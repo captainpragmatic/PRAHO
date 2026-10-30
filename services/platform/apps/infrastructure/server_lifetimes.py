@@ -114,12 +114,24 @@ def close_server_lifetimes(
         return open_rows.update(ended_at=now, updated_at=now)
 
 
+def open_lifetime_id(deployment: NodeDeployment, server_id: str) -> Any:
+    """The open lifetime of ``server_id``, or None (a row whose window predates lifetimes)."""
+    return (
+        _model()
+        .objects.filter(deployment=deployment, ended_at__isnull=True, server_id=server_id)
+        .values_list("pk", flat=True)
+        .first()
+    )
+
+
 def split_lifetime_for_resize(lifetime_id: Any, server_id: str, new_size: NodeSize) -> bool:
     """A resize finished: close the lifetime at the old rate and open its successor at the new one.
 
     Only while that lifetime is still open for that server: a teardown or re-deploy that closed it meanwhile is
-    left alone, and no window is reopened.
+    left alone, and no window is reopened. A ``lifetime_id`` of None (a row without lifetimes) changes nothing.
     """
+    if lifetime_id is None:
+        return False
     now = timezone.now()
     with transaction.atomic():
         lifetime = (

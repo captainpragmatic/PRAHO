@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -12,7 +13,7 @@ from django.utils import timezone
 from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.cloud_gateway import ServerCreateResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
-from apps.infrastructure.models import NodeDeployment, NodeServerLifetime
+from apps.infrastructure.models import NodeDeployment, NodeServerLifetime, NodeSize
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
 from tests.infrastructure.test_node_teardown import Harness
 
@@ -102,3 +103,39 @@ class TeardownWritePointTests(TestCase):
         self.assertTrue(h.destroy().is_ok())
         self.assertEqual(h.row().status, "destroyed")
         self.assertFalse(NodeServerLifetime.objects.filter(deployment=h.deployment, ended_at__isnull=True).exists())
+
+
+class ResizeWritePointTests(TestCase):
+    def setUp(self) -> None:
+        self.deployment = _create_deployment("completed", external_node_id="srv-1")
+        self.lifetime = NodeServerLifetime.objects.create(
+            deployment=self.deployment, server_id="srv-1", node_size=self.deployment.node_size,
+            monthly_cost_eur=Decimal("3.29"), started_at=timezone.now() - timedelta(days=3),
+        )
+        self.bigger = NodeSize.objects.create(
+            provider=self.deployment.provider, name="BIG", display_name="Big", provider_type_id="cpx32", vcpus=4,
+            memory_gb=8, disk_gb=160, hourly_cost_eur=Decimal("0.0200"), monthly_cost_eur=Decimal("13.99"),
+        )
+        self.bigger.available_regions.add(self.deployment.region)
+
+    def resize(self) -> Any:
+        service = _make_service()
+        service._check_resize_orderable = MagicMock(return_value=Ok(True))
+        with patch(
+            "apps.infrastructure.deployment_service.run_provider_command",
+            return_value=Ok(MagicMock(success=True, stderr="")),
+        ):
+            return service.upgrade_node_size(self.deployment, self.bigger, {"api_token": "test-token"})
+
+    def test_a_resize_keeps_the_old_rate_for_the_hours_before_it(self) -> None:
+        self.assertTrue(self.resize().is_ok())
+        rows = list(NodeServerLifetime.objects.filter(deployment=self.deployment).order_by("started_at"))
+        self.assertEqual(
+            [(lt.server_id, lt.monthly_cost_eur, lt.ended_at is None) for lt in rows],
+            [("srv-1", Decimal("3.29"), False), ("srv-1", Decimal("13.99"), True)],
+        )
+
+    def test_a_resize_of_a_row_without_lifetimes_starts_none(self) -> None:
+        self.lifetime.delete()
+        self.assertTrue(self.resize().is_ok())
+        self.assertFalse(NodeServerLifetime.objects.filter(deployment=self.deployment).exists())

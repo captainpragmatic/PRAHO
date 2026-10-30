@@ -70,7 +70,9 @@ from apps.infrastructure.server_lifetimes import (
     close_server_lifetimes,
     confirm_lifetime,
     discard_lifetime,
+    open_lifetime_id,
     open_pending_lifetime,
+    split_lifetime_for_resize,
 )
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 from apps.infrastructure.validation_service import NodeValidationReport, get_validation_service
@@ -1464,6 +1466,10 @@ class NodeDeploymentService:
 
         old_size = deployment.node_size
         audit_ctx = InfrastructureAuditContext(user=user)
+        # The billable window this resize changes: bound to this server, so a teardown or re-deploy that
+        # closes or replaces it meanwhile is never reopened.
+        resized_server = str(deployment.external_node_id)
+        lifetime_id = open_lifetime_id(deployment, resized_server)
 
         try:
             # Log the upgrade start
@@ -1523,6 +1529,8 @@ class NodeDeploymentService:
             # Write only the size: a full save would write back a lifecycle state read before the resize.
             deployment.node_size = new_size
             deployment.save(update_fields=["node_size", "updated_at"])
+            # The hours before the resize keep the old rate; a successor bills the new one.
+            split_lifetime_for_resize(lifetime_id, resized_server, new_size)
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
