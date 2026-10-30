@@ -89,14 +89,21 @@ class StaleSaveSyncTests(VirtualminViewsFixture):
     def test_a_change_made_during_the_remote_call_survives_the_sync(self) -> None:
         self.payload["data"] = [listing_row(self.account.domain, self.account.virtualmin_username)]
 
-        def listing_call(method: str, url: str, **kwargs: object):
-            # Staff suspend the account while the sync is waiting on Virtualmin.
-            VirtualminAccount.objects.filter(pk=self.account.pk).update(status="suspended")
-            return self.respond(method, url, **kwargs)
+        initial_get = VirtualminAccount.objects.get
+        stale = []
 
-        with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=listing_call):
+        def account_loaded(*args: object, **kwargs: object):
+            account = initial_get(*args, **kwargs)
+            if kwargs.get("virtualmin_username") == self.account.virtualmin_username:
+                stale.append(account)
+                VirtualminAccount.objects.filter(pk=account.pk).update(status="suspended")
+            return account
+
+        with patch.object(VirtualminAccount.objects, "get", side_effect=account_loaded):
             self.client.post(reverse(SYNC))
 
+        self.assertEqual(len(stale), 1)
+        self.assertEqual(stale[0].status, "active", "The loaded account must actually be stale")
         self.account.refresh_from_db()
         self.assertEqual(self.account.status, "suspended")
         self.assertEqual(self.account.current_disk_usage_mb, 0)

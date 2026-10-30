@@ -112,7 +112,7 @@ def test_usage_measures_independent_file_database_growth_and_real_http(bench: Be
             own = [line.split() for line in log.splitlines() if line.split()[2] == row["domain_id"]]
             assert sum(int(line[4]) for line in own) >= len("usage body\n") * 2
             assert "password_for_mysql" not in json.dumps(exported)
-            assert set(row) <= {"domain", "domain_id", "username", "scan_started_at", "scan_finished_at", "mailboxes", "databases", "disk_files_bytes", "disk_db_bytes", "disk_total_bytes", "segments", "binding_verified", "binding_started_at", "present"}
+            assert set(row) <= {"domain", "domain_id", "username", "scan_started_at", "scan_finished_at", "mailboxes", "databases", "disk_files_bytes", "disk_db_bytes", "disk_total_bytes", "segments", "binding_verified", "binding_started_at", "present", "identity_observed_at"}
         finally:
             data.sql("DROP TABLE usage_growth")
             data.remove("blob.bin")

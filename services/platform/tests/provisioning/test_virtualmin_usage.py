@@ -131,6 +131,25 @@ class UsagePublicationTests(MigrationTestBase):
         job.mark_completed({"success": True})
         self.assertEqual(UsageInterval.objects.get(account=self.account, ended_at__isnull=True).pk, current_interval.pk)
 
+    def test_cached_old_identity_cannot_rebind_between_recreation_and_fresh_scan(self):
+        old = self.payload()
+        self.usage.publish_snapshot(self.server.pk, old, self.usage.capture(self.server))
+        job = VirtualminProvisioningJob.objects.create(
+            server=self.server, account=self.account, operation="create_domain", status="running"
+        )
+        job.mark_completed({"success": True})
+        stale = {**old, "observed_at": timezone.now().isoformat()}
+        stale["records"][0]["identity_observed_at"] = old["records"][0]["scan_started_at"]
+        self.usage.publish_snapshot(self.server.pk, stale, self.usage.capture(self.server))
+        self.state.refresh_from_db()
+        self.assertEqual(self.state.domain_id, "")
+        fresh = self.payload()
+        fresh["installation"] = old["installation"]
+        fresh["records"][0]["domain_id"] = "67890"
+        self.assertEqual(self.usage.publish_snapshot(self.server.pk, fresh, self.usage.capture(self.server)), 1)
+        self.state.refresh_from_db()
+        self.assertEqual(self.state.domain_id, "67890")
+
     def bandwidth_payload(self, installation, *, known_owner=True):
         if known_owner:
             self.state.owner_start_known = True

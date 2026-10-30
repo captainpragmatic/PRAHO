@@ -623,6 +623,7 @@ def refresh(ledger: Ledger) -> None:
                 "domain": account["domain"],
                 "domain_id": account["id"],
                 "username": account["username"],
+                "identity_observed_at": started,
                 "mailboxes": account.get("mailboxes"),
                 "binding_verified": account.get("binding_verified") is True,
                 "binding_started_at": account.get("binding_started_at"),

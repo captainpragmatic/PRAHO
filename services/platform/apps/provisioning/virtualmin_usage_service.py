@@ -280,6 +280,9 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
                     raise ValueError("Invalid domain identity")
                 if state.domain_id and (state.domain_id != domain_id or state.installation != installation):
                     raise ValueError("Node binding changed")
+                identity_at = timestamp(row.get("identity_observed_at", row.get("scan_started_at")))
+                if not state.domain_id and (identity_at < state.gauge_not_before or identity_at > observed):
+                    continue
                 # Identity is useful for traffic even when a filesystem/DB walk
                 # is unsupported. A missing gauge must not erase that binding.
                 state.domain_id, state.installation = domain_id, installation
@@ -349,7 +352,7 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
     return published
 
 
-def publish_segments(  # noqa: PLR0913  # Bound snapshot and captured ownership evidence
+def publish_segments(  # noqa: C901, PLR0913  # Independent source and ownership guards
     server_id: UUID,
     installation: UUID,
     records: list[object],
@@ -372,11 +375,16 @@ def publish_segments(  # noqa: PLR0913  # Bound snapshot and captured ownership 
             except (ValueError, TypeError, KeyError):
                 continue
             with transaction.atomic():
-                interval = UsageInterval.objects.filter(pk=identifier, server_id=server_id).first()
+                interval = UsageInterval.objects.filter(
+                    pk=identifier, server_id=server_id, account_id__in=captured
+                ).first()
                 if interval is None:
                     continue
                 account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=interval.account_id)
                 state = current_state(account)
+                interval = UsageInterval.objects.select_for_update().filter(pk=identifier, server_id=server_id).first()
+                if interval is None:
+                    continue
                 expected = AccountCapture(
                     state.owner_scope, account.service_id, account.service.customer_id, account.chain_epoch
                 )

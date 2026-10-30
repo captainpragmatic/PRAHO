@@ -1,17 +1,20 @@
 """Real row locks fence terminal mutations against cached usage publication."""
 
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import timedelta
 from threading import Event
 from time import monotonic
 from unittest.mock import patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from django.db import connection, connections, transaction
 from django.test import TransactionTestCase, override_settings
 from django.utils import timezone
 
 from apps.provisioning import virtualmin_usage_service as usage
+from apps.provisioning import virtualmin_usage_tasks as usage_tasks
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
+from apps.provisioning.virtualmin_usage_models import UsageInterval
 from tests.helpers.task_queue import quiet_task_queue
 from tests.provisioning.test_virtualmin_tasks import VirtualminTaskTestBase
 
@@ -62,9 +65,9 @@ class UsagePostgresConcurrencyTests(TransactionTestCase):
                 self.assertRegex(observed_wait[2], statement)
                 return
             if pending.done():
-                self.fail(f"Publisher completed without waiting for {table}: {pending.result()}")
+                self.fail(f"Worker completed without waiting for {table}: {pending.result()}")
             poll.wait(0.01)
-        self.fail(f"Publisher never waited on {table}: {observed_wait!r}")
+        self.fail(f"Worker never waited on {table}: {observed_wait!r}")
 
     def _cached_scan(self):
         usage.current_state(self.account)
@@ -202,3 +205,91 @@ class UsagePostgresConcurrencyTests(TransactionTestCase):
             self.service.refresh_from_db()
             self.assertEqual(self.service.disk_usage_mb, 1)
             self.assertEqual(usage.public_usage(self.service)["usage_state"], "fresh")
+
+    def test_retention_waits_for_publisher_and_preserves_its_new_month_total(self):
+        publisher_ready, release, pruner_ready = Event(), Event(), Event()
+        publisher_pids, pruner_pids = [], []
+        with patch("apps.provisioning.virtualmin_usage_service.enabled", return_value=True):
+            captured, payload = self._cached_scan()
+            self.assertEqual(usage.publish_snapshot(self.server.pk, payload, captured), 1)
+            interval = UsageInterval.objects.get(account=self.account, ended_at__isnull=True)
+            observed = timezone.now()
+            start, end = usage.month(observed)
+            old_at = observed - timedelta(days=120)
+            old_key, current_key = usage.month(old_at)[0].isoformat(), start.isoformat()
+            interval.totals = {old_key: {"bytes": 7, "through": old_at.isoformat(), "complete": True}}
+            interval.save(update_fields=["totals"])
+            records = [
+                {
+                    "domain_id": interval.domain_id,
+                    "segments": [
+                        {
+                            "id": str(interval.pk),
+                            "bytes": 123,
+                            "start": max(start, interval.started_at).isoformat(),
+                            "end": min(end, observed).isoformat(),
+                            "complete": True,
+                        }
+                    ],
+                }
+            ]
+
+            def publish():
+                def pause_before_totals_write(execute, sql, params, many, context):
+                    if sql.startswith("UPDATE") and interval._meta.db_table in sql and '"totals"' in sql:
+                        publisher_ready.set()
+                        if not release.wait(20):
+                            raise TimeoutError("Usage retention test did not release publisher")
+                    return execute(sql, params, many, context)
+
+                try:
+                    publisher_pids.append(self._backend_pid())
+                    with transaction.atomic(), connection.execute_wrapper(pause_before_totals_write):
+                        # Exercise the real segment path directly. The gauge
+                        # identity UPDATE would otherwise acquire this row lock
+                        # even without the segment publisher's explicit lock.
+                        usage.publish_segments(
+                            self.server.pk,
+                            UUID(payload["installation"]),
+                            records,
+                            observed,
+                            uuid4(),
+                            captured,
+                        )
+                    return 1
+                finally:
+                    connections.close_all()
+
+            def prune():
+                try:
+                    pruner_pids.append(self._backend_pid())
+                    pruner_ready.set()
+                    usage_tasks._prune_interval_batch(None, observed - timedelta(days=90), monotonic() + 15)
+                    return 1
+                finally:
+                    connections.close_all()
+
+            with ThreadPoolExecutor(max_workers=2) as workers:
+                publisher = workers.submit(publish)
+                try:
+                    self.assertTrue(publisher_ready.wait(5), "Publisher did not reach the totals UPDATE")
+                    pruner = workers.submit(prune)
+                    self.assertTrue(pruner_ready.wait(5), "Pruner database connection did not start")
+                    self._assert_database_wait(
+                        pruner_pids[0],
+                        publisher_pids[0],
+                        pruner,
+                        table=interval._meta.db_table,
+                        statement=r"\bFOR UPDATE\b",
+                    )
+                finally:
+                    release.set()
+                self.assertEqual(publisher.result(timeout=15), 1)
+                self.assertEqual(pruner.result(timeout=15), 1)
+            interval.refresh_from_db()
+            self.assertEqual(
+                interval.totals,
+                {
+                    current_key: {"bytes": 123, "through": observed.isoformat(), "complete": True},
+                },
+            )

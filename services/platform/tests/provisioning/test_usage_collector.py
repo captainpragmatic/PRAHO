@@ -72,6 +72,7 @@ class UsageCollectorTests(SimpleTestCase):
             self.collector.refresh(ledger)
         row = json.loads(ledger.connection.execute("SELECT payload FROM gauges").fetchone()[0])
         self.assertEqual(row["scan_started_at"], timestamps[0])
+        self.assertEqual(row["identity_observed_at"], timestamps[0])
 
     def test_collection_resumes_after_expensive_accounts_instead_of_starving_the_tail(self):
         ledger, logs, account = self.node_fixture()
@@ -155,6 +156,7 @@ class UsageCollectorTests(SimpleTestCase):
             {"id": "interval", "domain_id": "42", "domain": "example.test", "start": start, "end": end}
         ]})
         self.assertIsNone(snapshot["records"][0]["disk_total_bytes"])
+        self.assertEqual(snapshot["records"][0]["identity_observed_at"], end)
         self.assertTrue(snapshot["records"][0]["segments"][0]["complete"])
 
     def test_unknown_mailbox_count_does_not_hide_disk_or_bandwidth(self):
@@ -235,6 +237,7 @@ class UsageCollectorTests(SimpleTestCase):
         ]})
         row = snapshot["records"][0]
         self.assertFalse(row["present"])
+        self.assertEqual(row["identity_observed_at"], start)
         self.assertEqual(row["segments"][0]["bytes"], 120)
         self.assertTrue(row["segments"][0]["complete"])
         self.assertEqual(self.collector.export_snapshot(ledger, "node", {"intervals": []})["records"], [])
