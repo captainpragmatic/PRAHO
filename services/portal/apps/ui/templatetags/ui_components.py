@@ -10,6 +10,7 @@ import logging
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from django import template
 from django.conf import settings
@@ -99,6 +100,7 @@ class HTMXAttributes:
     hx_boost: bool = False
     hx_vals: str | None = None
     hx_headers: str | None = None
+    hx_disabled_elt: str | None = None
 
 
 @dataclass
@@ -129,6 +131,16 @@ class ButtonConfig:
     submit_form: str = ""
     title: str = ""
     new_tab: bool = False
+    # A plain form submit shows the spinner too (htmx buttons always do).
+    loading: bool = False
+    # Only the icon shows; aria_label names the button and the text stays for screen readers.
+    icon_only: bool = False
+    aria_label: str = ""
+    label_class: str = ""
+    # Where this submit button posts its form instead of the form's action; a path on this site only.
+    formaction: str = ""
+    # "right": the right half of an input group, with square left corners.
+    joined: str = ""
 
 
 @dataclass
@@ -245,6 +257,35 @@ class DataTableConfig:
     empty_message: str | _StrPromise = field(default_factory=lambda: _("No data available."))
 
 
+_UNSAFE_PATH_CHARACTERS = frozenset("\\") | frozenset(chr(code) for code in (*range(0x20), 0x7F))
+
+
+def _is_path_on_this_site(value: str) -> bool:
+    """A root-relative path the browser resolves to this origin: no scheme, no host, nothing it would normalise."""
+    if not value.startswith("/") or value.startswith("//") or _UNSAFE_PATH_CHARACTERS.intersection(value):
+        return False
+    parts = urlsplit(value)
+    return not parts.scheme and not parts.netloc
+
+
+def _check_button(config: ButtonConfig) -> None:
+    """Refuse a button that would be unnamed, or would post its form somewhere else."""
+    if config.icon_only and (not config.icon or not config.aria_label.strip()):
+        message = "{% button %} icon_only needs an icon and a non-blank aria_label"
+        if settings.DEBUG or getattr(settings, "TESTING", False):
+            raise template.TemplateSyntaxError(message)
+        logger.warning(f"⚠️ [UI] {message}; showing the text instead")
+        config.icon_only = False
+    if config.formaction:
+        # Always refused: a dropped formaction would submit the form to its default action instead.
+        if config.href:
+            raise template.TemplateSyntaxError("{% button %} formaction must go on a submit button, not a link")
+        if not _is_path_on_this_site(config.formaction):
+            raise template.TemplateSyntaxError(
+                f"{{% button %}} formaction must be a path on this site, got {config.formaction!r}"
+            )
+
+
 @register.inclusion_tag("components/button.html")
 def button(
     text: str, *, config: ButtonConfig | None = None, htmx: HTMXAttributes | None = None, **kwargs: Any
@@ -278,6 +319,7 @@ def button(
         htmx = HTMXAttributes()
 
     _apply_arguments("button", kwargs, config, htmx, aliases=_BUTTON_ALIASES)
+    _check_button(config)
 
     # attrs may not add a second copy of an attribute an argument of this call already writes.
     owned = frozenset(
@@ -288,6 +330,7 @@ def button(
             ("data-message", config.confirm_message),
             ("data-confirm-text", config.confirm_text),
             ("data-submit-form", config.submit_form),
+            ("aria-label", config.aria_label),
             ("data-copy", config.data_copy),
             ("data-invoke", config.data_invoke),
             ("data-confirm", config.data_confirm),
@@ -339,6 +382,13 @@ def button(
         "submit_form": config.submit_form,
         "title": config.title,
         "new_tab": config.new_tab,
+        "loading": config.loading,
+        "icon_only": config.icon_only,
+        "aria_label": config.aria_label,
+        "label_class": config.label_class,
+        "formaction": config.formaction,
+        "joined": config.joined,
+        "hx_disabled_elt": htmx.hx_disabled_elt,
     }
 
 
@@ -1221,6 +1271,14 @@ _ICON_PATHS: dict[str, str | tuple[str, ...]] = {
     ),
     "logout": "M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1",
     "check": "M5 13l4 4L19 7",
+    "stop": (
+        "M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+        "M9 10a1 1 0 011-1h4a1 1 0 011 1v4a1 1 0 01-1 1h-4a1 1 0 01-1-1v-4z",
+    ),
+    "play": (
+        "M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z",
+        "M21 12a9 9 0 11-18 0 9 9 0 0118 0z",
+    ),
     "success": "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z",
     "x": "M6 18L18 6M6 6l12 12",
     "close": "M6 18L18 6M6 6l12 12",
@@ -1769,6 +1827,7 @@ _TAG_ARGUMENTS: dict[str, frozenset[str]] = {
         "hx_boost",
         "hx_vals",
         "hx_headers",
+        "hx_disabled_elt",
     ),
     "input_field": _fields(InputConfig)
     | _htmx(
