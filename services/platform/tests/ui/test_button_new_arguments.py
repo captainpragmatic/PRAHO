@@ -46,8 +46,9 @@ def label_span(parsed: Parser) -> dict[str, str | None]:
 
 class LoadingAndDisabledElementTests(SimpleTestCase):
     def test_loading_gives_a_plain_form_button_the_spinner(self) -> None:
-        html, _parsed = render('type="submit" loading=True')
+        html, parsed = render('type="submit" loading=True')
         self.assertIn("btn-spinner", html)
+        self.assertIn("data-loading", control(parsed))  # what ui-actions.js turns on at submit
 
     def test_hx_disabled_elt_reaches_the_button(self) -> None:
         _html, parsed = render('hx_post="/x/" hx_disabled_elt="this"')
@@ -74,6 +75,7 @@ class IconOnlyTests(SimpleTestCase):
             'icon="x" icon_only=True',
             'icon="x" icon_only=True aria_label="  "',
             "icon_only=True aria_label=named",
+            'icon="no-such-icon" icon_only=True aria_label=named',
         ):
             with self.subTest(arguments=arguments), self.assertRaisesRegex(TemplateSyntaxError, "icon_only needs"):
                 render(arguments)
@@ -100,8 +102,14 @@ class FormactionTests(SimpleTestCase):
         ):
             with self.subTest(value=value), self.assertRaisesRegex(TemplateSyntaxError, "formaction must"):
                 Template('{% load ui_components %}{% button "Go" type="submit" formaction=value %}').render(
-                    Context({"value": value or " "})
+                    Context({"value": value})
                 )
+
+    def test_an_empty_or_unresolved_formaction_is_refused_not_dropped(self) -> None:
+        """Dropping it would post the form to its default action."""
+        for source in ('formaction=""', "formaction=missing_variable"):
+            with self.subTest(source=source), self.assertRaisesRegex(TemplateSyntaxError, "formaction must"):
+                render('type="submit" ' + source)
 
     def test_a_link_has_no_formaction(self) -> None:
         with self.assertRaisesRegex(TemplateSyntaxError, "formaction must"):

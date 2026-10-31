@@ -134,8 +134,9 @@ class ButtonConfig:
     icon_only: bool = False
     aria_label: str = ""
     label_class: str = ""
-    # Where this submit button posts its form instead of the form's action; a path on this site only.
-    formaction: str = ""
+    # Where this submit button posts its form instead of the form's action; a path on this site only. None means
+    # not given: an empty or unresolved value is refused, since dropping it would post to the form's own action.
+    formaction: str | None = None
     # "right": the right half of an input group, with square left corners.
     joined: str = ""
 
@@ -277,13 +278,13 @@ def _is_path_on_this_site(value: str) -> bool:
 
 def _check_button(config: ButtonConfig) -> None:
     """Refuse a button that would be unnamed, or would post its form somewhere else."""
-    if config.icon_only and (not config.icon or not config.aria_label.strip()):
-        message = "{% button %} icon_only needs an icon and a non-blank aria_label"
+    if config.icon_only and (config.icon not in _ICON_PATHS or not config.aria_label.strip()):
+        message = "{% button %} icon_only needs a catalog icon and a non-blank aria_label"
         if settings.DEBUG or getattr(settings, "TESTING", False):
             raise template.TemplateSyntaxError(message)
         logger.warning(f"⚠️ [UI] {message}; showing the text instead")
         config.icon_only = False
-    if config.formaction:
+    if config.formaction is not None:
         # Always refused: a dropped formaction would submit the form to its default action instead.
         if config.href:
             raise template.TemplateSyntaxError("{% button %} formaction must go on a submit button, not a link")
@@ -338,6 +339,7 @@ def button(
             ("data-confirm-text", config.confirm_text),
             ("data-submit-form", config.submit_form),
             ("aria-label", config.aria_label),
+            ("data-loading", config.loading and not config.href),
             ("data-copy", config.data_copy),
             ("data-invoke", config.data_invoke),
             ("data-confirm", config.data_confirm),
