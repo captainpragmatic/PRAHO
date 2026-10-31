@@ -295,6 +295,13 @@ def button(
             ("data-message", config.confirm_message),
             ("data-confirm-text", config.confirm_text),
             ("data-submit-form", config.submit_form),
+            ("data-copy", config.data_copy),
+            ("data-invoke", config.data_invoke),
+            ("data-confirm", config.data_confirm),
+            ("hx-include", htmx.hx_include),
+            # A disabled link writes both itself (button.html's <a> branch).
+            ("tabindex", config.disabled and config.href),
+            ("aria-disabled", config.disabled and config.href),
         )
         if value
     )
