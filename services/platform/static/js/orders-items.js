@@ -279,19 +279,9 @@
   function deleteOrderItem(itemId) {
     if (!window.confirm(t("confirmDelete"))) { return; }
 
-    var csrfEl = document.querySelector("[name=csrfmiddlewaretoken]");
-    var metaEl = document.querySelector('meta[name="csrf-token"]');
-    var csrfToken = (csrfEl && csrfEl.value) || (metaEl && metaEl.getAttribute("content"));
-    if (!csrfToken) {
-      console.error("CSRF token not found");
-      window.alert(t("csrfError"));
-      return;
-    }
-
-    fetch(base() + "/items/" + itemId + "/delete/", {
+    window.platformFetch(base() + "/items/" + itemId + "/delete/", {
       method: "POST",
       headers: {
-        "X-CSRFToken": csrfToken,
         "X-Requested-With": "XMLHttpRequest",
         "Content-Type": "application/x-www-form-urlencoded",
       },
@@ -311,7 +301,7 @@
         }
       })
       .catch(function (error) {
-        if (leaving) { return; }
+        if (leaving || error.csrfReload) { return; }
         console.error("Error deleting item:", error);
         window.alert(t("errDelete"));
       });

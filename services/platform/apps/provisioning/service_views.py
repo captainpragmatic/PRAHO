@@ -15,6 +15,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
@@ -284,6 +285,14 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "provisioning/service_form.html", context, status=response_status)
 
 
+def _back_to_service(request: HttpRequest, pk: int) -> HttpResponse:
+    """Return to the service page; htmx gets HX-Redirect, since the page's buttons swap into a hidden container."""
+    destination = reverse("provisioning:service_detail", kwargs={"pk": pk})
+    if request.headers.get("HX-Request") == "true":
+        return HttpResponse(headers={"HX-Redirect": destination})
+    return redirect(destination)
+
+
 @staff_required_strict
 def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
     """⏸️ Suspend hosting service"""
@@ -308,16 +317,16 @@ def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
                     domain=service.domain, status=service.status
                 ),
             )
-            return redirect("provisioning:service_detail", pk=pk)
+            return _back_to_service(request, pk)
         except ConcurrentTransition:
             messages.error(
                 request,
                 _("❌ Service {domain} was modified concurrently. Please try again.").format(domain=service.domain),
             )
-            return redirect("provisioning:service_detail", pk=pk)
+            return _back_to_service(request, pk)
 
         messages.success(request, _("⏸️ Service {domain} has been suspended!").format(domain=service.domain))
-        return redirect("provisioning:service_detail", pk=pk)
+        return _back_to_service(request, pk)
 
     return render(request, "provisioning/service_suspend.html", {"service": service})
 
@@ -345,15 +354,15 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
                     domain=service.domain, status=service.status
                 ),
             )
-            return redirect("provisioning:service_detail", pk=pk)
+            return _back_to_service(request, pk)
         except ConcurrentTransition:
             messages.error(
                 request,
                 _("❌ Service {domain} was modified concurrently. Please try again.").format(domain=service.domain),
             )
-            return redirect("provisioning:service_detail", pk=pk)
+            return _back_to_service(request, pk)
 
         messages.success(request, _("▶️ Service {domain} has been activated!").format(domain=service.domain))
-        return redirect("provisioning:service_detail", pk=pk)
+        return _back_to_service(request, pk)
 
     return render(request, "provisioning/service_activate.html", {"service": service})

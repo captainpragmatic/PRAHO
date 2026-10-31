@@ -53,7 +53,7 @@ class DomainPageUrlTests(TestCase):
         response = self.client.get(reverse("domains:register"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, f"fetch('{reverse('domains:check_availability')}'")
+        self.assertContains(response, f"platformFetch('{reverse('domains:check_availability')}'")
 
     def test_the_detail_page_offers_no_page_that_does_not_exist(self) -> None:
         """#689: DNS, Manage DNS, Transfer Out and View Analytics linked to "#"; none has a page."""

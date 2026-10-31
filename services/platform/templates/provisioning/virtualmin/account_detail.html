@@ -602,7 +602,10 @@ function confirmAccountDelete(button) {
             message: messageElement.innerHTML,
             confirmText: button.dataset.confirmText,
             action: function() {
+                // From the button, so the page's <body hx-headers> CSRF token goes with it; the view answers
+                // with HX-Redirect to the accounts list.
                 htmx.ajax('DELETE', url, {
+                    source: button,
                     target: 'body'
                 });
             }

@@ -56,11 +56,6 @@ COMPANY_EMAIL = "supplier@e2e.test"
 COMPANY_BANK_ACCOUNT = "RO49AAAA1B31007593840000"
 COMPANY_BANK_NAME = "E2E Test Bank"
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
-if "django.middleware.csrf.CsrfViewMiddleware" not in MIDDLEWARE:
-    MIDDLEWARE.insert(
-        MIDDLEWARE.index("django.contrib.auth.middleware.AuthenticationMiddleware"),
-        "django.middleware.csrf.CsrfViewMiddleware",
-    )
 CACHES = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
 configure_rate_limiting(globals(), enabled=False)
 REST_FRAMEWORK = {**REST_FRAMEWORK, "DEFAULT_THROTTLE_CLASSES": []}

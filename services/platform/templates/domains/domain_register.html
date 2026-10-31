@@ -254,9 +254,8 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const formData = new FormData();
             formData.append('domain_name', domainName);
-            formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
 
-            const response = await fetch('{% url "domains:check_availability" %}', {
+            const response = await window.platformFetch('{% url "domains:check_availability" %}', {
                 method: 'POST',
                 body: formData
             });
@@ -370,6 +369,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 searchResults.appendChild(outerDiv);
             }
         } catch (error) {
+            if (error.csrfReload) {  // platformFetch already said to reload
+                searchResults.classList.add('hidden');
+                return;
+            }
             searchResults.innerHTML = `
                 <div class="border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
                     <p class="text-red-600 dark:text-red-400">{% icon "x" %} {% trans "Error checking availability. Please try again." %}</p>

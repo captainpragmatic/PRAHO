@@ -2366,12 +2366,10 @@ def virtualmin_account_delete(request: HttpRequest, account_id: str) -> HttpResp
         messages.error(request, f"❌ Error deleting account: {e}")
         logger.exception(f"🗑️ [AccountDelete] Exception deleting {account.domain}: {e}")
 
-    # If HTMX request, return updated table
+    # Both Delete controls sit on the account's own page, which no longer shows anything once it's gone: send
+    # htmx to the accounts list as a full page (a bare table used to replace the whole <body>).
     if request.headers.get("HX-Request"):
-        accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
-            "-created_at"
-        )
-        return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
+        return HttpResponse(headers={"HX-Redirect": reverse("provisioning:virtualmin_accounts")})
 
     return redirect("provisioning:virtualmin_accounts")
 

@@ -106,12 +106,9 @@ document.addEventListener("alpine:init", function () {
           }
         });
         try {
-          const response = await fetch(saveUrl, {
+          const response = await window.platformFetch(saveUrl, {
             method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value,
-            },
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ changes, baselines, reason: this.reason || null }),
           });
           const data = await response.json();
@@ -162,13 +159,14 @@ document.addEventListener("alpine:init", function () {
       testConnection() {
         this.testing = true;
         this.result = null;
-        return fetch(this.$root.dataset.testUrl, {
-          method: "POST",
-          headers: { "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value },
-        }).then((r) => r.json()).then((data) => {
-          this.testing = false;
-          this.result = data;
-        });
+        return window.platformFetch(this.$root.dataset.testUrl, { method: "POST" })
+          .then((r) => r.json())
+          .then((data) => {
+            this.result = data;
+          })
+          .finally(() => {
+            this.testing = false;
+          });
       },
     };
   });
@@ -196,14 +194,17 @@ document.addEventListener("alpine:init", function () {
           message: this.$root.dataset.clearMessage,
           confirmText: this.$root.dataset.confirmText,
           action: async () => {
-            const response = await fetch(this.$root.dataset.clearUrl, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value,
-              },
-              body: JSON.stringify({ reason: "Cleared from settings UI" }),
-            });
+            let response;
+            try {
+              response = await window.platformFetch(this.$root.dataset.clearUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ reason: "Cleared from settings UI" }),
+              });
+            } catch (error) {
+              this.message = error.message;
+              return;
+            }
             const data = await response.json();
             if (data.success) {
               this.applyCredentialState(data);
@@ -213,14 +214,11 @@ document.addEventListener("alpine:init", function () {
       },
       saveSecret() {
         this.busy = true;
-        return fetch(this.$root.dataset.setUrl, {
+        return window.platformFetch(this.$root.dataset.setUrl, {
           method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-CSRFToken": document.querySelector("[name=csrfmiddlewaretoken]").value,
-          },
+          headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ value: this.secret }),
-        }).then((r) => r.json()).then((data) => {
+        }).then((r) => r.json()).catch((error) => ({ success: false, error: error.message })).then((data) => {
           this.busy = false;
           if (data.success) {
             this.applyCredentialState(data);
@@ -370,13 +368,16 @@ document.addEventListener("alpine:init", function () {
         });
       },
       confirmAccountDelete() {
-        const data = this.$root.dataset;
+        const root = this.$root;
+        const data = root.dataset;
         this.$dispatch("confirm-dangerous-action", {
           title: data.deleteTitle,
           message: escapeHtml(data.domain + ": " + data.deleteMessage),
           confirmText: data.defaultConfirmText,
           action: function () {
-            htmx.ajax("DELETE", data.deleteUrl, { target: "body" });
+            // From the component, so the page's <body hx-headers> CSRF token goes with it; the view answers
+            // with HX-Redirect to the accounts list.
+            htmx.ajax("DELETE", data.deleteUrl, { source: root, target: "body" });
           },
         });
       },

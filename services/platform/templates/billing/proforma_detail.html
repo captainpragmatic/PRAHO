@@ -418,12 +418,9 @@ function sendProformaAction(el) {
 
 function sendProforma(sendUrl) {
     if (confirm('{% trans "Send this proforma to the customer via email?" %}')) {
-        fetch(sendUrl, {
+        window.platformFetch(sendUrl, {
             method: 'POST',
-            headers: {
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
-                'Content-Type': 'application/json',
-            },
+            headers: {'Content-Type': 'application/json'},
         })
         .then(response => response.json())
         .then(data => {
@@ -435,6 +432,7 @@ function sendProforma(sendUrl) {
             }
         })
         .catch(error => {
+            if (error.csrfReload) { return; }  // platformFetch already said to reload
             {% trans "An error occurred. Please try again." as proforma_error_msg %}
             alert('{{ proforma_error_msg|escapejs }}');
         });

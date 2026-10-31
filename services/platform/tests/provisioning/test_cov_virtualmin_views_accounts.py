@@ -7,6 +7,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from django.http import HttpResponse
+from django.test import Client
 from django.urls import reverse
 from django_q.models import OrmQ
 from django_q.signing import SignedPackage
@@ -16,6 +17,7 @@ from apps.provisioning.models import Service
 from apps.provisioning.services import STAFF_ACCOUNT_SUSPENSION_REASON
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from tests.factories.core_factories import create_staff_user
+from tests.helpers.csrf import body_csrf_token
 from tests.provisioning.test_cov_virtualmin_views_servers import VirtualminViewsFixture
 
 ENQUEUE = "apps.provisioning.virtualmin_tasks.reconcile_virtualmin_service_state_async"
@@ -267,10 +269,21 @@ class VirtualminAccountCoverageTests(VirtualminViewsFixture):
         self.account.status = "error"
         self.account.protected_from_deletion = False
         self.account.save(update_fields=["status", "protected_from_deletion"])
-        response = self.client.post(
-            reverse("provisioning:virtualmin_account_delete", args=[self.account.pk]), HTTP_HX_REQUEST="true"
-        )
-        self.assertContains(response, self.account.domain)
+        strict = Client(enforce_csrf_checks=True)
+        strict.force_login(self.admin)
+        detail = strict.get(reverse("provisioning:virtualmin_account_detail", args=[self.account.pk]))
+        token = body_csrf_token(detail.content.decode())
+        url = reverse("provisioning:virtualmin_account_delete", args=[self.account.pk])
+
+        # The page's Delete calls htmx.ajax('DELETE'); Django reads a DELETE's token only from the header.
+        self.assertEqual(strict.delete(url, HTTP_HX_REQUEST="true").status_code, 403)
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.status, "error")
+
+        response = strict.delete(url, HTTP_HX_REQUEST="true", HTTP_X_CSRFTOKEN=token)
+        # A full page to land on: the old answer, a bare accounts table, replaced the page's whole <body>.
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["HX-Redirect"], reverse("provisioning:virtualmin_accounts"))
         self.account.refresh_from_db()
         self.server.refresh_from_db()
         self.assertEqual(self.account.status, "terminated")

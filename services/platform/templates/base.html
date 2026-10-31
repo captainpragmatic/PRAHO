@@ -11,6 +11,9 @@
 
   <!-- Security Headers (X-Frame-Options and X-XSS-Protection set in middleware) -->
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
+  {# The CSRF token for fetch() callers; htmx gets it from <body hx-headers>. #}
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <meta name="csrf-reload-message" content="{% trans 'This page has expired. Please reload the page and try again.' %}">
 
   <!-- Branding -->
   <meta name="description" content="{% trans 'PRAHO, the platform that runs a hosting business' %}">
@@ -23,6 +26,11 @@
   <link rel="stylesheet" href="{% static 'css/tailwind.min.css' %}">
   <link rel="stylesheet" href="{% static 'brand/brand.css' %}">
   <script src="{% static 'js/htmx.min.js' %}"></script>
+  <script nonce="{{ csp_nonce }}">
+    // #284: htmx must not eval hx-on / js: bodies once 'unsafe-eval' is dropped. Every hx-on has been migrated
+    // to delegated listeners, so the eval path is off on every page, not only pages showing flash messages.
+    if (window.htmx) { htmx.config.allowEval = false; }
+  </script>
   <script defer src="{% static 'js/alpine-shared-components.js' %}"></script>
   <script defer src="{% static 'js/alpine-components.js' %}"></script>
   {# @alpinejs/csp build (no new-Function eval) so the platform can drop CSP 'unsafe-eval' (#284); components registered via Alpine.data in the two files above. #}
@@ -79,7 +87,9 @@
   </style>
 </head>
 
-<body class="h-full bg-slate-900 text-slate-100">
+{% comment %}Every htmx request sends the CSRF token (the cookie is HttpOnly, so scripts cannot read it); htmx keeps
+   selfRequestsOnly, so it never leaves this origin. A boosted swap would not refresh this attribute.{% endcomment %}
+<body class="h-full bg-slate-900 text-slate-100" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
   <div class="min-h-screen flex flex-col">
     <!-- Mobile Header & Navigation -->
     {% include 'components/mobile_header.html' %}
@@ -203,9 +213,6 @@
 
     <!-- Toast animations and auto-dismiss -->
     <script nonce="{{ csp_nonce }}">
-        // #284: htmx must not eval hx-on / js: bodies once 'unsafe-eval' is dropped.
-        // Every hx-on has been migrated to delegated listeners, so disable the eval path.
-        if (window.htmx) { htmx.config.allowEval = false; }
         document.addEventListener('DOMContentLoaded', function() {
             const toasts = document.querySelectorAll('[id^="toast-"]');
 
@@ -311,6 +318,12 @@
     document.body.addEventListener('htmx:responseError', function (event) {
       console.error(' HTMX Error:', event.detail);
       {% trans "An error occurred. Please try again." as htmx_error_msg %}
+      // A refused CSRF token (a stale tab) says to reload; htmx never retries it.
+      var xhr = event.detail.xhr;
+      if (xhr && xhr.getResponseHeader('X-CSRF-Failure') === 'reload') {
+        alert(document.querySelector('meta[name="csrf-reload-message"]').content);
+        return;
+      }
       alert('{{ htmx_error_msg|escapejs }}');
     });
 

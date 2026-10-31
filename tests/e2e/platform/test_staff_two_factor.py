@@ -92,7 +92,7 @@ class StaffMFAPolicy:
             f"{PLATFORM_BASE_URL}/settings/save/",
             data=json.dumps({"changes": {KEY: on}, "baselines": {KEY: baseline}, "reason": "E2E staff 2FA policy"}),
             headers={
-                "X-CSRFToken": self._session.cookies.get("csrftoken"),
+                "X-CSRFToken": self._session.cookies.get("platform_csrftoken"),
                 "Content-Type": "application/json",
                 "Referer": PLATFORM_BASE_URL,
             },
