@@ -121,3 +121,26 @@ class JoinedAndIconTests(SimpleTestCase):
             with self.subTest(icon=name):
                 html = Template("{% load ui_components %}{% icon name %}").render(Context({"name": name}))
                 self.assertIn("<path", html)
+
+
+TRICKY = 'Say "yes" & go'
+
+
+class NewArgumentEscapingTests(SimpleTestCase):
+    """Each new argument reaches the browser exactly as written, escaped once, whatever its quotes."""
+
+    def test_values_with_quotes_and_ampersands_survive(self) -> None:
+        source = (
+            "{% load i18n ui_components %}"
+            '{% trans "' + TRICKY.replace('"', '\\"') + '" as tricky %}'
+            '{% button "Go" icon="x" icon_only=True aria_label=tricky label_class=tricky '
+            'hx_post="/x/" hx_disabled_elt=tricky type="submit" formaction=path %}'
+        )
+        html = Template(source).render(Context({"path": '/orders/?a=1&b="2"'}))
+        parsed = Parser()
+        parsed.feed(html)
+        attrs = control(parsed)
+        self.assertEqual(attrs["aria-label"], TRICKY)
+        self.assertEqual(attrs["hx-disabled-elt"], TRICKY)
+        self.assertEqual(attrs["formaction"], '/orders/?a=1&b="2"')
+        self.assertIn(TRICKY, label_span(parsed)["class"] or "")

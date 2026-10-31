@@ -13,7 +13,8 @@
   <meta http-equiv="X-Content-Type-Options" content="nosniff">
   {# The CSRF token for fetch() callers; htmx gets it from <body hx-headers>. #}
   <meta name="csrf-token" content="{{ csrf_token }}">
-  <meta name="csrf-reload-message" content="{% trans 'This page has expired. Please reload the page and try again.' %}">
+  {% trans 'This page has expired. Please reload the page and try again.' as csrf_reload_message %}
+  <meta name="csrf-reload-message" content="{{ csrf_reload_message|force_escape }}">
 
   <!-- Branding -->
   <meta name="description" content="{% trans 'PRAHO, the platform that runs a hosting business' %}">

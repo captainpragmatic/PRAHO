@@ -30,6 +30,6 @@ class DevSettingsCsrfTests(SimpleTestCase):
                 self.assertEqual(module.CSRF_COOKIE_NAME, "platform_csrftoken")
 
     def test_staging_and_production_keep_the_default_name(self) -> None:
-        """They run on their own hosts; renaming there would void every open tab's token at deploy."""
+        """Their services have their own hostnames (cookies are host-only); renaming would void every open tab's token."""
         base = _settings_module("config.settings.base", {})
         self.assertEqual(getattr(base, "CSRF_COOKIE_NAME", "csrftoken"), "csrftoken")
