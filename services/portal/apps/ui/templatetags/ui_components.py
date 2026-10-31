@@ -142,6 +142,12 @@ class ButtonConfig:
     formaction: str | None = None
     # "right": the right half of an input group, with square left corners.
     joined: str = ""
+    # Alpine bindings (@click, :disabled, x-show, and x-text on the label). Expressions are written in templates;
+    # server values reach them through data-* attributes a registered component method reads, never spliced in.
+    alpine_click: str = ""
+    alpine_disabled: str = ""
+    alpine_show: str = ""
+    alpine_text: str = ""
 
 
 @dataclass
@@ -277,6 +283,12 @@ def _check_button(config: ButtonConfig) -> None:
             raise template.TemplateSyntaxError(message)
         logger.warning(f"⚠️ [UI] {message}; showing the text instead")
         config.icon_only = False
+    if config.href and (config.alpine_disabled or config.button_id):
+        message = "{% button %} alpine_disabled and button_id go on a button, not on a link"
+        if settings.DEBUG or getattr(settings, "TESTING", False):
+            raise template.TemplateSyntaxError(message)
+        logger.warning(f"⚠️ [UI] {message}; ignored")
+        config.alpine_disabled = config.button_id = ""
     if config.formaction is not None:
         # Always refused: a dropped formaction would submit the form to its default action instead.
         if config.href:
@@ -390,6 +402,10 @@ def button(
         "label_class": config.label_class,
         "formaction": config.formaction,
         "joined": config.joined,
+        "alpine_click": config.alpine_click,
+        "alpine_disabled": config.alpine_disabled,
+        "alpine_show": config.alpine_show,
+        "alpine_text": config.alpine_text,
         "hx_disabled_elt": htmx.hx_disabled_elt,
     }
 
