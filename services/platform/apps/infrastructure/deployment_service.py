@@ -66,6 +66,16 @@ from apps.infrastructure.provider_config import (
     run_provider_command,
 )
 from apps.infrastructure.registration_service import get_registration_service
+from apps.infrastructure.server_lifetimes import (
+    close_server_lifetimes,
+    confirm_lifetime,
+    discard_lifetime,
+    open_lifetime_id,
+    open_pending_lifetime,
+    save_legacy_window,
+    split_lifetime_for_resize,
+    start_lifetimes_at_resize,
+)
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 from apps.infrastructure.validation_service import NodeValidationReport, get_validation_service
 from apps.settings.services import SettingsService
@@ -519,7 +529,10 @@ class NodeDeploymentService:
                     )
                 else:
                     log_deployment("warning", "Previously created server not found, creating new one")
-                    owned_update(lease, deployment, external_node_id="")
+                    # Its lifetime ends now: the true end is unknown, so this over-counts at most to here.
+                    close_server_lifetimes(
+                        lease, deployment, server_id=deployment.external_node_id, external_node_id=""
+                    )
                     # The pre-claim check was skipped for the stored server; a replacement is new.
                     orderable_result = self._check_orderable(deployment, credentials)
                     if orderable_result.is_err():
@@ -539,7 +552,8 @@ class NodeDeploymentService:
                 # worker that dies mid-create leaves a row that teardown knows to reconcile. An earlier
                 # "unknown" outcome is never downgraded: that server may still exist.
                 prior_create_state = deployment.server_create_state
-                owned_update(
+                # A server's billable window opens with the intent: a create whose answer is lost stays billed.
+                pending_lifetime, opened_lifetime = open_pending_lifetime(
                     lease,
                     deployment,
                     server_create_state="intent",
@@ -550,7 +564,18 @@ class NodeDeploymentService:
                     # "none" never overwrites history: a server that existed (created) or may have
                     # (unknown, intent) keeps the row out of never_got_a_server for good.
                     keep = prior_create_state != "none" and state == "none"
-                    owned_update(lease, deployment, server_create_state=prior_create_state if keep else state)
+                    settled = prior_create_state if keep else state
+                    if state == "none" and prior_create_state not in ("unknown", "intent"):
+                        # Provably refused: this create billed nothing, so the lifetime it opened goes. After an
+                        # earlier unknown create it stays: that server may exist, and this is its only window.
+                        discard_lifetime(
+                            lease,
+                            deployment,
+                            pending_lifetime if opened_lifetime else None,
+                            server_create_state=settled,
+                        )
+                    else:
+                        owned_update(lease, deployment, server_create_state=settled)
 
                 # Upload SSH key to provider, labelled so teardown finds it and no other owner's key is touched
                 # Named per attempt: a re-deploy keeps the hostname, and a key or firewall left under an
@@ -677,12 +702,14 @@ class NodeDeploymentService:
                 else:
                     created_resources.append(("server", server_create_result.server_id))
                 # Persist the id at once: a worker that dies before the next stage leaves a known server.
-                owned_update(
+                confirm_lifetime(
                     lease,
                     deployment,
+                    pending_lifetime,
+                    server_create_result.server_id,
                     external_node_id=server_create_result.server_id,
                     server_create_state="created",
-                    # Costs run from the first server this attempt created; a re-deploy resets it.
+                    # The current attempt's start, for display; costs come from the server lifetimes.
                     started_at=deployment.started_at or timezone.now(),
                 )
             stages_completed.append("provision_server")
@@ -1131,9 +1158,10 @@ class NodeDeploymentService:
             }
         if deployment.needs_reconciliation:
             return gettext("Reconcile the deployment first: %(reason)s") % {"reason": deployment.reconciliation_reason}
-        if not deployment.never_got_a_server:
+        if not (deployment.never_got_a_server or deployment.proved_empty):
             return gettext(
-                "This deployment had a server; re-deploying it needs costs that track separate server lifetimes."
+                "This deployment had a server that is not proven gone: reconcile it "
+                "(manage.py reconcile_deployment), then re-deploy."
             )
         if deployment.external_node_id or deployment.dns_record_ids or deployment.virtualmin_server_id:
             return gettext(
@@ -1169,7 +1197,8 @@ class NodeDeploymentService:
     ) -> Result[DeploymentResult, str]:
         """Deploy a failed or destroyed deployment again, keeping its hostname, with ``new_size``.
 
-        Only a row that never got a server qualifies. The hostname, number, logs, audit and costs stay;
+        Only a row that never got a server, or a destroyed one proved empty for this attempt, qualifies. The
+        hostname, number, logs, audit and costs (its earlier server lifetimes) stay;
         everything that described the old attempt is reset, and the correlation id is rotated so nothing
         left under the old labels can be adopted. Needs the destroy permission.
         """
@@ -1215,6 +1244,10 @@ class NodeDeploymentService:
                 return Err(claim.unwrap_err())
             lease = claim.unwrap()
             locked.refresh_from_db()
+            # The earlier server's window, if it lives only in the row's timestamps, is kept before the reset
+            # (under the claim just taken, in this transaction).
+            if not locked.never_got_a_server:
+                save_legacy_window(locked, timezone.now())
             locked.node_size = new_size
             locked.set_max_domains_from_size()
             owned_update(
@@ -1237,6 +1270,7 @@ class NodeDeploymentService:
                 provider_token_fingerprint="",
                 registration_state="none",
                 dns_record_ids=[],
+                resources_proved_absent_for=None,
             )
         deployment.refresh_from_db()
         logger.info(f"🚀 [Redeploy:{deployment.hostname}] Re-deploying with {new_size.provider_type_id}")
@@ -1407,6 +1441,47 @@ class NodeDeploymentService:
             return f"Size {new_size.provider_type_id} is not available in {deployment.region.provider_region_id}"
         return ""
 
+    @staticmethod
+    def _record_resize(
+        deployment: NodeDeployment,
+        old_size: NodeSize,
+        new_size: NodeSize,
+        lifetime_id: uuid.UUID | None,
+        server_id: str,
+    ) -> None:
+        """The provider resized the server: record the new size and its cost window together.
+
+        Only while the row is still the attempt and server that were resized: a teardown and re-deploy that ran
+        during the provider call own the row now, and their size is left alone. A failure of the cost window does
+        not undo a resize that happened: the size is still recorded and the problem is logged for the cost records.
+        """
+        from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
+            NodeDeployment as Model,
+        )
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+
+        same_attempt = {"pk": deployment.pk, "correlation_id": deployment.correlation_id, "external_node_id": server_id}
+        try:
+            with transaction.atomic():
+                row = Model.objects.select_for_update().filter(**same_attempt).first()
+                if row is None:
+                    logger.warning(f"⚠️ [Upgrade:{deployment.hostname}] Resized, but the node was replaced meanwhile")
+                    return
+                # Write only the size: a full save would write back a lifecycle state read before the resize.
+                row.node_size = new_size
+                row.save(update_fields=["node_size", "updated_at"])
+                # The hours before the resize keep the old rate; a successor bills the new one.
+                split_lifetime_for_resize(lifetime_id, server_id, new_size) or start_lifetimes_at_resize(
+                    row, server_id, old_size, new_size
+                )
+            deployment.node_size = new_size
+        except Exception as error:  # The resize happened: keep the size, flag the cost window.
+            if Model.objects.filter(**same_attempt).update(node_size=new_size, updated_at=timezone.now()):
+                deployment.node_size = new_size
+            message = f"Resized to {new_size.name}, but its cost window was not updated: {error}"
+            logger.warning(f"⚠️ [Upgrade:{deployment.hostname}] {message}")
+            NodeDeploymentLog.objects.create(deployment=deployment, level="WARNING", message=message, phase="upgrading")
+
     def upgrade_node_size(  # Complexity: deployment orchestration
         self,
         deployment: NodeDeployment,
@@ -1442,6 +1517,10 @@ class NodeDeploymentService:
 
         old_size = deployment.node_size
         audit_ctx = InfrastructureAuditContext(user=user)
+        # The billable window this resize changes: bound to this server, so a teardown or re-deploy that
+        # closes or replaces it meanwhile is never reopened.
+        resized_server = str(deployment.external_node_id)
+        lifetime_id = open_lifetime_id(deployment, resized_server)
 
         try:
             # Log the upgrade start
@@ -1498,9 +1577,7 @@ class NodeDeploymentService:
                     logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
                 return Err(error_msg)
 
-            # Write only the size: a full save would write back a lifecycle state read before the resize.
-            deployment.node_size = new_size
-            deployment.save(update_fields=["node_size", "updated_at"])
+            self._record_resize(deployment, old_size, new_size, lifetime_id, resized_server)
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -2214,7 +2291,13 @@ class NodeDeploymentService:
 
         for resource_type, resource_id in reversed(resources):
             try:
-                self._delete_created_resource(gateway, resource_type, resource_id, hostname)
+                deleted = self._delete_created_resource(gateway, resource_type, resource_id, hostname)
+                if deleted and resource_type == "server" and lease is not None:
+                    close_server_lifetimes(lease, deployment, server_id=resource_id)
+            except OperationOwnershipLostError as lost:
+                # Another operation owns the row now: what is left is its to delete or keep.
+                logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup stopped: {lost}")
+                return
             except Exception as exc:
                 logger.warning(
                     f"[Deployment:{hostname}] Cleanup: exception deleting {resource_type} '{resource_id}': {exc}"
@@ -2227,8 +2310,8 @@ class NodeDeploymentService:
     @staticmethod
     def _delete_created_resource(
         gateway: CloudProviderGateway, resource_type: str, resource_id: str, hostname: str
-    ) -> None:
-        """Delete one resource this deployment created; logs the outcome, raises only what the SDK raises."""
+    ) -> bool:
+        """Delete one resource this deployment created; True when confirmed. Raises only what the SDK raises."""
         deleters = {
             "server": ("server id", gateway.delete_server),
             "firewall": ("firewall id", gateway.delete_firewall),
@@ -2236,14 +2319,15 @@ class NodeDeploymentService:
         }
         if resource_type not in deleters:
             logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup: unknown resource type '{resource_type}'")
-            return
+            return False
         label, delete = deleters[resource_type]
         logger.info(f"🗑️ [Deployment:{hostname}] Cleanup: deleting {label}={resource_id}")
         result = delete(resource_id)
         if result.is_err():
             logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup: {resource_type} deletion failed: {result.unwrap_err()}")
-        else:
-            logger.info(f"✅ [Deployment:{hostname}] Cleanup: {label}={resource_id} deleted")
+            return False
+        logger.info(f"✅ [Deployment:{hostname}] Cleanup: {label}={resource_id} deleted")
+        return True
 
     def _mark_failed(
         self,

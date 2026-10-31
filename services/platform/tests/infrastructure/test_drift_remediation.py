@@ -1806,7 +1806,7 @@ class PR341HardeningTests(DriftRemediationTestBase):
         with (
             patch("apps.infrastructure.provider_config.get_provider_token", return_value=Ok("token")),
             patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=mock_gw),
-            patch("apps.infrastructure.node_teardown.owned_update", side_effect=RuntimeError("db down")),
+            patch("apps.infrastructure.server_lifetimes.owned_update", side_effect=RuntimeError("db down")),
         ):
             result = _teardown_cloud_deployment(self.deployment, timezone.now() + timedelta(minutes=1))
 

@@ -4,6 +4,11 @@ Infrastructure CLI: reconcile_deployment
 Clear a node deployment's reconciliation flag once nothing it owned remains. Retry, the cleanup sweeps
 and re-deploy refuse a flagged deployment; this is the operator's way out.
 
+An unflagged deployment can be reconciled too, to record the proof re-deploy needs: a failed or destroyed
+one whose create outcome is unknown, with ``--attest-never-created``; or a destroyed one, by the same
+search (a deployment destroyed before teardowns recorded their proof). One that holds a server id, DNS
+records or a registered node is refused.
+
 The command searches the provider project (by label, name, recorded firewall id and SSH key
 fingerprint) and the DNS zones (by stored record id, stored name, current name and the deployment's
 tag). Anything found, any failed lookup or any unreadable zone refuses, and the deployment stays
@@ -38,7 +43,7 @@ from apps.infrastructure.reconciliation import ReconcileRequest, reconcile_deplo
 
 
 class Command(BaseCommand):
-    help = "Clear a deployment's reconciliation flag once nothing it owned remains"
+    help = "Prove, or attest, that nothing a deployment owned remains: clears its flag, records re-deploy's proof"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("hostname", help="The deployment's hostname")

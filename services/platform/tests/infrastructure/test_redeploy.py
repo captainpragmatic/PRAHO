@@ -1,7 +1,8 @@
 """Re-deploy keeps the hostname: a failed or destroyed deployment that never got a server is deployed again.
 
-Scope (until costs track separate server lifetimes): only rows that never got a server, either a create
-state of "none" or a reconciled, evidence-backed never-created attestation. A failed row must also never
+These tests cover rows that never got a server: a create state of "none" or a reconciled, evidence-backed
+never-created attestation. A destroyed row that had a server, once proved empty, is covered in
+test_redeploy_after_teardown. A failed row must also never
 have reached the provider (otherwise destroy it first). The row keeps its hostname, number, logs, audit
 and costs. Everything that described the old attempt is reset, including the correlation id, so nothing
 left under the old labels can ever be adopted. Re-deploy needs the destroy permission at the service.

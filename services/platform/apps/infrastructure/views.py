@@ -485,7 +485,7 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "can_retry": deployment.can_retry,
         "can_redeploy": (
             deployment.status in ("failed", "destroyed")
-            and deployment.never_got_a_server
+            and (deployment.never_got_a_server or deployment.proved_empty)
             and not deployment.needs_reconciliation
             and can_deploy_nodes(cast("User", request.user))
             and can_destroy_nodes(cast("User", request.user))
@@ -629,7 +629,7 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
 @require_destroy_permission
 @require_http_methods(["GET", "POST"])
 def deployment_redeploy(request: HttpRequest, pk: int) -> HttpResponse:
-    """Re-deploy a failed or destroyed deployment that never got a server, keeping its hostname."""
+    """Re-deploy a failed or destroyed deployment, keeping its hostname (never got a server, or proved empty)."""
     from .deployment_service import NodeDeploymentService  # noqa: PLC0415  # Deferred: avoids loading Ansible
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
