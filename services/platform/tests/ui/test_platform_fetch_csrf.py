@@ -7,6 +7,7 @@ and on a 403 marked `X-CSRF-Failure: reload` shows the page's reload message and
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from django.test import SimpleTestCase
@@ -82,3 +83,40 @@ class PlatformFetchCsrfTests(SimpleTestCase):
         result = self.run_with(403, marked=False)
         self.assertEqual(result["outcome"], {"resolved": 403})
         self.assertEqual(result["toasts"], [])
+
+
+ROOT = Path(__file__).resolve().parents[2]
+FETCH_CALL = re.compile(r"(?<![\w.])(?:window\.)?fetch\(")
+WRITE_METHOD = re.compile(r"""method:\s*['"](?:POST|PUT|PATCH|DELETE)['"]""", re.IGNORECASE)
+
+
+class EveryWriteUsesPlatformFetchTests(SimpleTestCase):
+    """A write that calls fetch() directly gets no reload guidance for a stale token, so none may."""
+
+    def sources(self) -> list[Path]:
+        return sorted([*(ROOT / "static/js").glob("*.js"), *(ROOT / "templates").rglob("*.html")])
+
+    def test_no_write_calls_fetch_directly(self) -> None:
+        direct_writes = []
+        for path in self.sources():
+            if path.name.endswith(".min.js"):
+                continue
+            text = path.read_text(encoding="utf-8")
+            for match in FETCH_CALL.finditer(text):
+                if path.name == "platform-actions.js":
+                    continue  # platformFetch itself
+                options = text[match.end() : match.end() + 300]
+                if WRITE_METHOD.search(options):
+                    direct_writes.append(f"{path.relative_to(ROOT)}:{text.count(chr(10), 0, match.start()) + 1}")
+        self.assertEqual(direct_writes, [])
+
+    def test_the_write_callers_are_all_found(self) -> None:
+        """Pinned, with the last one migrated named, so a scan that silently matches less fails here."""
+        sites = [
+            f"{path.relative_to(ROOT)}"
+            for path in self.sources()
+            for _ in re.finditer(r"platformFetch\(", path.read_text(encoding="utf-8"))
+            if path.name != "platform-actions.js"
+        ]
+        self.assertEqual(len(sites), 14)
+        self.assertEqual(sites.count("templates/billing/invoice_detail.html"), 2)

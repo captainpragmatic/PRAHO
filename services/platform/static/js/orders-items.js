@@ -416,7 +416,7 @@
       (form.action.indexOf("/add/") !== -1 || form.action.indexOf("/edit/") !== -1)
     ) {
       e.preventDefault();
-      fetch(form.action, {
+      window.platformFetch(form.action, {
         method: "POST",
         body: new FormData(form),
         headers: { "HX-Request": "true", "X-Requested-With": "XMLHttpRequest" },
@@ -450,7 +450,7 @@
           }
         })
         .catch(function (error) {
-          if (leaving) { return; }
+          if (leaving || error.csrfReload) { return; }  // platformFetch already said to reload
           console.error("Form submission error:", error);
           window.alert(t("errSubmit"));
         });
