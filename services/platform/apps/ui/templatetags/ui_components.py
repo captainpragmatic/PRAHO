@@ -320,7 +320,8 @@ def button(
 
     Args:
         text: Button text (supports Romanian diacritics)
-        variant: primary|secondary|success|warning|danger|info
+        variant: primary|secondary|success|warning|danger|info|ghost|link|outline-primary|outline-danger|
+            soft-warning|soft-danger|soft-secondary|inverse
         size: xs|sm|md|lg|xl
         href: Link URL (creates <a> instead of <button>)
         type: Button type (button|submit|reset)
