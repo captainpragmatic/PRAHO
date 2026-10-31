@@ -209,6 +209,11 @@ class ButtonHtmxTests(SimpleTestCase):
         self.assertIn("btn-spinner", result)
         self.assertIn("htmx-indicator", result)
 
+    def test_hx_sync_attribute(self) -> None:
+        """The Platform's button already took hx_sync; the Portal's rejected it (in tests) or dropped it."""
+        result = _render('{% button "Toggle" hx_post="/api/toggle/" hx_sync="this:drop" %}')
+        self.assertIn('hx-sync="this:drop"', result)
+
     def test_no_spinner_without_htmx(self) -> None:
         """A plain button with no HTMX attributes should not have a spinner."""
         result = _render('{% button "Static" %}')

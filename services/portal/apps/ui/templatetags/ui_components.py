@@ -120,7 +120,7 @@ class ButtonConfig:
     data_confirm: str = ""
     # button.html already reads {% if button_id %} on the <button> branch - missing here, so
     # it was silently dropped the same way the InputConfig fields above were.
-    button_id: str | None = None
+    button_id: str = ""
     # The dangerous-action modal's text and the form it submits, a tooltip, and a link's new tab: values are
     # passed raw (a {% trans … as v %} value as it is); button.html escapes each once.
     confirm_title: str = ""
@@ -312,6 +312,7 @@ def button(
         "hx_push_url": htmx.hx_push_url,
         "hx_select": htmx.hx_select,
         "hx_include": htmx.hx_include,
+        "hx_sync": htmx.hx_sync,
         "hx_boost": htmx.hx_boost,
         "hx_vals": htmx.hx_vals,
         "hx_headers": htmx.hx_headers,
@@ -1757,6 +1758,7 @@ _TAG_ARGUMENTS: dict[str, frozenset[str]] = {
         "hx_push_url",
         "hx_select",
         "hx_include",
+        "hx_sync",
         "hx_boost",
         "hx_vals",
         "hx_headers",
