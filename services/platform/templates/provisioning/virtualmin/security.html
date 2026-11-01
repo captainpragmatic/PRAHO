@@ -11,8 +11,10 @@
     <div role="alert" class="rounded border border-amber-600 p-4">
       <p>{% trans "A hardening attempt holds this node. Some changes may already have happened. New mutations and teardown remain blocked until its outcome is reconciled." %}</p>
       {% if can_decide %}
+        {# nosemgrep: django-no-csrf-token — literal csrf_token immediately inside; Django middleware rejects tokenless POST #}
         <form method="post" class="space-y-4">
-          {% csrf_token %}<input type="hidden" name="action" value="verify">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="verify">
           {{ verify_form.non_field_errors }}
           <div class="space-y-2">
             {{ verify_form.reason.label_tag }}
@@ -65,8 +67,10 @@
     </details>
     {% if can_decide %}
       {% if network_ready %}
+      {# nosemgrep: django-no-csrf-token — literal csrf_token immediately inside; Django middleware rejects tokenless POST #}
       <form method="post" class="space-y-4" hx-confirm="{% trans 'Apply every listed access and service change, including interruption and removal of affected packages?' %}">
-        {% csrf_token %}<input type="hidden" name="action" value="apply">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="apply">
         {{ apply_form.non_field_errors }}{{ apply_form.review_id }}{{ apply_form.review_id.errors }}
         <div class="space-y-2">
           {{ apply_form.reason.label_tag }}
@@ -79,8 +83,10 @@
         {% trans "Apply reviewed hardening" as apply_label %}{% button apply_label type="submit" variant="danger" %}
       </form>
       {% endif %}
+      {# nosemgrep: django-no-csrf-token — literal csrf_token immediately inside; Django middleware rejects tokenless POST #}
       <form method="post" class="space-y-4" hx-confirm="{% trans 'Keep existing access and services without applying hardening?' %}">
-        {% csrf_token %}<input type="hidden" name="action" value="acknowledge">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="acknowledge">
         {{ form.non_field_errors }}{{ form.review_id }}{{ form.review_id.errors }}
         <div class="space-y-2">
           {{ form.reason.label_tag }}
