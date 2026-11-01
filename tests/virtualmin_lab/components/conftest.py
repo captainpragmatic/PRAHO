@@ -23,6 +23,7 @@ from apps.provisioning.virtualmin_gateway import VirtualminConfig, listing_attri
 from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: E402
 from apps.provisioning.virtualmin_service import create_domain_params  # noqa: E402
 from tests.virtualmin_lab.components.site_observation import observe_target_site  # noqa: E402
+from tests.virtualmin_lab.components.target_frontend import ensure_target_frontend  # noqa: E402
 from tests.virtualmin_lab.contract.harness import (  # noqa: E402
     Lab,
     Recorder,
@@ -40,8 +41,13 @@ class MixedSource:
     cleanup_callbacks: list[Callable[[], None]] = field(default_factory=list, compare=False)
 
 
+@pytest.fixture(scope="session")
+def component_target_frontend() -> str:
+    return ensure_target_frontend()
+
+
 @pytest.fixture
-def native_target_site_observation(mixed_source: MixedSource) -> Iterator[None]:
+def native_target_site_observation(component_target_frontend: str, mixed_source: MixedSource) -> Iterator[None]:
     with observe_target_site(mixed_source.domain):
         yield
 
