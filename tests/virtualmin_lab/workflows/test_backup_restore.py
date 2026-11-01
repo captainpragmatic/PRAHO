@@ -98,6 +98,29 @@ def test_config_only_backup_restores_the_configuration_and_leaves_the_data(
     assert safety.status == "completed"
 
 
+def test_full_backup_restores_configuration_and_data_on_the_existing_domain(
+    bench: Bench, account: VirtualminAccount
+) -> None:
+    """In-place restoration needs the core metadata callback as well as files and SQL."""
+    lab = bench.lab_of(account)
+    data = DomainData(lab, account)
+    data.seed(secrets.token_hex(6))
+    before = data.snapshot()
+    lab.quiet("modify-domain", {"domain": DOMAIN, "desc": "full config at backup"})
+    assert lab.domain_values(DOMAIN)["description"] == ["full config at backup"]
+    backup = bench.backup(account, BackupConfig())
+    assert backup.status == "completed", backup.status_message
+    manifest = VirtualminBackupService(account.server).read_manifest(backup.result["backup_id"]).unwrap()
+    assert manifest["virtualmin_domain_id"] == lab.domain_values(DOMAIN)["id"][0]
+    lab.quiet("modify-domain", {"domain": DOMAIN, "desc": "full config after backup"})
+    data.write("data/marker.txt", "damaged after backup")
+    data.sql(f"DELETE FROM {data.TABLE} WHERE id = 2")  # noqa: S608 -- fixed fixture table
+    restored = bench.restore(account, backup.result["backup_id"], force=True)
+    assert restored.status == "completed", restored.status_message
+    assert data.snapshot() == before
+    assert lab.domain_values(DOMAIN)["description"] == ["full config at backup"]
+
+
 def test_restoring_a_backup_that_does_not_exist_fails_and_touches_nothing(
     bench: Bench, account: VirtualminAccount
 ) -> None:

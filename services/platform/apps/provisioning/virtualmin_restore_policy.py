@@ -18,6 +18,30 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 
 MAX_NATIVE_METADATA_BYTES = 1024 * 1024
+DEFAULT_PLAN_FIELDS = frozenset(
+    {
+        "aliasdomslimit",
+        "aliaslimit",
+        "bwlimit",
+        "capabilities",
+        "dbslimit",
+        "domslimit",
+        "featurelimits",
+        "file",
+        "forceunder",
+        "id",
+        "ipfollow",
+        "mailboxlimit",
+        "migrate",
+        "name",
+        "nodbname",
+        "norename",
+        "quota",
+        "realdomslimit",
+        "safeunder",
+        "uquota",
+    }
+)
 NATIVE_FEATURE_FIELDS = frozenset(
     {
         *WEB_ONLY_VIRTUALMIN_FEATURES,
@@ -64,6 +88,7 @@ def prepare_restore_params(  # noqa: PLR0913 -- archive identity, target identit
     *,
     source: str,
     force: bool,
+    restore_configuration: bool = False,
 ) -> dict[str, object]:
     """Re-read capability and inspect before mutation; legacy full-stack rollback is explicit and bounded."""
     current = VirtualminServer.objects.get(pk=server.pk)
@@ -78,11 +103,13 @@ def prepare_restore_params(  # noqa: PLR0913 -- archive identity, target identit
         # destination_refusal already checked the explicit existing-row rollout
         # exception and its enforcement flag. It never admits a new import here.
         return {"domain": account.domain, "source": source, "all-features": ""}
-    inspect_web_archive(archive, account.domain, metadata.get("domain_features"))
+    inspect_web_archive(
+        archive, account.domain, metadata.get("domain_features"), restore_configuration=restore_configuration
+    )
     return {
         "domain": account.domain,
         "source": source,
-        "feature": list(WEB_ONLY_VIRTUALMIN_FEATURES),
+        "feature": (["virtualmin"] if restore_configuration else []) + list(WEB_ONLY_VIRTUALMIN_FEATURES),
         "only-features": "",
     }
 
@@ -126,9 +153,29 @@ def validate_source_rollback(
         raise ValidationError(_("Source rollback must match the original node, account and existing native domain ID."))
 
 
-def _native_archive_metadata(archive: Path, domain: str) -> bytes:
+def _configuration_plan_member(suffix: str, size: int) -> bool:
+    if suffix in {"virtualmin", "virtualmin_ssl_cert", "virtualmin_ssl_key", "virtualmin_ssl_ca"}:
+        return False
+    if suffix == "virtualmin_scripts" and size == 0:
+        return False  # The native no-script-log marker, not a script archive.
+    if suffix == "virtualmin_plan":
+        return True
+    raise ValidationError(_("Restore requires review of unsupported native configuration bookkeeping."))
+
+
+def _read_native_member(bundle: tarfile.TarFile, member: tarfile.TarInfo, previous: bytes | None) -> bytes:
+    if previous is not None or member.size > MAX_NATIVE_METADATA_BYTES:
+        raise ValidationError(_("Native restore metadata is duplicated or oversized."))
+    stream = bundle.extractfile(member)
+    if stream is None:
+        raise ValidationError(_("Native restore metadata cannot be inspected."))
+    return stream.read(MAX_NATIVE_METADATA_BYTES + 1)
+
+
+def _native_archive_metadata(archive: Path, domain: str, *, restore_configuration: bool) -> tuple[bytes, bytes | None]:
     """Read one bounded metadata member while refusing unrelated service payloads."""
     metadata: bytes | None = None
+    plan: bytes | None = None
     with tarfile.open(archive, "r|gz") as bundle:
         for member in bundle:
             path = PurePosixPath(member.name)
@@ -145,21 +192,16 @@ def _native_archive_metadata(archive: Path, domain: str) -> bytes:
             feature = re.split(r"[_\.\-]", suffix, maxsplit=1)[0]
             if feature not in {*WEB_ONLY_VIRTUALMIN_FEATURES, "virtualmin"}:
                 raise ValidationError(_("Archive holds ancillary services; use component-scoped website migration."))
+            if restore_configuration and feature == "virtualmin" and _configuration_plan_member(suffix, member.size):
+                plan = _read_native_member(bundle, member, plan)
             if suffix == "virtualmin":
-                if metadata is not None or member.size > MAX_NATIVE_METADATA_BYTES:
-                    raise ValidationError(_("Native restore metadata is duplicated or oversized."))
-                stream = bundle.extractfile(member)
-                if stream is None:
-                    raise ValidationError(_("Native restore metadata cannot be inspected."))
-                metadata = stream.read(MAX_NATIVE_METADATA_BYTES + 1)
+                metadata = _read_native_member(bundle, member, metadata)
     if metadata is None or len(metadata) > MAX_NATIVE_METADATA_BYTES or b"\0" in metadata:
         raise ValidationError(_("Inspect the backup's missing or invalid native feature metadata before restoring."))
-    return metadata
+    return metadata, plan
 
 
-def inspect_web_archive(archive: Path, domain: str, declared_features: object = None) -> tuple[str, ...]:
-    """Inspect native metadata and member scope without extracting customer files or logging credentials."""
-    metadata = _native_archive_metadata(archive, domain)
+def _native_fields(metadata: bytes) -> dict[str, str]:
     fields: dict[str, str] = {}
     for line in metadata.decode().splitlines():
         key, separator, value = line.partition("=")
@@ -167,8 +209,35 @@ def inspect_web_archive(archive: Path, domain: str, declared_features: object = 
             if key in fields:
                 raise ValidationError(_("Native restore metadata contains duplicate fields."))
             fields[key] = value
+    return fields
+
+
+def _validate_default_plan(plan: bytes, metadata: dict[str, str]) -> None:
+    """Only the qualified native default limit record may be recreated, never another global plan."""
+    fields = _native_fields(plan)
+    identity = {"id": "0", "name": "Default Plan", "file": "/etc/webmin/virtual-server/plans/0"}
+    if (
+        b"\0" in plan
+        or metadata.get("plan") != "0"
+        or set(fields) != DEFAULT_PLAN_FIELDS
+        or any(fields.get(key) != value for key, value in identity.items())
+        or fields.get("capabilities") != ""
+        or fields.get("featurelimits") != ""
+        or any(value and re.fullmatch(r"[0-9]+", value) is None for key, value in fields.items() if key not in identity)
+    ):
+        raise ValidationError(_("Restore requires review of a non-default or unsupported native plan."))
+
+
+def inspect_web_archive(
+    archive: Path, domain: str, declared_features: object = None, *, restore_configuration: bool = False
+) -> tuple[str, ...]:
+    """Inspect native metadata and member scope without extracting customer files or logging credentials."""
+    metadata, plan = _native_archive_metadata(archive, domain, restore_configuration=restore_configuration)
+    fields = _native_fields(metadata)
     if fields.get("dom") != domain:
         raise ValidationError(_("Native restore metadata belongs to another domain."))
+    if plan is not None:
+        _validate_default_plan(plan, fields)
     native_features = {name for name in NATIVE_FEATURE_FIELDS if fields.get(name) == "1"}
     if not {"unix", "dir", "web"} <= native_features or native_features - set(WEB_ONLY_VIRTUALMIN_FEATURES):
         raise ValidationError(_("Archive enables ancillary or unclassified services; use component-scoped migration."))

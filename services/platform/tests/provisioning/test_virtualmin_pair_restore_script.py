@@ -302,6 +302,20 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertEqual(sum("--feature ssl" in call for call in args), 2)
         self.assertTrue(all("--feature virtualmin" not in call for call in args))
 
+    def test_ordinary_configuration_opt_in_restores_metadata_on_both_archives(self) -> None:
+        result = self.step(PRAHO_RESTORE_CONFIGURATION="1")
+        self.assertEqual(result.outcome, "ok")
+        args = (self.state / "restore_args").read_text().splitlines()
+        self.assertEqual(len(args), 2)
+        self.assertTrue(all("--feature virtualmin" in call for call in args))
+        self.assertTrue(all("--only-features" in call and "--all-features" not in call for call in args))
+
+    def test_recovery_refuses_configuration_opt_in_before_any_mutation(self) -> None:
+        result = self.run_script(PRAHO_RECOVERY="1", PRAHO_RESTORE_CONFIGURATION="1")
+        self.assertEqual(result.returncode, 64)
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(self.maint.exists())
+
     def test_recovery_accepts_a_single_standalone_archive(self) -> None:
         result = self.step(PRAHO_RECOVERY="1", PRAHO_DIFF_ARCHIVE="", PRAHO_DIFF_SHA="")
         self.assertEqual(result.outcome, "ok")

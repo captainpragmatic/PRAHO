@@ -763,6 +763,7 @@ class VirtualminBackupService:
                     metadata,
                     source=f"{REMOTE_ARCHIVE_DIR}/{archive_name}",
                     force=config.force_restore,
+                    restore_configuration=True,
                 )
             except (ValidationError, ValueError, OSError, tarfile.TarError) as error:
                 return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
@@ -846,6 +847,7 @@ class VirtualminBackupService:
                     metadata,
                     source=f"{REMOTE_ARCHIVE_DIR}/{archive_name}",
                     force=config.force_restore,
+                    restore_configuration=True,
                 )
             except (ValidationError, ValueError, OSError, tarfile.TarError) as error:
                 determinate = True
@@ -1606,6 +1608,7 @@ class VirtualminBackupService:
             return Err("Backup execution superseded after owner aging capture; backup was not dispatched")
         metadata["owner_shadow_version"] = 1
         metadata["owner_shadow_owner"] = account.virtualmin_username
+        metadata["virtualmin_domain_id"] = identity.unwrap()
         return Ok(None)
 
     def _read_domain_id(self, account: VirtualminAccount) -> Result[str, str]:

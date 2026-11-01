@@ -56,6 +56,7 @@ from .virtualmin_chain import (
 )
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from .virtualmin_restore_policy import prepare_restore_params
+from .virtualmin_validators import WEB_ONLY_VIRTUALMIN_FEATURES
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -438,6 +439,7 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
                     manifests[label],
                     source=f"{REMOTE_ARCHIVE_DIR}/{name}",
                     force=config.force_restore,
+                    restore_configuration=True,
                 )
                 for (path, name), label in zip(held, ("base", "differential"), strict=True)
             ]
@@ -505,6 +507,7 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
                     manifests[label],
                     source=f"{REMOTE_ARCHIVE_DIR}/{name}",
                     force=config.force_restore,
+                    restore_configuration=True,
                 )
                 for (path, name), label in zip(held, ("base", "differential"), strict=True)
             ]
@@ -561,6 +564,9 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
             "pair_base_sha": manifests["base"]["checksum_sha256"],
             "pair_diff_sha": manifests["differential"]["checksum_sha256"],
             "pair_web_only": all("only-features" in scope for scope in scopes),
+            "pair_restore_configuration": all(
+                scope.get("feature") == ["virtualmin", *WEB_ONLY_VIRTUALMIN_FEATURES] for scope in scopes
+            ),
         }
         timeout = (
             2 * service._backup_command_timeout()

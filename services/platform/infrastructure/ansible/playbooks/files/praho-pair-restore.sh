@@ -73,6 +73,7 @@ diff_sha=${PRAHO_DIFF_SHA:-}
 step_hold=${PRAHO_STEP_HOLD:-0}
 recovery=${PRAHO_RECOVERY:-0}
 web_only=${PRAHO_WEB_ONLY:-1}
+restore_configuration=${PRAHO_RESTORE_CONFIGURATION:-0}
 ssl_helper=${PRAHO_RECOVERY_SSL_HELPER:-/var/lib/praho/recovery/ssl.py}
 
 [[ $action =~ ^(restore|release)$ ]] || exit 64
@@ -83,6 +84,8 @@ ssl_helper=${PRAHO_RECOVERY_SSL_HELPER:-/var/lib/praho/recovery/ssl.py}
 [[ $step_hold =~ ^[0-9]{1,2}$ ]] || exit 64
 [[ $recovery =~ ^[01]$ ]] || exit 64
 [[ $web_only =~ ^[01]$ ]] || exit 64
+[[ $restore_configuration =~ ^[01]$ ]] || exit 64
+[[ $restore_configuration == 0 || $recovery == 0 && $web_only == 1 ]] || exit 64
 valid_archive_name() {
   [[ $1 =~ ^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$ ]] || \
     [[ $recovery == 1 && $1 == "migration_$token.tar.gz" ]]
@@ -488,6 +491,9 @@ restore_step() { # LABEL ARCHIVE SHA
   local -a restore_flags=(--only-existing)
   local ssl_archive="$staging/recovery-ssl-$token-$1.tar.gz"
   if [[ $web_only == 1 ]]; then
+    if [[ $restore_configuration == 1 ]]; then
+      restore_flags+=(--feature virtualmin)
+    fi
     restore_flags+=(--only-features --feature dir --feature web --feature logrotate --feature mysql)
     if [[ $recovery == 0 ]]; then
       restore_flags+=(--feature unix --feature ssl)

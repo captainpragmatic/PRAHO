@@ -13,6 +13,7 @@ from apps.provisioning.virtualmin_backup_service import RestoreConfig, restore_d
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_restore_policy import (
     inspect_web_archive,
+    prepare_restore_params,
     restore_destination_refusal,
     validate_source_rollback,
 )
@@ -91,6 +92,100 @@ class NativeArchiveInspectionTests(TestCase):
         with self.assertRaises(ValidationError):
             inspect_web_archive(
                 self.archive(members=[(f"{self.domain}_dir/etc/passwd", b"do not extract")]), self.domain
+            )
+
+    def prepare(self, archive, *, restore_configuration=False):
+        server = VirtualminServer(security_state="verified_web")
+        account = VirtualminAccount(domain=self.domain)
+        with (
+            patch("apps.provisioning.virtualmin_restore_policy.VirtualminServer.objects.get", return_value=server),
+            patch("apps.provisioning.virtualmin_restore_policy.restore_destination_refusal", return_value=None),
+        ):
+            return prepare_restore_params(
+                account,
+                server,
+                archive,
+                {},
+                source="/private/backup.tar.gz",
+                force=True,
+                restore_configuration=restore_configuration,
+            )
+
+    def test_ordinary_restore_selects_core_configuration_before_web_components(self):
+        params = self.prepare(self.archive(), restore_configuration=True)
+        self.assertEqual(params["feature"], ["virtualmin", *WEB_ONLY_VIRTUALMIN_FEATURES])
+        self.assertEqual(params["only-features"], "")
+        self.assertNotIn("all-features", params)
+
+    def test_migration_default_keeps_its_existing_component_and_credential_scope(self):
+        params = self.prepare(self.archive())
+        self.assertEqual(params["feature"], list(WEB_ONLY_VIRTUALMIN_FEATURES))
+
+    def test_native_empty_script_marker_is_admitted_without_ancillary_payloads(self):
+        path = self.archive(members=[(f"{self.domain}_virtualmin_scripts", b"")])
+        self.assertIn("virtualmin", self.prepare(path, restore_configuration=True)["feature"])
+
+    def test_configuration_restore_refuses_meaningful_ancillary_bookkeeping(self):
+        for suffix in ("admins", "users", "scripts", "initial", "saved_aliases", "unclassified"):
+            with self.subTest(suffix=suffix), self.assertRaises(ValidationError):
+                self.prepare(
+                    self.archive(members=[(f"{self.domain}_virtualmin_{suffix}", b"meaningful records")]),
+                    restore_configuration=True,
+                )
+
+    def test_configuration_opt_in_does_not_admit_ancillary_services(self):
+        with self.assertRaises(ValidationError):
+            self.prepare(self.archive(fields={"mail": "1"}), restore_configuration=True)
+
+    def test_migration_does_not_activate_or_reinterpret_ancillary_metadata(self):
+        path = self.archive(members=[(f"{self.domain}_virtualmin_admins", b"not restored by web callbacks")])
+        self.assertEqual(self.prepare(path)["feature"], list(WEB_ONLY_VIRTUALMIN_FEATURES))
+
+    def default_plan(self):
+        limits = (
+            "aliasdomslimit",
+            "aliaslimit",
+            "bwlimit",
+            "capabilities",
+            "dbslimit",
+            "domslimit",
+            "featurelimits",
+            "forceunder",
+            "ipfollow",
+            "mailboxlimit",
+            "migrate",
+            "nodbname",
+            "norename",
+            "quota",
+            "realdomslimit",
+            "safeunder",
+            "uquota",
+        )
+        return (
+            "id=0\nname=Default Plan\nfile=/etc/webmin/virtual-server/plans/0\n"
+            + "".join(f"{name}=\n" for name in limits)
+        ).encode()
+
+    def test_only_the_qualified_default_plan_can_accompany_configuration(self):
+        plan = self.default_plan()
+        path = self.archive(fields={"plan": "0"}, members=[(f"{self.domain}_virtualmin_plan", plan)])
+        self.assertIn("virtualmin", self.prepare(path, restore_configuration=True)["feature"])
+        for unsafe in (
+            plan.replace(b"id=0", b"id=99"),
+            plan.replace(b"capabilities=\n", b"capabilities=webmin\n"),
+            plan.replace(b"featurelimits=\n", b"featurelimits=mail\n"),
+            plan + b"unclassified=value\n",
+            plan + b"id=0\n",
+        ):
+            with self.subTest(plan_shape=unsafe.splitlines()[-1]), self.assertRaises(ValidationError):
+                self.prepare(
+                    self.archive(fields={"plan": "0"}, members=[(f"{self.domain}_virtualmin_plan", unsafe)]),
+                    restore_configuration=True,
+                )
+        with self.assertRaises(ValidationError):
+            self.prepare(
+                self.archive(fields={"plan": "99"}, members=[(f"{self.domain}_virtualmin_plan", plan)]),
+                restore_configuration=True,
             )
 
 
