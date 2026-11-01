@@ -264,13 +264,10 @@
                 <div class="px-6 py-4 border-b border-slate-700">
                     <h3 class="text-lg font-medium text-slate-100 flex items-center">
                         {% icon "clipboard" %} {% trans "Live Logs" %}
-                        {# tmpl-allow TMPL002: polls every 2s via hx-trigger; the button tag adds hx-indicator="this" and a spinner to every hx-get button, which would flash on each poll #}
-                        <button class="ml-2 text-xs bg-blue-600 px-2 py-1 rounded"
-                                hx-get="{% url 'provisioning:virtualmin_job_logs' job.id %}"
-                                hx-target="#job-logs"
-                                hx-trigger="every 2s">
-                            {% icon "refresh" %} Auto-refresh
-                        </button>
+                        {# Not a control: it refreshes the panel every 2s. #}
+                        <span class="ml-2 inline-flex items-center gap-1 text-xs text-slate-400" hx-get="{% url 'provisioning:virtualmin_job_logs' job.id %}" hx-target="#job-logs" hx-trigger="load, every 2s">
+                            {% icon "refresh" size="xs" %} {% trans "Auto-refresh" %}
+                        </span>
                     </h3>
                 </div>
                 <div class="p-6">
@@ -284,12 +281,4 @@
     </div>
 </div>
 
-<script nonce="{{ csp_nonce }}">
-// Initial logs load
-document.addEventListener('DOMContentLoaded', function() {
-    htmx.ajax('GET', '{% url "provisioning:virtualmin_job_logs" job.id %}', {
-        target: '#job-logs'
-    });
-});
-</script>
 {% endblock %}

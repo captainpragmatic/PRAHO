@@ -2451,6 +2451,44 @@ def virtualmin_job_retry(request: HttpRequest, job_id: str) -> HttpResponse:
     return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
 
 
+def _job_log_entries(job: VirtualminProvisioningJob) -> list[dict[str, str]]:
+    """A job's lifecycle as log entries, oldest first."""
+    logs: list[dict[str, str]] = []
+
+    # Add job lifecycle logs
+    logs.append(
+        {
+            "timestamp": job.created_at.isoformat(),
+            "level": "INFO",
+            "message": f"Job created: {job.operation} for {job.account.domain if job.account else 'unknown'}",
+        }
+    )
+
+    if job.started_at:
+        logs.append({"timestamp": job.started_at.isoformat(), "level": "INFO", "message": "Job started"})
+
+    if job.completed_at:
+        logs.append(
+            {
+                "timestamp": job.completed_at.isoformat(),
+                "level": "SUCCESS" if job.status == "completed" else "ERROR",
+                "message": f"Job {job.status}" + (f": {job.status_message}" if job.status_message else ""),
+            }
+        )
+
+    # Add response data as structured logs
+    if job.result:
+        logs.append(
+            {
+                "timestamp": (job.completed_at or job.updated_at).isoformat(),
+                "level": "DEBUG",
+                "message": f"Response: {job.result}",
+            }
+        )
+
+    return logs
+
+
 @login_required
 @user_passes_test(is_staff_or_superuser)
 @monitor_performance(max_duration_seconds=2.0, alert_threshold=1.0)
@@ -2458,42 +2496,13 @@ def virtualmin_job_logs(request: HttpRequest, job_id: str) -> HttpResponse:
     """📋 Show Virtualmin job logs and details."""
     job = get_object_or_404(VirtualminProvisioningJob, id=job_id)
 
-    # Return logs as JSON for HTMX requests
-    if request.headers.get("HX-Request"):
-        logs = []
-
-        # Add job lifecycle logs
-        logs.append(
-            {
-                "timestamp": job.created_at.isoformat(),
-                "level": "INFO",
-                "message": f"Job created: {job.operation} for {job.account.domain if job.account else 'unknown'}",
-            }
-        )
-
-        if job.started_at:
-            logs.append({"timestamp": job.started_at.isoformat(), "level": "INFO", "message": "Job started"})
-
-        if job.completed_at:
-            logs.append(
-                {
-                    "timestamp": job.completed_at.isoformat(),
-                    "level": "SUCCESS" if job.status == "completed" else "ERROR",
-                    "message": f"Job {job.status}" + (f": {job.status_message}" if job.status_message else ""),
-                }
-            )
-
-        # Add response data as structured logs
-        if job.result:
-            logs.append(
-                {
-                    "timestamp": (job.completed_at or job.updated_at).isoformat(),
-                    "level": "DEBUG",
-                    "message": f"Response: {job.result}",
-                }
-            )
-
-        return JsonResponse({"logs": logs})
+    # The job page's Live Logs panel (htmx) gets entries as markup it can swap in; a caller that asks for JSON gets it.
+    wants_json = "application/json" in request.headers.get("Accept", "")
+    if wants_json or request.headers.get("HX-Request"):
+        logs = _job_log_entries(job)
+        if wants_json:
+            return JsonResponse({"logs": logs})
+        return render(request, "provisioning/virtualmin/partials/job_log_entries.html", {"logs": logs})
 
     # Regular template render for non-HTMX requests
     context = {

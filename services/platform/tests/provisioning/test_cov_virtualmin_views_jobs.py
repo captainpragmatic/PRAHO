@@ -54,9 +54,26 @@ class VirtualminJobCoverageTests(VirtualminViewsFixture):
                 else:
                     self.assertNotContains(response, "Retry Job")
 
+    def test_the_live_logs_panel_gets_html_with_the_entries_escaped(self) -> None:
+        """htmx swaps the answer into #job-logs: it must be markup, not the JSON a caller can ask for."""
+        job = self.job()
+        VirtualminProvisioningJob.objects.filter(pk=job.pk).update(
+            status="failed", started_at=timezone.now(), completed_at=timezone.now(), status_message="<b>quota</b>"
+        )
+        response = self.client.get(reverse("provisioning:virtualmin_job_logs", args=[job.pk]), HTTP_HX_REQUEST="true")
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response["Content-Type"].startswith("text/html"))
+        html = response.content.decode()
+        self.assertNotIn('"logs"', html)
+        self.assertIn("Job started", html)
+        self.assertIn("Job failed: &lt;b&gt;quota&lt;/b&gt;", html)
+        self.assertNotIn("<b>quota</b>", html)
+
     def test_pending_job_logs_contain_only_creation_event(self) -> None:
         job = self.job()
-        response = self.client.get(reverse("provisioning:virtualmin_job_logs", args=[job.pk]), HTTP_HX_REQUEST="true")
+        response = self.client.get(
+            reverse("provisioning:virtualmin_job_logs", args=[job.pk]), HTTP_ACCEPT="application/json"
+        )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             response.json()["logs"],
@@ -83,7 +100,7 @@ class VirtualminJobCoverageTests(VirtualminViewsFixture):
                     result={"backup_id": "bk-42"},
                 )
                 response = self.client.get(
-                    reverse("provisioning:virtualmin_job_logs", args=[job.pk]), HTTP_HX_REQUEST="true"
+                    reverse("provisioning:virtualmin_job_logs", args=[job.pk]), HTTP_ACCEPT="application/json"
                 )
                 self.assertEqual(response.status_code, 200)
                 logs = response.json()["logs"]
@@ -99,7 +116,9 @@ class VirtualminJobCoverageTests(VirtualminViewsFixture):
         job.account = None
         job.result = {"phase": "uploading"}
         job.save()
-        response = self.client.get(reverse("provisioning:virtualmin_job_logs", args=[job.pk]), HTTP_HX_REQUEST="true")
+        response = self.client.get(
+            reverse("provisioning:virtualmin_job_logs", args=[job.pk]), HTTP_ACCEPT="application/json"
+        )
         self.assertEqual(response.status_code, 200)
         logs = response.json()["logs"]
         self.assertEqual(logs[0]["message"], "Job created: backup_domain for unknown")
