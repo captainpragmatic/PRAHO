@@ -445,5 +445,7 @@ def lab_transport(state: LabState) -> Iterator[None]:
         stack.enter_context(mock.patch("apps.infrastructure.ansible_service.recover_connection_port", recover_lab_port))
         stack.enter_context(mock.patch.object(AnsibleService, "_ensure_ssh_policy", lab_ssh_policy))
         stack.enter_context(mock.patch.object(AnsibleService, "_build_vars", build_vars))
-        stack.enter_context(override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH=state.known_hosts))
+        stack.enter_context(
+            override_settings(SETTINGS_MODULE=settings.SETTINGS_MODULE, PRAHO_SSH_KNOWN_HOSTS_PATH=state.known_hosts)
+        )
         yield

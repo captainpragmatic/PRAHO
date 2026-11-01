@@ -84,6 +84,50 @@ print('Private lab authority applied')
                 self.assertIn("Private lab authority applied", result.stdout)
                 self.assertNotIn(self.data["secret"], result.stdout + result.stderr)
 
+    def test_nested_lab_transport_preserves_the_verified_settings_identity(self) -> None:
+        result = self.load(
+            "platform",
+            code_suffix="""
+import django
+
+django.setup()
+from apps.provisioning.management.commands._virtualmin_lab import (
+    LabState, lab_transport, refuse_unless_lab_settings,
+)
+
+root = Path(os.environ['VIRTUALMIN_MAINTENANCE_AUTHORITY']).parent
+known_hosts = root / 'known_hosts'
+known_hosts.write_text('')
+known_hosts.chmod(0o600)
+state = LabState(
+    state_dir=str(root), nodes=(), known_hosts=str(known_hosts),
+    s3_endpoint='', bucket='', domain='', domain_user='',
+)
+original_settings = settings._wrapped
+original_known_hosts = getattr(settings, 'PRAHO_SSH_KNOWN_HOSTS_PATH', None)
+refuse_unless_lab_settings()
+assert settings.SETTINGS_MODULE == 'config.settings.lab'
+with lab_transport(state):
+    refuse_unless_lab_settings()
+    assert settings.SETTINGS_MODULE == 'config.settings.lab'
+    assert settings.PRAHO_SSH_KNOWN_HOSTS_PATH == str(known_hosts)
+    outer_settings = settings._wrapped
+    with lab_transport(state):
+        refuse_unless_lab_settings()
+        assert settings.SETTINGS_MODULE == 'config.settings.lab'
+        assert settings.PRAHO_SSH_KNOWN_HOSTS_PATH == str(known_hosts)
+    assert settings._wrapped is outer_settings
+    refuse_unless_lab_settings()
+assert settings._wrapped is original_settings
+assert getattr(settings, 'PRAHO_SSH_KNOWN_HOSTS_PATH', None) == original_known_hosts
+refuse_unless_lab_settings()
+print('Verified lab identity survived nested transports and was restored')
+""",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Verified lab identity survived nested transports and was restored", result.stdout)
+        self.assertNotIn(self.data["secret"], result.stdout + result.stderr)
+
     def test_owned_platform_serializes_a_ledger_read_upgrade_against_an_autocommit_writer(self) -> None:
         result = self.load(
             "platform",
