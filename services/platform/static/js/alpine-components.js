@@ -81,7 +81,10 @@ document.addEventListener("alpine:init", function () {
         else el.value = fallback === null ? "" : String(fallback);
         this.syncField(el);
       },
-      discard() { window.location.reload(); },
+      discard() {
+        this.dirty = {};  // dropping the edits was asked for: the unload warning must not ask again
+        window.location.reload();
+      },
       async save() {
         if (!this.dirtyCount || this.saving) return;
         const criticalDirty = Array.from(

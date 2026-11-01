@@ -93,3 +93,44 @@ class UnsavedSettingsWarningTests(SimpleTestCase):
     def test_leaving_with_unsaved_settings_warns_and_without_does_not(self) -> None:
         self.assertTrue(self.run_with({"billing.grace_days": True}))
         self.assertFalse(self.run_with({}))
+
+
+DISCARD_HARNESS = r"""
+const fs = require("node:fs");
+const vm = require("node:vm");
+const input = JSON.parse(fs.readFileSync(0, "utf8"));
+let unload, init;
+const factories = {};
+const form = {};
+let component;
+const context = {
+  console, Object, Array, JSON,
+  document: {
+    addEventListener(name, fn) { if (name === "alpine:init") init = fn; },
+    querySelector(s) { return s === "[data-settings-form]" ? form : null; },
+  },
+  window: {addEventListener(name, fn) { if (name === "beforeunload") unload = fn; }},
+  Alpine: {data(name, fn) { factories[name] = fn; }, $data(el) { return el === form ? component : undefined; }},
+};
+context.Alpine.store = () => {};
+context.window.Alpine = context.Alpine;
+vm.runInNewContext(fs.readFileSync(input.source, "utf8"), context);
+context.Alpine = context.window.Alpine;
+init();
+component = factories.settingsForm("/settings/save/");
+component.dirty = {"billing.grace_days": true};
+let prevented = null;
+context.window.location = {reload() {  // the browser runs beforeunload as the reload starts
+  prevented = false;
+  unload({preventDefault() { prevented = true; }});
+}};
+component.discard();
+process.stdout.write(JSON.stringify({prevented}));
+"""
+
+
+class DiscardDoesNotAskAgainTests(SimpleTestCase):
+    def test_discard_reloads_without_the_unsaved_changes_prompt(self) -> None:
+        """Discard is the user saying to drop the edits; the unload guard asked again, and Cancel kept them."""
+        source = str(PLATFORM / "static/js/alpine-components.js")
+        self.assertIs(run_node(DISCARD_HARNESS, {"source": source})["prevented"], False)

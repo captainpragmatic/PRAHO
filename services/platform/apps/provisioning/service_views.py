@@ -25,6 +25,7 @@ from apps.billing.currency_policy import (
     require_current_selling_policy,
 )
 from apps.common.decorators import staff_required_strict
+from apps.common.http import page_redirect
 from apps.customers.models import Customer
 from apps.users.models import User
 
@@ -304,10 +305,7 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
 
 def _back_to_service(request: HttpRequest, pk: int) -> HttpResponse:
     """Return to the service page; htmx gets HX-Redirect, since the page's buttons swap into a hidden container."""
-    destination = reverse("provisioning:service_detail", kwargs={"pk": pk})
-    if request.headers.get("HX-Request") == "true":
-        return HttpResponse(headers={"HX-Redirect": destination})
-    return redirect(destination)
+    return page_redirect(request, reverse("provisioning:service_detail", kwargs={"pk": pk}))
 
 
 @staff_required_strict

@@ -32,7 +32,7 @@ from django.views.decorators.http import require_POST
 
 from apps.common import audit_failures
 from apps.common.decorators import admin_required, staff_required_strict
-from apps.common.http import mark_download
+from apps.common.http import hx_redirect, mark_download
 from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok, Result
@@ -153,7 +153,7 @@ def _handle_immediate_download(request: HttpRequest, export_request: "DataExport
 
     logger.info(f"✅ [GDPR Export] Export {export_request.id} ready for {user.email}")
     messages.info(request, _("Your export is ready. Download it from Recent Data Exports below."))
-    return HttpResponse(headers={"HX-Redirect": reverse("audit:gdpr_dashboard")})
+    return hx_redirect(reverse("audit:gdpr_dashboard"))
 
 
 @login_required

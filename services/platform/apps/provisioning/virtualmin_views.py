@@ -29,6 +29,7 @@ from django_q.tasks import async_task
 
 from apps.common.decorators import admin_required
 from apps.common.encryption import DecryptionError, EncryptionError
+from apps.common.http import page_redirect
 from apps.common.security_decorators import (
     audit_service_call,
     monitor_performance,
@@ -344,10 +345,7 @@ def _quota_text(megabytes: int | None) -> str:
 
 def _page_redirect(request: HttpRequest, to: str, **kwargs: Any) -> HttpResponse:
     """Go to the next page; htmx gets HX-Redirect, so the address bar follows instead of a page swapped into body."""
-    destination = reverse(to, kwargs=kwargs)
-    if request.headers.get("HX-Request"):
-        return HttpResponse(headers={"HX-Redirect": destination})
-    return redirect(destination)
+    return page_redirect(request, reverse(to, kwargs=kwargs))
 
 
 ACCOUNTS_PER_PAGE = 25
@@ -2022,9 +2020,8 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
 
     if not active_servers.exists():
         messages.error(request, _("No active Virtualmin servers found to sync from"))
-        if request.headers.get("HX-Request"):  # a page to land on, not a page nested in the table
-            return HttpResponse(headers={"HX-Redirect": reverse("provisioning:virtualmin_accounts")})
-        return redirect("provisioning:virtualmin_accounts")
+        # a page to land on, not a page nested in the table
+        return page_redirect(request, reverse("provisioning:virtualmin_accounts"))
 
     sync_results: SyncResults = {
         "servers_checked": 0,
@@ -2420,10 +2417,7 @@ def virtualmin_account_delete(request: HttpRequest, account_id: str) -> HttpResp
 
     # Both Delete controls sit on the account's own page, which no longer shows anything once it's gone: send
     # htmx to the accounts list as a full page (a bare table used to replace the whole <body>).
-    if request.headers.get("HX-Request"):
-        return HttpResponse(headers={"HX-Redirect": reverse("provisioning:virtualmin_accounts")})
-
-    return redirect("provisioning:virtualmin_accounts")
+    return page_redirect(request, reverse("provisioning:virtualmin_accounts"))
 
 
 @login_required

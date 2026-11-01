@@ -9,13 +9,14 @@ from uuid import UUID
 from django.contrib import messages
 from django.db import IntegrityError
 from django.http import Http404, HttpRequest, HttpResponse
-from django.shortcuts import redirect, render
+from django.shortcuts import render
 from django.urls import reverse
 from django.utils.dateparse import parse_date
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_POST
 
 from apps.common.decorators import staff_required_strict
+from apps.common.http import page_redirect
 from apps.domains.staff_fulfilment import record_paid_domain, refuse_paid_domain, reveal_paid_transfer_code
 
 from .models import Order, OrderItem
@@ -40,10 +41,7 @@ def _refused(request: HttpRequest, message: object, status: int = 400) -> HttpRe
 
 
 def _domain_redirect(request: HttpRequest, order_id: UUID) -> HttpResponse:
-    destination = reverse("orders:order_detail", kwargs={"pk": order_id})
-    if request.headers.get("HX-Request") == "true":
-        return HttpResponse(headers={"HX-Redirect": destination})
-    return redirect(destination)
+    return page_redirect(request, reverse("orders:order_detail", kwargs={"pk": order_id}))
 
 
 @staff_required_strict
