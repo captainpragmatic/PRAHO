@@ -59,6 +59,7 @@ class RenewalSubscriptionLockConcurrencyTests(_SubscriptionInvoicePaymentFixture
 
     def _wait_for_subscription(self, pid: int, owner_pid: int, pending) -> None:
         deadline, poll = monotonic() + 10, Event()
+        row = None
         while monotonic() < deadline:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT pg_stat_clear_snapshot()")
@@ -66,8 +67,8 @@ class RenewalSubscriptionLockConcurrencyTests(_SubscriptionInvoicePaymentFixture
                     "SELECT wait_event_type, pg_blocking_pids(pid), query FROM pg_stat_activity WHERE pid = %s", [pid]
                 )
                 row = cursor.fetchone()
-            if row and owner_pid in row[1]:
-                self.assertEqual(row[0], "Lock")
+            # Activity and lock-manager samples can straddle entry into the wait.
+            if row and row[0] == "Lock" and owner_pid in row[1]:
                 # PostgreSQL bounds pg_stat_activity query text; the full eager
                 # SELECT can exceed it before the trailing FOR UPDATE clause.
                 self.assertIn('"billing_subscriptions"', row[2])
@@ -75,7 +76,7 @@ class RenewalSubscriptionLockConcurrencyTests(_SubscriptionInvoicePaymentFixture
             if pending.done():
                 self.fail(f"Renewal completed without reaching the subscription lock: {pending.result()}")
             poll.wait(0.01)
-        self.fail("Renewal preparation did not wait for the subscription writer")
+        self.fail(f"Renewal did not reach the subscription lock: pid={pid}, owner={owner_pid}, last_sample={row!r}")
 
     def _prepare_after(self, writer: Callable[[], None]):
         ready, start = Event(), Event()

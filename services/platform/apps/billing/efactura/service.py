@@ -546,7 +546,16 @@ class EFacturaService:
         )
 
     def _lock_owned_claim(self, claim: SubmissionClaim) -> EFacturaDocument | None:
-        document = EFacturaDocument.objects.select_for_update().select_related("invoice").get(pk=claim.document_id)
+        from apps.billing.invoice_models import Invoice  # noqa: PLC0415
+
+        # Match preparation's Invoice -> Document order, retaining both row locks.
+        # The unlocked ID is only a routing hint; recheck it under the document lock.
+        invoice_id = EFacturaDocument.objects.values_list("invoice_id", flat=True).get(pk=claim.document_id)
+        invoice = Invoice.objects.select_for_update(of=("self",)).get(pk=invoice_id)
+        document = EFacturaDocument.objects.select_for_update(of=("self",)).get(pk=claim.document_id)
+        if document.invoice_id != invoice.pk:
+            return None
+        document.invoice = invoice
         if document.status != EFacturaStatus.UPLOADING.value or document.submission_claim_token != claim.token:
             return None
         return document
