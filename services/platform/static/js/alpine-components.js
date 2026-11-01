@@ -30,6 +30,9 @@ document.addEventListener("alpine:init", function () {
       saving: false,
       reason: "",
       get dirtyCount() { return Object.keys(this.dirty).length; },
+      // Labels come from data-* on the root: a translation never sits inside a JS expression.
+      get saveLabel() { return this.saving ? this.$root.dataset.savingLabel : this.$root.dataset.saveLabel; },
+      get unsavedLabel() { return this.dirtyCount + " " + this.$root.dataset.unsavedLabel; },
       compute(el) {
         const kind = el.dataset.kind;
         if (kind === "toggle") return el.checked;
@@ -156,6 +159,9 @@ document.addEventListener("alpine:init", function () {
       get resultMessage() {
         return this.result ? this.result.message : "";
       },
+      get testLabel() {
+        return this.testing ? this.$root.dataset.testingLabel : this.$root.dataset.testLabel;
+      },
       testConnection() {
         this.testing = true;
         this.result = null;
@@ -179,6 +185,12 @@ document.addEventListener("alpine:init", function () {
       message: "",
       configured: configured,
       unreadable: unreadable,
+      get saveDisabled() {
+        return this.busy ? true : !this.secret.trim();
+      },
+      get configuredLabel() {
+        return this.configured ? this.$root.dataset.configuredLabel : this.$root.dataset.notConfiguredLabel;
+      },
       applyCredentialState(data) {
         this.configured = data.configured;
         this.unreadable = false;
