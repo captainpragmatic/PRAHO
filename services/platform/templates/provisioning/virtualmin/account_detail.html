@@ -470,64 +470,25 @@
             <div x-show="activeTab === 'settings'" x-transition>
                 <div class="space-y-6">
                     <h3 class="text-lg font-semibold text-slate-100">{% trans "Account Settings" %}</h3>
-
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <!-- Basic Settings -->
-                        <div class="space-y-4">
-                            <h4 class="text-md font-medium text-slate-200">{% trans "Basic Settings" %}</h4>
-
-                            <div>
-                                <label for="account-contact-email" class="block text-sm font-medium text-slate-300 mb-1">
-                                    {% trans "Contact Email" %}
-                                </label>
-                                {# tmpl-allow TMPL001: components/input.html loads the static library, which the minimal Engine in tests/provisioning/test_account_detail_confirmations.py does not register #}
-                                <input id="account-contact-email" type="email" value="{{ account.contact_email|default:'' }}"
-                                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-
-                            <div>
-                                <label for="account-php-version" class="block text-sm font-medium text-slate-300 mb-1">
-                                    {% trans "PHP Version" %}
-                                </label>
-                                {# tmpl-allow TMPL003: literal PHP version options rendered inline; select components take a view-built options list #}
-                                <select id="account-php-version" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option>PHP 8.1</option>
-                                    <option>PHP 8.2</option>
-                                    <option>PHP 8.3</option>
-                                </select>
-                            </div>
+                    {# Read-only: what Platform stores for this account. Editing is a separate feature (plan quotas: #776). #}
+                    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Virtualmin template" %}</dt>
+                            <dd class="mt-1 text-slate-100">{{ account.template_name|default:_("Not set") }}</dd>
                         </div>
-
-                        <!-- Resource Limits -->
-                        <div class="space-y-4">
-                            <h4 class="text-md font-medium text-slate-200">{% trans "Resource Limits" %}</h4>
-
-                            <div>
-                                <label for="account-disk-quota" class="block text-sm font-medium text-slate-300 mb-1">
-                                    {% trans "Disk Quota" %} (GB)
-                                </label>
-                                {# tmpl-allow TMPL001: components/input.html loads the static library, which the minimal Engine in tests/provisioning/test_account_detail_confirmations.py does not register #}
-                                <input id="account-disk-quota" type="number" value="{{ account.disk_quota_gb|default:'' }}"
-                                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-
-                            <div>
-                                <label for="account-bandwidth-quota" class="block text-sm font-medium text-slate-300 mb-1">
-                                    {% trans "Bandwidth Quota" %} (GB)
-                                </label>
-                                {# tmpl-allow TMPL001: components/input.html loads the static library, which the minimal Engine in tests/provisioning/test_account_detail_confirmations.py does not register #}
-                                <input id="account-bandwidth-quota" type="number" value="{% if account.bandwidth_quota_mb == -1 %}-1{% elif account.bandwidth_quota_mb %}{{ account.bandwidth_quota_mb|floatformat:0 }}{% endif %}"
-                                       placeholder="{% trans "Use -1 for unlimited" %}"
-                                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <p class="text-xs text-slate-400 mt-1">{% trans "Use -1 for unlimited bandwidth" %}</p>
-                            </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Disk quota" %}</dt>
+                            <dd class="mt-1 text-slate-100">{% if account.disk_quota_mb %}{% widthratio account.disk_quota_mb 1024 1 %} GB{% else %}{% trans "Not set" %}{% endif %}</dd>
                         </div>
-                    </div>
-
-                    <div class="pt-6 border-t border-slate-700">
-                        {% trans "Save Changes" as bt22 %}{% button bt22 variant="primary" %}
-                        {% trans "Cancel" as bt23 %}{% button bt23 variant="secondary" %}
-                    </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Bandwidth quota" %}</dt>
+                            <dd class="mt-1 text-slate-100">{% if account.bandwidth_quota_mb == -1 %}{% trans "Unlimited" %}{% elif account.bandwidth_quota_mb %}{% widthratio account.bandwidth_quota_mb 1024 1 %} GB{% else %}{% trans "Not set" %}{% endif %}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Features" %}</dt>
+                            <dd class="mt-1 text-slate-100">{% for name, enabled in account.features.items %}{% if enabled %}<span class="mr-2">{{ name }}</span>{% endif %}{% empty %}{% trans "Not set" %}{% endfor %}</dd>
+                        </div>
+                    </dl>
                 </div>
             </div>
         </div>
