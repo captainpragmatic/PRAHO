@@ -291,3 +291,14 @@ class ButtonIdTests(SimpleTestCase):
     def test_button_id_omitted_renders_no_id_attribute(self) -> None:
         result = _render('{% button "Attach" %}')
         self.assertNotIn(" id=", result)
+
+
+class PlansUpgradeButtonTests(SimpleTestCase):
+    """"Upgrade Plan" did nothing (no href, action or form); until portal upgrades exist it says so, disabled."""
+
+    def test_the_upgrade_button_is_disabled_and_says_why(self) -> None:
+        from django.template.loader import render_to_string  # noqa: PLC0415
+
+        html = render_to_string("services/plans_list.html", {"plans": [{"name": "Pro", "price_monthly": 10}]})
+        self.assertIn("Coming soon", html)
+        self.assertRegex(html, r"<button[^>]*\bdisabled\b[^>]*>\s*<span class=\"btn-label[^\"]*\">Upgrade Plan")

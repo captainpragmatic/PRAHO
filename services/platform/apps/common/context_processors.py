@@ -55,64 +55,6 @@ def user_permissions(request: HttpRequest) -> dict[str, Any]:
     }
 
 
-def navigation_context(request: HttpRequest) -> dict[str, Any]:
-    """Navigation context for templates"""
-    nav_items = [
-        {
-            "name": "Dashboard",
-            "url": "/",
-            "icon": "dashboard",
-            "active": request.path == "/",
-        },
-        {
-            "name": "Clienți",
-            "url": "/customers/",
-            "icon": "users",
-            "active": request.path.startswith("/customers/"),
-            "permission": "customers.view_customer",
-        },
-        {
-            "name": "Facturare",
-            "url": "/billing/",
-            "icon": "credit-card",
-            "active": request.path.startswith("/billing/"),
-            "permission": "billing.view_invoice",
-        },
-        {
-            "name": "Tickete",
-            "url": "/tickets/",
-            "icon": "message-circle",
-            "active": request.path.startswith("/tickets/"),
-            "permission": "tickets.view_ticket",
-        },
-        {
-            "name": "Servicii",
-            "url": "/provisioning/",
-            "icon": "server",
-            "active": request.path.startswith("/provisioning/"),
-            "permission": "provisioning.view_service",
-        },
-    ]
-
-    # Filter navigation by permissions
-    if request.user.is_authenticated:
-        # ⚡ PERFORMANCE: Use list comprehension for better performance
-        nav_items = [
-            item
-            for item in nav_items
-            if "permission" not in item
-            or (isinstance(item["permission"], str) and request.user.has_perm(item["permission"]))
-        ]
-    else:
-        # Anonymous users see limited navigation
-        nav_items = [item for item in nav_items if "permission" not in item]
-
-    return {
-        "nav_items": nav_items,
-        "current_path": request.path,
-    }
-
-
 def system_status(request: HttpRequest) -> dict[str, Any]:
     """System status information.
 
