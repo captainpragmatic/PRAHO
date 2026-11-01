@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from unittest.mock import patch
 from uuid import UUID
@@ -310,3 +311,33 @@ class StaffDomainLineTests(DomainOrderLineFixture, TestCase):
         self.assertEqual(response.status_code, 302)
         line.refresh_from_db()
         self.assertEqual(line.provisioning_status, "completed")
+
+
+class StaffDomainRefusalMessageTests(DomainOrderLineFixture, TestCase):
+    """htmx shows no 4xx body, so a refusal to an htmx request carries its message as a showToast event.
+
+    Staff saw only "An error occurred" instead of "Enter a future expiry date…" or the duplicate-domain warning.
+    The status stays 400/403 so nothing treats the refusal as a success; plain form posts are unchanged.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.staff = User.objects.create_user(
+            email="domain-refusal@example.test", password="test", staff_role="admin", is_staff=True
+        )
+        self.client.force_login(self.staff)
+
+    def test_an_htmx_refusal_says_why_as_a_toast(self) -> None:
+        order, line = self._domain_order("refusal-message.ro")
+        url = reverse("orders:domain_record", kwargs={"pk": order.pk, "item_pk": line.pk})
+
+        response = self.client.post(url, {"expires_on": "", "registrar_domain_id": "x"}, HTTP_HX_REQUEST="true")
+
+        self.assertEqual(response.status_code, 400)
+        toast = json.loads(response["HX-Trigger"])["showToast"]
+        self.assertEqual(toast["variant"], "error")
+        self.assertIn("future expiry date", toast["message"])
+
+        plain = self.client.post(url, {"expires_on": "", "registrar_domain_id": "x"})
+        self.assertEqual(plain.status_code, 400)
+        self.assertNotIn("HX-Trigger", plain)

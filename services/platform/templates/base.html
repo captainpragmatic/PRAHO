@@ -316,11 +316,23 @@
   <!-- Scripts -->
   <script nonce="{{ csp_nonce }}">
     // HTMX Error Handling
+    // A response's HX-Trigger showToast event (a refusal that says why) shows as a toast, as on the Portal.
+    document.body.addEventListener('showToast', function (event) {
+      if (window.showToast) {
+        var d = event.detail || {};
+        window.showToast(d.variant || 'error', d.message || '');
+      }
+    });
+
     document.body.addEventListener('htmx:responseError', function (event) {
       console.error(' HTMX Error:', event.detail);
       {% trans "An error occurred. Please try again." as htmx_error_msg %}
       // A refused CSRF token (a stale tab) says to reload; htmx never retries it.
       var xhr = event.detail.xhr;
+      // A refusal that sent its own message (HX-Trigger showToast) already showed it.
+      if (xhr && (xhr.getResponseHeader('HX-Trigger') || '').indexOf('showToast') !== -1) {
+        return;
+      }
       if (xhr && xhr.getResponseHeader('X-CSRF-Failure') === 'reload') {
         alert(document.querySelector('meta[name="csrf-reload-message"]').content);
         return;

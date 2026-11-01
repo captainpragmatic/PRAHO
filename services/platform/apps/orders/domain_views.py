@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, TypeGuard
 from uuid import UUID
 
 from django.contrib import messages
 from django.db import IntegrityError
-from django.http import Http404, HttpRequest, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden
+from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.dateparse import parse_date
@@ -30,6 +31,14 @@ def _can_record(user: object) -> TypeGuard[User]:
     return isinstance(user, User) and (user.is_superuser or user.staff_role in _REVIEW_APPROVE_ROLES)
 
 
+def _refused(request: HttpRequest, message: object, status: int = 400) -> HttpResponse:
+    """A refusal; htmx shows no 4xx body, so an htmx request gets the message as a showToast event too."""
+    response = HttpResponse(str(message), status=status, content_type="text/plain; charset=utf-8")
+    if request.headers.get("HX-Request") == "true":
+        response["HX-Trigger"] = json.dumps({"showToast": {"variant": "error", "message": str(message)}})
+    return response
+
+
 def _domain_redirect(request: HttpRequest, order_id: UUID) -> HttpResponse:
     destination = reverse("orders:order_detail", kwargs={"pk": order_id})
     if request.headers.get("HX-Request") == "true":
@@ -41,7 +50,7 @@ def _domain_redirect(request: HttpRequest, order_id: UUID) -> HttpResponse:
 @require_POST
 def domain_record(request: HttpRequest, pk: UUID, item_pk: UUID) -> HttpResponse:
     if not _can_record(request.user):
-        return HttpResponseForbidden(_("Only admin or billing staff can record registrar answers."))
+        return _refused(request, _("Only admin or billing staff can record registrar answers."), 403)
     try:
         try:
             expires_on = parse_date(request.POST.get("expires_on", ""))
@@ -64,7 +73,7 @@ def domain_record(request: HttpRequest, pk: UUID, item_pk: UUID) -> HttpResponse
             if isinstance(error, ValueError)
             else _("A domain with this name already exists; review its ownership first.")
         )
-        return HttpResponseBadRequest(message)
+        return _refused(request, message)
     messages.success(request, _("Recorded %(count)s domain order line(s).") % {"count": count})
     return _domain_redirect(request, pk)
 
@@ -73,13 +82,13 @@ def domain_record(request: HttpRequest, pk: UUID, item_pk: UUID) -> HttpResponse
 @require_POST
 def domain_refuse(request: HttpRequest, pk: UUID, item_pk: UUID) -> HttpResponse:
     if not _can_record(request.user):
-        return HttpResponseForbidden(_("Only admin or billing staff can record registrar answers."))
+        return _refused(request, _("Only admin or billing staff can record registrar answers."), 403)
     try:
         refuse_paid_domain(pk, item_pk, actor=request.user)
     except (Order.DoesNotExist, OrderItem.DoesNotExist):
         raise Http404 from None
     except ValueError as error:
-        return HttpResponseBadRequest(str(error))
+        return _refused(request, error)
     messages.success(request, _("Registrar refusal recorded."))
     return _domain_redirect(request, pk)
 
@@ -88,13 +97,13 @@ def domain_refuse(request: HttpRequest, pk: UUID, item_pk: UUID) -> HttpResponse
 @require_POST
 def domain_transfer_code(request: HttpRequest, pk: UUID, item_pk: UUID) -> HttpResponse:
     if not _can_record(request.user):
-        return HttpResponseForbidden(_("Only admin or billing staff can record registrar answers."))
+        return _refused(request, _("Only admin or billing staff can record registrar answers."), 403)
     try:
         code = reveal_paid_transfer_code(pk, item_pk, actor=request.user)
     except (Order.DoesNotExist, OrderItem.DoesNotExist):
         raise Http404 from None
     except ValueError as error:
-        return HttpResponseBadRequest(str(error))
+        return _refused(request, error)
     response = render(request, "orders/partials/domain_transfer_code.html", {"transfer_code": code})
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
