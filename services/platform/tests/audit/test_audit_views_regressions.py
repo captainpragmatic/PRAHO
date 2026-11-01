@@ -273,27 +273,22 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
         result = _handle_immediate_download(request, export, self.regular_user)
         self.assertIsNone(result)
 
-    @patch("apps.audit.views.read_export_file", return_value='{"test": true}')
-    @patch("apps.audit.views.AuditService")
-    def test_htmx_completed_with_file(self, mock_audit_svc, mock_read):
+    @patch("apps.audit.views.read_export_file")
+    def test_htmx_completed_is_sent_to_the_download(self, mock_read):
+        """The download view serves, counts and audits the file; this only points htmx at it."""
         from django.test import RequestFactory  # noqa: PLC0415
 
         from apps.audit.views import _handle_immediate_download  # noqa: PLC0415
 
-        factory = RequestFactory()
-        request = factory.get("/", HTTP_HX_REQUEST="true")
-        request.META["HTTP_USER_AGENT"] = "TestBrowser"
-        request.META["REMOTE_ADDR"] = "127.0.0.1"
-
+        request = RequestFactory().get("/", HTTP_HX_REQUEST="true")
         export = self._create_data_export(status="completed", file_path="exports/test.json")
 
         result = _handle_immediate_download(request, export, self.regular_user)
         self.assertIsNotNone(result)
-        self.assertEqual(result.status_code, 200)
-        self.assertEqual(result["Content-Type"], "application/json")
-        self.assertEqual(result["Cache-Control"], "private, no-store")
-        self.assertEqual(result.content, b'{"test": true}')
-        mock_read.assert_called_once_with(export)
+        self.assertEqual(result["HX-Redirect"], reverse("audit:download_data_export", args=[export.id]))
+        mock_read.assert_not_called()
+        export.refresh_from_db()
+        self.assertEqual(export.download_count, 0)
 
     def test_htmx_not_completed_returns_none(self):
         from django.test import RequestFactory  # noqa: PLC0415
@@ -306,20 +301,6 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
         result = _handle_immediate_download(request, export, self.regular_user)
         self.assertIsNone(result)
 
-    @patch("apps.audit.views.read_export_file", side_effect=Exception("File not found"))
-    def test_htmx_file_read_exception(self, mock_read):
-        from django.test import RequestFactory  # noqa: PLC0415
-
-        from apps.audit.views import _handle_immediate_download  # noqa: PLC0415
-
-        factory = RequestFactory()
-        request = factory.get("/", HTTP_HX_REQUEST="true")
-
-        export = self._create_data_export(status="completed", file_path="exports/test.json")
-
-        result = _handle_immediate_download(request, export, self.regular_user)
-        self.assertIsNone(result)
-        mock_read.assert_called_once_with(export)
 
 
 # =============================================================================
