@@ -1,14 +1,16 @@
 """The node inspector emits technical observations without leaking native passwords."""
 
+import hashlib
 import importlib.util
 import json
 import os
 import subprocess
 import tempfile
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from django.test import SimpleTestCase
 from jinja2 import Environment, StrictUndefined
@@ -127,25 +129,82 @@ class InspectorTests(TestCase):
             "ip6tables-save": "*filter\n:INPUT DROP [5:100]\nCOMMIT\n# Completed on clock two\n",
             "nft": '{"nftables": []}',
         }
+
+        def command(argv: list[str]) -> str:
+            if argv[:2] == ["virtualmin", "list-domains"]:
+                return ""
+            if argv[0] == "ip":
+                return "[]"
+            if argv[-1] == "--version":
+                return "iptables-save v1.8.9 (nf_tables)"
+            return outputs[argv[0]]
+
+        contents = b"#!/bin/sh\n# private hook contents\n"
+        for present, executable in ((False, False), (True, False), (True, True)):
+            with self.subTest(hook_present=present, executable=executable):
+                hooks = {name: MagicMock(spec=Path) for name in ("/etc/ufw/before.init", "/etc/ufw/after.init")}
+                before = hooks["/etc/ufw/before.init"]
+                for name, hook in hooks.items():
+                    hook.__str__.return_value = name
+                    hook.exists.return_value = hook is before and present
+                before.open.return_value = BytesIO(contents)
+
+                def access(path: Path, mode: int, expected: Path = before, allowed: bool = executable) -> bool:
+                    self.assertIs(path, expected)
+                    self.assertEqual(mode, os.X_OK)
+                    return allowed
+
+                with (
+                    patch.object(self.module.shutil, "which", return_value="/usr/sbin/ufw"),
+                    patch.object(self.module, "command", side_effect=command),
+                    patch.object(self.module, "Path", side_effect=hooks.__getitem__),
+                    patch.object(self.module.os, "access", side_effect=access),
+                    patch.object(self.module, "forwarding_flags", return_value={"ipv4": 0, "ipv6": {"all": 0}}),
+                    patch.object(self.module, "versions", return_value={"webmin": "2.670", "virtualmin": "8.3.0"}),
+                    patch.object(self.module, "inspect_ssh", return_value=ssh_policy_services()),
+                ):
+                    result = self.module.inspect("a" * 64)
+                self.assertEqual(result["schema"], 1)
+                self.assertIn("0.0.0.0:25", result["listeners"][0])
+                self.assertEqual(result["principals"][0]["name"], "root")
+                self.assertIn("fail2ban installed 1.0", result["services"])
+                self.assertIn(":INPUT DROP [0:0]", result["firewall"])
+                self.assertIn("PRAHO_NETWORK_COMPLETE", result["firewall"])
+                self.assertFalse(any("clock" in line for line in result["firewall"]))
+                self.assertTrue(any(row.startswith("PRAHO_SSH_TUNNEL ") for row in result["services"]))
+                descriptions = [row for row in result["proposed_changes"] if row.startswith("Firewall reload hook ")]
+                disable = [row for row in result["proposed_changes"] if row.startswith("Disable execution of ")]
+                self.assertEqual(
+                    descriptions,
+                    [
+                        f"Firewall reload hook /etc/ufw/before.init: sha256={hashlib.sha256(contents).hexdigest()}, executable={executable}"
+                    ]
+                    if present
+                    else [],
+                )
+                self.assertEqual(len(disable), int(present and executable))
+                self.assertNotIn("private hook contents", json.dumps(result))
+                for hook in hooks.values():
+                    hook.exists.assert_called_once_with()
+                if present:
+                    before.open.assert_called_once_with("rb")
+                else:
+                    before.open.assert_not_called()
+                hooks["/etc/ufw/after.init"].open.assert_not_called()
+
+    def test_classification_fixture_never_reads_the_host_filesystem(self):
+        # Ubuntu's root-only UFW hook exposed this fixture's accidental host reads.
         with (
-            patch.object(self.module.shutil, "which", return_value="/usr/sbin/ufw"),
-            patch.object(
-                self.module,
-                "command",
-                side_effect=lambda argv: "" if argv[:2] == ["virtualmin", "list-domains"] else outputs[argv[0]],
-            ),
-            patch.object(self.module, "versions", return_value={"webmin": "2.670", "virtualmin": "8.3.0"}),
-            patch.object(self.module, "inspect_ssh", return_value=ssh_policy_services(), create=True),
+            patch.object(Path, "exists", return_value=True),
+            patch.object(Path, "open", side_effect=PermissionError("Host UFW hook is root-only")),
+            patch.object(Path, "read_text", side_effect=AssertionError("Unexpected host file read")),
+            patch.object(Path, "glob", side_effect=AssertionError("Unexpected host directory scan")),
+            patch.object(Path, "stat", side_effect=AssertionError("Unexpected host file stat")),
+            patch("builtins.open", side_effect=AssertionError("Unexpected host file open")),
+            patch.object(os, "open", side_effect=AssertionError("Unexpected host descriptor open")),
+            patch.object(os, "access", side_effect=AssertionError("Unexpected host access check")),
         ):
-            result = self.module.inspect("a" * 64)
-        self.assertEqual(result["schema"], 1)
-        self.assertIn("0.0.0.0:25", result["listeners"][0])
-        self.assertEqual(result["principals"][0]["name"], "root")
-        self.assertIn("fail2ban installed 1.0", result["services"])
-        self.assertTrue(result["proposed_changes"])
-        self.assertIn(":INPUT DROP [0:0]", result["firewall"])
-        self.assertFalse(any("clock" in line for line in result["firewall"]))
-        self.assertTrue(any(row.startswith("PRAHO_SSH_TUNNEL ") for row in result["services"]))
+            self.test_inspection_classifies_every_observation_and_does_not_mutate()
 
     def test_effective_ssh_contexts_and_all_tunnel_key_files_are_read_without_raw_key_material(self):
         projected = {}
