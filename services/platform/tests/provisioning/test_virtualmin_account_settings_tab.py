@@ -42,6 +42,13 @@ class AccountSettingsTabTests(VirtualminViewsFixture):
         self.assertIn("Not set", tab)
         self.assertIn("50 GB", tab)
 
+    def test_a_zero_disk_quota_is_unlimited(self) -> None:
+        """The gateway stores Virtualmin's "unlimited" disk as 0 (the field can't hold -1)."""
+        self.account.disk_quota_mb = 0
+        self.account.bandwidth_quota_mb = 51200
+        self.account.save(update_fields=["disk_quota_mb", "bandwidth_quota_mb"])
+        self.assertRegex(self.settings_tab(), r"Disk quota</dt>\s*<dd[^>]*>Unlimited</dd>")
+
     def test_quotas_keep_their_precision(self) -> None:
         for disk_mb, shown in ((512, "512 MB"), (1536, "1.5 GB"), (10240, "10 GB")):
             with self.subTest(disk_mb=disk_mb):

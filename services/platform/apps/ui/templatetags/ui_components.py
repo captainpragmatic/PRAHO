@@ -259,7 +259,6 @@ class EnhancedTableConfig:
 
     show_actions: bool = True
     pagination_enabled: bool = True
-    include_js: bool = True
     action_column_label: str = ""
     empty_icon: str = "📋"
     empty_title: str = ""
@@ -1026,7 +1025,6 @@ def table_enhanced(
         {
             'clickable': True,
             'click_url': '/billing/invoice/123/',  # Direct URL
-            'click_js': 'navigateToDocument("invoice", "123")',  # Custom JS
             'cells': [
                 {
                     'component': 'badge',      # badge|button|text
@@ -1057,7 +1055,6 @@ def table_enhanced(
         rows: List of row data
         show_actions: Show actions column
         pagination_enabled: Enable pagination
-        include_js: Include navigation JavaScript
         page_obj: Django paginator page object
         extra_params: URL parameters for pagination
         htmx_target: HTMX target selector
@@ -1074,7 +1071,6 @@ def table_enhanced(
         "rows": rows,
         "show_actions": config.show_actions,
         "pagination_enabled": config.pagination_enabled,
-        "include_js": config.include_js,
         "action_column_label": config.action_column_label,
         "empty_icon": config.empty_icon,
         "empty_title": config.empty_title,

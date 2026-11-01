@@ -149,6 +149,13 @@ class RetryLineTests(RetryFailedLineCase):
         self.line.refresh_from_db()
         self.assertEqual(self.line.provisioning_status, "pending")
 
+    def test_the_customer_facing_failure_note_is_cleared(self) -> None:
+        self.line.refresh_from_db()
+        self.assertTrue(self.line.provisioning_notes)  # fulfilment left it when the line failed
+        self.retry().unwrap()
+        self.line.refresh_from_db()
+        self.assertEqual(self.line.provisioning_notes, "")
+
     def test_a_second_retry_is_refused(self) -> None:
         self.retry().unwrap()
         self.assertIn("isn't failed", self.retry().unwrap_err())
@@ -185,7 +192,7 @@ class RetryLineTests(RetryFailedLineCase):
 
     def test_a_line_praho_does_not_provision_is_left_to_staff(self) -> None:
         Service.objects.filter(pk=self.service.pk).update(domain="")
-        self.assert_refused("fulfilled")
+        self.assert_refused("can't be retried here")
 
 
 class RetryLineViewTests(RetryFailedLineCase):

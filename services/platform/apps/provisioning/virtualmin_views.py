@@ -327,10 +327,14 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
 
 
 def _quota_text(megabytes: int | None) -> str:
-    """A stored quota as a person reads it: MB below 1 GB, GB with one decimal above, -1 as Unlimited."""
-    if megabytes is None or megabytes == 0:
+    """A stored quota as a person reads it: MB below 1 GB, GB with one decimal above.
+
+    Unlimited is stored as 0 for disk (the gateway parses "unlimited" to 0; the field can't hold -1) and -1 for
+    bandwidth; None means no quota was recorded.
+    """
+    if megabytes is None:
         return str(_("Not set"))
-    if megabytes < 0:
+    if megabytes <= 0:
         return str(_("Unlimited"))
     if megabytes < 1024:  # noqa: PLR2004  # MB in a GB
         return f"{megabytes} MB"
@@ -406,7 +410,9 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
     """📊 List all Virtualmin accounts with filtering and search."""
 
     table = _accounts_table_context(request)
-    if request.headers.get("HX-Request"):  # the filter form and pagination swap the table, not the page
+    # The filter form and pagination swap the table, not the page. htmx restoring a pushed URL it no longer caches
+    # also sends HX-Request, and swaps the answer into <body>: that one gets the whole page.
+    if request.headers.get("HX-Request") and not request.headers.get("HX-History-Restore-Request"):
         return render(request, "provisioning/virtualmin/partials/accounts_table.html", table)
     accounts_page = table["accounts"]
     status_filter, server_filter, search_query = table["status_filter"], table["server_filter"], table["search_query"]

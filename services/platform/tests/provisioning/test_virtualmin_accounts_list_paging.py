@@ -96,3 +96,18 @@ class AccountsListPagingTests(VirtualminViewsFixture):
         response = self.client.get(self.url, {"search": "no-such-account"}, HTTP_HX_REQUEST="true")
         links = [a.get("href") for t, a in Markup(response.content.decode()).elements if t == "a"]
         self.assertIn(reverse("provisioning:virtualmin_account_new"), links)
+
+    def test_a_history_restore_gets_the_whole_page(self) -> None:
+        """htmx restores a pushed URL it no longer caches with HX-Request too; the table alone would replace <body>."""
+        response = self.client.get(
+            self.url, {"search": "second"}, HTTP_HX_REQUEST="true", HTTP_HX_HISTORY_RESTORE_REQUEST="true"
+        )
+        self.assertIn('id="accounts-container"', response.content.decode())
+
+    def test_an_empty_server_filter_says_filters_are_active(self) -> None:
+        other = VirtualminServer.objects.create(
+            name="empty-node", hostname="empty.example.test", api_username="u", status="active"
+        )
+        html = self.client.get(self.url, {"server": str(other.pk)}, HTTP_HX_REQUEST="true").content.decode()
+        self.assertIn("No accounts match your current filters", html)
+        self.assertIn("Clear Filters", html)

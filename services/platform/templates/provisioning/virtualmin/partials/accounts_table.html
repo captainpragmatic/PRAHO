@@ -120,15 +120,15 @@
     <span class="text-slate-400">{% icon "globe" size="2xl" %}</span>
     <h3 class="mt-4 text-lg font-medium text-slate-100">{% trans "No accounts found" %}</h3>
     <p class="mt-2 text-sm text-slate-400">
-        {% if request.GET.search or request.GET.status or request.GET.plan %}
+        {% if search_query or status_filter or server_filter %}
             {% trans "No accounts match your current filters. Try adjusting your search criteria." %}
         {% else %}
             {% trans "Get started by creating your first hosting account." %}
         {% endif %}
     </p>
     <div class="mt-6">
-        {% if request.GET.search or request.GET.status or request.GET.plan %}
-            {% trans "Clear Filters" as bt7 %}{% button bt7 href="." variant="secondary" %}
+        {% if search_query or status_filter or server_filter %}
+            {% url 'provisioning:virtualmin_accounts' as accounts_url %}{% trans "Clear Filters" as bt7 %}{% button bt7 href=accounts_url variant="secondary" %}
         {% endif %}
         {% url 'provisioning:virtualmin_account_new' as new_account_url %}{% trans "Create Account" as bt8 %}{% button bt8 href=new_account_url variant="primary" %}
     </div>

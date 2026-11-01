@@ -137,10 +137,12 @@ def _generate_unless_ready(export_request: "DataExport") -> Result[str, str]:
 
 
 def _handle_immediate_download(request: HttpRequest, export_request: "DataExport", user: Any) -> HttpResponse | None:
-    """Send the dashboard's htmx export form to the download once the export is ready.
+    """Reload the dashboard once the export is ready; it lists the export with its Download link.
 
     The file itself can't be the answer: htmx swaps it into the page (XHR ignores Content-Disposition), which
-    replaced the dashboard with raw JSON. download_data_export serves it, and counts and audits the download there.
+    replaced the dashboard with raw JSON. Nor can HX-Redirect to the download: the browser saves the file but the
+    page stays as it was, modal open and spinner on. download_data_export serves the file, and counts and audits
+    the download there.
     """
     if not request.headers.get("HX-Request"):
         return None
@@ -149,8 +151,9 @@ def _handle_immediate_download(request: HttpRequest, export_request: "DataExport
     if export_request.status != "completed" or not export_request.file_path:
         return None
 
-    logger.info(f"✅ [GDPR Export] Sending {user.email} to download export {export_request.id}")
-    return HttpResponse(headers={"HX-Redirect": reverse("audit:download_data_export", args=[export_request.id])})
+    logger.info(f"✅ [GDPR Export] Export {export_request.id} ready for {user.email}")
+    messages.info(request, _("Your export is ready. Download it from Recent Data Exports below."))
+    return HttpResponse(headers={"HX-Redirect": reverse("audit:gdpr_dashboard")})
 
 
 @login_required

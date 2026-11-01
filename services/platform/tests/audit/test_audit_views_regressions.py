@@ -274,18 +274,21 @@ class HandleImmediateDownloadTests(AuditViewsBaseTestCase):
         self.assertIsNone(result)
 
     @patch("apps.audit.views.read_export_file")
-    def test_htmx_completed_is_sent_to_the_download(self, mock_read):
-        """The download view serves, counts and audits the file; this only points htmx at it."""
+    def test_htmx_completed_reloads_the_dashboard(self, mock_read):
+        """The download view serves, counts and audits the file; this only reloads the dashboard that links to it."""
+        from django.contrib.messages.storage.fallback import FallbackStorage  # noqa: PLC0415
         from django.test import RequestFactory  # noqa: PLC0415
 
         from apps.audit.views import _handle_immediate_download  # noqa: PLC0415
 
         request = RequestFactory().get("/", HTTP_HX_REQUEST="true")
+        request.session = {}
+        request._messages = FallbackStorage(request)
         export = self._create_data_export(status="completed", file_path="exports/test.json")
 
         result = _handle_immediate_download(request, export, self.regular_user)
         self.assertIsNotNone(result)
-        self.assertEqual(result["HX-Redirect"], reverse("audit:download_data_export", args=[export.id]))
+        self.assertEqual(result["HX-Redirect"], reverse("audit:gdpr_dashboard"))
         mock_read.assert_not_called()
         export.refresh_from_db()
         self.assertEqual(export.download_count, 0)

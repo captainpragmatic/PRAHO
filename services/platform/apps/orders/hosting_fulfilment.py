@@ -306,7 +306,7 @@ def _retry_refusal(line: OrderItem, service: Service | None) -> str | None:  # n
     if line.provisioning_status != "failed":
         return _("This line isn't failed, so there is nothing to retry.")
     if line.is_domain_line or service is None or service.status != "active" or not _is_automatic(service):
-        return _("PRAHO doesn't provision this line itself; mark it fulfilled once it is delivered.")
+        return _("PRAHO doesn't provision this line itself, so it can't be retried here.")
     if is_suspended(order.customer_id):  # read under the Customer lock _lock holds
         return _("The customer is suspended; unsuspend them before retrying.")
     refund = Refund.objects.filter(
@@ -367,7 +367,8 @@ def retry_line_for_staff(item_id: UUID | str, *, actor: User) -> Result[str, str
             transaction.set_rollback(True)
             return Err(_("The create job changed meanwhile; reload the page and try again."))
         line.retry_provisioning()
-        line.save(update_fields=["provisioning_status", "updated_at"])
+        line.provisioning_notes = ""  # the customer read "could not set up"; completion doesn't rewrite it
+        line.save(update_fields=["provisioning_status", "provisioning_notes", "updated_at"])
         AuditService.log_simple_event(
             event_type="provisioning_retried",
             user=actor,
