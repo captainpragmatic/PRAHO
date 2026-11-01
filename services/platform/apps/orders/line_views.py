@@ -47,3 +47,27 @@ def order_item_fulfil(request: HttpRequest, pk: UUID, item_pk: UUID) -> HttpResp
     if request.headers.get("HX-Request") == "true":
         return HttpResponse(headers={"HX-Redirect": destination})
     return redirect(destination)
+
+
+@staff_required_strict
+@require_POST
+def order_item_retry(request: HttpRequest, pk: UUID, item_pk: UUID) -> HttpResponse:
+    """Give a failed hosting line's create job one more attempt (apps.orders.hosting_fulfilment.retry_line_for_staff)."""
+    from apps.users.models import User  # noqa: PLC0415  # Cross-app models are deferred (ADR-0007).
+
+    from .hosting_fulfilment import retry_line_for_staff  # noqa: PLC0415  # Deferred: models import signals
+
+    if not can_fulfil_lines(request.user) or not isinstance(request.user, User):
+        return HttpResponseForbidden(_("Only admin or manager staff can retry a line."))
+    line = get_object_or_404(OrderItem, pk=item_pk, order_id=pk)
+    if not request.user.can_access_customer(line.order.customer):
+        raise Http404
+    result = retry_line_for_staff(line.pk, actor=request.user)
+    if result.is_ok():
+        messages.success(request, _("The line is queued for another attempt."))
+    else:
+        messages.error(request, result.unwrap_err())
+    destination = reverse("orders:order_detail", kwargs={"pk": pk})
+    if request.headers.get("HX-Request") == "true":
+        return HttpResponse(headers={"HX-Redirect": destination})
+    return redirect(destination)

@@ -132,9 +132,25 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # Only staff can manage services (edit/suspend)
     can_manage = user.is_staff_user and service.status in ["active", "suspended"]
 
+    # A real hosting failure leaves the Service active and fails its order line; a failed Service is one whose order
+    # was cancelled. The page points to the line, where staff retry it (orders: retry_line_for_staff).
+    from apps.orders.models import OrderItem  # noqa: PLC0415  # ADR-0007
+
+    failed_line = (
+        OrderItem.objects.filter(service=service, provisioning_status="failed")
+        .select_related("order")
+        .order_by("-created_at")
+        .first()
+    )
+    cancelled_with_order = service.status == "failed" and (
+        OrderItem.objects.filter(service=service, order__status="cancelled").exists()
+    )
+
     context = {
         "service": service,
         "can_manage": can_manage,
+        "failed_line": failed_line,
+        "cancelled_with_order": cancelled_with_order,
     }
 
     return render(request, "provisioning/service_detail.html", context)
@@ -344,6 +360,11 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("provisioning:services")
 
     if request.method == "POST":
+        if service.status == "failed":
+            # The FSM allows failed -> active, but here it would skip every check fulfilment makes: a failed
+            # Service is one whose order was cancelled. A real hosting failure is retried on its order line.
+            messages.error(request, _("A failed service can't be activated here; retry its order line instead."))
+            return _back_to_service(request, pk)
         try:
             service.activate()
             service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"])

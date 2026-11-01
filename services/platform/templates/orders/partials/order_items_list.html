@@ -1,5 +1,5 @@
 {% load i18n %}
-{% load ui_components %}
+{% load ui_components order_lines %}
 {% load formatting %}
 
 <!-- Order Items Section with HTMX for real-time updates -->
@@ -114,6 +114,23 @@
                 {% trans "Active" as bt3 %}{% badge bt3 icon="check" variant="success" size="sm" %}
               {% elif item.provisioning_status == "failed" %}
                 {% trans "Failed" as bt4 %}{% badge bt4 variant="danger" size="sm" %}
+                {% if not item.is_domain_line %}
+                  {% trans "Retry" as retry_label %}
+                  {% if not can_fulfil_lines %}
+                    {% trans "Only admin or manager staff can retry a line." as retry_why %}
+                  {% else %}
+                    {% line_retry_refusal item as retry_why %}
+                  {% endif %}
+                  <div class="mt-2">
+                  {% if retry_why %}
+                    {% button retry_label variant="secondary" size="sm" icon="refresh" disabled=True title=retry_why %}
+                    <p class="mt-1 text-xs text-slate-400 max-w-xs whitespace-normal">{{ retry_why }}</p>
+                  {% else %}
+                    {% url 'orders:order_item_retry' pk=order.pk item_pk=item.pk as retry_url %}{% trans "Give this line's hosting account another attempt?" as retry_confirm %}
+                    {% button retry_label variant="warning" size="sm" icon="refresh" hx_post=retry_url hx_confirm=retry_confirm %}
+                  {% endif %}
+                  </div>
+                {% endif %}
               {% elif item.provisioning_status == "cancelled" %}
                 {% trans "Cancelled" as bt5 %}{% badge bt5 icon="x" variant="secondary" size="sm" %}
               {% else %}
