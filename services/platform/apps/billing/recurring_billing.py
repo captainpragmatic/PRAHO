@@ -376,9 +376,8 @@ class RecurringBillingOrchestrator:
             preparation_cutoff = run_at + timedelta(days=invoice_lead_days)
             with transaction.atomic():
                 policy = get_selling_currency_policy(lock=True)
-                candidate_subscriptions = list(
-                    Subscription.objects.select_for_update(of=("self",))
-                    .select_related(
+                due_subscriptions = (
+                    Subscription.objects.select_related(
                         "customer",
                         "currency",
                         "product",
@@ -402,6 +401,14 @@ class RecurringBillingOrchestrator:
                     .filter(Q(next_proforma_at__lte=run_at) | Q(current_period_end__lte=preparation_cutoff))
                     .order_by("customer_id", "currency_id", "next_charge_at", "id")
                 )
+                # A locking SELECT that waits on PostgreSQL refreshes the
+                # subscription, but not eager joined mandate/customer rows.
+                # Lock IDs first, then materialize fresh relations and recheck
+                # the same service eligibility in a new statement.
+                locked_subscription_ids = list(
+                    due_subscriptions.select_related(None).select_for_update(of=("self",)).values_list("pk", flat=True)
+                )
+                candidate_subscriptions = list(due_subscriptions.filter(pk__in=locked_subscription_ids))
                 result["subscriptions_checked"] = len(candidate_subscriptions)
 
                 groups: dict[tuple[object, ...], list[tuple[Subscription, BillingCycle, datetime]]] = {}
