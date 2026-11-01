@@ -215,6 +215,7 @@ def destroy_node_task(
     provider_id: int,
     user_id: int | None = None,
     operation_token: str | None = None,
+    plan_id: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to destroy a node.
@@ -280,6 +281,7 @@ def destroy_node_task(
         cloudflare_api_token=cloudflare_api_token,
         user=user,
         expected_token=_token(operation_token),
+        plan_id=_token(plan_id),
     )
 
     if result.is_err():
@@ -1246,6 +1248,7 @@ def queue_destroy_node(
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    plan_id: str | None = None,
 ) -> str:
     """
     Queue a node destruction task.
@@ -1270,6 +1273,7 @@ def queue_destroy_node(
     token = _reserve(
         deployment_id, from_states=DESTROYABLE_STATES, kind="destroy", flagged_states=PARKED_TEARDOWN_STATES
     )
+    plan_options = {"plan_id": plan_id} if plan_id is not None else {}
     task_id = async_task(
         "apps.infrastructure.tasks.destroy_node_task",
         deployment_id,
@@ -1280,6 +1284,7 @@ def queue_destroy_node(
         hook="apps.infrastructure.tasks.destruction_complete_hook",
         timeout=NODE_DESTROY_TASK_TIMEOUT_SECONDS,
         **LIFECYCLE_TASK_OPTIONS,
+        **plan_options,
     )
 
     logger.info(f"[Queue] Destruction queued: deployment_id={deployment_id}, task_id={task_id}")
@@ -2133,14 +2138,9 @@ def check_remediation_health_task() -> dict[str, Any]:
 
 def cleanup_old_snapshots_task() -> dict[str, Any]:
     """Scheduled daily. Deletes snapshots with expires_at < now via gateway + DB."""
-    from apps.infrastructure.cloud_gateway import (  # noqa: PLC0415  # Deferred: avoids circular import
-        get_cloud_gateway,  # Circular: cross-app  # Deferred: avoids circular import
-    )
+    from apps.infrastructure.cloud_snapshot_expiry import expire_snapshot  # noqa: PLC0415 -- deferred worker dependency
     from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
         DriftSnapshot,  # Circular: cross-app  # Deferred: avoids circular import
-    )
-    from apps.infrastructure.provider_config import (  # noqa: PLC0415  # Deferred: avoids circular import
-        get_provider_token,  # Circular: cross-app  # Deferred: avoids circular import
     )
 
     logger.info("🚀 [Task:cleanup_snapshots] Cleaning up expired snapshots")
@@ -2156,27 +2156,11 @@ def cleanup_old_snapshots_task() -> dict[str, Any]:
 
     for snapshot in expired:
         try:
-            provider = snapshot.deployment.provider
-            token_result = get_provider_token(provider)
-            if token_result.is_err():
-                failed += 1
-                continue
-
-            gateway = get_cloud_gateway(provider.provider_type, token_result.unwrap())
-            result = gateway.delete_snapshot(snapshot.provider_snapshot_id)
-
-            if result.is_ok():
-                snapshot.status = "deleted"
-                snapshot.save(update_fields=["status"])
+            outcome = expire_snapshot(snapshot, now)
+            if outcome == "deleted":
                 deleted += 1
-            else:
-                # A confirmed provider-delete failure is terminal 'cleanup_failed'
-                # (distinct, surfaced for manual reconciliation) rather than left
-                # 'available' to be retried every day forever with no escalation.
-                snapshot.status = "cleanup_failed"
-                snapshot.save(update_fields=["status"])
+            elif outcome == "failed":
                 failed += 1
-                logger.warning(f"⚠️ [Task:cleanup_snapshots] Delete failed: {result.unwrap_err()}")
         except Exception as e:
             failed += 1
             logger.error(f"🔥 [Task:cleanup_snapshots] Error: {e}")

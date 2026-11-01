@@ -450,6 +450,10 @@ def _get_provisioning_server_secure(server_id: str | None) -> VirtualminServer |
         validated_server_id = ProvisioningParametersValidator.validate_server_id(server_id)
 
         server = VirtualminServer.objects.get(id=validated_server_id)
+        from .virtualmin_node_capability import destination_refusal  # noqa: PLC0415 -- destination dispatch boundary
+
+        if destination_refusal(server) is not None:
+            return None
 
         # Enhanced server validation
         if not server.can_host_domain():

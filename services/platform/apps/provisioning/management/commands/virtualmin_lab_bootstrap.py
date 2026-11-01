@@ -2,7 +2,7 @@
 
 Creates or refreshes, for each lab node:
 - a VirtualminServer, pinned to the node's live TLS certificate, with a fresh
-  random API password (root's password on the node);
+  random dedicated API password, separate from the local root rescue password;
 - a NodeDeployment with a fresh managed SSH key in the credential vault;
 - the node's credential files under .state/<node>/inject, which
   `lab.sh apply-credentials` installs (no credential ever lives in the image).
@@ -122,6 +122,10 @@ class Command(BaseCommand):
         self.stdout.write("Next: deploy/virtualmin-lab/lab.sh apply-credentials")
 
     def _register_node(self, node: LabNode, state_dir: Path) -> None:
+        from apps.common.credential_vault import (  # noqa: PLC0415 -- lab enrollment boundary
+            CredentialData,
+            get_credential_vault,
+        )
         from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
 
         password = secrets.token_urlsafe(24)
@@ -130,11 +134,13 @@ class Command(BaseCommand):
             defaults={
                 "name": f"lab-{node.key}",
                 "api_port": node.api_port,
-                "api_username": "root",
+                "api_username": "praho-api",
                 "use_ssl": True,
                 "ssl_verify": False,
                 "ssl_cert_fingerprint": _certificate_sha256(node.api_port),
-                "status": "active",
+                "status": "disabled",
+                "security_state": "unreviewed",
+                "verified_security_review": None,
                 "max_domains": 50,
                 "health_check_error": "",
                 "last_health_check": timezone.now(),
@@ -142,10 +148,26 @@ class Command(BaseCommand):
         )
         server.set_api_password(password)
         server.save()
+        stored = get_credential_vault().store_credential(
+            CredentialData(
+                service_type="virtualmin",
+                service_identifier=server.hostname,
+                username="praho-api",
+                password=password,
+                metadata={"lab": True, "server_id": str(server.pk)},
+                reason="Durable dedicated lab API enrollment",
+            )
+        )
+        if stored.is_err():
+            raise CommandError("Could not persist the dedicated lab API credential")
 
         ensure_lab_deployment(node, state_dir, server=server)
         inject = state_dir / node.key / "inject"
-        write_private(inject / "root_password", password + "\n")
+        write_private(inject / "root_password", secrets.token_urlsafe(24) + "\n")
+        write_private(inject / "api_password", password + "\n")
+        write_private(inject / "api_cidrs", container_address(node.container, "Gateway") + "/32\n")
+        helper = Path(__file__).resolve().parents[4] / "infrastructure/ansible/playbooks/files/praho-webmin-api-user.pl"
+        write_private(inject / "api_user_helper", helper.read_text())
         self.stdout.write(f"{node.key}: server {server.hostname}:{node.api_port}, ssh {node.ssh_port}")
 
     def _configure_backup_settings(self, lab_env: dict[str, str], s3_port: int, spool: Path) -> None:

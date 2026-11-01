@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from time import perf_counter
 from typing import TYPE_CHECKING, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from django.db import transaction
 from django.utils import timezone
@@ -104,7 +104,13 @@ def _target(migration: VirtualminMigration) -> dict[str, Any]:
 def apply_target_policy(migration: VirtualminMigration, policy: EnabledPolicy) -> dict[str, Any]:
     """Native policy callbacks preserve current credentials/cron; they never replay a backup."""
     _target(migration)
-    if migration.contract == VirtualminMigration.Contract.RECOVERY:
+    if migration.contract == VirtualminMigration.Contract.IMPORTED_WEB:
+        from .component_target_transport import run_target_operation  # noqa: PLC0415 -- exact current native scope
+
+        if migration.lease_token is None:
+            raise ValueError("Current component policy requires its own unexpired worker lease")
+        run_target_operation(migration, migration.lease_token, "target_policy", enabled=policy.enabled)
+    elif migration.contract == VirtualminMigration.Contract.RECOVERY:
         from .migration_target_hold import run_held_target_node  # noqa: PLC0415  # Native transport seam
 
         run_held_target_node(migration, "reconcile_policy", enabled=policy.enabled)
@@ -174,7 +180,12 @@ def _eligible(migration: VirtualminMigration, account: VirtualminAccount) -> boo
         migration.cutover_committed_at is not None
         and phase in _READY_PHASES
         and (migration.status in _READY_PHASES or migration.status == "needs_review")
-        and migration.contract in {VirtualminMigration.Contract.CUTOVER, VirtualminMigration.Contract.RECOVERY}
+        and migration.contract
+        in {
+            VirtualminMigration.Contract.CUTOVER,
+            VirtualminMigration.Contract.RECOVERY,
+            VirtualminMigration.Contract.IMPORTED_WEB,
+        }
         and account.server_id == migration.target_server_id
         and proof.get("complete") is True
         and proof.get("server_id") == str(account.server_id)
@@ -193,7 +204,9 @@ def _other_operation(account: VirtualminAccount) -> bool:
     )
 
 
-def reconcile_committed_target(service_id: str, *, task_budget_seconds: int) -> dict[str, Any] | None:
+def reconcile_committed_target(  # noqa: PLR0911 -- distinct ownership, active operation, budget and native outcomes
+    service_id: str, *, task_budget_seconds: int
+) -> dict[str, Any] | None:
     """A dedicated reconciler branch; no general lifecycle writer gains migration permission."""
     identifier = (
         VirtualminMigration.objects.filter(account__service_id=service_id)
@@ -210,12 +223,19 @@ def reconcile_committed_target(service_id: str, *, task_budget_seconds: int) -> 
             return None
         if _other_operation(account):
             return {"success": True, "action": "operation_active"}
-        if task_budget_seconds < _MIN_POLICY_TASK_SECONDS:
+        required = _MIN_POLICY_TASK_SECONDS
+        if task_budget_seconds < required:
             return {
                 "success": False,
                 "action": "migration_policy",
-                "error": f"Current target policy requires a task budget of at least {_MIN_POLICY_TASK_SECONDS} seconds",
+                "error": f"Current target policy requires a task budget of at least {required} seconds",
             }
+        component_token = None
+        if migration.contract == VirtualminMigration.Contract.IMPORTED_WEB:
+            component_token = uuid4()
+            if not migration.acquire_lease(component_token, timedelta(seconds=task_budget_seconds + 60)):
+                return {"success": True, "action": "operation_active"}
+            migration.refresh_from_db()
         migration.account = account
         policy = current_policy(account)
         try:
@@ -223,6 +243,15 @@ def reconcile_committed_target(service_id: str, *, task_budget_seconds: int) -> 
             _record_account_policy(account, policy)
         except (ValueError, RuntimeError) as error:
             return {"success": False, "action": "migration_policy", "error": str(error)}
+        finally:
+            if component_token is not None:
+                migration.transition(
+                    component_token,
+                    migration.status,
+                    migration.status,
+                    lease_token=None,
+                    worker_lease_expires_at=None,
+                )
         from .virtualmin_migration_service import _reconcile_after_migration  # noqa: PLC0415  # Race follow-up
 
         if current_policy(account) != policy:

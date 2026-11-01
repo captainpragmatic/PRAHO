@@ -82,7 +82,7 @@ case $cmd in
     ;;
   restore-domain)
     printf '%s\n' "$*" >>"$state/restore_args"
-    if [[ " $* " == *" --feature ssl "* ]]; then
+    if [[ " $* " == *"/recovery-ssl-"* ]]; then
       echo ssl_restore >>"$state/calls"
       exit 0
     fi
@@ -294,10 +294,13 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertNotIn("barrier_down", [c.step for c in result.checkpoints])
         args = (self.state / "restore_args").read_text().splitlines()
         self.assertEqual(len(args), 4)
-        data = [call for call in args if "--all-features" in call]
+        data = [call for call in args if "/recovery-ssl-" not in call]
         self.assertEqual(len(data), 2)
-        self.assertTrue(all("--except-feature unix" in call and "--except-feature ssl" in call for call in data))
-        self.assertEqual(sum("--feature virtualmin --feature ssl" in call for call in args), 2)
+        self.assertTrue(all("--feature unix" not in call and "--feature ssl" not in call for call in data))
+        self.assertTrue(all("--all-features" not in call and "--only-features" in call for call in args))
+        self.assertTrue(all("--feature mysql" in call and "--feature web" in call for call in data))
+        self.assertEqual(sum("--feature ssl" in call for call in args), 2)
+        self.assertTrue(all("--feature virtualmin" not in call for call in args))
 
     def test_recovery_accepts_a_single_standalone_archive(self) -> None:
         result = self.step(PRAHO_RECOVERY="1", PRAHO_DIFF_ARCHIVE="", PRAHO_DIFF_SHA="")

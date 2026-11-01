@@ -154,7 +154,7 @@ cmd_up() {
 
 cmd_down() {
   [ -s "${ENV_FILE}" ] || { info "no lab state; nothing to stop"; return 0; }
-  compose --profile debian-node down --volumes --remove-orphans
+  compose --profile debian-node --profile component-source down --volumes --remove-orphans
   info "lab down"
 }
 

@@ -933,6 +933,16 @@ class VirtualminGateway:
             )
 
         # Server health check
+        if (
+            not is_virtualmin_read_only_program(program)
+            and isinstance(self.server, VirtualminServer)
+            and not self.server._state.adding
+            and VirtualminServer.objects.filter(pk=self.server.pk, security_operation__isnull=False).exists()
+        ):
+            return Err(
+                VirtualminAPIError("Node hardening is unresolved; mutation is fenced", self.server.hostname, program),
+                retriability=Retriability.NOT_RETRIABLE,
+            )
         health_result = self._validate_server_health(program)
         if health_result.is_err():
             return Err(

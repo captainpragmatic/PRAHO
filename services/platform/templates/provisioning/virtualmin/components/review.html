@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+
+{% block title %}{% trans "Selected website migration" %} — {{ account.domain }}{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+  {% url 'provisioning:virtualmin_account_detail' account.pk as account_url %}{% button account.domain href=account_url variant="secondary" size="sm" %}
+  <h1 class="text-2xl font-bold text-slate-100">{% trans "Selected website migration" %}</h1>
+  <p>{% trans "Mail, DNS and Unix authentication remain on the source. Select only the application files, uploads, configuration and isolated MySQL databases that belong to this website." %}</p>
+  <p>{% trans "Acknowledge retained source responsibilities on the node security page before inspecting. The destination must have a current verified web policy." %}</p>
+  {% url 'provisioning:node_security' account.server_id as source_security_url %}{% trans "Source security and responsibilities" as source_security_label %}{% button source_security_label href=source_security_url variant="secondary" size="sm" %}
+
+  {% if task %}
+    <section class="rounded border border-slate-700 p-4" aria-live="polite">
+      {% if task.success %}
+        {% if task.result.outcome == "started" %}<p>{% trans "Component migration queued. Follow the phase and retained source responsibilities below." %}</p>{% endif %}
+        {% if task.result.outcome == "released" %}<p>{% trans "Retained source resolution recorded after live verification that the original native domain and every domain using its Unix owner are absent." %}</p>{% endif %}
+        {% if task.result.outcome == "needs_review" %}<p class="text-amber-300">{{ task.result.message }}</p>{% endif %}
+      {% else %}
+        <p class="text-amber-300">{% trans "The operation did not finish. Recheck current permissions, native access and preparation before retrying." %}</p>
+      {% endif %}
+    </section>
+  {% elif request.GET.task %}
+    <p role="status">{% trans "Inspection or acceptance is queued or running. Refresh this page for its result." %}</p>
+  {% endif %}
+
+  {% include "provisioning/virtualmin/components/status.html" %}
+  {% include "provisioning/virtualmin/components/obligations.html" %}
+
+  <form method="post" class="space-y-4 rounded-lg border border-slate-700 bg-slate-800 p-6">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="inspect">
+    <h2 class="text-lg font-semibold">{% trans "Inspect selected website" %}</h2>
+    <p>{% trans "Inspection reads native state. It does not hold services, change authentication, harden the source or start a migration." %}</p>
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      <div>{{ field.label_tag }}{{ field }}{% if field.help_text %}<p class="text-sm text-slate-400">{{ field.help_text }}</p>{% endif %}{{ field.errors }}</div>
+    {% endfor %}
+    {% trans "Inspect selected website" as inspect_label %}{% button inspect_label type="submit" variant="primary" %}
+  </form>
+
+  {% if review %}
+    <section class="space-y-4 rounded-lg border border-slate-700 bg-slate-800 p-6">
+      <h2 class="text-lg font-semibold">{% trans "Reviewed impact" %}</h2>
+      <p>{{ review.source_server.name }} → {{ review.target_server.name }} · {{ review.created_at }}</p>
+      <h3 class="font-semibold">{% trans "Selected source paths" %}</h3>
+      <ul class="list-disc pl-6">{% for path in facts.paths %}<li>{{ facts.source.home }}/{{ path.relative }} — {{ path.purpose }} — {{ path.bytes|filesizeformat }}</li>{% endfor %}</ul>
+      <h3 class="font-semibold">{% trans "Selected MySQL databases" %}</h3>
+      <ul class="list-disc pl-6">{% for database in facts.databases %}<li>{{ database.name }} — {{ database.bytes|filesizeformat }} · {% trans "Principals:" %} {% for principal in database.principals %}{{ principal.user }}@{{ principal.host }}{% if not forloop.last %}, {% endif %}{% endfor %}</li>{% empty %}<li>{% trans "No databases selected." %}</li>{% endfor %}</ul>
+      <h3 class="font-semibold">{% trans "Retained source services" %}</h3>
+      <p>{% for service in facts.retained.services %}{{ service }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+      <p>{% trans "Unselected databases remain on the source:" %} {% for name in facts.retained.database_names %}{{ name }}{% if not forloop.last %}, {% endif %}{% empty %}{% trans "None recorded." %}{% endfor %}</p>
+      <h3 class="font-semibold">{% trans "Classified website writers and jobs" %}</h3>
+      <ul class="list-disc pl-6">{% for writer in facts.writers %}<li>{{ writer.kind }} — {{ writer.identity }}</li>{% empty %}<li>{% trans "No active selected writers recorded." %}</li>{% endfor %}</ul>
+      <ul class="list-disc space-y-2 pl-6 text-sm">
+        <li>{% trans "The selected website returns maintenance responses while its classified PHP writers, independent website cron jobs, selected SQL principals and files are held. Shared owner cron and retained services must be independent before migration." %}</li>
+        <li>{% trans "Only Unix, directory, web, SSL, MySQL and log rotation features are created on the target. Original Unix password hashes and selected application SQL credentials are handled privately on the nodes." %}</li>
+        <li>{% trans "Source privileged Apache programs and logrotate hooks are not transported. Destination log paths and callbacks are retained, using a safe weekly compressed rotation policy with eight retained logs." %}</li>
+        <li>{% trans "Website apex and www A/AAAA routing moves only through exact owned eligible records. A selected old AAAA is removed when the destination has no IPv6. MX, mail routing and SPF remain on the source." %}</li>
+        <li>{% trans "External or proxy DNS requires operator routing changes. The source bridge remains until authoritative routing and old DNS caches are verified. Retained source mail, DNS, certificates and authentication require ongoing operator care." %}</li>
+        <li>{% trans "After native source and target seals, recovery proceeds forward on the target. A late cancellation cannot reopen the source or delete the sealed target. Later hosting policy changes converge without replaying archived credentials or jobs." %}</li>
+        <li>{% trans "The retained native source domain and its independent backup responsibility survive account placement changes. The source cannot be deleted, drained or hardened until those responsibilities are explicitly resolved." %}</li>
+      </ul>
+      {% if facts.preparation or readiness_errors %}
+        <div class="rounded border border-amber-500 p-4 text-amber-200">
+          <h3 class="font-semibold">{% trans "Prepare the source and inspect again" %}</h3>
+          <ul class="list-disc pl-6">{% for reason in facts.preparation %}<li>{{ reason }}</li>{% endfor %}{% for reason in readiness_errors %}<li>{{ reason }}</li>{% endfor %}</ul>
+          <p>{% trans "These dependencies cannot be accepted away. No migration will start from this preview." %}</p>
+        </div>
+      {% endif %}
+      {% if ready %}
+        <form method="post" class="space-y-4">
+          {% csrf_token %}
+          <input type="hidden" name="action" value="accept">
+          {{ approval_form.non_field_errors }}
+          {{ approval_form.review_id }}
+          {{ approval_form.review_id.errors }}
+          {% for field in approval_form.visible_fields %}
+            <div>
+              {% if field.field.widget.input_type == "checkbox" %}<div class="flex items-start gap-3">{{ field }}{{ field.label_tag }}</div>{% else %}{{ field.label_tag }}{{ field }}{% endif %}
+              {% if field.help_text %}<p class="text-sm text-slate-400">{{ field.help_text }}</p>{% endif %}{{ field.errors }}
+            </div>
+          {% endfor %}
+          <p>{% trans "Acceptance triggers a fresh native inspection. Replaced roots, changed principals, writers, routes or retained dependencies require another preview." %}</p>
+          {% trans "Accept reviewed impact and start" as accept_label %}
+          {% trans "Hold only the reviewed website and SQL components, retain source mail/DNS/authentication, and continue forward after native seals?" as accept_confirmation %}
+          {% button accept_label type="submit" variant="warning" hx_confirm=accept_confirmation %}
+        </form>
+      {% else %}
+        <p>{% trans "This preview cannot authorize another migration. Inspect the current scope again after resolving preparation or the existing operation." %}</p>
+      {% endif %}
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

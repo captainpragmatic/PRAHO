@@ -73,7 +73,7 @@ def _patched(cloud: mock.Mock, token: Any = None) -> tuple[Any, ...]:
 class OccupiedNodeTests(TestCase):
     def test_the_failed_sweep_refuses_an_occupied_node(self) -> None:
         deployment, server = _occupied_failed_row()
-        cloud = cloud_gateway()
+        cloud = cloud_gateway(deployment)
         a, b, c, d = _patched(cloud)
         with a, b, c, d:
             result = cleanup_failed_deployments_task()
@@ -86,7 +86,7 @@ class OccupiedNodeTests(TestCase):
 
     def test_the_cleanup_command_refuses_an_occupied_node(self) -> None:
         deployment, server = _occupied_failed_row()
-        cloud = cloud_gateway()
+        cloud = cloud_gateway(deployment)
         a, b, c, d = _patched(cloud)
         with a, b, c, d:
             call_command("cleanup_deployments", stdout=StringIO(), stderr=StringIO())
@@ -100,7 +100,7 @@ class OccupiedNodeTests(TestCase):
 class CommandProvesEachStepTests(TestCase):
     def test_a_missing_token_never_marks_a_billed_row_destroyed(self) -> None:
         deployment = _billed_failed_row()
-        a, b, c, d = _patched(cloud_gateway(), token=Err("no credential"))
+        a, b, c, d = _patched(cloud_gateway(deployment), token=Err("no credential"))
         with a, b, c, d:
             call_command("cleanup_deployments", stdout=StringIO(), stderr=StringIO())
 
@@ -109,7 +109,7 @@ class CommandProvesEachStepTests(TestCase):
 
     def test_a_proven_teardown_marks_the_row_destroyed(self) -> None:
         deployment = _billed_failed_row()
-        cloud = cloud_gateway()
+        cloud = cloud_gateway(deployment)
         a, b, c, d = _patched(cloud)
         with a, b, c, d:
             call_command("cleanup_deployments", stdout=StringIO(), stderr=StringIO())
@@ -122,7 +122,7 @@ class CommandProvesEachStepTests(TestCase):
 class SweepTests(TestCase):
     def test_the_failed_sweep_skips_rows_that_need_reconciliation(self) -> None:
         deployment = _billed_failed_row(needs_reconciliation=True, reconciliation_reason="legacy")
-        cloud = cloud_gateway()
+        cloud = cloud_gateway(deployment)
         a, b, c, d = _patched(cloud)
         with a, b, c, d:
             cleanup_failed_deployments_task()
@@ -135,7 +135,7 @@ class SweepTests(TestCase):
         deployment = _billed_failed_row()
         claim_operation(deployment.pk, from_states=("failed",), to_status="destroying", kind="destroy").unwrap()
         _age(deployment, "destroying", hours=4)
-        cloud = cloud_gateway()
+        cloud = cloud_gateway(deployment)
         a, b, c, d = _patched(cloud)
         with a, b, c, d:
             recover_stuck_deployments_task()
@@ -149,10 +149,14 @@ class CompensationWithdrawsDnsFirstTests(TestCase):
         deployment = _create_deployment("provisioning_node", external_node_id="srv-5")
         tag = f"praho:node-deploy:{deployment.correlation_id}"
         NodeDeployment.objects.filter(pk=deployment.pk).update(
-            dns_record_ids=[{"zone_id": "z1", "record_id": "rA", "type": "A", "name": "n", "owner_tag": tag}]
+            dns_record_ids=[{"zone_id": "z1", "record_id": "rA", "type": "A", "name": "n", "owner_tag": tag}],
+            provider_token_fingerprint=provider_token_fingerprint(TOKEN), server_create_state="created",
         )
+        lease = claim_operation(
+            deployment.pk, from_states=("provisioning_node",), to_status="provisioning_node", kind="deploy"
+        ).unwrap()
         deployment.refresh_from_db()
-        cloud = cloud_gateway()
+        cloud = cloud_gateway(deployment)
         dns = dns_gateway()
         dns.confirm_no_owned_records.return_value = Ok(False)
 
@@ -160,9 +164,12 @@ class CompensationWithdrawsDnsFirstTests(TestCase):
             mock.patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=dns),
             mock.patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value="tok"),
         ):
-            _make_service()._cleanup_resources(cloud, [("firewall", "fw-1"), ("server", "srv-5")], deployment)
+            _make_service()._cleanup_resources(
+                cloud, [("firewall", "fw-1"), ("server", "srv-5")], deployment, lease=lease, api_token=TOKEN
+            )
 
         cloud.delete_server.assert_not_called()
+        dns.delete_owned_records.assert_called_once()
 
 
 class MarkFailedNeverForcesTests(TestCase):

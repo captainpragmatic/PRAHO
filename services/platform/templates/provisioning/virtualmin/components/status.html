@@ -1,0 +1,33 @@
+{% load i18n ui_components %}
+{% if migration and migration.contract == "imported_web" %}
+  <section class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-4">
+    <h2 class="font-semibold">{% trans "Selected website migration" %}</h2>
+    <p>{% trans "Phase:" %} {{ migration.get_status_display }} · {{ migration.source_server.name }} → {{ migration.target_server.name }}</p>
+    {% if migration.barrier_state.component_source_seal_intent or migration.cutover_committed_at %}
+      <p class="text-amber-200">{% trans "Forward-only recovery: native seal intent has been recorded. Preserve the target and source holds; cancellation cannot reopen the source or delete the target." %}</p>
+    {% else %}
+      <p>{% trans "Before native seal intent, compensation removes only the owned partial target and releases the selected source holds." %}</p>
+    {% endif %}
+    {% if migration.component_source_obligation %}
+      <p>{% trans "Retained source:" %} {{ migration.component_source_obligation.domain }} · {{ migration.component_source_obligation.owner }}</p>
+      <p>{% trans "Independent source backup responsibility:" %} {{ migration.component_source_obligation.backup_responsible.email }} — {{ migration.component_source_obligation.backup_responsibility }}</p>
+      <p>{% trans "Mail, DNS and Unix authentication remain on the source. Account placement does not release those responsibilities or authorize deleting the source." %}</p>
+    {% endif %}
+    {% if migration.error_detail %}<p class="text-amber-300">{{ migration.error_detail }}</p>{% endif %}
+    {% if component_management and migration.status == "needs_review" or component_management and migration.parked_phase %}
+      <form method="post" action="{% url 'provisioning:virtualmin_migration_resolve' account.pk %}" class="space-y-3">
+        {% csrf_token %}
+        <input type="hidden" name="migration_id" value="{{ migration.pk }}">
+        {% trans "Repair and recovery note" as note_label %}{% input_field "note" html_id="component-recovery-note" label=note_label required=True maxlength=200 %}
+        {% if migration.barrier_state.component_source_seal_intent or migration.cutover_committed_at %}
+          {% trans "Continue forward on the target" as resume_label %}
+        {% else %}
+          {% trans "Keep source and compensate selected components" as resume_label %}
+        {% endif %}
+        {% trans "Continue the recorded component recovery path while preserving retained source services?" as recovery_confirmation %}
+        {% button resume_label type="submit" variant="warning" hx_confirm=recovery_confirmation %}
+      </form>
+    {% endif %}
+    {% if not component_management %}{% url 'provisioning:component_migration' account.pk as component_url %}{% trans "Review component migration and retained responsibilities" as component_label %}{% button component_label href=component_url variant="secondary" size="sm" %}{% endif %}
+  </section>
+{% endif %}

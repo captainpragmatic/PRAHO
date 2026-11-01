@@ -19,7 +19,7 @@ from hcloud.firewalls.client import BoundFirewall
 from hcloud.ssh_keys.client import BoundSSHKey
 
 from apps.common.types import Err, Ok, Retriability, retriability_of
-from apps.infrastructure.cloud_gateway import CloudProviderGateway, ServerCreateRequest
+from apps.infrastructure.cloud_gateway import CloudProviderGateway, ServerCreateRequest, SSHKeyResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.hcloud_service import HcloudService
 from apps.infrastructure.models import NodeDeployment
@@ -199,7 +199,7 @@ class DeployRecordsProviderOutcomesTests(TestCase):
 
     def _owned_gateway(self) -> mock.Mock:
         gateway = _gateway()
-        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
         return gateway
 
     def test_intent_and_provenance_are_recorded_before_the_first_provider_write(self) -> None:

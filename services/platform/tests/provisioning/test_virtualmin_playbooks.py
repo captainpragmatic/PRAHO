@@ -7,7 +7,13 @@ without needing the lab.
 
 from __future__ import annotations
 
-from itertools import product
+import importlib.util
+import io
+import os
+import tempfile
+from contextlib import redirect_stdout
+from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 from django.test import SimpleTestCase
@@ -36,8 +42,30 @@ class NodeDeployPlaybookTests(SimpleTestCase):
                 self.assertNotIn(absent, commands)
 
     def test_installs_the_virtualmin_8_installer(self) -> None:
-        url = load("virtualmin.yml")[0]["vars"]["virtualmin_install_script_url"]
-        self.assertEqual(url, "https://download.virtualmin.com/virtualmin-install.sh")
+        variables = load("virtualmin.yml")[0]["vars"]
+        self.assertEqual(variables["virtualmin_install_script_url"], "https://raw.githubusercontent.com/virtualmin/virtualmin-install/232a23d6aebf3ff9ad43d4d2823773ad14770509/virtualmin-install.sh")
+        self.assertEqual(variables["virtualmin_install_script_checksum"], "sha256:996d32a9a2b7e64cc9dc4af7b6d001297fdee867ce34dffae31a7197f230d5ae")
+
+    def test_installer_library_and_firewall_owner_are_qualified_together(self) -> None:
+        variables = load("virtualmin.yml")[0]["vars"]
+        self.assertEqual(
+            variables["virtualmin_install_library_url"],
+            "https://raw.githubusercontent.com/virtualmin/slib/d225f66ee9df1f29865a8b117f968cdf44672380/slib.sh",
+        )
+        self.assertEqual(variables["virtualmin_install_library_checksum"], "sha256:a6894f5b83d2d4776f0f7103dd984dbf34e823902d94574c65e52b59a9f77941")
+        library = task_named("virtualmin.yml", "Download the matching qualified installer utility library")
+        self.assertEqual(library["ansible.builtin.get_url"]["dest"], "/root/slib.sh")
+        install = task_named("virtualmin.yml", "Run Virtualmin installation")
+        self.assertEqual(install["args"]["chdir"], "/root")
+        self.assertIn("--exclude Nftables,Firewalld,Fail2ban,Fail2banFirewalld", install["ansible.builtin.command"])
+
+    def test_api_proof_waits_for_actual_tls_after_panel_restarts(self) -> None:
+        tasks = load("virtualmin.yml")[0]["tasks"]
+        flush = task_named("virtualmin.yml", "Apply panel service changes before API credential verification")
+        ready = task_named("virtualmin.yml", "Require the local Webmin TLS endpoint to be ready")
+        self.assertLess(tasks.index(flush), tasks.index(ready))
+        self.assertEqual(ready["ansible.builtin.uri"]["url"], "https://127.0.0.1:10000/")
+        self.assertGreater(ready["retries"], 1)
 
     def test_api_user_password_travels_on_stdin_only(self) -> None:
         task = task_named("virtualmin.yml", "Create or update the PRAHO API user")
@@ -73,7 +101,7 @@ class NodeDeployPlaybookTests(SimpleTestCase):
 
     def test_feature_set_matches_a_minimal_node(self) -> None:
         required = load("virtualmin.yml")[0]["vars"]["virtualmin_required_features"]
-        self.assertEqual(set(required), {"unix", "dir", "web", "ssl", "logrotate", "mysql", "webmin"})
+        self.assertEqual(set(required), {"unix", "dir", "web", "ssl", "logrotate", "mysql"})
         task = task_named("virtualmin.yml", "Enable the Virtualmin features PRAHO provisions with")
         self.assertEqual(
             task["ansible.builtin.command"]["argv"][:3], ["virtualmin", "set-global-feature", "--enable-feature"]
@@ -150,6 +178,13 @@ class NodeFirewallPlaybookTests(SimpleTestCase):
 
     ADMIN_PORTS = frozenset({"9876", "10000"})
 
+    def setUp(self) -> None:
+        self.role = PLAYBOOKS.parents[4] / "deploy/ansible/roles/virtualmin-web-only"
+        spec = importlib.util.spec_from_file_location("web_firewall_contract", self.role / "files/firewall.py")
+        self.policy = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.policy)
+        self.role_tasks = yaml.safe_load((self.role / "tasks/main.yml").read_text())
+
     @staticmethod
     def _group_vars() -> dict[str, list[object]]:
         loaded = yaml.safe_load((PLAYBOOKS.parent / "group_vars" / "all.yml").read_text())
@@ -171,77 +206,52 @@ class NodeFirewallPlaybookTests(SimpleTestCase):
             for port in group_vars["firewall_admin_tcp_ports"]
         }
         self.assertEqual(bootstrap, {"22", "10000"})
-        # Web, mail, FTP, DNS and Usermin stay public.
+        # Legacy group vars remain for Blesta; the Virtualmin role owns its complete policy.
         self.assertLessEqual({"80", "443", "25", "465", "587", "993", "995", "21", "53", "20000"}, public)
 
     def test_play_refuses_an_empty_allowlist_before_touching_the_firewall(self) -> None:
-        names = [task.get("name") for task in tasks("virtualmin_harden.yml")]
-        guard = task_named("virtualmin_harden.yml", "Refuse an empty node admin allowlist")
+        guard = self.role_tasks[0]
         self.assertIn("node_admin_allowed_cidrs | length > 0", guard["ansible.builtin.assert"]["that"])
-        first_ufw = min(
-            index for index, task in enumerate(tasks("virtualmin_harden.yml")) if "community.general.ufw" in task
-        )
-        self.assertLess(names.index("Refuse an empty node admin allowlist"), first_ufw)
+        include = task_named("virtualmin_harden.yml", "Converge the reviewed host firewall")
+        self.assertEqual(include["ansible.builtin.include_role"]["name"], "virtualmin-web-only")
 
     def test_admin_ports_are_allowed_only_from_the_allowlist(self) -> None:
-        task = task_named("virtualmin_harden.yml", "Allow SSH and Webmin from the node admin allowlist")
-        rule = task["community.general.ufw"]
-        self.assertEqual(rule["rule"], "allow")
-        self.assertEqual(rule["from_ip"], "{{ item.1 }}")
-        self.assertEqual(rule["port"], "{{ item.0 }}")
-        self.assertIn("product(node_admin_allowed_cidrs)", task["loop"])
-        self.assertIn("firewall_admin_tcp_ports", task["loop"])
-        environment = NativeEnvironment(undefined=StrictUndefined)
-        environment.filters["product"] = product
         sources = ["192.0.2.10/32", "2001:db8::10/128"]
-        rendered_rules = environment.from_string(task["loop"]).render(
-            firewall_admin_tcp_ports=sorted(self.ADMIN_PORTS), node_admin_allowed_cidrs=sources,
-        )
-        self.assertEqual(set(rendered_rules), set(product(self.ADMIN_PORTS, sources)))
-        for item in rendered_rules:
-            with self.subTest(port=item[0], source=item[1]):
-                source = environment.from_string(rule["from_ip"]).render(item=item)
-                self.assertEqual(source, item[1])
-                self.assertNotIn(source, ("0.0.0.0/0", "::/0"))
-        for other in tasks("virtualmin_harden.yml"):
-            spec = other.get("community.general.ufw") or {}
-            if spec.get("rule") == "allow" and not spec.get("delete") and "from_ip" not in spec:
-                with self.subTest(task=other.get("name")):
-                    self.assertNotIn("firewall_admin_tcp_ports", str(other.get("loop", "")))
-                    self.assertNotIn(str(spec.get("port")), self.ADMIN_PORTS | {"22"})
-        removed = task_named("virtualmin_harden.yml", "Remove any-source SSH and Webmin rules")
-        self.assertIs(removed["community.general.ufw"]["delete"], True)
+        with patch.object(self.policy, "run") as run:
+            self.policy.add_allowed(sources, 9876)
+        expected = [["ufw", "allow", "80/tcp"], ["ufw", "allow", "443/tcp"]]
+        expected += [["ufw", "allow", "from", source, "to", "any", "port", port, "proto", "tcp"] for source in sources for port in ("9876", "10000")]
+        self.assertEqual([call.args[0] for call in run.call_args_list], expected)
 
     def test_the_firewall_ends_enabled_even_when_no_rule_changed(self) -> None:
         # Observed in the lab: with every rule in place and UFW switched off, the
         # notify-only handler never fired and the play left the firewall off.
-        names = [task.get("name") for task in tasks("virtualmin_harden.yml")]
-        enable = task_named("virtualmin_harden.yml", "Enable UFW")
-        self.assertEqual(enable["community.general.ufw"], {"state": "enabled"})
-        self.assertNotIn("when", enable)
-        last_rule = max(
-            index
-            for index, task in enumerate(tasks("virtualmin_harden.yml"))
-            if "rule" in (task.get("community.general.ufw") or {})
-            or "default" in (task.get("community.general.ufw") or {})
-        )
-        self.assertGreater(names.index("Enable UFW"), last_rule)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.policy.BASE, self.policy.LOCK = root / "snapshots", root / "lock"
+            self.policy.CONFIG_FILES, self.policy.HOOK_FILES = [], []
+            with patch.object(self.policy, "run", return_value="Status: inactive"):
+                self.policy.begin("a" * 32)
+            with (
+                patch.dict(os.environ, {"SSH_CONNECTION": "192.0.2.10 50000 192.0.2.2 9876"}),
+                patch.object(self.policy, "run", return_value="Status: inactive") as run,
+                patch.object(self.policy, "configure_baselines"),
+                patch.object(self.policy, "safe_defaults"),
+                patch.object(self.policy, "ensure_guard"),
+                patch.object(self.policy, "verify_guarded_filter"),
+                redirect_stdout(io.StringIO()),
+            ):
+                self.policy.activate("a" * 32, {"cidrs": ["192.0.2.10/32"]})
+            self.assertIn(["ufw", "--force", "enable"], [call.args[0] for call in run.call_args_list])
+            ufw_calls = [call.args[0] for call in run.call_args_list if call.args[0][0] == "ufw"]
+            self.assertEqual(ufw_calls[-1], ["ufw", "reload"])
 
     def test_the_deploy_cannot_lock_platform_out(self) -> None:
-        names = [task.get("name") for task in tasks("virtualmin_harden.yml")]
-        check = task_named("virtualmin_harden.yml", "Require this connection's source in the allowlist")
-        self.assertIn("SSH_CLIENT", str(check))
-        # The source is checked and the allow rules exist before the deny default.
-        for earlier in (
-            "Require this connection's source in the allowlist",
-            "Allow SSH and Webmin from the node admin allowlist",
-        ):
-            with self.subTest(task=earlier):
-                self.assertLess(names.index(earlier), names.index("Configure UFW defaults"))
-        self.assertLess(
-            names.index("Allow SSH and Webmin from the node admin allowlist"),
-            names.index("Remove any-source SSH and Webmin rules"),
-        )
+        for sources in ([], ["198.51.100.1/32"], ["0.0.0.0/0"]):
+            with self.subTest(sources=sources), patch.dict(os.environ, {"SSH_CONNECTION": "192.0.2.10 50000 192.0.2.2 9876"}), patch.object(self.policy, "run") as run:
+                with self.assertRaises(ValueError):
+                    self.policy.activate("b" * 32, {"cidrs": sources})
+                run.assert_not_called()
 
 
 class NodeWebRootSymlinkTests(SimpleTestCase):

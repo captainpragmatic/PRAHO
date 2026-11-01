@@ -37,12 +37,16 @@ See also:
 from __future__ import annotations
 
 from argparse import ArgumentParser
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.core.management.base import BaseCommand, CommandError
 
 from apps.common.types import Result
 from apps.infrastructure.provider_config import get_provider_token
+
+if TYPE_CHECKING:
+    from apps.infrastructure.cloud_destroy_service import DestroyPreview
+    from apps.infrastructure.models import NodeDeployment
 
 # Valid lifecycle actions — maps to service layer methods
 VALID_ACTIONS = ("stop", "start", "reboot", "destroy", "retry", "upgrade")
@@ -90,12 +94,31 @@ class Command(BaseCommand):
         parser.add_argument(
             "--force",
             action="store_true",
-            help="Skip confirmation prompt for destructive actions (destroy)",
+            help="Skip interactive hostname confirmation; explicit provider retention choices remain required",
         )
         parser.add_argument(
             "--dry-run",
             action="store_true",
             help="Show what would happen without executing",
+        )
+        parser.add_argument(
+            "--provider-restore-points",
+            choices=("keep", "delete"),
+            help="Explicit provider backup/snapshot retention choice for destroy",
+        )
+        parser.add_argument("--operator", help="Active PRAHO operator email approving destruction")
+        parser.add_argument("--reason", help="Responsibility for provider restore-point retention/deletion")
+        parser.add_argument(
+            "--accept-provider-impact",
+            action="store_true",
+            help="Accept the listed resource deletions and continuing charges for retained resources",
+        )
+        parser.add_argument(
+            "--provider-backup-snapshot",
+            action="append",
+            default=[],
+            metavar="BACKUP=SNAPSHOT",
+            help="Operator-verified provider-console mapping when automatic backup conversion is unavailable",
         )
 
     def handle(self, *args: Any, **options: Any) -> None:
@@ -147,8 +170,13 @@ class Command(BaseCommand):
             )
             if action == "upgrade":
                 self.stdout.write(f"  New Size:  {options['size']}\n")
+            elif action == "destroy":
+                self._destroy_preview(deployment, token_result.unwrap())
             return
 
+        if action == "destroy":
+            self._validate_status_for_action(deployment, action)
+            self._require_force_choices(options)
         # Confirmation prompt for destroy — bypassed with --force for scripting
         if action == "destroy" and not options.get("force"):
             confirm = input(
@@ -157,11 +185,93 @@ class Command(BaseCommand):
             if confirm.strip() != hostname:
                 raise CommandError("Confirmation failed. Destroy cancelled.")
 
+        if action == "destroy":
+            self._approve_destroy(deployment, token_result.unwrap(), options)
+
         # Dispatch to async or sync execution
         if options.get("run_async"):
             self._dispatch_async(deployment, action, options)
         else:
             self._dispatch_sync(deployment, action, token_result.unwrap(), options)
+
+    @staticmethod
+    def _require_force_choices(options: dict[str, Any]) -> None:
+        if not options.get("force"):
+            return
+        required = ("provider_restore_points", "operator", "reason", "accept_provider_impact")
+        missing = ["--" + name.replace("_", "-") for name in required if not options.get(name)]
+        if missing:
+            raise CommandError("Destroy --force requires " + ", ".join(missing))
+
+    def _destroy_preview(self, deployment: NodeDeployment, token: str) -> DestroyPreview:
+        from django.core.exceptions import ValidationError  # noqa: PLC0415 -- command-only dependency
+
+        from apps.infrastructure.cloud_destroy_service import (  # noqa: PLC0415 -- command-only dependency
+            inspect_destroy,
+        )
+
+        try:
+            preview = inspect_destroy(deployment, token)
+        except (ValidationError, ValueError) as error:
+            raise CommandError(str(error)) from error
+        self.stdout.write("Provider resources and restore-point outcomes:")
+        for option in preview.options:
+            self.stdout.write(f"  {option['key']}\n    Keep: {option['keep']}\n    Delete: {option['delete']}")
+        self.stdout.write(
+            "Unknown/shared resources remain preserved; retained resources may continue to incur charges."
+        )
+        return preview
+
+    def _approve_destroy(self, deployment: NodeDeployment, token: str, options: dict[str, Any]) -> None:
+        from django.core.exceptions import (  # noqa: PLC0415 -- command-only dependencies
+            PermissionDenied,
+            ValidationError,
+        )
+
+        from apps.infrastructure.cloud_destroy_service import (  # noqa: PLC0415 -- command-only dependencies
+            DestroyApproval,
+            approve_destroy,
+        )
+        from apps.users.models import User  # noqa: PLC0415 -- active operator resolution
+
+        preview = self._destroy_preview(deployment, token)
+        policy = str(
+            options.get("provider_restore_points") or input("Provider backups/snapshots: keep or delete? ")
+        ).strip()
+        email = str(options.get("operator") or input("Approving PRAHO operator email: ")).strip()
+        reason = str(options.get("reason") or input("Provider restore-point responsibility: ")).strip()
+        operator = User.objects.filter(email__iexact=email, is_active=True).first()
+        if operator is None:
+            raise CommandError("An active PRAHO operator with node destruction permission must approve the plan")
+        mappings: dict[str, str] = {}
+        for value in options.get("provider_backup_snapshot", []):
+            backup_id, separator, snapshot_id = str(value).partition("=")
+            if not separator or not backup_id or not snapshot_id or backup_id in mappings:
+                raise CommandError("Each --provider-backup-snapshot must be a unique BACKUP=SNAPSHOT mapping")
+            mappings[backup_id] = snapshot_id
+        if policy == "keep" and preview.capabilities.backup_retention == "manual":
+            for decision in preview.decisions:
+                if decision.kind == "backup" and decision.resource_id not in mappings:
+                    if options.get("force"):
+                        raise CommandError("Supply --provider-backup-snapshot for every retained provider backup")
+                    mappings[decision.resource_id] = input(
+                        f"Durable snapshot prepared from backup {decision.resource_id}: "
+                    ).strip()
+        if (
+            not options.get("accept_provider_impact")
+            and input("Accept the listed resource changes and charges? Type ACCEPT: ") != "ACCEPT"
+        ):
+            raise CommandError("Provider resource impact was not accepted; destroy cancelled")
+        try:
+            plan = approve_destroy(
+                deployment,
+                token,
+                operator,
+                DestroyApproval(deployment.hostname, preview.digest, policy, reason, mappings),
+            )
+        except (ValidationError, PermissionDenied) as error:
+            raise CommandError(str(error)) from error
+        options["destroy_plan_id"], options["destroy_actor"] = plan.pk, operator
 
     def _validate_status_for_action(self, deployment: Any, action: str) -> None:
         """
@@ -240,9 +350,16 @@ class Command(BaseCommand):
         elif action == "reboot":
             task_id = queue_reboot_node(deployment.id, provider_id)
         elif action in ("destroy", "retry"):
-            queue = queue_destroy_node if action == "destroy" else queue_retry_deployment
             try:
-                task_id = queue(deployment.id, provider_id)
+                if action == "destroy":
+                    task_id = queue_destroy_node(
+                        deployment.id,
+                        provider_id,
+                        user_id=options["destroy_actor"].pk,
+                        plan_id=str(options["destroy_plan_id"]),
+                    )
+                else:
+                    task_id = queue_retry_deployment(deployment.id, provider_id)
             except OperationReservationError as refused:
                 raise CommandError(str(refused)) from refused
         elif action == "upgrade":
@@ -288,7 +405,9 @@ class Command(BaseCommand):
         elif action == "reboot":
             node_result = service.reboot_node(deployment, credentials)
         elif action == "destroy":
-            node_result = service.destroy_node(deployment, credentials)
+            node_result = service.destroy_node(
+                deployment, credentials, user=options["destroy_actor"], plan_id=options["destroy_plan_id"]
+            )
         elif action == "retry":
             node_result = service.retry_deployment(deployment, credentials)
         elif action == "upgrade":

@@ -21,6 +21,8 @@ from django_q.signing import SignedPackage
 from apps.common import outbound_http
 from apps.common.types import Ok
 from apps.common.validators import SecureInputValidator
+from apps.infrastructure import ansible_service
+from apps.infrastructure.imported_backup_transport import ImportedIdentity
 from apps.infrastructure.models import NodeDeployment
 from apps.infrastructure.ssh_transport import trusted_node_known_hosts
 from apps.provisioning.management.commands import virtualmin_lab_bootstrap as bootstrap
@@ -89,6 +91,8 @@ class LabCommandRefusalTests(SimpleTestCase):
     def test_commands_refuse_outside_lab_settings(self) -> None:
         for command in (
             "virtualmin_lab_bootstrap",
+            "virtualmin_lab_qualify",
+            "virtualmin_lab_component_source",
             "virtualmin_lab_roundtrip",
             "virtualmin_lab_checks",
             "virtualmin_lab_runserver",
@@ -109,6 +113,19 @@ class LabCommandRefusalTests(SimpleTestCase):
 
 @override_settings(SETTINGS_MODULE="config.settings.lab", DEBUG=True)
 class LabTransportScopeTests(SimpleTestCase):
+    def test_imported_source_routes_only_its_enrolled_host_key_to_the_published_port(self):
+        node = LabNode("component-source", "vmlab-component-source", "vm-d.praho.test", "imported-source", 10104, 2822)
+        state = _state()
+        server = SimpleNamespace(hostname=node.server_hostname, ssh_port=node.ssh_port, node_deployment=None)
+        key = "ssh-ed25519 enrolled-fixture-public-key"
+        enrolled = ImportedIdentity(node.server_hostname, node.ssh_port, Path("/private/fixture/key"), (f"[vm-d.praho.test]:2822 {key}",))
+        with patch.object(ansible_service, "imported_identity", return_value=enrolled):
+            with lab_transport(state):
+                actual = ansible_service.imported_identity(server)
+                self.assertEqual((actual.host, actual.port, actual.key), ("127.0.0.1", 2822, enrolled.key))
+                self.assertEqual(actual.trusted_keys, (f"[127.0.0.1]:2822 {key}",))
+            self.assertEqual(ansible_service.imported_identity(server), enrolled)
+
     def test_only_lab_names_resolve_to_loopback(self) -> None:
         with patch.object(outbound_http, "_resolve_dns", return_value=["203.0.113.9"]) as real:
             with lab_transport(_state()):

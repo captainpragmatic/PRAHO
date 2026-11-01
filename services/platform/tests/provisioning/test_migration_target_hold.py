@@ -2,15 +2,18 @@
 
 import base64
 import json
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 from uuid import uuid4
 
-from django.test import SimpleTestCase
+from django.test import TestCase
 
 from apps.common.types import Ok
 from apps.common.validators import SecureInputValidator
 from apps.provisioning import migration_target_hold as hold
+from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_pair_restore import PairStepResult
 from apps.provisioning.virtualmin_validators import VirtualminValidator
 
@@ -27,14 +30,15 @@ class _ScriptedTokens:
         return next(self._tokens)
 
 
-class HeldTargetRestoreTests(SimpleTestCase):
+class HeldTargetRestoreTests(TestCase):
     def setUp(self):
         self.identity = uuid4()
+        target = VirtualminServer.objects.create(hostname="held-target.example.test", legacy_security_admission=True)
         self.migration = SimpleNamespace(
             pk=self.identity,
             status="restoring",
             barrier_state={},
-            target_server=SimpleNamespace(node_deployment=object()),
+            target_server=SimpleNamespace(pk=target.pk, node_deployment=object(), security_state="unreviewed"),
             account=SimpleNamespace(
                 domain="customer.example",
                 virtualmin_username="customer",
@@ -46,7 +50,9 @@ class HeldTargetRestoreTests(SimpleTestCase):
             pre_migration_snapshot={"status": "active"},
         )
         self.archives = [{"archive_name": f"migration_{self.identity}.tar.gz", "checksum_sha256": "a" * 64}]
-        self.service = Mock(backup_timeout=60)
+        spool = tempfile.TemporaryDirectory()
+        self.addCleanup(spool.cleanup)
+        self.service = Mock(backup_timeout=60, spool=Path(spool.name))
         self.events = []
 
         def move(migration, token, status, **fields):

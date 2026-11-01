@@ -12,13 +12,15 @@ from typing import Any
 from unittest import mock
 
 from django.core.management.base import CommandError
+from django.db import transaction
 from django.test import TestCase
 
 from apps.common.types import Err, Ok
 from apps.infrastructure.audit_service import InfrastructureAuditContext
-from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
+from apps.infrastructure.deployment_lifecycle import claim_operation, provider_token_fingerprint
 from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
+from tests.helpers.teardown_provider import attach_teardown_provider
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
 from tests.infrastructure.test_node_admission_guard import make_service as make_hosting_service
 
@@ -26,7 +28,7 @@ TOKEN = "teardown-token"
 _NODE_NUMBERS = itertools.count(1)
 
 
-def cloud_gateway() -> mock.Mock:
+def cloud_gateway(deployment: NodeDeployment | None = None) -> mock.Mock:
     gateway = mock.Mock()
     gateway.find_servers_by_label.return_value = Ok([])
     gateway.get_server.return_value = Ok(mock.Mock(server_id="srv-1"))
@@ -35,6 +37,8 @@ def cloud_gateway() -> mock.Mock:
     gateway.delete_firewall.return_value = Ok(True)
     gateway.find_ssh_keys_by_label.return_value = Ok(["7"])
     gateway.delete_ssh_key_by_id.return_value = Ok(True)
+    if deployment is not None:
+        attach_teardown_provider(gateway, deployment, firewall_ids=("fw-1",), ssh_key_ids=("7",))
     return gateway
 
 
@@ -64,7 +68,7 @@ class Harness:
         self.deployment = NodeDeployment.objects.get(pk=deployment.pk)
         self.service = _make_service()
         self.service._registration.unregister_node.side_effect = self._unregister
-        self.cloud = cloud_gateway()
+        self.cloud = cloud_gateway(self.deployment)
         self.dns = dns_gateway()
 
     def _unregister(self, deployment: NodeDeployment, **_kwargs: Any) -> Ok[bool]:
@@ -148,7 +152,9 @@ class InterruptionAndResumeTests(TestCase):
 
     def test_each_failure_resumes_to_destroyed_without_repeating_finished_steps(self) -> None:
         for inject in ("unregister", "dns", "server", "firewall", "ssh_key", "vault"):
-            with self.subTest(inject=inject):
+            # Each scenario starts in its own provider lifetime; immutable ownership
+            # receipts must not be reused by the next scenario's same fake IDs.
+            with self.subTest(inject=inject), transaction.atomic():
                 h = self._fail_then_resume(inject)
                 unregistered = h.service._registration.unregister_node.call_count
                 dns_deletes = h.dns.delete_owned_records.call_count
@@ -171,6 +177,7 @@ class InterruptionAndResumeTests(TestCase):
                     self.assertEqual(h.dns.delete_owned_records.call_count, dns_deletes)
                 if inject in ("firewall", "ssh_key", "vault"):
                     self.assertEqual(h.cloud.delete_server.call_count, 1)
+                transaction.set_rollback(True)
 
 
 class GuardRefusalChangesNothingTests(TestCase):
@@ -216,11 +223,13 @@ class ProvenanceTests(TestCase):
         self.assertEqual((row.external_node_id, row.needs_reconciliation), ("srv-1", True))
         h.cloud.delete_server.assert_not_called()
 
-    def test_unknown_provenance_deletes_a_server_this_token_can_see(self) -> None:
+    def test_unknown_provenance_requires_reconciliation_even_when_the_server_is_visible(self) -> None:
         h = Harness(fingerprint="")
 
-        self.assertTrue(h.destroy().is_ok())
-        h.cloud.delete_server.assert_called_once_with("srv-1")
+        self.assertIsNotNone(h.cloud.resource_client.return_value.read_exact("server", "srv-1"))
+        self.assertTrue(h.destroy().is_err())
+        self.assertTrue(h.row().needs_reconciliation)
+        h.cloud.delete_server.assert_not_called()
 
     def test_a_row_that_never_reached_the_provider_needs_no_token_or_provider(self) -> None:
         deployment = _create_deployment("failed")
@@ -257,7 +266,7 @@ class AmbiguousProviderWritesTests(TestCase):
             server_create_state="none", provider_token_fingerprint=provider_token_fingerprint(TOKEN)
         )
         deployment.refresh_from_db()
-        cloud = cloud_gateway()
+        cloud = cloud_gateway(deployment)
         service = _make_service()
 
         with mock.patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=cloud):
@@ -294,10 +303,19 @@ class ApiCredentialRevocationTests(TestCase):
         self.assertFalse(self._active(deployment))
 
     def test_compensation_deactivates_the_api_credential(self) -> None:
-        deployment = _create_deployment("provisioning_node")
+        deployment = _create_deployment("provisioning_node", external_node_id="srv-1")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            provider_token_fingerprint=provider_token_fingerprint(TOKEN), server_create_state="created"
+        )
+        lease = claim_operation(
+            deployment.pk, from_states=("provisioning_node",), to_status="provisioning_node", kind="deploy"
+        ).unwrap()
+        deployment.refresh_from_db()
         self._store(deployment)
 
-        _make_service()._cleanup_resources(cloud_gateway(), [("server", "srv-1")], deployment)
+        _make_service()._cleanup_resources(
+            cloud_gateway(deployment), [("server", "srv-1")], deployment, lease=lease, api_token=TOKEN
+        )
 
         self.assertFalse(self._active(deployment))
 

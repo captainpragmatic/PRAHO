@@ -210,6 +210,7 @@ class ApacheBindings:
             text += f'Define PRAHO_NEUTRAL_{token}_BINDINGS "{values}"\n'
         common = (
             "ServerName praho-default.invalid\nDocumentRoot /var/www/praho-default\n"
+            "RewriteEngine On\nRewriteOptions InheritBefore\n"
             'ErrorDocument 404 "Not Found"\n'
             "<Directory /var/www/praho-default>\nAllowOverride None\nRequire all granted\n</Directory>\n"
         )

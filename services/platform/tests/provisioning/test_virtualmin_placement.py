@@ -37,6 +37,7 @@ class PlacementTests(MigrationTestBase):
         identifier: UUID | None = None,
     ) -> VirtualminServer:
         server = VirtualminServer.objects.create(
+            legacy_security_admission=True,
             id=identifier or uuid4(),
             name=name,
             hostname=f"{name}.example.com",

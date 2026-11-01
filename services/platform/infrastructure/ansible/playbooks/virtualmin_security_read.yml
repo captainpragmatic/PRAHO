@@ -1,0 +1,17 @@
+---
+- name: Inspect node security without changing access or services
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Read bounded native security observations
+      ansible.builtin.script:
+        cmd: "files/praho-node-security-inspect.py {{ security_identity }}"
+        executable: /usr/bin/python3
+      register: security_observations
+      changed_when: false
+      no_log: true
+
+    - name: Return bounded technical evidence
+      ansible.builtin.debug:
+        msg: "PRAHO_SECURITY_INSPECTION={{ security_observations.stdout | trim | b64encode }}"

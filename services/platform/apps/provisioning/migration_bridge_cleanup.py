@@ -250,6 +250,12 @@ def cleanup_bridge(migration_id: str) -> dict[str, str]:
     try:
         migration = bridge.migration
         service = VirtualminMigrationService()
+        if migration.contract == "imported_web":
+            from .component_bridge_cleanup import (  # noqa: PLC0415 -- component retention boundary
+                cleanup_component_bridge,
+            )
+
+            return cleanup_component_bridge(bridge, token, service)
         _guard(bridge.pk, token)
         _verify_routing(bridge, token)
         if bridge.status == "active":

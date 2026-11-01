@@ -14,7 +14,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.common.types import Err, Ok
-from apps.infrastructure.cloud_gateway import ServerCreateResult
+from apps.infrastructure.cloud_gateway import ServerCreateResult, SSHKeyResult
 from apps.infrastructure.deployment_lifecycle import OperationLease, claim_operation
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.dns_gateway import DnsRecordResult, ReconcileOutcome
@@ -182,12 +182,12 @@ class DeleteOwnedDnsTests(TestCase):
 class TeardownPathsInvokeDnsDeletion(TestCase):
     """All THREE compensation paths must call _delete_owned_dns (codex C1)."""
 
-    def test_cleanup_resources_invokes_dns_deletion(self) -> None:
+    def test_cleanup_without_operation_authority_preserves_dns(self) -> None:
         dep = _create_deployment("provisioning_node")
         svc = _make_service()
         with patch.object(NodeDeploymentService, "_delete_owned_dns") as spy:
             svc._cleanup_resources(MagicMock(), [], dep)
-        spy.assert_called_once_with(dep, None)
+        spy.assert_not_called()
 
     def test_destroy_node_invokes_dns_deletion(self) -> None:
         dep = _create_deployment("completed")  # no virtualmin_server, no external_node_id
@@ -216,12 +216,16 @@ class DeployFailClosedOnDnsError(TestCase):
         svc._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
 
         cloud = MagicMock()
-        cloud.upload_owned_ssh_key.return_value = Ok("praho-key")
+        cloud.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
         cloud.create_firewall.return_value = Ok("fw-1")
         cloud.create_server.return_value = Ok(
             ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
         )
         cloud.delete_server.return_value = Ok(True)
+        from tests.helpers.teardown_provider import attach_teardown_provider  # noqa: PLC0415
+
+        attach_teardown_provider(cloud, dep, server_id="srv-1", ssh_key_ids=("key-1",))
+        cloud.delete_ssh_key_by_id.return_value = Ok(True)
 
         dns = MagicMock()
         dns.get_zone_name.return_value = Ok("test.example.com")

@@ -64,9 +64,44 @@ class NodeSecurityReview(SecurityEvidence):
 class NodeSecurityDecision(SecurityEvidence):
     review = models.OneToOneField(NodeSecurityReview, on_delete=models.PROTECT, related_name="decision")
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
-    action = models.CharField(max_length=32, choices=[("acknowledge_source", _("Keep as migration source"))])
+    action = models.CharField(
+        max_length=32,
+        choices=[
+            ("acknowledge_source", _("Keep as migration source")),
+            ("apply_hardening", _("Apply reviewed hardening")),
+            ("verify_policy", _("Verify applied policy")),
+        ],
+    )
     reason = models.CharField(max_length=2000)
 
     class Meta:
         db_table = "provisioning_node_security_decision"
         db_table_comment = "Immutable operator responsibility acknowledgment bound to one inspected node state."
+
+
+class NodeSecurityExecution(models.Model):
+    """A durable exclusion: an interrupted attempt needs reconciliation before another mutation."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    server = models.ForeignKey(
+        "provisioning.VirtualminServer", on_delete=models.SET_NULL, null=True, related_name="security_executions"
+    )
+    server_uuid = models.UUIDField(editable=False)
+    expected_identity = models.CharField(max_length=64, default="", editable=False)
+    decision = models.OneToOneField(NodeSecurityDecision, on_delete=models.PROTECT, related_name="execution")
+    status = models.CharField(
+        max_length=20,
+        choices=[("running", _("Running")), ("needs_review", _("Needs review")), ("verified", _("Verified"))],
+        default="running",
+    )
+    verification = models.OneToOneField(
+        NodeSecurityReview, on_delete=models.PROTECT, null=True, blank=True, related_name="verified_execution"
+    )
+
+    class Meta:
+        db_table = "provisioning_node_security_execution"
+        db_table_comment = (
+            "Fenced operator hardening attempt; uncertain outcomes retain the server operation exclusion."
+        )

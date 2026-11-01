@@ -15,6 +15,7 @@ from unittest import mock
 from django.test import TestCase
 
 from apps.common.types import Err, Ok
+from apps.infrastructure.cloud_gateway import SSHKeyResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.models import NodeDeployment
 from apps.provisioning.virtualmin_models import VirtualminServer
@@ -33,7 +34,7 @@ def _vault(stored: tuple[str, str, dict[str, Any]] | None = None) -> mock.Mock:
 
 def _deploy(service: Any, deployment: NodeDeployment, vault: mock.Mock, gateway: mock.Mock | None = None) -> Any:
     cloud = gateway or _gateway()
-    cloud.upload_owned_ssh_key.return_value = Ok("praho-key")
+    cloud.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
     with (
         mock.patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
         mock.patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),

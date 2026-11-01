@@ -30,6 +30,7 @@ from typing import Any, cast
 
 from botocore.client import BaseClient
 from django.core.cache import cache
+from django.core.exceptions import ValidationError
 from django.db import models, transaction
 from django.utils import timezone
 from django.utils.crypto import salted_hmac
@@ -59,6 +60,7 @@ from .virtualmin_gateway import (
     listing_attribute,
 )
 from .virtualmin_models import VirtualminAccount, VirtualminServer
+from .virtualmin_restore_policy import prepare_restore_params, restore_destination_refusal
 
 try:
     import boto3
@@ -236,12 +238,11 @@ def config_backup_params(*, domain: str, dest: str, chain_role: str) -> dict[str
     }
 
 
-def restore_domain_params(*, domain: str, source: str) -> dict[str, str]:
-    """restore-domain parameters: the archive on the node, every feature it holds.
+def restore_domain_params(*, domain: str, source: str) -> dict[str, Any]:
+    """Select exact web components AND limit recreated domains to those components."""
+    from .virtualmin_validators import WEB_ONLY_VIRTUALMIN_FEATURES  # noqa: PLC0415 -- shared native feature vocabulary
 
-    `all-features` is a bare flag; True would arrive as "--all-features True".
-    """
-    return {"domain": domain, "source": source, "all-features": ""}
+    return {"domain": domain, "source": source, "feature": list(WEB_ONLY_VIRTUALMIN_FEATURES), "only-features": ""}
 
 
 def manifest_restore_refusal(metadata: dict[str, Any]) -> str | None:
@@ -694,6 +695,8 @@ class VirtualminBackupService:
         self._progress_key = progress_key or restore_id
         self._ownership = ownership
         try:
+            if refusal := restore_destination_refusal(account, target_server, force=config.force_restore):
+                return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
             self._update_restore_progress(restore_id, "initializing", 0)
             if config.differential_backup_id:
                 from .virtualmin_pair_restore import restore_pair  # noqa: PLC0415  # Circular
@@ -751,6 +754,18 @@ class VirtualminBackupService:
             lineage_refusal = manifest_restore_refusal(metadata)
             if lineage_refusal is not None:
                 return Err(lineage_refusal, retriability=Retriability.NOT_RETRIABLE)
+
+            try:
+                prepare_restore_params(
+                    account,
+                    target_server,
+                    Path(spool_path),
+                    metadata,
+                    source=f"{REMOTE_ARCHIVE_DIR}/{archive_name}",
+                    force=config.force_restore,
+                )
+            except (ValidationError, ValueError, OSError, tarfile.TarError) as error:
+                return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
 
             # Target ownership/state gate (force can NEVER override ownership).
             self._update_restore_progress(restore_id, "verifying_target", 25)
@@ -823,12 +838,24 @@ class VirtualminBackupService:
                 )
 
             # The one destructive call, explicit-success required.
+            try:
+                params = prepare_restore_params(
+                    account,
+                    target_server,
+                    Path(spool_path),
+                    metadata,
+                    source=f"{REMOTE_ARCHIVE_DIR}/{archive_name}",
+                    force=config.force_restore,
+                )
+            except (ValidationError, ValueError, OSError, tarfile.TarError) as error:
+                determinate = True
+                return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
             self._update_restore_progress(restore_id, "restoring", 70)
             gateway = VirtualminGateway(VirtualminConfig(server=target_server))
             restore_result = self._call_checked(
                 gateway,
                 "restore-domain",
-                restore_domain_params(domain=account.domain, source=f"{REMOTE_ARCHIVE_DIR}/{archive_name}"),
+                params,
                 self._backup_command_timeout(),
             )
             if restore_result.is_err():

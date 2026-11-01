@@ -8,12 +8,14 @@ The lab publishes Virtualmin nodes on 127.0.0.1 under distinct ports.
    those names: every other host still goes through the real resolver and the
    SSRF check.
 2. Each lab deployment uses its published SSH port for inventory and readiness
-   probes. Container firewall rules still use the daemon's internal port 22.
+   probes. Container firewall rules use the daemon's internal port 9876.
 3. Bootstrap imports the lab's verified, port-specific host keys into its
    deployment record. The normal strict enrolled-identity checks remain active.
 4. The Ubuntu port transition is skipped for these disposable Debian containers.
    The hook refuses any non-lab hostname or address; there is no production skip
    setting. Real Ubuntu transitions are exercised by the SSH Docker suite.
+5. The opt-in imported source uses its real enrolled SSH identity through the
+   published Docker port, without requiring a NodeDeployment.
 
 Everything else (gateway, TLS pinning, credentials, job layer, playbooks, S3)
 is the production code path.
@@ -44,6 +46,7 @@ from django_q.models import OrmQ
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
+    from apps.infrastructure.imported_backup_transport import ImportedIdentity
     from apps.infrastructure.models import NodeDeployment
     from apps.provisioning.virtualmin_models import VirtualminServer
 
@@ -72,6 +75,9 @@ class LabNode:
 DEPLOY_NODE_ZONE = "praho.test"
 DEPLOY_NODE = LabNode(
     "node-c", "vmlab-debian-node", f"dev-sha-lab-ro-vmlc-003.{DEPLOY_NODE_ZONE}", "dev-sha-lab-ro-vmlc-003", 10103, 2722
+)
+COMPONENT_SOURCE = LabNode(
+    "component-source", "vmlab-component-source", "vm-d.praho.test", "imported-component-source", 10104, 2822
 )
 
 
@@ -203,7 +209,40 @@ def ensure_lab_deployment(
     if key.is_err():
         raise CommandError(f"SSH key generation failed for {node.key}: {key.unwrap_err()}")
     write_private(state_dir / node.key / "inject" / "authorized_keys", key.unwrap().public_key.strip() + "\n")
+    prepare_lab_ssh_policy(state_dir, node)
     return deployment
+
+
+def prepare_lab_ssh_policy(state_dir: Path, node: LabNode) -> None:
+    """Render the actual production policy, using a separate disposable operator identity."""
+    import shutil  # noqa: PLC0415 -- lab-only fixture setup
+
+    from jinja2 import Environment, StrictUndefined  # noqa: PLC0415 -- canonical Ansible template
+
+    refuse_unless_lab_settings()
+    key_path = state_dir / "operator_id_ed25519"
+    if not key_path.exists():
+        subprocess.run(  # Fixed argv, local disposable key
+            [shutil.which("ssh-keygen") or "ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(key_path)],
+            check=True,
+            capture_output=True,
+            timeout=30,
+        )
+    public_key = key_path.with_suffix(".pub").read_text().strip()
+    write_private(state_dir / "operator_authorized_keys", public_key + "\n")
+    inject = state_dir / node.key / "inject"
+    write_private(inject / "operator_authorized_keys", public_key + "\n")
+    template_path = Path(__file__).resolve().parents[6] / "deploy/ansible/roles/ssh-hardening/templates/sshd_config.j2"
+    template = Environment(undefined=StrictUndefined, autoescape=False).from_string(template_path.read_text())  # noqa: S701 -- SSH configuration, not HTML
+    write_private(
+        inject / "sshd_config",
+        template.render(
+            ssh_phase_ports=[9876],
+            ssh_authorized_keys_files=[".ssh/authorized_keys", ".ssh/authorized_keys2"],
+            ssh_webmin_tunnel_enabled=True,
+        )
+        + "\n",
+    )
 
 
 def lab_ssh_host_keys(node: LabNode, state_dir: Path) -> str:
@@ -365,6 +404,27 @@ def read_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def _route_imported_lab_identity(
+    identity: ImportedIdentity, server: VirtualminServer, nodes: tuple[LabNode, ...]
+) -> ImportedIdentity:
+    refuse_unless_lab_settings()
+    node = next((node for node in nodes if node.server_hostname == server.hostname), None)
+    if node is None or node.key != "component-source":
+        return identity
+    if identity.host != node.server_hostname or identity.port != node.ssh_port:
+        raise CommandError("Refusing a different imported source endpoint in lab SSH transport")
+    original = f"[{identity.host}]:{identity.port} "
+    if not identity.trusted_keys or any(not line.startswith(original) for line in identity.trusted_keys):
+        raise CommandError("Imported lab SSH trust must name the exact enrolled source endpoint")
+    return replace(
+        identity,
+        host=LAB_LOOPBACK,
+        trusted_keys=tuple(
+            f"[{LAB_LOOPBACK}]:{identity.port} " + line[len(original) :] for line in identity.trusted_keys
+        ),
+    )
+
+
 @contextmanager
 def lab_transport(state: LabState) -> Iterator[None]:
     """Route PRAHO's production transport to the lab nodes (see module docstring).
@@ -375,12 +435,18 @@ def lab_transport(state: LabState) -> Iterator[None]:
     """
     refuse_unless_lab_settings()
     from apps.common import outbound_http  # noqa: PLC0415
+    from apps.infrastructure import ansible_service  # noqa: PLC0415
     from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415
 
-    lab_names = {node.server_hostname for node in state.nodes}
+    connection_nodes = tuple({node.key: node for node in (*state.nodes, COMPONENT_SOURCE)}.values())
+    lab_names = {node.server_hostname for node in connection_nodes}
     ports_by_deployment = {node.deployment_hostname: node.ssh_port for node in state.nodes}
     real_resolve = outbound_http._resolve_dns
     real_build_vars = AnsibleService._build_vars
+    real_imported_identity = ansible_service.imported_identity
+
+    def imported_identity(server: VirtualminServer) -> ImportedIdentity:
+        return _route_imported_lab_identity(real_imported_identity(server), server, connection_nodes)
 
     def resolve(hostname: str, port: int) -> list[str]:
         if hostname in lab_names:
@@ -420,7 +486,7 @@ def lab_transport(state: LabState) -> Iterator[None]:
         built = real_build_vars(self, deployment, extra_vars)
         port = checked_lab_port(deployment)
         built["ansible_port"] = port
-        built["ssh_port"] = 22  # Host forwarding port differs from the daemon's container port.
+        built["ssh_port"] = 9876  # Host forwarding port differs from the daemon's container port.
         return built
 
     with ExitStack() as stack:
@@ -429,5 +495,8 @@ def lab_transport(state: LabState) -> Iterator[None]:
         stack.enter_context(mock.patch("apps.infrastructure.ansible_service.recover_connection_port", recover_lab_port))
         stack.enter_context(mock.patch.object(AnsibleService, "_ensure_ssh_policy", lab_ssh_policy))
         stack.enter_context(mock.patch.object(AnsibleService, "_build_vars", build_vars))
-        stack.enter_context(override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH=state.known_hosts))
+        stack.enter_context(mock.patch.object(ansible_service, "imported_identity", imported_identity))
+        stack.enter_context(
+            override_settings(SETTINGS_MODULE=settings.SETTINGS_MODULE, PRAHO_SSH_KNOWN_HOSTS_PATH=state.known_hosts)
+        )
         yield

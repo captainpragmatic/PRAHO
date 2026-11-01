@@ -11,11 +11,83 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, PropertyMock, patch
 
+import paramiko
 from django.test import TestCase
 
 from apps.common.types import Err, Ok
 from apps.infrastructure.registration_service import NodeRegistrationService
 from apps.provisioning.virtualmin_models import VirtualminServer
+from apps.provisioning.virtualmin_security import connection_identity
+from tests.infrastructure.test_deployment_service_pipeline import _create_deployment
+from tests.provisioning.test_node_security_policy import ADMIN_NETWORKS, OPERATOR_KEY, node_policy_evidence
+
+
+class GeneratedNodeActivationTests(TestCase):
+    def setUp(self):
+        self.server = VirtualminServer.objects.create(
+            hostname="generated.example.test", api_username="praho-api", status="disabled"
+        )
+        deployment = _create_deployment(status="completed")
+        host_key = paramiko.ECDSAKey.generate()
+        deployment.ssh_host_keys = f"{host_key.get_name()} {host_key.get_base64()}"
+        deployment.virtualmin_server = self.server
+        deployment.save(update_fields=["virtualmin_server", "ssh_host_keys"])
+        self.evidence = node_policy_evidence()
+        self.evidence["identity"] = connection_identity(self.server)
+
+    def activate(self, *, before_commit=None, username="praho-api"):
+        def trust_policy(_service, _server):
+            if before_commit:
+                before_commit()
+
+        with (
+            patch("apps.common.credential_vault.get_credential_vault") as vault,
+            patch("apps.provisioning.virtualmin_gateway.VirtualminGateway") as gateway,
+            patch("apps.infrastructure.ansible_service.node_admin_allowed_cidrs", return_value=ADMIN_NETWORKS),
+            patch(
+                "apps.infrastructure.ansible_service.AnsibleService.operator_public_keys", return_value=(OPERATOR_KEY,)
+            ),
+            patch("apps.provisioning.virtualmin_security_tasks.collect_inspection", return_value=self.evidence),
+            patch("apps.settings.services.SettingsService.get_boolean_setting", return_value=True),
+            patch.object(NodeRegistrationService, "_panel_trust_refusal", trust_policy),
+        ):
+            vault.return_value.get_credential.return_value = Ok((username, "vault-password", {}))
+            gateway.return_value.test_connection.return_value = Ok({"healthy": True})
+            self.evidence["identity"] = connection_identity(self.server)
+            return NodeRegistrationService().verify_and_activate(self.server)
+
+    def test_native_policy_is_required_even_with_healthy_api(self):
+        self.evidence["listeners"].append("tcp LISTEN 0 128 0.0.0.0:25 0.0.0.0:*")
+        result = self.activate()
+        self.assertTrue(result.is_err(), result)
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.status, "disabled")
+        self.assertIsNone(self.server.verified_security_review_id)
+
+    def test_healthy_api_with_current_policy_activates_with_bound_proof(self):
+        result = self.activate()
+        self.assertTrue(result.is_ok(), result)
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.status, "active")
+        self.assertEqual(self.server.security_state, "verified_web")
+        self.assertEqual(self.server.verified_security_review.identity, self.evidence["identity"])
+
+    def test_identity_drift_after_inspection_and_before_activation_cannot_activate(self):
+        result = self.activate(
+            before_commit=lambda: VirtualminServer.objects.filter(pk=self.server.pk).update(api_port=10001)
+        )
+        self.assertTrue(result.is_err(), result)
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.status, "disabled")
+        self.assertIsNone(self.server.verified_security_review_id)
+
+    def test_root_or_different_vault_principal_does_not_grant_policy(self):
+        for username in ("root", "other-api"):
+            with self.subTest(username=username):
+                self.assertTrue(self.activate(username=username).is_err())
+                self.server.refresh_from_db()
+                self.assertEqual(self.server.status, "disabled")
+                self.assertIsNone(self.server.verified_security_review_id)
 
 
 class TrustedPanelCertificateGateTests(TestCase):

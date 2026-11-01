@@ -269,8 +269,8 @@ class NodeSizeForm(forms.ModelForm):
         }
 
 
-class DeploymentDestroyForm(forms.Form):
-    """Form for confirming deployment destruction"""
+class HostnameConfirmationForm(forms.Form):
+    """Exact hostname confirmation shared by lifecycle actions."""
 
     confirm_hostname = forms.CharField(
         widget=forms.TextInput(
@@ -291,3 +291,68 @@ class DeploymentDestroyForm(forms.Form):
         if confirm != self.expected_hostname:
             raise ValidationError(_("Hostname must match exactly: %(hostname)s") % {"hostname": self.expected_hostname})
         return str(confirm)
+
+
+class DeploymentDestroyForm(HostnameConfirmationForm):
+    """Form for confirming deployment destruction"""
+
+    resource_digest = forms.CharField(min_length=64, max_length=64, widget=forms.HiddenInput)
+    provider_restore_points = forms.ChoiceField(
+        label=_("Provider backups and snapshots"),
+        choices=(
+            ("", _("Choose what to do with existing provider restore points")),
+            ("keep", _("Keep as durable provider snapshots; storage charges continue")),
+            ("delete", _("Delete where supported; track provider expiry or required manual action")),
+        ),
+        widget=forms.Select(attrs={"class": "w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2"}),
+    )
+    retention_reason = forms.CharField(
+        label=_("Provider restore-point responsibility"),
+        max_length=2000,
+        widget=forms.Textarea(
+            attrs={"rows": 3, "class": "w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2"}
+        ),
+    )
+    accepted_provider_impact = forms.BooleanField(
+        label=_(
+            "I accept the listed resource changes, permanent data loss from deletions, and continuing charges for retained resources."
+        ),
+    )
+
+    def __init__(self, *args: Any, hostname: str = "", manual_backup_ids: tuple[str, ...] = (), **kwargs: Any) -> None:
+        self.manual_backup_ids = manual_backup_ids
+        super().__init__(*args, hostname=hostname, **kwargs)
+        for backup_id in manual_backup_ids:
+            self.fields[f"snapshot_for_backup_{backup_id}"] = forms.CharField(
+                required=False,
+                max_length=128,
+                label=_("Prepared durable snapshot for provider backup %(backup)s") % {"backup": backup_id},
+                help_text=_(
+                    "For Keep: enter the snapshot ID prepared from this exact backup in the provider console. "
+                    "You attest this mapping because the provider API cannot prove its origin. Storage charges continue."
+                ),
+                widget=forms.TextInput(
+                    attrs={"class": "w-full bg-slate-700 border-slate-600 rounded-lg text-white px-4 py-2"}
+                ),
+            )
+
+    @property
+    def manual_snapshot_fields(self) -> list[forms.BoundField]:
+        return [self[f"snapshot_for_backup_{backup_id}"] for backup_id in self.manual_backup_ids]
+
+    def clean(self) -> dict[str, Any]:
+        cleaned = super().clean() or {}
+        if cleaned.get("provider_restore_points") == "keep":
+            for backup_id in self.manual_backup_ids:
+                field_name = f"snapshot_for_backup_{backup_id}"
+                if not cleaned.get(field_name):
+                    self.add_error(field_name, _("Prepare this backup as a durable snapshot before choosing Keep."))
+        return cleaned
+
+    def provider_snapshot_mappings(self) -> dict[str, str]:
+        if self.cleaned_data.get("provider_restore_points") != "keep":
+            return {}
+        return {
+            backup_id: str(self.cleaned_data[f"snapshot_for_backup_{backup_id}"])
+            for backup_id in self.manual_backup_ids
+        }

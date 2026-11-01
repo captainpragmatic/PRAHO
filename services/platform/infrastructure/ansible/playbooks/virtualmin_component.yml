@@ -1,0 +1,143 @@
+---
+- name: Operate exactly selected website components over the enrolled source connection
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Validate the single-host component action
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - component_action in ['inspect', 'source_hold', 'source_verify', 'source_export', 'source_release', 'source_commit', 'source_route', 'source_retire', 'source_retire_artifacts', 'target_prepare', 'target_restore', 'target_verify', 'target_seal', 'target_activate', 'target_policy', 'target_remove', 'target_retire_artifacts', 'target_retire_unprepared_archive']
+          - component_request is mapping
+
+    - name: Inspect through temporary root-private native helpers
+      block:
+        - name: Allocate the private inspection directory
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: praho-component-inspect-
+          register: component_directory
+
+        - name: Install the bounded inspection helpers
+          ansible.builtin.copy:
+            src: "files/{{ item }}"
+            dest: "{{ component_directory.path }}/{{ item }}"
+            owner: root
+            group: root
+            mode: '0700'
+          loop:
+            - praho-component-inspect.py
+            - praho-component-paths.py
+            - praho-component-mysql.py
+            - praho-component-cron-fence.py
+            - praho-component-capacity.py
+            - praho-component-default.py
+            - praho-apache-bindings.py
+            - praho-component-archive.py
+            - praho-account-name-neutral.py
+
+        - name: Install independent native hold and export helpers for the explicit source action
+          when: component_action != 'inspect'
+          ansible.builtin.copy:
+            src: "files/{{ item }}"
+            dest: "{{ component_directory.path }}/{{ item }}"
+            owner: root
+            group: root
+            mode: '0700'
+          loop:
+            - praho-component-action.py
+            - praho-component-source.py
+            - praho-component-native-source.py
+            - praho-component-source-export.py
+            - praho-component-routing.py
+            - praho-component-routing.pl
+            - praho-bridge.py
+            - praho-component-journal.py
+            - praho-component-web-fence.py
+            - praho-component-database-fence.py
+            - praho-component-database-export.py
+            - praho-component-fence.py
+            - praho-component-archive.py
+            - praho-apache-bindings.py
+            - praho-recovery-credentials.pl
+
+        - name: Install only explicit source retirement helpers
+          when: component_action in ['source_retire', 'source_retire_artifacts']
+          ansible.builtin.copy:
+            src: "files/{{ item }}"
+            dest: "{{ component_directory.path }}/{{ item }}"
+            owner: root
+            group: root
+            mode: '0700'
+          loop:
+            - praho-component-retire.py
+            - praho-component-retire.pl
+            - praho-component-file-retire.py
+
+        - name: Install the qualified target restoration and activation helpers
+          when: component_action in ['target_prepare', 'target_restore', 'target_verify', 'target_seal', 'target_activate', 'target_policy', 'target_remove', 'target_retire_artifacts', 'target_retire_unprepared_archive']
+          ansible.builtin.copy:
+            src: "files/{{ item }}"
+            dest: "{{ component_directory.path }}/{{ item }}"
+            owner: root
+            group: root
+            mode: '0700'
+          loop:
+            - praho-component-target.py
+            - praho-component-target-preflight.py
+            - praho-component-target-archive.py
+            - praho-component-target-database.py
+            - praho-component-file-restore.py
+            - praho-component-native-command.pl
+            - praho-component-policy.pl
+            - praho-recovery.py
+            - praho-recovery-ssl.py
+            - praho-pair-restore.sh
+
+        - name: Install the shared numeric owner shadow schema for target activation
+          when: component_action in ['target_prepare', 'target_restore', 'target_verify', 'target_seal', 'target_activate', 'target_policy', 'target_remove', 'target_retire_artifacts', 'target_retire_unprepared_archive']
+          ansible.builtin.copy:
+            src: "{{ playbook_dir }}/../../../apps/provisioning/backup_owner_shadow.py"
+            dest: "{{ component_directory.path }}/praho_owner_shadow.py"
+            owner: root
+            group: root
+            mode: '0600'
+
+        - name: Read native component scope without changing services or authentication
+          when: component_action == 'inspect'
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - "{{ component_directory.path }}/praho-component-inspect.py"
+            stdin: "{{ component_request | to_json }}"
+          register: component_evidence
+          changed_when: false
+          no_log: true
+
+        - name: Return bounded secret-free component evidence
+          when: component_action == 'inspect'
+          ansible.builtin.debug:
+            msg: "PRAHO_COMPONENT_INSPECTION={{ component_evidence.stdout | trim | b64encode }}"
+
+        - name: Execute the explicit receipted source operation
+          when: component_action != 'inspect'
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - "{{ component_directory.path }}/praho-component-action.py"
+            stdin: "{{ component_operation | combine({'action': component_action, 'request': component_request}) | to_json }}"
+          register: component_result
+          changed_when: component_action not in ['source_verify', 'target_verify']
+          no_log: true
+
+        - name: Return only secret-free source action receipts
+          when: component_action != 'inspect'
+          ansible.builtin.debug:
+            msg: "PRAHO_COMPONENT_RESULT={{ component_result.stdout | trim | b64encode }}"
+      always:
+        - name: Remove only this action's temporary inspection directory
+          ansible.builtin.file:
+            path: "{{ component_directory.path }}"
+            state: absent
+          when: component_directory.path is defined

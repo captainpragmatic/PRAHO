@@ -25,13 +25,14 @@ from django.test import TestCase, override_settings
 from apps.common.types import Err, Ok, Retriability
 from apps.infrastructure.ansible_service import AnsibleService
 from apps.infrastructure.audit_service import InfrastructureAuditContext
-from apps.infrastructure.cloud_gateway import STANDARD_FIREWALL_RULES, ServerCreateResult
+from apps.infrastructure.cloud_gateway import STANDARD_FIREWALL_RULES, ServerCreateResult, SSHKeyResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.deployment_service import NodeDeploymentService
 from apps.infrastructure.dns_gateway import ReconcileOutcome
 from apps.infrastructure.forms import NodeDeploymentForm
 from apps.infrastructure.models import (
     CloudProvider,
+    CloudResourceOwnership,
     NodeDeployment,
     NodeDeploymentLog,
     NodeRegion,
@@ -141,13 +142,16 @@ def _created_by_token(status: str, server_id: str, token: str) -> NodeDeployment
     return deployment
 
 
-def _teardown_gateway() -> MagicMock:
+def _teardown_gateway(deployment: NodeDeployment) -> MagicMock:
     """A provider gateway for teardown: nothing else discovered, every delete confirmed."""
     gateway = MagicMock()
     gateway.find_servers_by_label.return_value = Ok([])
     gateway.find_firewalls_by_label.return_value = Ok([])
     gateway.find_ssh_keys_by_label.return_value = Ok([])
     gateway.delete_server.return_value = Ok(True)
+    from tests.helpers.teardown_provider import attach_teardown_provider  # noqa: PLC0415
+
+    attach_teardown_provider(gateway, deployment)
     return gateway
 
 
@@ -163,6 +167,7 @@ def _make_service() -> NodeDeploymentService:
     service._ansible = MagicMock()
     service._validation = MagicMock()
     service._registration = MagicMock()
+    service._registration.verify_provisioned_api.return_value = Ok(True)
     service._node_firewall_rules = MagicMock(return_value=STANDARD_FIREWALL_RULES)
     # The provider orderable check has its own tests (test_deploy_orderable_check).
     service._check_orderable = MagicMock(return_value=Ok(True))
@@ -346,10 +351,11 @@ class TestDeployNodeReachesCompletedThroughFSM(TestCase):
         service._registration.register_node.return_value = Ok(MagicMock(id=1))
 
         gateway = MagicMock()
-        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
         gateway.create_firewall.return_value = Ok("fw-1")
         gateway.create_server.return_value = Ok(
-            ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
+            ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="",
+                created_resources=(("primary_ip", "ip-1"),))
         )
 
         with (
@@ -362,6 +368,28 @@ class TestDeployNodeReachesCompletedThroughFSM(TestCase):
         self.assertTrue(result.is_ok(), f"deploy_node happy path must succeed, got {result}")
         deployment.refresh_from_db()
         self.assertEqual(deployment.status, "completed")
+        gateway.create_firewall.assert_not_called()
+        self.assertEqual(gateway.create_server.call_args.args[0].firewall_ids, [])
+        self.assertEqual(set(CloudResourceOwnership.objects.filter(deployment=deployment).values_list("kind", "resource_id")),
+                         {("server", "srv-1"), ("ssh_key", "key-1"), ("primary_ip", "ip-1")})
+
+    def test_blesta_keeps_its_provider_firewall(self) -> None:
+        deployment = _create_deployment("pending")
+        deployment.panel_type, _ = PanelType.objects.get_or_create(
+            panel_type="blesta", defaults={"name": "Blesta", "ansible_playbook": "blesta.yml", "is_active": True}
+        )
+        deployment.save(update_fields=["panel_type"])
+        service = _make_service()
+        gateway = TestCredentialSeamWiring._wire_happy_path(service, registered=MagicMock(id=7))
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
+        self.assertTrue(result.is_ok(), result)
+        gateway.create_firewall.assert_called_once()
+        self.assertEqual(gateway.create_server.call_args.args[0].firewall_ids, ["fw-1"])
 
 
 # ===========================================================================
@@ -386,7 +414,7 @@ class TestCredentialSeamWiring(TestCase):
         service._registration.verify_and_activate.return_value = Ok(registered)
 
         gateway = MagicMock()
-        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
         gateway.create_firewall.return_value = Ok("fw-1")
         gateway.create_server.return_value = Ok(
             ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
@@ -406,8 +434,10 @@ class TestCredentialSeamWiring(TestCase):
         panel_extra = calls["virtualmin.yml"]
         self.assertEqual(panel_extra["praho_api_user"], "praho-api")
         self.assertTrue(panel_extra["praho_api_password"], "API password must be generated and threaded")
-        for other in ("base.yml", "harden.yml", "backup.yml"):
+        for other in ("base.yml", "backup.yml"):
             self.assertIsNone(calls[other], f"the API credential must not reach {other}")
+        self.assertEqual(calls["harden.yml"], {"praho_api_user": "praho-api"})
+        service._registration.verify_provisioned_api.assert_called_once_with(deployment)
         reg_kwargs = service._registration.register_node.call_args.kwargs
         self.assertEqual(reg_kwargs["admin_username"], "praho-api")
         self.assertEqual(reg_kwargs["admin_password"], panel_extra["praho_api_password"])
@@ -421,7 +451,7 @@ class TestCredentialSeamWiring(TestCase):
         service._validation.validate_node.return_value = Ok(MagicMock(all_passed=True, summary="ok"))
         service._registration.register_node.return_value = Ok(registered)
         gateway = MagicMock()
-        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
         gateway.create_firewall.return_value = Ok("fw-1")
         gateway.create_server.return_value = Ok(
             ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="")
@@ -697,7 +727,7 @@ class TestDestroyNodeAtomicTransition(TestCase):
         service = _make_service()
         service._registration.unregister_node.return_value = Ok(True)
 
-        mock_gateway = _teardown_gateway()
+        mock_gateway = _teardown_gateway(deployment)
 
         with patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=mock_gateway):
             result = service.destroy_node(
@@ -715,7 +745,7 @@ class TestDestroyNodeAtomicTransition(TestCase):
         service = _make_service()
         service._registration.unregister_node.return_value = Ok(True)
 
-        mock_gateway = _teardown_gateway()
+        mock_gateway = _teardown_gateway(deployment)
 
         with patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=mock_gateway):
             result = service.destroy_node(
@@ -1097,7 +1127,7 @@ class TestDestroyClearsExternalIdForRetryIdempotency(TestCase):
         # Vault revocation FAILS after cloud deletion succeeds -> destroy returns Err.
         service._ssh_manager.delete_deployment_key.return_value = Err("vault unavailable")
 
-        mock_gateway = _teardown_gateway()
+        mock_gateway = _teardown_gateway(deployment)
 
         with patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=mock_gateway):
             result = service.destroy_node(deployment, credentials={"api_token": "tok"})

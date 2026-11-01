@@ -26,6 +26,7 @@ from .virtualmin_gateway import listing_attribute
 from .virtualmin_migration_models import MigrationBridge, VirtualminMigration, account_has_active_operation
 from .virtualmin_migration_service import MigrationDeferredError, VirtualminMigrationService
 from .virtualmin_models import VirtualminAccount, VirtualminServer
+from .virtualmin_node_capability import destination_refusal
 from .virtualmin_pair_restore import pair_lineage_refusal, run_pair_step
 from .virtualmin_units import modify_quota_parameters
 
@@ -35,6 +36,15 @@ if TYPE_CHECKING:
 _BACKUP_ID = re.compile(r"^[0-9a-f]{32}$")
 _COMPONENTS = ("include_files", "include_databases", "include_email", "include_ssl")
 PAIR_ARCHIVES = 2
+
+
+def _require_recovery_nodes(source: VirtualminServer, target: VirtualminServer) -> None:
+    if source.security_operation or target.security_operation:
+        raise ValueError("Resolve node hardening before recovery")
+    if target.status != "active" or getattr(target, "node_deployment", None) is None:
+        raise ValueError("Recovery needs an active managed target")
+
+
 _MANIFEST_KEYS = frozenset(
     {
         "backup_id",
@@ -141,8 +151,7 @@ class VirtualminRecoveryService(VirtualminMigrationService):
                 assert_move_ready(locked)
                 if MigrationBridge.objects.filter(migration__account=locked).exclude(status="torn_down").exists():
                     raise ValueError("Resolve the account's retained bridge before recovery")
-                if target.status != "active" or getattr(target, "node_deployment", None) is None:
-                    raise ValueError("Recovery needs an active managed target")
+                _require_recovery_nodes(source, target)
                 self._admission_preflight(target)
                 rows = self._listing(self._gateway(target))
                 if any(row["domain"] == locked.domain or row["username"] == locked.virtualmin_username for row in rows):
@@ -249,6 +258,8 @@ class VirtualminRecoveryService(VirtualminMigrationService):
                     release_spool_reservation(archive_name)
 
     def _restore(self, migration: VirtualminMigration, token: UUID) -> None:
+        if refusal := destination_refusal(migration.target_server):
+            raise ValueError(refusal)
         restore_held_target(self, migration, token, migration.barrier_state["recovery_archives"])
 
     @staticmethod
@@ -312,6 +323,8 @@ class VirtualminRecoveryService(VirtualminMigrationService):
             )
 
     def _activate(self, migration: VirtualminMigration, token: UUID) -> None:
+        if refusal := destination_refusal(migration.target_server):
+            raise ValueError(refusal)
         if migration.cutover_committed_at is None:
             raise ValueError("Recovery activation requires the ownership commit")
         from .migration_enabled_state import (  # noqa: PLC0415  # Same-app activation policy seam.
@@ -341,6 +354,8 @@ class VirtualminRecoveryService(VirtualminMigrationService):
         self._converge_cutover(migration, token)
 
     def _prepare_completion(self, migration: VirtualminMigration, token: UUID) -> None:
+        if refusal := destination_refusal(migration.target_server):
+            raise ValueError(refusal)
         # These normal-backup names can be used by a future restore. Delete them while this
         # recovery still holds the account exclusion, rather than scheduling a late deletion.
         store = VirtualminBackupService(migration.target_server)

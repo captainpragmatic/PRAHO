@@ -22,6 +22,7 @@
         </div>
         <div class="mt-4 sm:mt-0 flex space-x-3">
             {% trans "Edit" as bt1 %}{% button bt1 href="edit/" variant="secondary" %}
+            {% url 'provisioning:node_security' server.pk as security_url %}{% trans "Security review" as security_label %}{% button security_label href=security_url variant="secondary" %}
             {% url 'provisioning:node_drain' server.pk as drain_url %}{% trans "Drain server" as bt_drain %}{% button bt_drain href=drain_url variant="secondary" %}
             <form method="post" action="health/" class="inline">
                 {% csrf_token %}

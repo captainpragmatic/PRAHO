@@ -1326,6 +1326,15 @@ virtualmin-lab-build:
 	@echo "🐳 [Virtualmin lab] Building praho-virtualmin-lab and praho-debian-node images..."
 	@$(VIRTUALMIN_LAB_SH) build
 
+.PHONY: virtualmin-lab-component-source-up
+virtualmin-lab-component-source-up: virtualmin-lab-ensure
+	@docker build -f deploy/virtualmin-lab/mixed-source/Dockerfile -t praho-virtualmin-lab-mixed-source:8.3.0 deploy/virtualmin-lab
+	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_component_source
+
+.PHONY: test-virtualmin-components
+test-virtualmin-components: virtualmin-lab-component-source-up
+	@PYTHONPATH=$(PWD)/services/platform:$(PWD) DJANGO_SETTINGS_MODULE=config.settings.lab $(PYTHON_SHARED) -m pytest -c tests/virtualmin_lab/pytest.ini tests/virtualmin_lab/components $(COMPONENT_ARGS)
+
 virtualmin-lab-up:
 	@echo "🧪 [Virtualmin lab] Starting nodes vm-a, vm-b and MinIO..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -1333,6 +1342,7 @@ virtualmin-lab-up:
 	@$(PYTHON_PLATFORM_LAB_MANAGE) migrate --noinput
 	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_bootstrap
 	@$(VIRTUALMIN_LAB_SH) apply-credentials
+	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_qualify
 	@echo "✅ [Virtualmin lab] Ready. Gate: make test-virtualmin-lab | Probe: make virtualmin-probe"
 
 # Start and register the lab only when it is not already usable: registering rotates every node credential.
@@ -1373,6 +1383,7 @@ test-virtualmin-lab:
 	@echo "🧪 [Virtualmin lab] Provisioning, differential-base, staging and node-playbook checks on vm-b..."
 	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_checks
 	@echo "✅ [Virtualmin lab] Checks passed"
+	@$(MAKE) --no-print-directory test-virtualmin-components
 
 test-virtualmin-contract:
 	@echo "🧪 [Virtualmin lab] Contract suite: every allowlisted program against the real node (needs make virtualmin-lab-up)..."

@@ -4,8 +4,9 @@ Tests for DigitalOcean Cloud Service (pydo SDK wrapper).
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
+from azure.core.exceptions import HttpResponseError
 from django.test import TestCase
 
 from apps.infrastructure.cloud_gateway import FirewallRule, ServerCreateRequest
@@ -101,22 +102,22 @@ class TestDigitalOceanServiceDeleteServer(TestCase):
     )
     def test_delete_server_success(self, mock_sleep: MagicMock) -> None:
         svc, client = _make_service()
-        client.droplets.destroy.return_value = None
+        client.droplets.destroy.return_value = (204, None)
         # Faithful to pydo 0.27.0: droplets.get does NOT raise on 404 — it RETURNS the
         # decoded error payload. A raising fixture would exercise the string-matching
         # except branch that a real 404 never reaches, keeping this test green while
         # production polled to timeout on every deletion (#299).
-        client.droplets.get.return_value = {
+        client.droplets.get.return_value = (404, {
             "id": "not_found",
             "message": "The resource you were accessing could not be found.",
-        }
+        })
 
         result = svc.delete_server("12345")
 
         self.assertTrue(result.is_ok())
         self.assertIs(result.unwrap(), True)
-        client.droplets.destroy.assert_called_once_with(droplet_id=12345)
-        client.droplets.get.assert_called_once_with(droplet_id=12345)
+        client.droplets.destroy.assert_called_once_with(droplet_id=12345, cls=ANY)
+        client.droplets.get.assert_called_once_with(droplet_id=12345, cls=ANY)
         # Destroy must precede the absence check — individually asserted calls would also
         # pass under a check-then-destroy implementation.
         self.assertEqual(
@@ -127,7 +128,9 @@ class TestDigitalOceanServiceDeleteServer(TestCase):
 
     def test_delete_server_not_found(self) -> None:
         svc, client = _make_service()
-        client.droplets.destroy.side_effect = RuntimeError("404 not found")
+        error = HttpResponseError(message="Droplet absent")
+        error.status_code = 404
+        client.droplets.destroy.side_effect = error
         result = svc.delete_server("12345")
         self.assertTrue(result.is_ok())
 
@@ -135,7 +138,7 @@ class TestDigitalOceanServiceDeleteServer(TestCase):
 class TestDigitalOceanServiceGetServer(TestCase):
     def test_get_server_exists(self) -> None:
         svc, client = _make_service()
-        client.droplets.get.return_value = {"droplet": _droplet_dict()}
+        client.droplets.get.return_value = (200, {"droplet": _droplet_dict()})
         result = svc.get_server("12345")
         self.assertTrue(result.is_ok())
         info = result.unwrap()
@@ -145,7 +148,9 @@ class TestDigitalOceanServiceGetServer(TestCase):
 
     def test_get_server_not_found(self) -> None:
         svc, client = _make_service()
-        client.droplets.get.side_effect = RuntimeError("not found")
+        error = HttpResponseError(message="Droplet absent")
+        error.status_code = 404
+        client.droplets.get.side_effect = error
         result = svc.get_server("99999")
         self.assertTrue(result.is_ok())
         self.assertIsNone(result.unwrap())
@@ -211,9 +216,12 @@ class TestDigitalOceanServiceFirewalls(TestCase):
 
     def test_delete_firewall(self) -> None:
         svc, client = _make_service()
-        client.firewalls.delete.return_value = None
+        client.firewalls.delete.return_value = (204, None)
+        client.firewalls.get.return_value = (404, {"id": "not_found"})
         result = svc.delete_firewall("fw-uuid-123")
         self.assertTrue(result.is_ok())
+        client.firewalls.delete.assert_called_once_with(firewall_id="fw-uuid-123", cls=ANY)
+        client.firewalls.get.assert_called_once_with(firewall_id="fw-uuid-123", cls=ANY)
 
 
 class TestDigitalOceanServiceCatalog(TestCase):
@@ -334,7 +342,9 @@ class TestDigitalOceanDeleteFirewallIdempotent(TestCase):
 
     def test_delete_firewall_404_returns_ok(self) -> None:
         svc, client = _make_service()
-        client.firewalls.delete.side_effect = RuntimeError("404 not found")
+        error = HttpResponseError(message="Firewall absent")
+        error.status_code = 404
+        client.firewalls.delete.side_effect = error
         result = svc.delete_firewall("fw-gone")
         self.assertTrue(result.is_ok())
 
@@ -344,7 +354,7 @@ class TestDigitalOceanStatusNormalization(TestCase):
 
     def test_active_normalized_to_running(self) -> None:
         svc, client = _make_service()
-        client.droplets.get.return_value = {"droplet": _droplet_dict(status="active")}
+        client.droplets.get.return_value = (200, {"droplet": _droplet_dict(status="active")})
         result = svc.get_server("12345")
         self.assertTrue(result.is_ok())
         info = result.unwrap()

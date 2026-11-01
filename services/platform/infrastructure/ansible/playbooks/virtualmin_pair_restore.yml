@@ -22,6 +22,7 @@
     pair_base_sha: ""
     pair_diff_sha: ""
     pair_recovery: false
+    pair_web_only: true
   tasks:
     - name: Validate pair restore inputs
       ansible.builtin.assert:
@@ -86,6 +87,7 @@
         PRAHO_DIFF_SHA: "{{ pair_diff_sha }}"
         PRAHO_STEP_HOLD: "{{ pair_step_hold_seconds }}"
         PRAHO_RECOVERY: "{{ (pair_recovery | bool) | ternary('1', '0') }}"
+        PRAHO_WEB_ONLY: "{{ (pair_web_only | bool) | ternary('1', '0') }}"
       register: pair_step
       changed_when: true
 

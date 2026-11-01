@@ -10,6 +10,12 @@ from .account_hostname_models import (
     AccountNameCertificateBudget,
     AccountNameCertificateInstall,
 )
+from .component_migration_models import (
+    ComponentMigrationApproval,
+    ComponentMigrationReview,
+    SourceServiceObligation,
+    SourceServiceRelease,
+)
 from .hosted_domain_dns_models import HostedDomainDnsStatus
 from .relationship_models import ServiceDomain, ServiceGroup, ServiceGroupMember, ServiceRelationship
 from .service_models import ProvisioningTask, Server, Service, ServicePlan, ServicePlanPrice
@@ -21,7 +27,7 @@ from .virtualmin_models import (
     VirtualminProvisioningJob,
     VirtualminServer,
 )
-from .virtualmin_security_models import NodeSecurityDecision, NodeSecurityReview
+from .virtualmin_security_models import NodeSecurityDecision, NodeSecurityExecution, NodeSecurityReview
 from .virtualmin_usage_models import AccountUsageState, NodeUsageSyncState, UsageInterval, UsageReading
 
 # Re-export for external imports
@@ -31,10 +37,13 @@ __all__ = [
     "AccountNameCertificateBudget",
     "AccountNameCertificateInstall",
     "AccountUsageState",
+    "ComponentMigrationApproval",
+    "ComponentMigrationReview",
     "HostedDomainDnsStatus",
     "MigrationBridge",
     "NodeDrain",
     "NodeSecurityDecision",
+    "NodeSecurityExecution",
     "NodeSecurityReview",
     "NodeUsageSyncState",
     "ProvisioningTask",
@@ -47,6 +56,8 @@ __all__ = [
     "ServicePlanPrice",
     "ServiceRelationship",
     "ServiceRequest",
+    "SourceServiceObligation",
+    "SourceServiceRelease",
     "UsageInterval",
     "UsageReading",
     # Virtualmin models

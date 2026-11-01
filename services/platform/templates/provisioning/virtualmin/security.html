@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Node security review" %}{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <h1 class="text-2xl text-slate-100">{% trans "Node security review" %}: {{ server.name }}</h1>
+  <p>{% if verification_stale %}{% trans "Verification needs renewal" %}{% else %}{{ server.get_security_state_display }}{% endif %}</p>
+  {% if admission_warning %}<p>{{ admission_warning }}</p>{% endif %}
+  {% if legacy_admitted %}<p>{% trans "Existing destination placement remains enabled during qualification." %}</p>{% endif %}
+  {% if server.security_operation %}
+    <div role="alert" class="rounded border border-amber-600 p-4">
+      <p>{% trans "A hardening attempt holds this node. Some changes may already have happened. New mutations and teardown remain blocked until its outcome is reconciled." %}</p>
+      {% if can_decide %}
+        <form method="post" class="space-y-4">
+          {% csrf_token %}<input type="hidden" name="action" value="verify">
+          {{ verify_form.as_p }}
+          {% trans "Verify applied policy without replay" as verify_label %}{% button verify_label type="submit" variant="secondary" %}
+        </form>
+      {% endif %}
+    </div>
+  {% endif %}
+  {% if task %}
+    <div role="status" class="rounded border border-slate-700 p-4">
+      {% if task.success %}{{ task.result.outcome }} {{ task.result.message }}{% else %}{% trans "Inspection failed. Check enrolled access and retry." %}{% endif %}
+    </div>
+  {% endif %}
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="inspect">
+    {% trans "Inspect current policy" as inspect_label %}{% button inspect_label type="submit" %}
+  </form>
+  {% if review %}
+    <p>{% trans "Observed at" %}: {{ review.created_at }}. {% trans "Policy" %}: {{ review.policy_version }}</p>
+    {% if network_preparation %}
+      <div role="alert" class="rounded border border-amber-600 p-4">
+        <p>{% trans "Prepare network ingress before hardening." %}</p>
+        {% if not server.security_operation %}<p>{% trans "No conversion has started." %}</p>{% endif %}
+        <ul class="list-disc pl-6">{% for item in network_preparation %}<li>{{ item }}</li>{% endfor %}</ul>
+        <p>{% trans "Inspection and migration-source acknowledgment remain available. Outbound masquerading and unrelated private routing must be preserved." %}</p>
+      </div>
+    {% endif %}
+    <section class="rounded border border-slate-700 p-4 space-y-2">
+      <h2 class="text-xl">{% trans "Proposed changes and operational impact" %}</h2>
+      <ul class="list-disc pl-6">{% for change in review.evidence.proposed_changes %}<li>{{ change }}</li>{% endfor %}</ul>
+    </section>
+    <section class="rounded border border-slate-700 p-4 space-y-2">
+      <h2 class="text-xl">{% trans "Administrator access" %}</h2>
+      {% for principal in review.evidence.principals %}<p>{{ principal.name }}: {{ principal.access }}</p>{% endfor %}
+    </section>
+    <details><summary>{% trans "Listeners, services, packages and firewall evidence" %}</summary>
+      {% for section, observations in review.evidence.items %}
+        {% if section == "listeners" or section == "services" or section == "firewall" %}
+          <h3>{{ section }}</h3><pre class="overflow-x-auto">{% for line in observations %}{{ line }}
+{% endfor %}</pre>
+        {% endif %}
+      {% endfor %}
+    </details>
+    {% if can_decide %}
+      {% if network_ready %}
+      <form method="post" class="space-y-4" hx-confirm="{% trans 'Apply every listed access and service change, including interruption and removal of affected packages?' %}">
+        {% csrf_token %}<input type="hidden" name="action" value="apply">
+        {{ apply_form.as_p }}
+        {% trans "Apply reviewed hardening" as apply_label %}{% button apply_label type="submit" variant="danger" %}
+      </form>
+      {% endif %}
+      <form method="post" class="space-y-4" hx-confirm="{% trans 'Keep existing access and services without applying hardening?' %}">
+        {% csrf_token %}<input type="hidden" name="action" value="acknowledge">
+        {{ form.as_p }}
+        {% trans "Keep as migration source" as acknowledge_label %}{% button acknowledge_label type="submit" variant="secondary" %}
+      </form>
+    {% endif %}
+  {% else %}<p>{% trans "Import and existing services remain available. Inspect the node to review proposed hardening." %}</p>{% endif %}
+</div>
+{% endblock %}

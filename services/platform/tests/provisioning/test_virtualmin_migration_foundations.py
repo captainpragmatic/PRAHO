@@ -68,6 +68,7 @@ class VirtualminMigrationFoundationTests(TestCase):
         )
         self.server = VirtualminServer.objects.create(
             name="migration-source",
+            legacy_security_admission=True,
             hostname="migration-source.example.com",
             api_username="praho-acl",
             api_port=10000,
@@ -81,6 +82,7 @@ class VirtualminMigrationFoundationTests(TestCase):
         self.server.save()
         self.target = VirtualminServer.objects.create(
             name="migration-target",
+            legacy_security_admission=True,
             hostname="migration-target.example.com",
             api_username="praho-acl",
             api_port=10000,

@@ -40,6 +40,38 @@ class NodeSecurityReviewTests(TestCase):
     def inspect(self):
         return record_inspection(self.server, self.evidence)
 
+    def test_reading_connection_identity_never_enrolls_legacy_host_trust(self):
+        from tests.infrastructure.test_deployment_service_pipeline import _create_deployment  # noqa: PLC0415
+
+        deployment = _create_deployment("completed")
+        deployment.virtualmin_server = self.server
+        deployment.ssh_host_keys = ""
+        deployment.save(update_fields=["virtualmin_server", "ssh_host_keys"])
+        self.server.refresh_from_db()
+        with patch("apps.infrastructure.ssh_transport.resolve_node_host_keys", return_value="would-enroll") as enroll:
+            identity = connection_identity(self.server)
+        self.assertEqual(len(identity), 64)
+        enroll.assert_not_called()
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.ssh_host_keys, "")
+
+    def test_managed_persisted_trust_is_not_revoked_by_an_unrelated_known_hosts_edit(self):
+        from tests.infrastructure.test_deployment_service_pipeline import _create_deployment  # noqa: PLC0415
+        from tests.provisioning.test_node_security_policy import OPERATOR_KEY  # noqa: PLC0415
+
+        deployment = _create_deployment("completed")
+        deployment.virtualmin_server = self.server
+        deployment.ssh_host_keys = OPERATOR_KEY
+        deployment.save(update_fields=["virtualmin_server", "ssh_host_keys"])
+        self.server.refresh_from_db()
+        with TemporaryDirectory() as directory:
+            trust = Path(directory) / "known_hosts"
+            trust.write_text("unrelated-node initial key\n")
+            with override_settings(PRAHO_SSH_KNOWN_HOSTS_PATH=str(trust)):
+                original = connection_identity(self.server)
+                trust.write_text("unrelated-node replacement key\n")
+                self.assertEqual(connection_identity(self.server), original)
+
     def test_import_stays_active_and_unreviewed(self):
         self.assertEqual(self.server.security_state, "unreviewed")
         self.assertTrue(self.server.is_healthy)
@@ -132,6 +164,8 @@ class NodeSecurityReviewTests(TestCase):
     @override_settings(DISABLE_AUDIT_SIGNALS=False)
     def test_decision_is_audited_with_the_operator(self):
         review = self.inspect()
+        inspection = AuditEvent.objects.get(object_id=str(review.pk), action="security_scan_detected")
+        self.assertEqual(inspection.severity, "low", "Recording evidence is not a detected security incident")
         decision = acknowledge_source(review, self.evidence, self.operator, "Keep existing services")
         event = AuditEvent.objects.get(object_id=str(decision.pk), action="configuration_changed")
         self.assertEqual(event.user_id, self.operator.pk)

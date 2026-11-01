@@ -57,6 +57,7 @@ class VirtualminCoverageCase(TestCase):
             status="active",
         )
         self.server = VirtualminServer.objects.create(
+            legacy_security_admission=True,
             name="Coverage VM",
             hostname="vm-coverage.example.com",
             api_username="coverage-api",

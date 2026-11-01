@@ -42,7 +42,10 @@ class ArtifactLeaseLostError(ValueError):
 
 def _eligible() -> QuerySet[VirtualminMigration]:
     return (
-        VirtualminMigration.objects.filter(status__in=TERMINAL).exclude(contract="recovery").exclude(reason="recovery")
+        VirtualminMigration.objects.filter(status__in=TERMINAL)
+        .exclude(contract="recovery")
+        .exclude(contract="imported_web", status="completed")
+        .exclude(reason="recovery")
     )
 
 
@@ -208,7 +211,12 @@ def cleanup_migration_artifacts(migration_id: str) -> dict[str, str]:
         archive = f"migration_{migration.pk}.tar.gz"
         if migration.archive_name != archive:
             raise ValueError("The archive name does not belong to this migration UUID")
-        failures = _clean_locations(migration, token, archive)
+        if migration.contract == VirtualminMigration.Contract.IMPORTED_WEB:
+            from .component_artifact_cleanup import cleanup_component_artifacts  # noqa: PLC0415
+
+            failures = cleanup_component_artifacts(migration, token, archive)
+        else:
+            failures = _clean_locations(migration, token, archive)
         if failures:
             raise ValueError("; ".join(failures))
         _checkpoint(migration, token, {"done": True, "last_error": "", "next_run": None})

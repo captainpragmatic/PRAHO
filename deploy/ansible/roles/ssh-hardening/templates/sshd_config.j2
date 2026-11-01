@@ -18,6 +18,7 @@ UseDNS no
 X11Forwarding no
 AllowAgentForwarding no
 AllowTcpForwarding no
+AllowStreamLocalForwarding no
 PermitTunnel no
 PermitUserEnvironment no
 ClientAliveInterval 300
@@ -25,3 +26,14 @@ ClientAliveCountMax 2
 PrintMotd no
 AcceptEnv LANG LC_*
 Subsystem sftp internal-sftp
+{% if ssh_webmin_tunnel_enabled | default(false) %}
+# BEGIN PRAHO WEBMIN TUNNEL
+Match User praho-webmin-tunnel
+    AllowTcpForwarding local
+    PermitOpen 127.0.0.1:10000
+    PermitTTY no
+    ForceCommand /bin/false
+    GatewayPorts no
+Match all
+# END PRAHO WEBMIN TUNNEL
+{% endif %}

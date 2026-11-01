@@ -1216,13 +1216,12 @@ class Command(BaseCommand):
 
     def _check_node_deploy_playbook(self, server: Any) -> tuple[str, str, Any]:
         """virtualmin.yml's post-install tasks succeed and its API user can provision."""
-        import secrets  # noqa: PLC0415
 
         from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
 
         self.stdout.write("Check 5: node deploy (virtualmin.yml) and its API user")
-        user, password = "praho-labcheck", secrets.token_urlsafe(24)
+        user, password = server.api_username, server.get_api_password()
         self._run_playbook(server, "virtualmin.yml", {"praho_api_user": user, "praho_api_password": password})
         as_api_user = VirtualminServer.objects.get(pk=server.pk)  # unsaved credential swap
         as_api_user.api_username = user
@@ -1252,6 +1251,7 @@ class Command(BaseCommand):
             CHAIN_ROLE_STANDALONE,
             REMOTE_ARCHIVE_DIR,
             differential_flags,
+            restore_domain_params,
         )
 
         node = load_state().node("vm-b")
@@ -1276,7 +1276,7 @@ class Command(BaseCommand):
         mode = node_exec(node.container, "stat", "-c", "%a %U", REMOTE_ARCHIVE_DIR).strip()
         self._ok("mkdir created the staging directory root 0700", mode == "700 root", mode)
         restored = gateway.call(
-            "restore-domain", {"domain": CHECK_DOMAIN, "source": archive, "all-features": ""}, timeout_seconds=900
+            "restore-domain", restore_domain_params(domain=CHECK_DOMAIN, source=archive), timeout_seconds=900
         )
         self._ok(
             "the API user restores it over the live domain",
@@ -1381,7 +1381,14 @@ class Command(BaseCommand):
         for run in (1, 2):
             # The play itself runs over SSH from Platform: a second run proves
             # port 22 is still open to Platform after the first.
-            self._run_playbook(server, "virtualmin_harden.yml")
+            self._run_playbook(
+                server,
+                "virtualmin_harden.yml",
+                {
+                    "security_hardening_approved": True,
+                    "praho_api_user": server.api_username,
+                },
+            )
             self.stdout.write(f"    harden run {run} done")
         after = reach(10000, "https")
         self._ok("after the play, vm-a cannot reach vm-b:10000", after == "000", after)

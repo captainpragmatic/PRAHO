@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import DatabaseError, InterfaceError, models, transaction
 from django.db.models import Count, Prefetch, Q
@@ -35,10 +36,12 @@ from apps.infrastructure.provider_config import get_provider_sync_fn, get_provid
 from apps.infrastructure.provider_sync import PROVIDERS_WITH_LOCATION_DATA
 from apps.settings.services import SettingsService
 
+from .cloud_destroy_service import DestroyApproval, approve_destroy, inspect_destroy
 from .deployment_preflight import deployment_configuration_issues, validate_deployment_dns_zone
 from .forms import (
     CloudProviderForm,
     DeploymentDestroyForm,
+    HostnameConfirmationForm,
     NodeDeploymentForm,
     NodeSizeForm,
 )
@@ -471,6 +474,7 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
     # Pre-compute progress step for template (0-6 range matching 6 stages)
     progress_step = min(progress_percentage // 16, 6)
+    destroy_plan = deployment.destroy_plans.first()
 
     context = {
         "page_title": f"Deployment: {deployment.hostname}",
@@ -479,6 +483,8 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "logs": logs,
         "progress_percentage": progress_percentage,
         "progress_step": progress_step,
+        "destroy_plan": destroy_plan,
+        "cloud_cleanup_outcomes": destroy_plan.cleanup_outcomes.order_by("kind", "resource_id") if destroy_plan else [],
         "stages": ["SSH Key", "Provision", "DNS", "Ansible", "Validate", "Register"],
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
@@ -575,34 +581,56 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
         messages.error(request, f"Cannot destroy deployment in status '{deployment.get_status_display()}'.")
         return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
-    if request.method == "POST":
-        form = DeploymentDestroyForm(request.POST, hostname=deployment.hostname)
-        if form.is_valid():
-            # Validate token exists before queuing (fail fast)
-            token_result = get_provider_token(deployment.provider)
-
-            if token_result.is_err():
-                messages.error(request, _provider_credentials_help(deployment.provider))
-                return redirect("infrastructure:deployment_detail", pk=deployment.id)
-
-            try:
-                task_id = queue_destroy_node(
-                    deployment_id=deployment.id,
-                    provider_id=deployment.provider_id,
-                    user_id=request.user.id,
-                )
-            except OperationReservationError as refused:
-                messages.error(request, str(refused))
-                return redirect("infrastructure:deployment_detail", pk=deployment.id)
-
-            messages.success(request, f"Destruction queued for deployment '{deployment.hostname}'.")
-            logger.info(
-                f"[Deployment] Destroy queued for {deployment.hostname} by {request.user.email}, task_id={task_id}"  # type: ignore[union-attr]
-            )
-
-            return redirect("infrastructure:deployment_detail", pk=deployment.id)
+    preview = None
+    inventory_error = ""
+    token_result = get_provider_token(deployment.provider)
+    if token_result.is_err():
+        inventory_error = _provider_credentials_help(deployment.provider)
     else:
-        form = DeploymentDestroyForm(hostname=deployment.hostname)
+        try:
+            preview = inspect_destroy(deployment, token_result.unwrap())
+        except (ValidationError, ValueError) as error:
+            inventory_error = str(error)
+    form = DeploymentDestroyForm(
+        request.POST if request.method == "POST" else None,
+        hostname=deployment.hostname,
+        initial={"resource_digest": preview.digest if preview else ""},
+        manual_backup_ids=tuple(item.resource_id for item in preview.decisions if item.kind == "backup")
+        if preview is not None and preview.capabilities.backup_retention == "manual"
+        else (),
+    )
+    if request.method == "POST" and form.is_valid() and preview is not None:
+        try:
+            plan = approve_destroy(
+                deployment,
+                token_result.unwrap(),
+                cast("User", request.user),
+                DestroyApproval(
+                    form.cleaned_data["confirm_hostname"],
+                    form.cleaned_data["resource_digest"],
+                    form.cleaned_data["provider_restore_points"],
+                    form.cleaned_data["retention_reason"],
+                    form.provider_snapshot_mappings(),
+                ),
+            )
+        except ValidationError as changed:
+            messages.error(request, str(changed))
+            return redirect("infrastructure:deployment_destroy", pk=deployment.id)
+        try:
+            task_id = queue_destroy_node(
+                deployment_id=deployment.id,
+                provider_id=deployment.provider_id,
+                user_id=request.user.id,
+                plan_id=str(plan.pk),
+            )
+        except OperationReservationError as refused:
+            messages.error(request, str(refused))
+            return redirect("infrastructure:deployment_detail", pk=deployment.id)
+        messages.success(request, f"Destruction queued for deployment '{deployment.hostname}'.")
+        logger.info(
+            f"[Deployment] Destroy queued for {deployment.hostname} by {cast('User', request.user).email}, task_id={task_id}"
+        )
+        return redirect("infrastructure:deployment_detail", pk=deployment.id)
 
     breadcrumb_items = [
         {"text": "Management", "url": "/dashboard/"},
@@ -617,6 +645,9 @@ def deployment_destroy(request: HttpRequest, pk: int) -> HttpResponse:
         "breadcrumb_items": breadcrumb_items,
         "deployment": deployment,
         "form": form,
+        "resource_options": preview.options if preview is not None else [],
+        "inventory_error": inventory_error,
+        "inventory_ready": preview is not None,
         "form_action": reverse("infrastructure:deployment_destroy", args=[deployment.id]),
         "cancel_url": reverse("infrastructure:deployment_detail", args=[deployment.id]),
     }
@@ -634,7 +665,7 @@ def deployment_redeploy(request: HttpRequest, pk: int) -> HttpResponse:
 
     deployment = get_object_or_404(NodeDeployment, id=pk)
     available_sizes = NodeSize.offered_in(deployment.region).order_by("monthly_cost_eur")
-    form = DeploymentDestroyForm(request.POST or None, hostname=deployment.hostname)
+    form = HostnameConfirmationForm(request.POST or None, hostname=deployment.hostname)
     size_id = str(request.POST.get("new_size", ""))
     # ASCII digits of a sane length only: "²" passes isdigit(), and a huge number overflows the column.
     valid_id = size_id.isascii() and size_id.isdecimal() and len(size_id) <= _MAX_ID_DIGITS

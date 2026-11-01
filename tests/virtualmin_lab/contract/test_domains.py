@@ -25,7 +25,7 @@ from tests.virtualmin_lab.contract.harness import (
 
 ABSENT = "contract-absent.praho.test"
 SEED = "contract-recovery-seed"
-DEFAULT_FEATURES = {"unix", "dir", "web", "ssl", "logrotate", "mysql", "webmin"}
+DEFAULT_FEATURES = {"unix", "dir", "web", "ssl", "logrotate", "mysql"}
 
 
 @pytest.mark.smoke
@@ -48,14 +48,14 @@ def test_create_domain(lab: Lab) -> None:
             "create-domain",
             params,
             case="success",
-            note="PRAHO's own parameters: default template, default features, the recovery seed as description",
+            note="PRAHO's own parameters: default template, explicit web-only features, the recovery seed as description",
         )
         assert_accepted(created)
 
         values = lab.domain_values(domain)
         assert listing_attribute(values, "Template") == DEFAULT_VIRTUALMIN_TEMPLATE
         assert listing_attribute(values, "Description") == SEED
-        assert set(listing_attribute(values, "Features").split()) >= DEFAULT_FEATURES
+        assert set(listing_attribute(values, "Features").split()) == DEFAULT_FEATURES
         assert listing_enabled(values) is True
 
         again = lab.call("create-domain", params, case="already_hosted", note="the same domain created twice")

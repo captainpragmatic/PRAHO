@@ -14,7 +14,12 @@
     webmin_version: "2.670"
     # The Virtualmin 8 installer. The old software.virtualmin.com/gpl/scripts URL
     # serves installer 7.5.2, which sets up the Virtualmin 7 repository.
-    virtualmin_install_script_url: "https://download.virtualmin.com/virtualmin-install.sh"
+    virtualmin_install_script_url: "https://raw.githubusercontent.com/virtualmin/virtualmin-install/232a23d6aebf3ff9ad43d4d2823773ad14770509/virtualmin-install.sh"
+    virtualmin_install_script_checksum: "sha256:996d32a9a2b7e64cc9dc4af7b6d001297fdee867ce34dffae31a7197f230d5ae"
+    # This installer calls set_hosts_entry, absent from the rolling slib download.
+    # Resolve its supported local-library path against an equally qualified revision.
+    virtualmin_install_library_url: "https://raw.githubusercontent.com/virtualmin/slib/d225f66ee9df1f29865a8b117f968cdf44672380/slib.sh"
+    virtualmin_install_library_checksum: "sha256:a6894f5b83d2d4776f0f7103dd984dbf34e823902d94574c65e52b59a9f77941"
     # Features every PRAHO-provisioned server gets; all exist on a --minimal node.
     virtualmin_required_features:
       - unix
@@ -23,7 +28,6 @@
       - ssl
       - logrotate
       - mysql
-      - webmin
 
   tasks:
     # The installer and Let's Encrypt need the node's fully qualified name, which the
@@ -45,6 +49,34 @@
         url: "{{ virtualmin_install_script_url }}"
         dest: /root/virtualmin-install.sh
         mode: '0755'
+        checksum: "{{ virtualmin_install_script_checksum }}"
+      when: not virtualmin_installed.stat.exists
+
+    - name: Read the qualified installer before preserving the host firewall
+      ansible.builtin.slurp:
+        src: /root/virtualmin-install.sh
+      register: qualified_installer
+      when: not virtualmin_installed.stat.exists
+
+    - name: Require the exact reviewed firewall purge before patching
+      ansible.builtin.assert:
+        that:
+          - (qualified_installer.content | b64decode | regex_findall('(?m)^  /usr/bin/apt-get --quiet --assume-yes purge ufw firewalld.*$')) | length == 1
+      when: not virtualmin_installed.stat.exists
+
+    - name: Preserve the already verified host firewall during installation
+      ansible.builtin.replace:
+        path: /root/virtualmin-install.sh
+        regexp: '(?m)^  /usr/bin/apt-get --quiet --assume-yes purge ufw firewalld.*$'
+        replace: '  # PRAHO: retain the verified host firewall throughout installation.'
+      when: not virtualmin_installed.stat.exists
+
+    - name: Download the matching qualified installer utility library
+      ansible.builtin.get_url:
+        url: "{{ virtualmin_install_library_url }}"
+        dest: /root/slib.sh
+        mode: '0600'
+        checksum: "{{ virtualmin_install_library_checksum }}"
       when: not virtualmin_installed.stat.exists
 
     - name: Run Virtualmin installation
@@ -52,9 +84,11 @@
         /root/virtualmin-install.sh
         --hostname {{ node_fqdn }}
         --minimal
+        --exclude Nftables,Firewalld,Fail2ban,Fail2banFirewalld
         --force
       args:
         creates: /usr/share/webmin/virtual-server
+        chdir: /root
       register: virtualmin_install
       # Fire-and-forget (poll: 0): the virtualmin installer runs ~40 min and restarts
       # services/networking, dropping the SSH connection. With a non-zero poll ansible would
@@ -369,6 +403,22 @@
 
     - name: Install private hosting usage collection
       ansible.builtin.import_tasks: virtualmin_usage_tasks.yml
+
+    - name: Apply panel service changes before API credential verification
+      ansible.builtin.meta: flush_handlers
+
+    - name: Require the local Webmin TLS endpoint to be ready
+      ansible.builtin.uri:
+        url: https://127.0.0.1:10000/
+        validate_certs: false
+        follow_redirects: none
+        status_code: [200, 302, 401, 403]
+        timeout: 5
+      register: webmin_tls_ready
+      until: webmin_tls_ready.status | default(-1) in [200, 302, 401, 403]
+      retries: 15
+      delay: 1
+      changed_when: false
 
   handlers:
     - name: Restart webmin

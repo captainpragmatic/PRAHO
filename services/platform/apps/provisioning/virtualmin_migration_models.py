@@ -43,7 +43,7 @@ TRANSITIONS: dict[str, frozenset[str]] = {
     "repointing": frozenset({"completed"}),
     "compensating": frozenset({"rolled_back"}),
     "fencing": frozenset(),
-    "needs_review": frozenset({"failed", "compensating", "activating", "bridging", "repointing"}),
+    "needs_review": frozenset({"failed", "compensating", "verifying", "activating", "bridging", "repointing"}),
 }
 
 
@@ -108,9 +108,24 @@ class VirtualminMigration(models.Model):
         CUTOVER = "cutover", _("Cutover")  # The account has a live published name: DNS and bridge steps run
         LEGACY = "legacy", _("Legacy")
         RECOVERY = "recovery", _("Recovery from backup")
+        IMPORTED_WEB = "imported_web", _("Imported website components; retain source services")
 
     # ADR-0061 Phase 2: the cutover's own evidence.
-    contract = models.CharField(max_length=10, choices=Contract.choices, blank=True)
+    contract = models.CharField(max_length=20, choices=Contract.choices, blank=True)
+    component_approval = models.OneToOneField(
+        "provisioning.ComponentMigrationApproval",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="migration",
+    )
+    component_source_obligation = models.ForeignKey(
+        "provisioning.SourceServiceObligation",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="component_migrations",
+    )
     drain = models.ForeignKey(
         "provisioning.NodeDrain", on_delete=models.SET_NULL, null=True, blank=True, related_name="migrations"
     )
@@ -178,6 +193,19 @@ class VirtualminMigration(models.Model):
             rows = rows.filter(contract="recovery")
         if to_status == "compensating":
             rows = rows.filter(cutover_committed_at__isnull=True)
+            rows = rows.filter(
+                ~models.Q(contract="imported_web")
+                | models.Q(barrier_state__component_source_seal_intent=False)
+                | models.Q(barrier_state__component_source_seal_intent__isnull=True)
+            )
+        if from_status == "needs_review" and to_status == "verifying":
+            rows = rows.filter(
+                contract="imported_web",
+                cutover_committed_at__isnull=True,
+                component_approval__isnull=False,
+                component_source_obligation__isnull=False,
+                barrier_state__component_source_seal_intent=True,
+            )
         if from_status == "needs_review" and to_status in {"activating", "bridging", "repointing"}:
             rows = rows.filter(cutover_committed_at__isnull=False)
         fields.update(status=to_status, updated_at=timezone.now())  # fsm-bypass: a dict for the guarded UPDATE

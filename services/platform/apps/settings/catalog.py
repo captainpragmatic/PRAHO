@@ -2785,6 +2785,18 @@ CATALOG: tuple[SettingDef, ...] = (
         input_kind="toggle",
     ),
     SettingDef(
+        key="provisioning.enforce_verified_web_nodes",
+        data_type="boolean",
+        default=False,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Require verified web destinations for existing nodes"),
+        help_text=_(
+            "Enable after qualifying existing nodes. New nodes and imports always need verification; acknowledged sources never accept destination work."
+        ),
+        input_kind="toggle",
+    ),
+    SettingDef(
         key="provisioning.max_concurrent_health_checks",
         data_type="integer",
         default=10,

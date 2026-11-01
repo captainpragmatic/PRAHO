@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import timedelta
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.db import IntegrityError, transaction
 from django.db.models import F
@@ -38,6 +39,18 @@ class DrainTests(MigrationTestBase):
         )
         self.drain_queue = queue_patch.start()
         self.addCleanup(queue_patch.stop)
+
+    def test_hardening_exclusion_prevents_drain_admission_before_lifecycle_changes(self) -> None:
+        operation = uuid4()
+        VirtualminServer.objects.filter(pk=self.server.pk).update(security_operation=operation)
+        result = NodeDrainService.start_drain(self.server, initiated_by=self.staff)
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("hardening", result.unwrap_err())
+        self.server.refresh_from_db()
+        self.assertFalse(self.server.is_draining)
+        self.assertEqual(self.server.security_operation, operation)
+        self.assertFalse(NodeDrain.objects.exists())
+        self.drain_queue.assert_not_called()
 
     def _second(self, status: str = "suspended") -> VirtualminAccount:
         domain = f"second-{status}.example.com"

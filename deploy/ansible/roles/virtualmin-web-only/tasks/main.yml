@@ -1,0 +1,78 @@
+---
+- name: Require an administrative allowlist
+  ansible.builtin.assert:
+    that:
+      - node_admin_allowed_cidrs | length > 0
+
+- name: Install host firewall tooling before panel packages
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install the access recovery coordinator
+  ansible.builtin.copy:
+    src: firewall.py
+    dest: /usr/local/sbin/praho-firewall
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Choose a unique transition owner
+  ansible.builtin.set_fact:
+    firewall_token: "{{ lookup('password', '/dev/null', length=32, chars=['hexdigits']) | lower }}"
+    firewall_recovery_completed: false
+
+- name: Snapshot firewall state with exclusive SSH transition ownership
+  ansible.builtin.command:
+    argv: [/usr/bin/python3, /usr/local/sbin/praho-firewall, begin, "{{ firewall_token }}"]
+  changed_when: false
+
+- name: Converge and prove administrative access
+  block:
+    - name: Arm bounded automatic access recovery
+      ansible.builtin.command:
+        argv: [systemd-run, "--unit=praho-firewall-{{ firewall_token }}", --on-active=180s, /usr/bin/python3, /usr/local/sbin/praho-firewall, rollback, "{{ firewall_token }}"]
+      changed_when: false
+
+    - name: Apply the complete reviewed firewall policy
+      become: false
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/sbin/praho-firewall, activate, "{{ firewall_token }}"]
+        stdin: "{{ {'cidrs': node_admin_allowed_cidrs, 'reviewed_hooks': security_reviewed_firewall_hooks | default({})} | to_json }}"
+      register: firewall_convergence
+      changed_when: (firewall_convergence.stdout | from_json).changed
+
+    - name: Prove a fresh pinned controller connection
+      ansible.builtin.include_role:
+        name: ssh-hardening
+        tasks_from: prove.yml
+      vars:
+        ssh_proof_port: "{{ ansible_port | default(22) }}"
+
+    - name: Commit only the proved access policy
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/sbin/praho-firewall, commit, "{{ firewall_token }}"]
+      changed_when: false
+    - name: Record confirmed access recovery ownership completion
+      ansible.builtin.set_fact:
+        firewall_recovery_completed: true
+  rescue:
+    - name: Restore the previous access policy
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/sbin/praho-firewall, rollback, "{{ firewall_token }}"]
+      changed_when: false
+    - name: Record confirmed access restoration
+      ansible.builtin.set_fact:
+        firewall_recovery_completed: true
+    - name: Stop before installing or changing any services
+      ansible.builtin.fail:
+        msg: "Firewall verification failed; prior access configuration was restored. Inspect the recovery snapshot before retrying."
+  always:
+    - name: Disarm completed access recovery
+      ansible.builtin.command:
+        argv: [systemctl, stop, "praho-firewall-{{ firewall_token }}.timer"]
+      changed_when: false
+      failed_when: false
+      when: firewall_recovery_completed | default(false)

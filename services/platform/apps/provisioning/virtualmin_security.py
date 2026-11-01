@@ -22,7 +22,7 @@ from .virtualmin_security_models import NodeSecurityDecision, NodeSecurityReview
 if TYPE_CHECKING:
     from apps.users.models import User
 
-POLICY_VERSION = "virtualmin-web-only-v1"
+POLICY_VERSION = "virtualmin-web-only-v2"
 MAX_EVIDENCE_BYTES = 131072
 MAX_PREVIEW_AGE_SECONDS = 900
 IDENTITY_LENGTH = 64
@@ -76,8 +76,19 @@ def _vault_identity(hostname: str) -> object:
 def connection_identity(server: VirtualminServer) -> str:
     """Bind evidence to endpoint, trust, credential incarnation and managed resource."""
     deployment = getattr(server, "node_deployment", None)
+    host_keys = deployment.ssh_host_keys if deployment else server.imported_ssh_host_keys or None
+    from apps.infrastructure.ansible_service import node_admin_allowed_cidrs  # noqa: PLC0415 -- avoids transport cycle
+
+    try:
+        operator_keys = _configured_file_identity("PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE")
+    except ValidationError:
+        # A source inspection remains available before the operator key bundle is
+        # provisioned. Apply independently requires a readable, valid bundle.
+        operator_keys = "unavailable"
     return _digest(
         {
+            "administrative_networks": sorted(node_admin_allowed_cidrs()),
+            "operator_keys": operator_keys,
             "server": str(server.pk),
             "hostname": server.hostname,
             "api_port": server.api_port,
@@ -89,13 +100,14 @@ def connection_identity(server: VirtualminServer) -> str:
             "credential": hashlib.sha256(bytes(server.encrypted_api_password or b"")).hexdigest(),
             "vault": _vault_identity(server.hostname),
             "ssh_port": server.effective_ssh_port,
-            "ssh_host_keys": server.enrolled_ssh_host_keys,
+            # Reading a preview identity cannot enroll legacy configured trust as a side effect.
+            "ssh_host_keys": host_keys,
             "deployment": str(deployment.pk) if deployment else None,
             "resource": deployment.external_node_id if deployment else None,
             "imported_key": _configured_file_identity("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH")
             if not deployment
             else None,
-            "configured_trust": _configured_file_identity("PRAHO_SSH_KNOWN_HOSTS_PATH"),
+            "configured_trust": _configured_file_identity("PRAHO_SSH_KNOWN_HOSTS_PATH") if not host_keys else None,
         }
     )
 
@@ -143,6 +155,10 @@ def record_inspection(server: VirtualminServer, evidence: dict[str, object]) -> 
     """Supersede the prior preview while preserving node health and services."""
     digest = _evidence_digest(evidence)
     locked = VirtualminServer.objects.select_for_update().get(pk=server.pk)
+    if locked.security_operation:
+        raise ValidationError(
+            _("A hardening attempt is unresolved; reconcile its outcome before replacing the review.")
+        )
     identity = connection_identity(locked)
     if evidence["identity"] != identity:
         raise ValidationError(_("Node connection changed; inspect it again."))
@@ -165,7 +181,7 @@ def acknowledge_source(
     review: NodeSecurityReview, current_evidence: dict[str, object], actor: User, reason: str
 ) -> NodeSecurityDecision:
     """Keep existing services; never equate operator acknowledgment with hardening."""
-    if not can_deploy_nodes(actor):
+    if not actor.is_active or not can_deploy_nodes(actor):
         raise PermissionDenied(_("Deployment permission is required to accept node security changes."))
     if not reason.strip() or len(reason) > MAX_REASON_LENGTH:
         raise ValidationError(_("Explain responsibility for the retained services (up to 2000 characters)."))
@@ -173,9 +189,23 @@ def acknowledge_source(
     if stored.server_id is None:
         raise ValidationError(_("The inspected node has been removed."))
     locked = VirtualminServer.objects.select_for_update().get(pk=stored.server_id)
+    validate_decision(locked, stored, current_evidence)
+    decision = NodeSecurityDecision.objects.create(
+        review=stored, actor=actor, action="acknowledge_source", reason=reason.strip()
+    )
+    locked.security_state = "acknowledged_source_only"
+    locked.save(update_fields=["security_state", "updated_at"])
+    return decision
+
+
+def validate_decision(
+    locked: VirtualminServer, stored: NodeSecurityReview, current_evidence: dict[str, object]
+) -> None:
+    """Caller holds the server row lock; both operator decisions share the same freshness fence."""
     age = (timezone.now() - stored.created_at).total_seconds()
     if (
-        locked.current_security_review_id != stored.pk
+        locked.security_operation
+        or locked.current_security_review_id != stored.pk
         or stored.policy_version != POLICY_VERSION
         or stored.identity != connection_identity(locked)
         or _evidence_digest(current_evidence) != stored.digest
@@ -184,9 +214,3 @@ def acknowledge_source(
         or NodeSecurityDecision.objects.filter(review=stored).exists()
     ):
         raise ValidationError(_("The preview changed, expired or was already decided; inspect the node again."))
-    decision = NodeSecurityDecision.objects.create(
-        review=stored, actor=actor, action="acknowledge_source", reason=reason.strip()
-    )
-    locked.security_state = "acknowledged_source_only"
-    locked.save(update_fields=["security_state", "updated_at"])
-    return decision

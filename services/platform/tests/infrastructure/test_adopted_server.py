@@ -13,6 +13,7 @@ from django.test import TestCase
 from hcloud.servers.domain import IPv4Address
 
 from apps.common.types import Ok
+from apps.infrastructure.cloud_gateway import SSHKeyResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.dns_gateway import ReconcileOutcome
 from apps.infrastructure.hcloud_service import HcloudService
@@ -53,7 +54,7 @@ class AdoptedServerRetryTests(TestCase):
         service = _pipeline_service()
         service._ssh_manager.get_deployment_key.return_value = Ok(mock.Mock(public_key="ssh-ed25519 FIRST"))
         gateway = _gateway()
-        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
         from apps.infrastructure.cloud_gateway import ServerCreateResult  # noqa: PLC0415
 
         gateway.create_server.return_value = Ok(
@@ -85,7 +86,7 @@ class AdoptedFirewallTests(TestCase):
         deployment.refresh_from_db()
         service = _pipeline_service()
         gateway = _gateway()
-        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
         from apps.infrastructure.cloud_gateway import ServerCreateResult  # noqa: PLC0415
 
         gateway.create_server.return_value = Ok(
@@ -115,7 +116,7 @@ class EarlierAttemptFirewallTests(TestCase):
         deployment.refresh_from_db()
         service = _pipeline_service()
         gateway = _gateway()
-        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
         gateway.create_server.return_value = Err("server lookup failed")
 
         with (
@@ -139,7 +140,7 @@ class KeyNameRecordedAtUploadTests(TestCase):
         deployment = _create_deployment("pending")
         service = _pipeline_service()
         gateway = _gateway()
-        gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+        gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
         gateway.create_firewall.return_value = Err("firewall quota")
 
         with (

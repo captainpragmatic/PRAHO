@@ -30,6 +30,10 @@ os.environ["PRAHO_SKIP_DOTENV"] = "1"
 from .dev import *  # noqa: E402, F403  # Django settings pattern
 
 VIRTUALMIN_LAB_STATE_DIR = _LAB_STATE_DIR
+PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE = str(_LAB_STATE_DIR / "operator_authorized_keys")
+VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH = os.environ.get(
+    "VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH", str(_LAB_STATE_DIR / "component-source" / "identity")
+)
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",

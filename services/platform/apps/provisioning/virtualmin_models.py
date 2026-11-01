@@ -134,6 +134,17 @@ class VirtualminServer(NaturalKeySecretsMixin, models.Model):
         related_name="+",
         editable=False,
     )
+    security_operation = models.UUIDField(null=True, blank=True, editable=False)
+    legacy_security_admission = models.BooleanField(default=False, editable=False)
+    verified_security_review = models.ForeignKey(
+        "provisioning.NodeSecurityReview",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="+",
+        editable=False,
+    )
+    imported_ssh_host_keys = models.TextField(blank=True, default="", editable=False)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active", verbose_name=_("Status"))
     last_health_check = models.DateTimeField(null=True, blank=True)
     health_check_error = models.TextField(blank=True)
@@ -219,7 +230,7 @@ class VirtualminServer(NaturalKeySecretsMixin, models.Model):
         try:
             deployment = self.node_deployment
         except ObjectDoesNotExist:
-            return None
+            return self.imported_ssh_host_keys or None
         return resolve_node_host_keys(deployment)
 
     @property

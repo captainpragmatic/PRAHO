@@ -29,6 +29,7 @@ from django.utils.translation import gettext
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service, node_admin_allowed_cidrs
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
+from apps.infrastructure.cloud_destroy_service import record_resource_ownership
 from apps.infrastructure.cloud_gateway import (
     CloudProviderGateway,
     FirewallRule,
@@ -589,7 +590,9 @@ class NodeDeploymentService:
                 if key_upload_result.is_err():
                     settle_create_state("none")
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                        self._cleanup_resources(
+                            gateway, created_resources, deployment, lease=lease, api_token=api_token
+                        )
                     self._mark_failed(
                         deployment,
                         f"SSH key upload failed: {key_upload_result.unwrap_err()}",
@@ -601,6 +604,7 @@ class NodeDeploymentService:
                         retriability=retriability_of(key_upload_result),
                     )
 
+                record_resource_ownership(deployment, "ssh_key", key_upload_result.unwrap().key_id, "create_response")
                 created_resources.append(("ssh_key", ssh_key_name))
                 # Recorded at once, so reconciliation finds this attempt's key by name after a re-deploy.
                 from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415  # Deferred import
@@ -615,20 +619,32 @@ class NodeDeploymentService:
                 log_deployment("info", f"SSH key '{ssh_key_name}' uploaded to provider")
 
                 # Create firewall before server — attach during provisioning
-                log_deployment("info", f"Creating firewall '{firewall_name}'")
-                firewall_result = gateway.create_firewall(
-                    name=firewall_name,
-                    rules=self._node_firewall_rules(),
-                    labels={
-                        "managed-by": "praho",
-                        "deployment-id": str(deployment.correlation_id),
-                        "hostname": deployment.hostname,
-                    },
+                provider_firewall = bool(deployment.panel_type and deployment.panel_type.panel_type != "virtualmin")
+                log_deployment(
+                    "info",
+                    f"Creating firewall '{firewall_name}'"
+                    if provider_firewall
+                    else "Virtualmin will use the reviewed host firewall during bootstrap",
+                )
+                firewall_result = (
+                    gateway.create_firewall(
+                        name=firewall_name,
+                        rules=self._node_firewall_rules(),
+                        labels={
+                            "managed-by": "praho",
+                            "deployment-id": str(deployment.correlation_id),
+                            "hostname": deployment.hostname,
+                        },
+                    )
+                    if provider_firewall
+                    else Ok("")
                 )
                 if firewall_result.is_err():
                     settle_create_state("none")
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                        self._cleanup_resources(
+                            gateway, created_resources, deployment, lease=lease, api_token=api_token
+                        )
                     self._mark_failed(
                         deployment,
                         f"Firewall creation failed: {firewall_result.unwrap_err()}",
@@ -643,21 +659,28 @@ class NodeDeploymentService:
                 firewall_id = firewall_result.unwrap()
                 # After an earlier attempt that may have created a server, this firewall may be that
                 # attempt's (adopted by label) and in use: compensation keeps it, teardown finds it by label.
-                if prior_create_state == "none":
+                if firewall_id and prior_create_state == "none":
                     created_resources.append(("firewall", firewall_id))
-                log_deployment("info", f"Firewall '{firewall_name}' created (id={firewall_id})")
+                if firewall_id:
+                    record_resource_ownership(deployment, "firewall", firewall_id, "create_response")
+                    log_deployment("info", f"Firewall '{firewall_name}' created (id={firewall_id})")
                 # Persist firewall_id in a structured log entry so destroy_node can retrieve it by ID
                 from apps.infrastructure.models import (  # noqa: PLC0415  # Deferred: avoids circular import
                     NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
                 )
 
-                NodeDeploymentLog.objects.create(
-                    deployment=deployment,
-                    level="INFO",
-                    message=f"{FIREWALL_RECORD_PREFIX} {firewall_name}",
-                    phase="provision_server",
-                    details={"firewall_id": firewall_id, "firewall_name": firewall_name, "ssh_key_name": ssh_key_name},
-                )
+                if firewall_id:
+                    NodeDeploymentLog.objects.create(
+                        deployment=deployment,
+                        level="INFO",
+                        message=f"{FIREWALL_RECORD_PREFIX} {firewall_name}",
+                        phase="provision_server",
+                        details={
+                            "firewall_id": firewall_id,
+                            "firewall_name": firewall_name,
+                            "ssh_key_name": ssh_key_name,
+                        },
+                    )
 
                 # Create the server via gateway
                 create_request = ServerCreateRequest(
@@ -665,7 +688,7 @@ class NodeDeploymentService:
                     server_type=deployment.node_size.provider_type_id if deployment.node_size else "",
                     location=deployment.region.provider_region_id if deployment.region else "",
                     ssh_keys=[ssh_key_name],
-                    firewall_ids=[firewall_id],
+                    firewall_ids=[firewall_id] if firewall_id else [],
                     labels={
                         "managed-by": "praho",
                         "praho-deployment": str(deployment.correlation_id),
@@ -680,7 +703,9 @@ class NodeDeploymentService:
                     refused = retriability_of(server_result) is Retriability.NOT_RETRIABLE
                     settle_create_state("none" if refused else "unknown")
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                        self._cleanup_resources(
+                            gateway, created_resources, deployment, lease=lease, api_token=api_token
+                        )
                     self._mark_failed(
                         deployment,
                         f"Server creation failed: {server_result.unwrap_err()}",
@@ -712,6 +737,9 @@ class NodeDeploymentService:
                     # The current attempt's start, for display; costs come from the server lifetimes.
                     started_at=deployment.started_at or timezone.now(),
                 )
+                record_resource_ownership(deployment, "server", server_create_result.server_id, "create_response")
+                for resource_kind, resource_id in server_create_result.created_resources:
+                    record_resource_ownership(deployment, resource_kind, resource_id, "implicit_create_response")
             stages_completed.append("provision_server")
             log_deployment("info", f"Server created successfully via {provider_type} gateway")
 
@@ -720,7 +748,7 @@ class NodeDeploymentService:
 
             if not server_create_result or not server_create_result.ipv4_address:
                 if gateway is not None and created_resources:
-                    self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                    self._cleanup_resources(gateway, created_resources, deployment, lease=lease, api_token=api_token)
                 self._mark_failed(
                     deployment, "Server creation did not return an IP address", stage="update_deployment", lease=lease
                 )
@@ -751,7 +779,7 @@ class NodeDeploymentService:
             dns_result = self._configure_dns(deployment, dns_token, dns_zone_id, log_deployment, lease)
             if dns_result.is_err():
                 if gateway is not None and created_resources:
-                    self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                    self._cleanup_resources(gateway, created_resources, deployment, lease=lease, api_token=api_token)
                 self._mark_failed(
                     deployment, dns_result.unwrap_err(), stage="configuring_dns", audit_ctx=audit_ctx, lease=lease
                 )
@@ -810,7 +838,9 @@ class NodeDeploymentService:
                 stored = self._store_api_credential(deployment, virtualmin_api_username, virtualmin_api_password, user)
                 if stored.is_err():
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                        self._cleanup_resources(
+                            gateway, created_resources, deployment, lease=lease, api_token=api_token
+                        )
                     self._mark_failed(deployment, stored.unwrap_err(), stage="ansible_panel", lease=lease)
                     return Err(stored.unwrap_err())
 
@@ -822,18 +852,24 @@ class NodeDeploymentService:
                 report_progress(stage_name)
                 log_deployment("info", f"Running Ansible playbook: {playbook}")
 
+                if stage_name == "ansible_harden" and panel_type == "virtualmin":
+                    credential_proof = self._registration.verify_provisioned_api(deployment)
+                    if credential_proof.is_err():
+                        self._mark_failed(deployment, credential_proof.unwrap_err(), stage=stage_name, lease=lease)
+                        return Err(credential_proof.unwrap_err())
+
                 # Only the panel playbook (virtualmin.yml, the "ansible_panel" stage) provisions the
                 # ACL user, so scope the API credential to that stage. Broadcasting it to base/harden/
                 # backup would write the secret into a 0600 vars file for each and expose it to every
                 # task/callback in playbooks that never use it (#348 finding #6).
-                stage_extra_vars = (
-                    {
+                stage_extra_vars = None
+                if stage_name == "ansible_panel":
+                    stage_extra_vars = {
                         "praho_api_user": virtualmin_api_username,
                         "praho_api_password": virtualmin_api_password,
                     }
-                    if stage_name == "ansible_panel"
-                    else None
-                )
+                elif stage_name == "ansible_harden":
+                    stage_extra_vars = {"praho_api_user": virtualmin_api_username}
 
                 playbook_result = self._ansible.run_playbook(
                     deployment=deployment,
@@ -844,7 +880,9 @@ class NodeDeploymentService:
 
                 if playbook_result.is_err():
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                        self._cleanup_resources(
+                            gateway, created_resources, deployment, lease=lease, api_token=api_token
+                        )
                     self._mark_failed(
                         deployment,
                         f"Ansible {playbook} failed: {playbook_result.unwrap_err()}",
@@ -861,7 +899,9 @@ class NodeDeploymentService:
 
                 if not result.success:
                     if gateway is not None and created_resources:
-                        self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                        self._cleanup_resources(
+                            gateway, created_resources, deployment, lease=lease, api_token=api_token
+                        )
                     self._mark_failed(
                         deployment, f"Ansible {playbook} failed: {result.stderr[:500]}", stage=stage_name, lease=lease
                     )
@@ -891,7 +931,7 @@ class NodeDeploymentService:
 
             if validation_result.is_err():
                 if gateway is not None and created_resources:
-                    self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                    self._cleanup_resources(gateway, created_resources, deployment, lease=lease, api_token=api_token)
                 self._mark_failed(
                     deployment,
                     f"Validation failed: {validation_result.unwrap_err()}",
@@ -982,19 +1022,23 @@ class NodeDeploymentService:
             # Best-effort cleanup of cloud resources created before the failure; once registration has
             # started the node is installed and kept, for Retry to resume registration alone.
             if gateway is not None and created_resources and deployment.registration_state == "none":
-                self._cleanup_resources(gateway, created_resources, deployment, lease=lease)
+                self._cleanup_resources(
+                    gateway, created_resources, deployment, lease=lease, api_token=credentials.get("api_token", "")
+                )
             self._mark_failed(deployment, str(e), audit_ctx=audit_ctx, lease=lease)
 
             duration = (timezone.now() - start_time).total_seconds()
             return Err(f"Deployment failed: {e}")
 
-    def destroy_node(
+    def destroy_node(  # noqa: PLR0913 -- lifecycle context includes the immutable provider plan
         self,
         deployment: NodeDeployment,
         credentials: dict[str, str],
         cloudflare_api_token: str | None = None,
         user: User | None = None,
         expected_token: uuid.UUID | None = None,
+        *,
+        plan_id: uuid.UUID | None = None,
     ) -> Result[bool, str]:
         """
         Destroy a deployed node through the shared teardown.
@@ -1049,6 +1093,7 @@ class NodeDeploymentService:
             registration=self._registration,
             user=user,
             audit_ctx=audit_ctx,
+            plan_id=plan_id,
         )
 
     def retry_deployment(  # noqa: PLR0911  # One refusal per pre-claim check
@@ -2260,74 +2305,57 @@ class NodeDeploymentService:
         resources: list[tuple[str, str]],
         deployment: NodeDeployment,
         lease: OperationLease | None = None,
+        *,
+        api_token: str = "",
     ) -> None:
-        """
-        Best-effort cleanup of cloud resources created during a failed deployment.
+        """Compensate through exact inventory and retention, preserving this pipeline's lease.
 
-        Processes resources in reverse creation order (server → firewall → ssh_key)
-        so dependencies are respected. Never raises; logs all outcomes.
-
-        Args:
-            gateway: The cloud provider gateway to use for deletions
-            resources: List of (resource_type, resource_id) tuples in creation order
-            deployment: The NodeDeployment instance (used for logging only)
+        The in-memory creation list cannot authorize deletion. Immutable provenance,
+        fresh inventory and independently confirmed absence govern the shared executor.
+        A backup needing operator consent stops before DNS or credential withdrawal.
         """
+        from apps.infrastructure.cloud_destroy_execution import ResourceDestroyExecution  # noqa: PLC0415
+        from apps.infrastructure.cloud_destroy_service import plan_for_teardown  # noqa: PLC0415
+        from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
+
+        del resources
         hostname = deployment.hostname
-        if lease is not None and not still_owns(lease):
+        if lease is None or not still_owns(lease):
             # The row belongs to another owner now; its resources are no longer ours to delete.
             logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup skipped: this operation no longer owns the deployment")
             return
-        # DNS first: no record may point at an address about to be released. Unconfirmed, the server is
-        # kept (the row fails with its id) and the teardown sweep finishes the job.
         try:
+            client = gateway.resource_client()
+            plan = plan_for_teardown(deployment, lease, api_token, client, provisioning_compensation=True)
+            execution = ResourceDestroyExecution(
+                deployment, lease, plan, client, api_token, provisioning_compensation=True
+            )
+            prepared = execution.prepare()
+            if prepared.is_err():
+                raise ValueError(prepared.unwrap_err())
             dns = self._delete_owned_dns(deployment, lease)
+            if dns.is_err():
+                raise ValueError(dns.unwrap_err())
+            result = execution.delete_resources()
+            if execution.servers_absent:
+                owned_update(lease, deployment)
+                deactivate_api_credential(deployment)
+            if result.is_err():
+                raise ValueError(result.unwrap_err())
         except OperationOwnershipLostError as lost:
             logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup stopped: {lost}")
             return
-        if dns.is_err():
-            logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup kept the server: {dns.unwrap_err()}")
-            return
-        logger.info(f"[Deployment:{hostname}] Starting best-effort cleanup of {len(resources)} resource(s)")
-
-        for resource_type, resource_id in reversed(resources):
-            try:
-                deleted = self._delete_created_resource(gateway, resource_type, resource_id, hostname)
-                if deleted and resource_type == "server" and lease is not None:
-                    close_server_lifetimes(lease, deployment, server_id=resource_id)
-            except OperationOwnershipLostError as lost:
-                # Another operation owns the row now: what is left is its to delete or keep.
-                logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup stopped: {lost}")
-                return
-            except Exception as exc:
-                logger.warning(
-                    f"[Deployment:{hostname}] Cleanup: exception deleting {resource_type} '{resource_id}': {exc}"
+        except (ValueError, ValidationError, RuntimeError, OSError) as error:
+            if still_owns(lease):
+                NodeDeploymentLog.objects.create(
+                    deployment=deployment,
+                    level="WARNING",
+                    phase="cleanup",
+                    message=f"Provider cleanup awaits review or retry: {error}",
                 )
-
-        # The node is gone: its Virtualmin API credential, stored before the panel install, goes too.
-        deactivate_api_credential(deployment)
-        logger.info(f"[Deployment:{hostname}] Cleanup complete")
-
-    @staticmethod
-    def _delete_created_resource(
-        gateway: CloudProviderGateway, resource_type: str, resource_id: str, hostname: str
-    ) -> bool:
-        """Delete one resource this deployment created; True when confirmed. Raises only what the SDK raises."""
-        deleters = {
-            "server": ("server id", gateway.delete_server),
-            "firewall": ("firewall id", gateway.delete_firewall),
-            "ssh_key": ("SSH key name", gateway.delete_ssh_key),
-        }
-        if resource_type not in deleters:
-            logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup: unknown resource type '{resource_type}'")
-            return False
-        label, delete = deleters[resource_type]
-        logger.info(f"🗑️ [Deployment:{hostname}] Cleanup: deleting {label}={resource_id}")
-        result = delete(resource_id)
-        if result.is_err():
-            logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup: {resource_type} deletion failed: {result.unwrap_err()}")
-            return False
-        logger.info(f"✅ [Deployment:{hostname}] Cleanup: {label}={resource_id} deleted")
-        return True
+            logger.warning("⚠️ [Deployment:%s] Provider cleanup awaits review or retry: %s", hostname, error)
+            return
+        logger.info("✅ [Deployment:%s] Exact provider cleanup confirmed; retained restore points preserved", hostname)
 
     def _mark_failed(
         self,

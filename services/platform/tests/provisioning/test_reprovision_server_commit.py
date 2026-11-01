@@ -31,6 +31,7 @@ class ReprovisionServerCommitTests(VirtualminTaskTestBase):
         self.account.save(update_fields=["status", "updated_at"])
         self.target = VirtualminServer.objects.create(
             name="vm-test-2",
+            legacy_security_admission=True,
             hostname="vm2.example.com",
             api_username="praho-acl",
             api_port=10000,
