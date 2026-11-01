@@ -7,7 +7,8 @@ They need the Docker lab, its settings module and a server that only `make test-
     `VIRTUALMIN_E2E=1` (a deselect by marker would still import the module, and the module imports the lab);
 (b) the default E2E stack hands pytest an allow-listed environment, so a `VIRTUALMIN_E2E` in the caller's shell
     cannot reach it;
-(c) every such test carries the `virtualmin_lab` marker, registered in both pytest ini files.
+(c) native tests carry `virtualmin_lab`; the separate owned HTTP fixture uses `virtualmin_maintenance_lab`.
+    Both markers are registered, and the native runner selects only its own family.
 """
 
 from __future__ import annotations
@@ -47,24 +48,38 @@ def test_the_platform_conftest_ignores_the_lab_tests_without_the_runner_flag() -
 def test_the_ignore_pattern_matches_every_lab_test_file() -> None:
     files = sorted(E2E_PLATFORM.glob(LAB_TEST_GLOB))
 
-    assert files, "the smoke tests moved: update LAB_TEST_GLOB and the conftest together"
-    assert {file.name for file in files} >= {"test_virtualmin_lab_account.py"}
+    assert {file.name for file in files} == {
+        "test_virtualmin_lab_account.py",
+        "test_virtualmin_lab_backups.py",
+        "test_virtualmin_lab_jobs.py",
+        "test_virtualmin_lab_maintenance.py",
+    }, "the smoke tests moved: update the marker inventory and conftest together"
 
 
 def test_the_default_e2e_stack_does_not_forward_the_runner_flag() -> None:
-    with mock.patch.dict(os.environ, {"VIRTUALMIN_E2E": "1", "VIRTUALMIN_LAB_DATABASE": "/tmp/x.sqlite3"}):  # noqa: S108
+    with mock.patch.dict(
+        os.environ,
+        {
+            "VIRTUALMIN_E2E": "1",
+            "VIRTUALMIN_MAINTENANCE_LAB": "1",
+            "VIRTUALMIN_LAB_DATABASE": "/tmp/x.sqlite3",  # noqa: S108 -- caller value must never be forwarded
+        },
+    ):
         forwarded = environment()
 
     assert "VIRTUALMIN_E2E" not in forwarded
+    assert "VIRTUALMIN_MAINTENANCE_LAB" not in forwarded
     assert "VIRTUALMIN_LAB_DATABASE" not in forwarded
     assert forwarded["DJANGO_SETTINGS_MODULE"] == "config.settings.e2e"
 
 
 @pytest.mark.parametrize("ini", ["pytest.ini", "tests/virtualmin_lab/pytest.ini"])
-def test_the_marker_is_registered(ini: str) -> None:
-    assert "virtualmin_lab:" in (REPO / ini).read_text()
+@pytest.mark.parametrize("marker", ["virtualmin_lab", "virtualmin_maintenance_lab"])
+def test_the_marker_is_registered(ini: str, marker: str) -> None:
+    assert f"{marker}:" in (REPO / ini).read_text()
 
 
 @pytest.mark.parametrize("path", sorted(E2E_PLATFORM.glob(LAB_TEST_GLOB)), ids=lambda path: path.name)
 def test_every_lab_test_module_carries_the_marker(path: Path) -> None:
-    assert "pytestmark = pytest.mark.virtualmin_lab" in path.read_text(), path.name
+    marker = "virtualmin_maintenance_lab" if path.name == "test_virtualmin_lab_maintenance.py" else "virtualmin_lab"
+    assert f"pytestmark = pytest.mark.{marker}" in path.read_text(), path.name

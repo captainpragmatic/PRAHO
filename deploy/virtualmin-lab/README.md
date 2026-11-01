@@ -238,6 +238,14 @@ Both nodes publish on 127.0.0.1, which breaks four assumptions in PRAHO's produc
 
 The tests wait with retrying expects and polls, never a fixed sleep, and never drain the queue themselves (the server's worker does, and the test process would race it). An `hx-post` that redirects swaps the next page in without moving the address bar, so the tests read the job id from the swapped page.
 
+### Customer maintenance Portal (`make test-virtualmin-maintenance-portal`)
+
+This separate acceptance target starts Platform and Portal on owned loopback ports. It migrates a fresh, private seed database, copies it with SQLite's backup API, and gives Portal its own session database. It uses imported fixture servers without node or provider credentials; it does not bootstrap the shared lab nodes or change their keys. Install the normal development dependencies and Playwright Chromium before running it.
+
+The browser uses real customer login and signed HTTP calls to Platform. It exercises manual maintenance, live status polling, operator completion, emergency notices without an ordinary policy, company selection, and move/cancel corrections through the production email templates. Email is captured locally. The optional worker checks exact task names and fixture ownership before consuming a queue row; global maintenance sweeps, cloud operations and unrelated email remain queued. This qualifies the manual workflow and customer notifications; provider restart adapters have separate tests.
+
+Both services load one freshly generated private authority file after development defaults. The runner stops its own child processes and removes the private authority and databases on exit. Screenshots, service logs, worker outcomes and the source fingerprint are saved under `output/playwright/maintenance-lab/`. A source change during the run makes the result diagnostic and fails the target. The full lab workflow invokes it explicitly; the default lab server keeps Portal off and retains its existing worker scope.
+
 ### CI (`.github/workflows/virtualmin-lab.yml`)
 
 | Run | When | What |

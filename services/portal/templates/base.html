@@ -121,8 +121,10 @@
         {% endif %}
 
         <!-- Account Status Banner -->
-        {% if account_banner %}
-          {% include "components/account_status_banner.html" with banner=account_banner %}
+        {% if account_status_authenticated %}
+          <div id="account-status-region" hx-get="{% url 'dashboard:account_status_partial' %}" hx-trigger="every 30s" hx-swap="innerHTML" hx-sync="this:replace" aria-live="polite">
+            {% include "components/account_status_content.html" %}
+          </div>
         {% endif %}
 
         <!-- Main Content -->

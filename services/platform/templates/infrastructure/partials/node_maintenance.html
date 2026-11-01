@@ -1,0 +1,87 @@
+{% load i18n ui_components localisation_tags %}
+<section class="rounded-lg border border-slate-700 bg-slate-800 p-6 space-y-4" aria-labelledby="node-maintenance-heading">
+  {% translate "Server maintenance" as section_heading %}<h2 id="node-maintenance-heading" class="text-xl font-semibold text-white">{{ section_heading|force_escape }}</h2>
+  <div class="text-sm text-slate-300 space-y-1">
+    {% translate "Tracked hosting accounts:" as accounts_label %}<p>{{ accounts_label|force_escape }} {{ maintenance_account_count }}</p>
+    {% translate "Affected customers:" as customers_label %}<p>{{ customers_label|force_escape }} {{ maintenance_customer_count }}</p>
+    {% translate "Sub-servers and account names belong to their parent hosting account; they do not multiply customer notices. This preview covers PRAHO-tracked accounts and performs no native inspection." as scope_note %}<p>{{ scope_note|force_escape }}</p>
+  </div>
+  {% if maintenance_policy %}
+    {% translate "Permitted scheduling timezone:" as scheduling_zone_label %}<p class="text-sm text-slate-300">{{ scheduling_zone_label|force_escape }} {{ maintenance_policy.timezone }} · {% translate "Policy revision" as revision_label %}{{ revision_label|force_escape }} {{ maintenance_policy.revision }}</p>
+    {% if maintenance_full_controls %}
+      <dl class="text-sm text-slate-300 space-y-1">
+        <div><dt class="inline">{% translate "Permitted weekdays" as weekdays_label %}{{ weekdays_label|force_escape }}:</dt> <dd class="inline">{{ maintenance_policy_weekdays|join:", " }}</dd></div>
+        <div><dt class="inline">{% translate "Permitted interval start" as interval_start_label %}{{ interval_start_label|force_escape }}:</dt> <dd class="inline">{{ maintenance_policy.starts_time|time:"H:i" }}</dd> · <dt class="inline">{% translate "Permitted interval end" as interval_end_label %}{{ interval_end_label|force_escape }}:</dt> <dd class="inline">{{ maintenance_policy.ends_time|time:"H:i" }}</dd></div>
+        <div><dt class="inline">{% translate "Latest-start deferral (minutes)" as deferral_label %}{{ deferral_label|force_escape }}:</dt> <dd class="inline">{{ maintenance_policy.max_defer_minutes }}</dd></div>
+      </dl>
+    {% endif %}
+  {% else %}
+    {% translate "An operator must configure permitted intervals before ordinary maintenance can be scheduled." as unconfigured %}<p class="text-sm text-slate-300">{{ unconfigured|force_escape }}</p>
+  {% endif %}
+  <div class="flex flex-wrap gap-3">
+    {% url 'infrastructure:maintenance_policy' maintenance_node.pk as policy_url %}
+    {% translate "Review maintenance policy" as policy_label %}{% button policy_label|force_escape href=policy_url variant="secondary" %}
+    {% if maintenance_can_schedule %}
+      {% url 'infrastructure:maintenance_create' maintenance_node.pk as create_url %}
+      {% translate "Schedule maintenance" as schedule_label %}{% button schedule_label|force_escape href=create_url variant="primary" %}
+    {% endif %}
+  </div>
+  {% if not maintenance_can_change %}
+    {% translate "Only administrators and managers can change maintenance. Support has read-only access." as readonly_note %}<p class="text-sm text-slate-400">{{ readonly_note|force_escape }}</p>
+  {% endif %}
+  {% if maintenance_applicable %}
+    {% translate "An applicable window already owns this server's maintenance schedule. Cancel or finish it before changing the policy or adding ordinary work." as active_note %}<p class="text-sm text-slate-300">{{ active_note|force_escape }}</p>
+  {% endif %}
+  {% if maintenance_full_controls and maintenance_accounts %}
+    <details class="text-sm text-slate-300">
+      {% translate "Preview tracked accounts" as preview_label %}<summary class="cursor-pointer">{{ preview_label|force_escape }}</summary>
+      <ul class="mt-2 space-y-1">
+        {% for account in maintenance_accounts %}
+          <li class="break-words">
+            {{ account.domain }} · {{ account.service.customer.get_display_name }}
+            {% if account.domains %}
+              <ul class="mt-1 ml-4 space-y-1 text-slate-400">
+                {% for domain in account.domains %}{% if domain != account.domain %}<li>{{ domain }}</li>{% endif %}{% endfor %}
+              </ul>
+            {% endif %}
+          </li>
+        {% endfor %}
+      </ul>
+      {% translate "Up to 25 accounts are listed; the totals above include every tracked account." as limit_note %}<p class="mt-2 text-xs text-slate-400">{{ limit_note|force_escape }}</p>
+    </details>
+  {% endif %}
+  {% for row in maintenance_rows %}
+    <article class="border-t border-slate-700 pt-4 space-y-3">
+      <h3 class="text-base font-semibold text-white">{{ row.window.get_kind_display }} · {{ row.window.get_status_display }}</h3>
+      <p class="text-sm text-slate-300">{% localised_date row.window.starts_at "datetime" %} – {% localised_date row.window.ends_at "datetime" %} ({{ maintenance_viewer_zone }})</p>
+      <p class="text-sm text-slate-300 break-words">{{ row.window.customer_note }}</p>
+      {% if row.manual_target %}
+        <p class="text-sm text-slate-300 break-words">{% translate "Recorded hosting node" as recorded_target_label %}{{ recorded_target_label|force_escape }}: {{ row.manual_target.hostname }} · {% translate "Recorded SSH endpoint" as recorded_ssh_label %}{{ recorded_ssh_label|force_escape }}: {{ row.manual_target.effective_address }}:{{ row.manual_target.effective_ssh_port }}</p>
+      {% endif %}
+      {% if row.window.public_outcome %}<p class="text-sm text-slate-400 break-words">{{ row.window.public_outcome }}</p>{% endif %}
+      {% if maintenance_full_controls %}
+        {% for decision in row.actions %}
+          <details class="rounded-lg border border-slate-600 p-4">
+            <summary class="font-medium text-slate-200 cursor-pointer">{{ decision.label }}</summary>
+            {% if decision.name == "finish" %}
+              {% translate "A provider acknowledgment is not proof of recovery. Verify remote commands have stopped and describe the readiness you actually checked. Uncertain or ongoing work must not be reported as completed." as readiness_note %}<p class="mt-3 text-sm text-slate-300">{{ readiness_note|force_escape }}</p>
+            {% endif %}
+            <form method="post" action="{% url 'infrastructure:maintenance_action' row.window.pk decision.name %}" class="mt-4 space-y-4" data-confirm="{{ decision.label }}?">
+              {% csrf_token %}
+              {{ decision.form.revision }}
+              {% for field in decision.form.visible_fields %}
+                {% if field.field.widget.input_type == "checkbox" %}
+                  {% checkbox_field field.html_name checked=field.value label=field.label required=field.field.required html_id=field.id_for_label error=field.errors|join:", " %}
+                {% else %}
+                  {% form_field field %}
+                {% endif %}
+              {% endfor %}
+              {% button decision.label type="submit" variant="secondary" %}
+            </form>
+          </details>
+        {% endfor %}
+      {% endif %}
+    </article>
+  {% endfor %}
+</section>
+{% include "infrastructure/partials/node_maintenance_direct.html" %}

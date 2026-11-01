@@ -2,6 +2,11 @@
 
 ## 🎯 Overview
 
+Node work uses [customer maintenance windows](../../../../docs/deployment/NODE_MAINTENANCE.md):
+per-node permitted calendars, shared operation admission, current-customer notices and recorded outcomes.
+Imported nodes support manual work; automatic window dispatch supports provider reboot and approved drift recovery,
+while panel updates remain manual and reviewed hardening retains its separate workflow.
+
 Measured hosting usage is owned solely by `virtualmin_usage_tasks` and
 `virtualmin_usage_service` (ADR-0068). `virtualmin-usage-sync` dispatches hourly at
 :10 to `praho-cluster`, using a single cached root SSH export per node. The local

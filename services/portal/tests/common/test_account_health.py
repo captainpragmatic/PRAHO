@@ -198,6 +198,17 @@ class BlendBannerTest(TestCase):
 class GetAccountHealthTest(TestCase):
     """Test get_account_health() orchestrator with mocked API calls."""
 
+    def setUp(self) -> None:
+        super().setUp()
+        # These legacy tests isolate the three cached summaries; maintenance is a
+        # new independent HTTP read and has its own boundary-driven tests.
+        transport = patch(
+            "apps.api_client.services.PlatformAPIClient._make_request",
+            return_value={"success": True, "data": {"maintenance": {"windows": [], "last_completed": None}}},
+        )
+        transport.start()
+        self.addCleanup(transport.stop)
+
     @staticmethod
     def _make_request(session_data: dict | None = None) -> MagicMock:
         """Create a mock request with session data.

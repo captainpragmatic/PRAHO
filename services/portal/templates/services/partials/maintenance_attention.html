@@ -1,0 +1,21 @@
+{% load i18n ui_components %}
+{% for row in maintenance_windows %}
+  <section class="mb-4" aria-label="{{ row.heading }}">
+    {% alert row.description|force_escape variant=row.variant title=row.heading|force_escape css_class="mb-2" %}
+    <p class="text-sm text-slate-300">{{ row.period }}</p>
+    <p class="text-sm text-slate-300">{{ row.impact }}</p>
+    {% if row.note %}<p class="mt-1 text-sm text-slate-300 break-words">{{ row.note }}</p>{% endif %}
+  </section>
+{% endfor %}
+{% if maintenance_outcome %}
+  <p class="mb-4 text-sm text-slate-400" role="status">
+    {{ maintenance_outcome.heading }}: {{ maintenance_outcome.finished }} ({{ maintenance_outcome.zone }}).
+    {{ maintenance_outcome.text }}
+    {% if maintenance_outcome.operator_confirmed %}{% trans "Confirmed by an operator." as confirmed_label %}{{ confirmed_label|force_escape }}{% endif %}
+    {% if maintenance_outcome.was_overrun %}{% trans "The work took longer than planned." as overrun_label %}{{ overrun_label|force_escape }}{% endif %}
+  </p>
+{% endif %}
+{% if service_maintenance_unavailable %}
+  {% trans "Maintenance information is temporarily unavailable. Please check again shortly." as unavailable_label %}
+  <p class="mb-4 text-sm text-slate-400" role="status">{{ unavailable_label|force_escape }}</p>
+{% endif %}

@@ -5,8 +5,10 @@ Staff interface for managing node deployments, providers, and configurations.
 """
 
 import logging
+from collections.abc import Callable
 from datetime import datetime
 from decimal import Decimal
+from functools import wraps
 from typing import TYPE_CHECKING, Any, cast
 
 from django.utils import timezone as tz
@@ -17,6 +19,7 @@ if TYPE_CHECKING:
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.core.exceptions import ValidationError
 from django.core.paginator import Paginator
 from django.db import DatabaseError, InterfaceError, models, transaction
 from django.db.models import Count, Prefetch, Q
@@ -80,6 +83,20 @@ from .tasks import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _handle_native_admission(
+    view: Callable[[HttpRequest, int], HttpResponse],
+) -> Callable[[HttpRequest, int], HttpResponse]:
+    @wraps(view)
+    def guarded(request: HttpRequest, pk: int) -> HttpResponse:
+        try:
+            return view(request, pk)
+        except ValidationError as exc:
+            messages.error(request, "; ".join(exc.messages))
+            return redirect("infrastructure:deployment_detail", pk=pk)
+
+    return guarded
 
 
 def _provider_credentials_help(provider: CloudProvider) -> SafeString:
@@ -498,6 +515,17 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "fqdn": f"{deployment.hostname}.{deployment.dns_zone}" if deployment.dns_zone else deployment.hostname,
     }
 
+    if deployment.virtualmin_server is not None:
+        from .node_maintenance_views import node_maintenance_context  # noqa: PLC0415  # Read-only status card.
+
+        context.update(node_maintenance_context(deployment.virtualmin_server, request))
+    else:
+        from .node_maintenance_views import (  # noqa: PLC0415  # Read-only unbound status card.
+            direct_maintenance_context,  # Unbound node operation review.
+        )
+
+        context.update(direct_maintenance_context(request, deployment_id=deployment.pk))
+
     return render(request, "infrastructure/deployment_detail.html", context)
 
 
@@ -690,6 +718,7 @@ def deployment_redeploy(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_http_methods(["GET", "POST"])
+@_handle_native_admission
 def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
     """Upgrade a deployment to a new size."""
 
@@ -763,6 +792,7 @@ def deployment_upgrade(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_POST
+@_handle_native_admission
 def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
     """Stop (power off) a deployment."""
 
@@ -794,6 +824,7 @@ def deployment_stop(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_POST
+@_handle_native_admission
 def deployment_start(request: HttpRequest, pk: int) -> HttpResponse:
     """Start (power on) a deployment."""
 
@@ -824,6 +855,7 @@ def deployment_start(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_deployment_management
 @require_POST
+@_handle_native_admission
 def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
     """Reboot a deployment."""
 
@@ -854,6 +886,7 @@ def deployment_reboot(request: HttpRequest, pk: int) -> HttpResponse:
 @login_required
 @require_deploy_permission
 @require_http_methods(["GET", "POST"])
+@_handle_native_admission
 def deployment_maintenance(request: HttpRequest, pk: int) -> HttpResponse:
     """Run maintenance tasks on a deployment."""
 

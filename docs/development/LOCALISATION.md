@@ -63,6 +63,12 @@ formats. Explicit Romanian date utilities remain available for documents.
 
 ## Portal propagation
 
+Maintenance windows keep their permitted calendar timezone separate from the viewer's display timezone.
+Their signed DTOs carry aware ISO timestamps; Portal and staff templates use the display formatter.
+Notice snapshots use the primary active member's display preferences with organisation fallback, and
+Romanian/English templates use the customer's locale. No request-wide timezone activation changes
+billing or scheduling. See [the maintenance runbook](../deployment/NODE_MAINTENANCE.md).
+
 `POST /api/localisation/` requires the existing HMAC service authentication and
 a fresh signed timestamp; customer identity is not required. Its allowlisted
 response contains only `default_language`, `default_country`, `timezone`, and

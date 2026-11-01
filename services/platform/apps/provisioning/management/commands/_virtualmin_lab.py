@@ -28,7 +28,7 @@ import secrets
 import socket
 import subprocess
 import traceback
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
@@ -303,7 +303,11 @@ class QueuedRun:
         return self.func.rsplit(".", 1)[-1]
 
 
-def run_queued_once(modules: tuple[str, ...] = LAB_WORKER_MODULES) -> list[QueuedRun]:
+def run_queued_once(
+    modules: tuple[str, ...] = LAB_WORKER_MODULES,
+    *,
+    maintenance_scope: Mapping[str, object] | None = None,
+) -> list[QueuedRun]:
     """Run, once and in queue order, what is waiting on the ORM broker, the way a Django-Q worker does.
 
     The lab has no Django-Q cluster: its worker processes are spawned, so they would not inherit the lab
@@ -311,14 +315,26 @@ def run_queued_once(modules: tuple[str, ...] = LAB_WORKER_MODULES) -> list[Queue
     suite call this in a process that already runs inside the transport instead. A task that raises is recorded,
     not propagated (a worker records the failure and moves on); a row another caller already took is skipped.
     """
+    if maintenance_scope is not None:
+        refuse_unless_lab_settings()
+        if not getattr(settings, "VIRTUALMIN_MAINTENANCE_LAB", False) or settings.EMAIL_BACKEND not in {
+            "django.core.mail.backends.filebased.EmailBackend",
+            "django.core.mail.backends.locmem.EmailBackend",
+        }:
+            raise CommandError("Maintenance lab work requires explicit local mode and captured email")
     ran: list[QueuedRun] = []
     for row in list(OrmQ.objects.order_by("id")):
         task = row.task
+        if maintenance_scope is not None:
+            from ._virtualmin_maintenance_lab import owned_maintenance_task  # noqa: PLC0415 -- opt-in lab only
+
+            if not owned_maintenance_task(task, maintenance_scope):
+                continue
         if OrmQ.objects.filter(pk=row.pk).delete()[0] == 0:
             continue  # taken by another caller between the listing and now
         func = str(task.get("func", ""))
         module, _, name = func.rpartition(".")
-        if module not in modules:
+        if maintenance_scope is None and module not in modules:
             continue
         run = QueuedRun(func=func, args=tuple(task.get("args", ())))
         try:
