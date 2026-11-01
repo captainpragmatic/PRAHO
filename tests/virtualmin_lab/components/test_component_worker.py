@@ -45,6 +45,7 @@ from apps.provisioning.virtualmin_security_tasks import collect_inspection
 from apps.settings.services import SettingsService
 from apps.users.models import User
 from tests.virtualmin_lab.components.conftest import MixedSource
+from tests.virtualmin_lab.components.site_observation import INSPECTION_ERROR_OBSERVATION
 from tests.virtualmin_lab.components.test_source_coordinator import NATIVE_PREPARATION
 from tests.virtualmin_lab.contract.harness import Lab, Recorder, RecordingGateway
 
@@ -178,7 +179,7 @@ def _install_helpers(lab: Lab, helpers: Path) -> str:
 
 def _private_script(lab: Lab, script: str, payload: dict, *, timeout=240) -> str:
     result = subprocess.run(  # noqa: S603 -- literal owned fixture; credentials only through private stdin
-        ["docker", "exec", "-i", lab.node.container, "python3", "-c", script],  # noqa: S607
+        ["docker", "exec", "-i", lab.node.container, "python3", "-c", INSPECTION_ERROR_OBSERVATION + script],  # noqa: S607
         input=json.dumps(payload),
         text=True,
         capture_output=True,

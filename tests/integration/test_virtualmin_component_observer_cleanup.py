@@ -11,9 +11,57 @@ from time import time_ns
 
 import pytest
 
+from tests.virtualmin_lab.components import site_observation
 from tests.virtualmin_lab.components.site_observation import _WATCH, _stop_observer
 
 pytestmark = pytest.mark.integration
+
+
+def test_inventory_refusal_reports_only_the_exact_entry_and_keeps_the_native_failure(tmp_path: Path) -> None:
+    entry = tmp_path / "123.lock"
+    entry.write_text("private content must not appear in diagnostics")
+    helper = (
+        Path(__file__).resolve().parents[2]
+        / "services/platform/infrastructure/ansible/playbooks/files/praho-component-inspect.py"
+    )
+    script = (
+        getattr(site_observation, "INSPECTION_ERROR_OBSERVATION", "")
+        + r"""
+import importlib.util,sys
+from pathlib import Path
+spec=importlib.util.spec_from_file_location('actual_inspection',sys.argv[1])
+module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+directory=Path(sys.argv[2]);module.Path=lambda unused:directory
+module._related_domains('fixture-owner')
+"""
+    )
+    result = subprocess.run(  # noqa: S603 -- actual inspection against one owned temporary fixture
+        [sys.executable, "-c", script, str(helper), str(tmp_path)],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 1
+    assert "Native retained-domain inventory is unclassified or exceeds its bound" in result.stderr
+    diagnostics = [line for line in result.stderr.splitlines() if line.startswith("PRAHO_INSPECTION_REFUSAL=")]
+    assert len(diagnostics) == 1, result.stderr
+    evidence = json.loads(diagnostics[0].partition("=")[2])
+    assert evidence["entry"] == "123.lock"
+    assert evidence["index"] == 0
+    assert type(evidence["time_ns"]) is int
+    assert "private content" not in result.stderr
+
+
+@pytest.mark.parametrize("script,code", [("print('ordinary stdout')", 0), ("raise ValueError('ordinary failure')", 1)])
+def test_inspection_diagnostics_preserve_unrelated_script_outcomes(script: str, code: int) -> None:
+    prefix = getattr(site_observation, "INSPECTION_ERROR_OBSERVATION", "")
+    result = subprocess.run(  # noqa: S603 -- literal local success/failure control only
+        [sys.executable, "-c", prefix + script], capture_output=True, text=True, timeout=5, check=False
+    )
+    assert result.returncode == code
+    assert "PRAHO_INSPECTION_REFUSAL=" not in result.stderr
+    assert result.stdout == ("ordinary stdout\n" if code == 0 else "")
 
 
 def test_actual_observer_events_include_wall_clock_timestamps_for_log_correlation(tmp_path: Path) -> None:

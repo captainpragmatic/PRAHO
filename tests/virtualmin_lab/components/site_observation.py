@@ -11,6 +11,29 @@ from threading import Event
 from time import monotonic
 from uuid import uuid4
 
+INSPECTION_ERROR_OBSERVATION = r"""
+import json as _inspection_json,sys as _inspection_sys,time as _inspection_time
+def _inspection_error(kind,value,trace):
+ current=trace
+ try:
+  while current is not None:
+   frame=current.tb_frame
+   if (frame.f_code.co_name=='_related_domains' and
+       frame.f_code.co_filename.endswith('/praho-component-inspect.py')):
+    entry=frame.f_locals.get('path');index=frame.f_locals.get('count')
+    name=getattr(entry,'name',None)
+    if isinstance(name,str) and type(index) is int:
+     print('PRAHO_INSPECTION_REFUSAL='+_inspection_json.dumps(
+      {'entry':name[:255],'index':index,'time_ns':_inspection_time.time_ns()},
+      ensure_ascii=True,separators=(',',':')),file=_inspection_sys.stderr,flush=True)
+    break
+   current=current.tb_next
+ except Exception:
+  pass
+ _inspection_sys.__excepthook__(kind,value,trace)
+_inspection_sys.excepthook=_inspection_error
+"""
+
 _WATCH = r"""
 import difflib,hashlib,json,os,select,stat,sys,time
 from pathlib import Path
