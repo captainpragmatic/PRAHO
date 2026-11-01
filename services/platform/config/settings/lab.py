@@ -83,6 +83,9 @@ DATABASES = {
 }
 
 if _MAINTENANCE_MODE:
+    # HTTP and the scoped worker share this owned file. Reserve short writes
+    # before their reads so SQLite cannot fail a later read-to-write upgrade.
+    DATABASES["default"]["OPTIONS"]["transaction_mode"] = "IMMEDIATE"
     VIRTUALMIN_MAINTENANCE_LAB = True
     VIRTUALMIN_MAINTENANCE_MANIFEST = _run_dir / "manifest.json"
     VIRTUALMIN_MAINTENANCE_PLATFORM_ADDRESS = f"127.0.0.1:{_authority['platform_port']}"

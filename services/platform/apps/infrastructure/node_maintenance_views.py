@@ -238,9 +238,13 @@ def window_action(request: HttpRequest, window_id: UUID, action: str) -> HttpRes
     actor = cast("User", request.user)
     require_maintenance_operator(actor)
     if request.POST.get("confirmation") != "on":
-        return HttpResponseBadRequest(_("Review and confirm the maintenance impact before continuing."))
+        return HttpResponseBadRequest(
+            _("Review and confirm the maintenance impact before continuing."), content_type="text/plain; charset=utf-8"
+        )
     if action not in {"start", "finish", "cancel", "move"}:
-        return HttpResponseBadRequest(_("Choose a supported maintenance action."))
+        return HttpResponseBadRequest(
+            _("Choose a supported maintenance action."), content_type="text/plain; charset=utf-8"
+        )
     form = maintenance_action_form(window, action, request.POST)
     if not form.is_valid():
         return HttpResponseBadRequest(form.errors.as_text(), content_type="text/plain")
@@ -260,7 +264,7 @@ def window_action(request: HttpRequest, window_id: UUID, action: str) -> HttpRes
             customer_note=values.get("customer_note", ""),
         )
     except (ValidationError, ValueError, KeyError) as exc:
-        return HttpResponseBadRequest(str(exc))
+        return HttpResponseBadRequest(str(exc), content_type="text/plain; charset=utf-8")
     return redirect("infrastructure:maintenance_policy", node_id=window.node_uuid)
 
 
@@ -289,7 +293,7 @@ def execution_reconcile(request: HttpRequest, execution_id: UUID) -> HttpRespons
             resource_confirmed=True,
         )
     except ValidationError as exc:
-        return HttpResponseBadRequest(str(exc))
+        return HttpResponseBadRequest(str(exc), content_type="text/plain; charset=utf-8")
     if execution.deployment_id is not None:
         return redirect("infrastructure:deployment_detail", pk=execution.deployment_id)
     if execution.node_id is not None:

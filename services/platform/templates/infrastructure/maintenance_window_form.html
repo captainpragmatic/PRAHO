@@ -23,22 +23,7 @@
       {% endif %}
       <form id="{% if policy_form %}maintenance-policy-form{% else %}maintenance-create-form{% endif %}" method="post" class="space-y-4">
         {% csrf_token %}
-        {% for hidden in form.hidden_fields %}{{ hidden }}{% endfor %}
-        {% for field in form.visible_fields %}
-          {% if field.name == "weekdays" %}
-            <fieldset class="space-y-3">
-              <legend class="text-sm font-medium text-slate-300">{{ field.label }}</legend>
-              <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {% for day in form.weekday_options %}{% checkbox_field "weekdays" value=day.value checked=day.selected label=day.label html_id=day.id %}{% endfor %}
-              </div>
-              {% for error in field.errors %}{% alert error|force_escape variant="danger" %}{% endfor %}
-            </fieldset>
-          {% elif field.field.widget.input_type == "checkbox" %}
-            {% checkbox_field field.html_name checked=field.value label=field.label required=field.field.required html_id=field.id_for_label error=field.errors|join:", " %}
-          {% else %}
-            {% form_field field %}
-          {% endif %}
-        {% endfor %}
+        {% include "infrastructure/partials/maintenance_form_fields.html" %}
         {% button form_heading|force_escape type="submit" variant="primary" %}
       </form>
     </section>

@@ -19,8 +19,8 @@ from tests.services.test_maintenance_summary import envelope, window
 
 
 class AccountStatusPartialTests(SimpleTestCase):
-    def request(self, *, customer=1, user=7, htmx=True, session=None):
-        request = RequestFactory().get("/dashboard/account-status/", HTTP_HX_REQUEST="true" if htmx else "false")
+    def request(self, *, customer=1, user=7, htmx=True, session=None, path="/dashboard/account-status/"):
+        request = RequestFactory().get(path, HTTP_HX_REQUEST="true" if htmx else "false")
         request.customer_id = customer
         request.user_id = user
         request.localisation = DisplayLocalisation("en", "RO", "America/New_York", "%Y-%m-%d")
@@ -133,6 +133,24 @@ class AccountStatusPartialTests(SimpleTestCase):
                 response = self.partial(request)
                 self.assertEqual(response.status_code, 401)
                 self.assertEqual(response.headers["HX-Redirect"], "/login/")
+        transport.assert_not_called()
+
+    @patch("apps.api_client.services.PlatformAPIClient._make_request")
+    def test_expired_poll_responses_are_empty_plain_text_with_private_login_redirect(self, transport):
+        for path in ("/dashboard/account-status/", "/services/12/maintenance/"):
+            for identity in ({"user": None}, {"customer": None}):
+                with self.subTest(path=path, identity=identity):
+                    request = self.request(path=path, **identity)
+                    match = resolve(path)
+                    response = match.func(request, **match.kwargs)
+                    self.assertEqual(response.status_code, 401)
+                    self.assertEqual(response.content, b"")
+                    self.assertEqual(response.headers["HX-Redirect"], "/login/")
+                    self.assertIn("no-store", response.headers["Cache-Control"])
+                    self.assertIn("private", response.headers["Cache-Control"])
+                    self.assertIn("Cookie", response.headers["Vary"])
+                    self.assertEqual(response.headers["Content-Type"].split(";", 1)[0], "text/plain")
+                    self.assertEqual(response.charset.casefold(), "utf-8")
         transport.assert_not_called()
 
     @patch("apps.api_client.services.PlatformAPIClient._make_request")

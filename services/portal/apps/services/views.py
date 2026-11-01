@@ -386,7 +386,9 @@ def service_maintenance(request: HttpRequest, service_id: int) -> HttpResponse:
     customer_id, user_id = _get_session_identity(request)
     if not customer_id or not user_id:
         if request.headers.get("HX-Request") == "true":
-            return HttpResponse(status=401, headers={"HX-Redirect": "/login/"})
+            return HttpResponse(
+                status=401, headers={"HX-Redirect": "/login/"}, content_type="text/plain; charset=utf-8"
+            )
         return redirect("/login/")
     return render(
         request,

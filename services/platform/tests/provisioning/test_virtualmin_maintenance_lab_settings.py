@@ -26,7 +26,7 @@ class MaintenanceLabSettingsTests(SimpleTestCase):
         self.authority.write_text(json.dumps(self.data))
         self.authority.chmod(0o600)
 
-    def load(self, service: str, *, enabled: bool = True) -> subprocess.CompletedProcess[str]:
+    def load(self, service: str, *, enabled: bool = True, code_suffix: str = "") -> subprocess.CompletedProcess[str]:
         repo = Path(__file__).resolve().parents[4]
         env = {
             key: value
@@ -64,6 +64,7 @@ else:
     assert Path(settings.DATABASES['default']['NAME']).resolve() == (Path(os.environ['VIRTUALMIN_MAINTENANCE_AUTHORITY']).parent / 'portal.sqlite3').resolve()
 print('Private lab authority applied')
 """
+        code += code_suffix
         env["LAB_TEST_ROLE"] = service
         return subprocess.run(  # noqa: S603 -- current interpreter, fixed source and isolated local fixture paths
             [sys.executable, "-c", code],
@@ -82,6 +83,102 @@ print('Private lab authority applied')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn("Private lab authority applied", result.stdout)
                 self.assertNotIn(self.data["secret"], result.stdout + result.stderr)
+
+    def test_owned_platform_serializes_a_ledger_read_upgrade_against_an_autocommit_writer(self) -> None:
+        result = self.load(
+            "platform",
+            code_suffix="""
+import threading
+import sqlite3
+import django
+from django.db import connections, transaction
+
+django.setup()
+with connections['default'].cursor() as cursor:
+    cursor.execute('CREATE TABLE ledger_canary (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)')
+    cursor.executemany('INSERT INTO ledger_canary VALUES (%s, %s)', [(1, 10), (2, 20)])
+connections['default'].close()
+
+reader_ready = threading.Event()
+writer_attempted = threading.Event()
+writer_reserved = threading.Event()
+errors = {}
+attempts = {'ledger': 0, 'http': 0}
+
+def wait_for(event, label):
+    if not event.wait(10):
+        raise AssertionError('Timed out waiting for ' + label)
+
+def ledger():
+    connection = connections['default']
+    try:
+        with transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT value FROM ledger_canary WHERE id = 1')
+                assert cursor.fetchone() == (10,)
+                # An independent, nonblocking writer must already be excluded by
+                # the real ledger transaction, before HTTP competes for the lock.
+                probe = sqlite3.connect(settings.DATABASES['default']['NAME'], timeout=0)
+                try:
+                    try:
+                        probe.execute('BEGIN IMMEDIATE')
+                    except sqlite3.OperationalError as error:
+                        assert str(error) == 'database is locked', str(error)
+                    else:
+                        probe.rollback()
+                        raise AssertionError('Ledger SELECT did not retain the SQLite writer reservation')
+                finally:
+                    probe.close()
+                reader_ready.set()
+                wait_for(writer_attempted, 'competing autocommit UPDATE')
+                attempts['ledger'] += 1
+                cursor.execute('UPDATE ledger_canary SET value = value + 1 WHERE id = 1')
+    except Exception as error:
+        errors['ledger'] = type(error).__name__ + ': ' + str(error)
+    finally:
+        reader_ready.set()
+        connection.close()
+
+def http_writer():
+    connection = connections['default']
+    try:
+        wait_for(reader_ready, 'ledger SELECT')
+        connection.ensure_connection()
+        assert connection.get_autocommit()
+        def reserved():
+            writer_reserved.set()
+            return 1
+        def entered(statement):
+            if statement.startswith('UPDATE ledger_canary'):
+                writer_attempted.set()
+        connection.connection.create_function('write_reserved', 0, reserved)
+        connection.connection.set_trace_callback(entered)
+        with connection.cursor() as cursor:
+            attempts['http'] += 1
+            cursor.execute('UPDATE ledger_canary SET value = value + write_reserved() WHERE id = 2')
+    except Exception as error:
+        errors['http'] = type(error).__name__ + ': ' + str(error)
+    finally:
+        connection.close()
+
+threads = [threading.Thread(target=ledger), threading.Thread(target=http_writer)]
+for thread in threads:
+    thread.start()
+for thread in threads:
+    thread.join(12)
+assert not any(thread.is_alive() for thread in threads), 'A canary connection failed to terminate'
+assert errors == {}, errors
+assert attempts == {'ledger': 1, 'http': 1}, attempts
+assert writer_reserved.is_set(), 'Competing UPDATE never obtained its reservation'
+with connections['default'].cursor() as cursor:
+    cursor.execute('SELECT value FROM ledger_canary ORDER BY id')
+    assert cursor.fetchall() == [(11,), (21,)]
+connections['default'].close()
+print('Both private ledger writes committed once without retry')
+""",
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Both private ledger writes committed once without retry", result.stdout)
 
     def test_both_services_refuse_a_group_readable_authority(self) -> None:
         self.authority.chmod(0o640)

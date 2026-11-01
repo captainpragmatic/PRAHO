@@ -1,12 +1,14 @@
 """Staff maintenance forms use real permissions, CSRF and the audited public services."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from unittest.mock import patch
 
 from django.test import Client, SimpleTestCase, TestCase
 from django.urls import reverse
 from django.utils import timezone
-from django.utils.translation import override
+from django.utils.translation import override, trans_real
 from freezegun import freeze_time
 
 from apps.common.types import Ok
@@ -25,6 +27,16 @@ from apps.infrastructure.provider_config import ProviderCommandResult
 from apps.users.models import User
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
 from tests.infrastructure.test_node_maintenance_admission import MaintenanceAdmissionFixture
+
+
+@contextmanager
+def hostile_catalog_messages(messages: dict[str, str]) -> Iterator[None]:
+    """Change only the translation catalog boundary; request/business authority stays real."""
+    with override("en"):
+        catalog = trans_real._active.value
+        original = catalog.gettext
+        with patch.object(catalog, "gettext", side_effect=lambda message: messages.get(message, original(message))):
+            yield
 
 
 class NodeMaintenanceModeFormTests(SimpleTestCase):
@@ -153,6 +165,28 @@ class NodeMaintenanceDirectViewsTests(MaintenanceAdmissionFixture, TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(NodeMaintenanceExecution.objects.get(pk=execution.pk).phase, "awaiting_recovery")
 
+    def test_real_reconciliation_refusals_remain_plain_text_with_hostile_catalog_content(self):
+        deployment, execution = self.operation(bound=False)
+        hostile = '<img src=x onerror="window.catalogBoundary=1">'
+        for changed_resource in (False, True):
+            with self.subTest(changed_resource=changed_resource):
+                if changed_resource:
+                    deployment.external_node_id = "changed-after-review"
+                    deployment.save(update_fields=["external_node_id"])
+                message = (
+                    "The recorded resource binding changed. Do not release this hold without manual review."
+                    if changed_resource
+                    else "This execution changed. Reload and review its current phase."
+                )
+                body = self.body(expected_phase="awaiting_recovery" if changed_resource else "issued")
+                with hostile_catalog_messages({message: hostile}):
+                    response = self.client.post(self.reconcile_url(execution), body)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(hostile, response.content.decode())
+                self.assertEqual(NodeMaintenanceExecution.objects.get(pk=execution.pk).phase, "awaiting_recovery")
+                self.assertEqual(response.headers["Content-Type"].split(";", 1)[0], "text/plain")
+                self.assertEqual(response.charset.casefold(), "utf-8")
+
     def test_active_administrators_and_managers_can_record_a_checked_failure(self):
         for role in ("admin", "manager"):
             with self.subTest(role=role):
@@ -236,6 +270,25 @@ class NodeMaintenanceViewsTests(MaintenanceAdmissionFixture, TestCase):
 
     def action_url(self, window, action):
         return reverse("infrastructure:maintenance_action", args=[window.pk, action])
+
+    def test_action_refusals_remain_plain_text_with_hostile_catalog_content(self):
+        window = self.window()
+        hostile = '<img src=x onerror="window.catalogBoundary=1">'
+        cases = (
+            ("cancel", {"confirmation": ""}, "Review and confirm the maintenance impact before continuing."),
+            ("unsupported", {}, "Choose a supported maintenance action."),
+            ("cancel", {"revision": "2"}, "This window changed. Reload and review the current revision."),
+        )
+        for action, changes, message in cases:
+            with self.subTest(action=action, changes=changes):
+                body = {"revision": "1", "reason": "Request error contract", "confirmation": "on", **changes}
+                with hostile_catalog_messages({message: hostile}):
+                    response = self.client.post(self.action_url(window, action), body)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(hostile, response.content.decode())
+                self.assertEqual(NodeMaintenanceWindow.objects.get(pk=window.pk).status, "scheduled")
+                self.assertEqual(response.headers["Content-Type"].split(";", 1)[0], "text/plain")
+                self.assertEqual(response.charset.casefold(), "utf-8")
 
     def test_stale_policy_revision_cannot_overwrite_a_newer_operator_decision(self):
         first = self.client.post(self.policy_url, self.policy_body())
