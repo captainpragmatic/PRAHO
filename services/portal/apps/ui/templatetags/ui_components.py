@@ -333,6 +333,8 @@ def button(
         htmx = HTMXAttributes()
 
     _apply_arguments("button", kwargs, config, htmx, aliases=_BUTTON_ALIASES)
+    if "formaction" in kwargs and kwargs["formaction"] is None:
+        config.formaction = ""  # given but None: refused below, not skipped like other None arguments
     _check_button(config)
 
     # attrs may not add a second copy of an attribute an argument of this call already writes.

@@ -110,6 +110,10 @@ class FormactionTests(SimpleTestCase):
         for source in ('formaction=""', "formaction=missing_variable"):
             with self.subTest(source=source), self.assertRaisesRegex(TemplateSyntaxError, "formaction must"):
                 render('type="submit" ' + source)
+        with self.assertRaisesRegex(TemplateSyntaxError, "formaction must"):
+            Template('{% load ui_components %}{% button "Go" type="submit" formaction=value %}').render(
+                Context({"value": None})
+            )
 
     def test_a_link_has_no_formaction(self) -> None:
         with self.assertRaisesRegex(TemplateSyntaxError, "formaction must"):

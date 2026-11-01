@@ -35,6 +35,7 @@ const buttons = {plain: element(true), intercepted: element(true), other: elemen
 const context = {
   console,
   Object,
+  setTimeout,
   document: {
     addEventListener(name, fn) { (listeners.document[name] = listeners.document[name] || []).push(fn); },
     querySelectorAll() { return [buttons.plain, buttons.intercepted].filter((b) => b.classList.contains("is-loading")); },
@@ -42,15 +43,20 @@ const context = {
   window: {addEventListener(name, fn) { (listeners.window[name] = listeners.window[name] || []).push(fn); }},
 };
 vm.runInNewContext(fs.readFileSync(input.source, "utf8"), context);
-function submit(button, prevented) {
-  for (const fn of listeners.document.submit || []) fn({submitter: button, defaultPrevented: prevented});
+// The page's own confirm handler is registered after ui-actions.js (both layouts load it later) and may cancel.
+function submit(button, cancelLater) {
+  const event = {submitter: button, defaultPrevented: false, preventDefault() { this.defaultPrevented = true; }};
+  for (const fn of listeners.document.submit || []) fn(event);
+  if (cancelLater) event.preventDefault();
 }
 submit(buttons.plain, false);
 submit(buttons.intercepted, true);
 submit(buttons.other, false);
-const atSubmit = {plain: buttons.plain.state(), intercepted: buttons.intercepted.state(), other: buttons.other.state()};
-for (const fn of listeners.window.pageshow || []) fn({persisted: true});
-process.stdout.write(JSON.stringify({atSubmit, afterRestore: buttons.plain.state()}));
+setTimeout(() => {
+  const atSubmit = {plain: buttons.plain.state(), intercepted: buttons.intercepted.state(), other: buttons.other.state()};
+  for (const fn of listeners.window.pageshow || []) fn({persisted: true});
+  process.stdout.write(JSON.stringify({atSubmit, afterRestore: buttons.plain.state()}));
+}, 5);
 """
 
 
