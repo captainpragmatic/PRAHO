@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, cast
+from urllib.parse import urlencode
 from uuid import UUID
 
 from django.contrib import messages
@@ -10,6 +11,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import Http404, HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
@@ -71,6 +73,11 @@ def _readiness(review: ComponentMigrationReview | None) -> tuple[bool, list[str]
     return not hasattr(review, "approval"), []
 
 
+def _task_redirect(account_id: UUID, task_id: str) -> HttpResponse:
+    path = reverse("provisioning:component_migration", args=[account_id])
+    return redirect(f"{path}?{urlencode({'task': task_id})}")
+
+
 def _queue_release(
     request: HttpRequest, account: VirtualminAccount, actor: User, task_name: str, form: SourceReleaseForm
 ) -> HttpResponse | None:
@@ -89,7 +96,7 @@ def _queue_release(
         timeout=360,
     )
     messages.info(request, _("Retained source absence verification and backup handoff recording are queued."))
-    return redirect(f"{request.path}?task={task_id}")
+    return _task_redirect(account.pk, task_id)
 
 
 def _obligation_rows(account: VirtualminAccount, bound: SourceReleaseForm) -> list[dict[str, object]]:
@@ -152,7 +159,7 @@ def component_migration(request: HttpRequest, account_id: UUID) -> HttpResponse:
                 timeout=360,
             )
             messages.info(request, _("Read-only component inspection queued. Refresh for the current preview."))
-            return redirect(f"{request.path}?task={task_id}")
+            return _task_redirect(account.pk, task_id)
         if action == "accept" and approval_form.is_valid():
             review = get_object_or_404(
                 ComponentMigrationReview, pk=approval_form.cleaned_data["review_id"], account=account
@@ -170,12 +177,14 @@ def component_migration(request: HttpRequest, account_id: UUID) -> HttpResponse:
                     timeout=600,
                 )
                 messages.info(request, _("Fresh verification and the accepted component migration are queued."))
-                return redirect(f"{request.path}?task={task_id}")
+                return _task_redirect(account.pk, task_id)
             approval_form.add_error(
                 None, _("This preview requires preparation or has already been accepted. Inspect again.")
             )
         if action not in {"inspect", "accept", "release"}:
-            return HttpResponse(_("Invalid component migration action."), status=400)
+            return HttpResponse(
+                _("Invalid component migration action."), status=400, content_type="text/plain; charset=utf-8"
+            )
         status = 400
     ready, readiness_errors = _readiness(review)
     if not approval_form.is_bound:

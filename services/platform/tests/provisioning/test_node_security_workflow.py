@@ -3,6 +3,7 @@
 import base64
 import json
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from django.core.exceptions import ValidationError
 from django.test import Client, TestCase, override_settings
@@ -43,6 +44,27 @@ class SecurityWorkflowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Inspect current policy")
         queue.assert_not_called()
+
+    def test_queued_task_redirect_preserves_one_encoded_task_identifier(self):
+        identifier = "task/id?part=one&mode=two"
+        with patch("apps.provisioning.virtualmin_security_views.async_task", return_value=identifier):
+            response = self.client.post(self.url, {"action": "inspect"})
+        self.assertEqual(response.status_code, 302)
+        location = urlsplit(response["Location"])
+        self.assertEqual(location.path, self.url)
+        self.assertEqual(parse_qs(location.query), {"task": [identifier]})
+
+    def test_invalid_action_and_denied_decision_are_plain_text_errors(self):
+        response = self.client.post(self.url, {"action": "<strong>invalid</strong>"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response["Content-Type"], "text/plain; charset=utf-8")
+        self.assertEqual(response.content.decode(), "Invalid security action.")
+        self.operator.is_superuser = False
+        self.operator.save(update_fields=["is_superuser"])
+        denied = self.client.post(self.url, {"action": "acknowledge"})
+        self.assertEqual(denied.status_code, 403)
+        self.assertEqual(denied["Content-Type"], "text/plain; charset=utf-8")
+        self.assertEqual(denied.content.decode(), "Deployment permission is required.")
 
     def unsafe_network(self):
         evidence = self.evidence

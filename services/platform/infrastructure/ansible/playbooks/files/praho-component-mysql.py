@@ -249,7 +249,9 @@ def native_owner_password(native: dict[str, str], databases: list[dict[str, Any]
         or any(char in password for char in "\0\r\n")
     ):
         raise ValueError("Prepare current recoverable native owner SQL credentials or an independent application login")
+    # nosemgrep: insecure-hash-algorithm-sha1 — Protocol verification of existing mysql_native_password double-SHA1, not a new hash scheme.
     first = hashlib.sha1(password.encode(), usedforsecurity=False).digest()
+    # nosemgrep: insecure-hash-algorithm-sha1 — Protocol verification of existing mysql_native_password double-SHA1, not a new hash scheme.
     secret = "*" + hashlib.sha1(first, usedforsecurity=False).hexdigest().upper()
     compatible = {
         hashlib.sha256(

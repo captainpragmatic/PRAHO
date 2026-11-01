@@ -1,6 +1,7 @@
 """Operator review of the exact observed node policy."""
 
 from typing import TYPE_CHECKING, cast
+from urllib.parse import urlencode
 from uuid import UUID
 
 from django import forms
@@ -9,6 +10,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext as _
 from django.views.decorators.http import require_http_methods
 from django_q.models import Task
@@ -94,10 +96,12 @@ def node_security(request: HttpRequest, server_id: UUID) -> HttpResponse:
     if request.method == "POST":
         action = request.POST.get("action")
         if action not in {"inspect", "acknowledge", "apply", "verify"}:
-            return HttpResponse(_("Invalid security action."), status=400)
+            return HttpResponse(_("Invalid security action."), status=400, content_type="text/plain; charset=utf-8")
         if action != "inspect":
             if not can_deploy_nodes(actor):
-                return HttpResponse(_("Deployment permission is required."), status=403)
+                return HttpResponse(
+                    _("Deployment permission is required."), status=403, content_type="text/plain; charset=utf-8"
+                )
             decision_form = (
                 HardeningApprovalForm(request.POST) if action == "apply" else SourceAcknowledgmentForm(request.POST)
             )
@@ -135,7 +139,8 @@ def node_security(request: HttpRequest, server_id: UUID) -> HttpResponse:
                 timeout=4200 if action == "apply" else 180,
             )
             messages.info(request, _("Node security action queued. Refresh this page for the result."))
-            return redirect(f"{request.path}?task={task_id}")
+            path = reverse("provisioning:node_security", args=[server.pk])
+            return redirect(f"{path}?{urlencode({'task': task_id})}")
     task = Task.objects.filter(pk=request.GET.get("task"), name=task_name).first() if request.GET.get("task") else None
     return render(
         request,

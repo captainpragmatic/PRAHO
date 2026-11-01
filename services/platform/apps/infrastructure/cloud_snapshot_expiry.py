@@ -32,6 +32,7 @@ def expire_snapshot(candidate: DriftSnapshot, now: datetime) -> ExpiryOutcome:
     if not deployment.provider_token_fingerprint or deployment.provider_token_fingerprint != fingerprint:
         snapshot.status = "cleanup_failed"
         snapshot.save(update_fields=["status"])
+        # nosemgrep: python-logger-credential-disclosure — Only a static message and snapshot UUID are logged; never the credential.
         logger.warning("⚠️ [Snapshot expiry] Creating provider credential is unproven for snapshot %s", snapshot.pk)
         return "failed"
     if CloudResourceRetention.objects.filter(

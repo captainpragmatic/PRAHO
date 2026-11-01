@@ -176,12 +176,14 @@ def _retire_web(source: Any, context: dict[str, Any], web: Any) -> str:
 def _sql_absent(fence: Any) -> None:
     if fence.selected:
         names = ",".join("'" + name + "'" for name in fence.selected)
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — DatabaseFence validates selected schema names with mysql._names; native mysql CLI.
         if fence.execute(
             f"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN ({names}) ORDER BY SCHEMA_NAME"
         ):
             raise ValueError("A retired selected source schema is present or reused")
     if fence.principals:
         scope = " OR ".join(f"(User = '{user}' AND Host = '{host}')" for user, host in sorted(fence.principals))
+        # nosemgrep: sqlalchemy-execute-raw-query — DatabaseFence USER/HOST fullmatches qualify every literal; native mysql CLI.
         if fence.execute("SELECT User, Host FROM mysql.user WHERE " + scope + " ORDER BY User, Host"):
             raise ValueError("A retired selected source principal is present or reused")
 
@@ -202,8 +204,10 @@ def _retire_database(source: Any, context: dict[str, Any], fence: Any) -> None:
         state["phase"] = "retiring"
         fence.journal.write(state)
         for name in fence.selected:
+            # nosemgrep: sqlalchemy-execute-raw-query — DatabaseFence mysql._names excludes quotes/backticks; owned held receipt precedes DROP.
             fence.execute("DROP DATABASE `" + name + "`")
         for user, host in sorted(fence.principals):
+            # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — DatabaseFence USER/HOST fullmatches and exact owned held receipt precede DROP.
             fence.execute(f"DROP USER '{user}'@'{host}'")
         _sql_absent(fence)
         if fence.selected:

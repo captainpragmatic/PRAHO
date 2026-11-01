@@ -111,6 +111,7 @@ class DatabaseFence:
             return []
         users = sorted({user for user, _host in self.principals})
         scope = ",".join("'" + user + "'" for user in users)
+        # nosemgrep: sqlalchemy-execute-raw-query — Usernames fullmatch mysql.USER in __init__; native mysql stdin, not SQLAlchemy.
         rows = self.execute(
             "SELECT ID, USER FROM information_schema.PROCESSLIST " + f"WHERE USER IN ({scope}) ORDER BY ID"
         )
@@ -133,11 +134,13 @@ class DatabaseFence:
             if not sessions:
                 return
             for identifier, user in sessions:
+                # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — _sessions returns range-checked int IDs; native mysql CLI, not SQLAlchemy.
                 current = self.execute(f"SELECT USER FROM information_schema.PROCESSLIST WHERE ID = {identifier}")
                 if not current:
                     continue
                 if current != [(user,)]:
                     raise ValueError("A database connection changed identity; refusing to kill an unrelated session")
+                # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Bounded int ID, with its exact user rechecked before KILL.
                 self.execute(f"KILL CONNECTION {identifier}")
         if self._sessions():
             raise ValueError("Selected website database sessions have not independently closed")
@@ -184,6 +187,7 @@ class DatabaseFence:
             raise ValueError("Native lock has no confirmed ownership receipt; operator inspection is required")
         principal["phase"] = "lock_intent"
         self.journal.write(state)
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Principal USER/HOST fullmatches and owned receipt precede native DDL.
         self.execute(f"ALTER USER '{key[0]}'@'{key[1]}' ACCOUNT LOCK")
         if not self._current()[key]["locked"]:
             raise ValueError("Native database principal did not become locked")
@@ -262,6 +266,7 @@ class DatabaseFence:
                     if locked:
                         principal["phase"] = "unlock_intent"
                         self.journal.write(state)
+                        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Principal USER/HOST fullmatches and owned receipt precede native DDL.
                         self.execute(f"ALTER USER '{key[0]}'@'{key[1]}' ACCOUNT UNLOCK")
                         if self._current()[key]["locked"]:
                             raise ValueError("Native database principal unlock is unconfirmed")

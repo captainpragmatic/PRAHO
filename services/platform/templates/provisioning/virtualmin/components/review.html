@@ -70,6 +70,7 @@
         </div>
       {% endif %}
       {% if ready %}
+        {# nosemgrep: django-no-csrf-token — csrf_token is present immediately below; middleware enforces all POST branches. #}
         <form method="post" class="space-y-4">
           {% csrf_token %}
           <input type="hidden" name="action" value="accept">

@@ -3,6 +3,7 @@
 from copy import deepcopy
 from datetime import timedelta
 from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from django.core.exceptions import PermissionDenied
 from django.test import Client
@@ -71,6 +72,23 @@ class ComponentMigrationUITests(ComponentAdmissionTestBase):
             },
         )
         self.assertFalse(ComponentMigrationReview.objects.exists())
+
+    def test_queued_task_redirect_preserves_one_encoded_task_identifier(self):
+        identifier = "task/id?part=one&mode=two"
+        with patch("apps.provisioning.component_migration_views.async_task", return_value=identifier):
+            response = self.client.post(
+                self.url, {"action": "inspect", "target_server": self.target.pk, "application_paths": "public_html"}
+            )
+        self.assertEqual(response.status_code, 302)
+        location = urlsplit(response["Location"])
+        self.assertEqual(location.path, self.url)
+        self.assertEqual(parse_qs(location.query), {"task": [identifier]})
+
+    def test_invalid_action_is_a_plain_text_error_without_reflected_input(self):
+        response = self.client.post(self.url, {"action": "<strong>invalid</strong>"})
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response["Content-Type"], "text/plain; charset=utf-8")
+        self.assertEqual(response.content.decode(), "Invalid component migration action.")
 
     def test_unsafe_overlapping_or_retained_paths_never_queue_inspection(self):
         for paths, config in (

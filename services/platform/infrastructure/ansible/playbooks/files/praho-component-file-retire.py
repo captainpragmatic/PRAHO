@@ -383,6 +383,7 @@ class Retirement:
     def _freeze(self, descriptor: int, relative: str, state: dict[str, Any]) -> None:
         self._check(relative, os.fstat(descriptor), "", state, frozen=False)
         os.fchown(descriptor, self.owner_uid, -1)
+        # nosemgrep: insecure-file-permissions — 0700 restricts verified directory-fd traversal to its owner, with no group/other access.
         os.fchmod(descriptor, 0o700)
         os.fsync(descriptor)
         children = sorted(

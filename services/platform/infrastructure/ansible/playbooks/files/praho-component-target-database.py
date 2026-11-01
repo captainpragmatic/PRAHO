@@ -81,6 +81,7 @@ class TargetDatabase:
     def _namespace(self) -> set[tuple[str, str]]:
         mysql._is_mariadb(self.execute)
         scope = ",".join("'" + user + "'" for user in self.users)
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Approved manifest/private principals qualify USER/HOST; native mysql CLI, not SQLAlchemy.
         rows = self.execute(f"SELECT User, Host FROM mysql.user WHERE User IN ({scope}) ORDER BY User, Host")
         if any(
             len(row) != mysql.NATIVE_PRINCIPAL_COLUMNS
@@ -156,9 +157,12 @@ class TargetDatabase:
     def _configure(self, key: tuple[str, str], *, create: bool) -> None:
         identity = "'" + key[0] + "'@'" + key[1] + "'"
         if create:
+            # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Identity belongs to validated manifest/native USER/HOST; native mysql DDL.
             self.execute(f"CREATE USER {identity} ACCOUNT LOCK")
         else:
+            # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Identity belongs to validated manifest/native USER/HOST; native mysql DDL.
             self.execute(f"ALTER USER {identity} ACCOUNT LOCK")
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Identity belongs to validated manifest/native USER/HOST; native mysql DDL.
         self.execute(f"REVOKE ALL PRIVILEGES, GRANT OPTION FROM {identity}")
         if key in self.private:
             row = self.private[key]
@@ -166,8 +170,10 @@ class TargetDatabase:
                 clause = "IDENTIFIED VIA mysql_native_password USING '" + row["authentication_string"] + "'"
             else:
                 clause = "IDENTIFIED WITH mysql_native_password AS '" + row["authentication_string"] + "'"
+            # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Private principal parser allows only *[A-F0-9]{40} and fixed plugin syntax.
             self.execute(f"ALTER USER {identity} {clause} ACCOUNT LOCK")
             for privileges, database, grant_option in self.grants[key]:
+                # nosemgrep: sqlalchemy-execute-raw-query — selected_schema_grants parses allowed privilege tokens; exact_schema quotes the reviewed schema.
                 self.execute(
                     f"GRANT {privileges} ON {mysql.exact_schema(database)}.* TO {identity}"
                     + (" WITH GRANT OPTION" if grant_option else "")
@@ -239,6 +245,7 @@ class TargetDatabase:
             }
             for key, principal in sorted(self.principals.items()):
                 if enabled and not principal["locked"]:
+                    # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Identity belongs to validated manifest USER/HOST; native mysql DDL.
                     self.execute(f"ALTER USER '{key[0]}'@'{key[1]}' ACCOUNT UNLOCK")
             self._verify(state, active=True)
             state["owned_accounts"] = self._fingerprints(self.accounts)
@@ -259,6 +266,7 @@ class TargetDatabase:
             for user, host in sorted(self.accounts):
                 principal = self.principals.get((user, host))
                 unlock = enabled and principal is not None and not principal["locked"]
+                # nosemgrep: sqlalchemy-execute-raw-query — Validated manifest/native USER/HOST and a fixed LOCK/UNLOCK choice; native mysql DDL.
                 self.execute(f"ALTER USER '{user}'@'{host}' ACCOUNT " + ("UNLOCK" if unlock else "LOCK"))
             state["enabled"] = enabled
             self._verify(state, active=True)
@@ -275,6 +283,7 @@ class TargetDatabase:
                 raise ValueError("The native target domain still exists; SQL cleanup is not authorized")
             schemas = sorted({self.owner, *self.selected})
             scope = ",".join("'" + name + "'" for name in schemas)
+            # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Owner matches mysql.USER and selected schemas pass mysql._names; native mysql CLI.
             if self.execute(
                 f"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN ({scope}) ORDER BY SCHEMA_NAME"
             ):
@@ -296,6 +305,7 @@ class TargetDatabase:
             state["phase"] = "removing"
             self.journal.write(state)
             for user, host in sorted(remaining):
+                # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — _namespace validates Host and owned account fingerprints bind the exact validated username.
                 self.execute(f"DROP USER '{user}'@'{host}'")
             if self._namespace():
                 raise ValueError("Target SQL cleanup did not prove exact account absence")
