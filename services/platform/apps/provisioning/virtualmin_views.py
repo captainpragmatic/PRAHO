@@ -10,7 +10,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from typing import Any, TypedDict, cast
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID
 
 from django.contrib import messages
@@ -18,7 +18,7 @@ from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import AnonymousUser
 from django.core.paginator import Paginator
 from django.db import connections, models, transaction
-from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -326,22 +326,26 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
 # ===============================================================================
 
 
-@login_required
-@user_passes_test(is_staff_or_superuser)
-@monitor_performance(max_duration_seconds=10.0, alert_threshold=3.0)
-def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
-    """📊 List all Virtualmin accounts with filtering and search."""
+ACCOUNTS_PER_PAGE = 25
 
-    # Get base queryset
+
+def _accounts_query(request: HttpRequest) -> QueryDict:
+    """The list's filters: from the query string, or from the list URL an htmx action on that list was made on."""
+    if request.method == "GET":
+        return request.GET
+    return QueryDict(urlsplit(request.headers.get("HX-Current-URL", "")).query)
+
+
+def _accounts_table_context(request: HttpRequest) -> dict[str, Any]:
+    """The filtered, paginated accounts table, as the list page and every htmx render of it show it."""
+    query = _accounts_query(request)
+    status_filter = query.get("status", "")
+    server_filter = query.get("server", "")
+    search_query = query.get("search", "").strip()
+
     accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
         "-created_at"
     )
-
-    # Apply filters
-    status_filter = request.GET.get("status")
-    server_filter = request.GET.get("server")
-    search_query = request.GET.get("search", "").strip()
-
     if status_filter:
         accounts = accounts.filter(status=status_filter)
     if server_filter:
@@ -350,11 +354,35 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
         accounts = accounts.filter(
             models.Q(domain__icontains=search_query) | models.Q(service__customer__name__icontains=search_query)
         )
+    page = Paginator(accounts, ACCOUNTS_PER_PAGE).get_page(query.get("page"))
+    kept = urlencode(
+        {
+            key: value
+            for key, value in (("status", status_filter), ("server", server_filter), ("search", search_query))
+            if value
+        }
+    )
+    return {
+        "accounts": page,
+        "extra_params": f"&{kept}" if kept else "",
+        "status_filter": status_filter,
+        "server_filter": server_filter,
+        "search_query": search_query,
+        "last_updated": timezone.now(),
+    }
 
-    # Pagination
-    paginator = Paginator(accounts, 25)
-    page_number = request.GET.get("page")
-    accounts_page = paginator.get_page(page_number)
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@monitor_performance(max_duration_seconds=10.0, alert_threshold=3.0)
+def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
+    """📊 List all Virtualmin accounts with filtering and search."""
+
+    table = _accounts_table_context(request)
+    if request.headers.get("HX-Request"):  # the filter form and pagination swap the table, not the page
+        return render(request, "provisioning/virtualmin/partials/accounts_table.html", table)
+    accounts_page = table["accounts"]
+    status_filter, server_filter, search_query = table["status_filter"], table["server_filter"], table["search_query"]
 
     # Prepare table data
     table_data = [
@@ -410,8 +438,8 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
     context = {
         "page_title": "Virtualmin Accounts",
         "bulk_actions_url": f"{bulk_url}?{bulk_filters}" if bulk_filters else bulk_url,
+        **table,
         "accounts_page": accounts_page,
-        "accounts": accounts_page,  # For template compatibility
         "table_data": table_data,
         "breadcrumb_items": breadcrumb_items,
         "table_columns": [
@@ -1965,6 +1993,8 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
 
     if not active_servers.exists():
         messages.error(request, _("No active Virtualmin servers found to sync from"))
+        if request.headers.get("HX-Request"):  # a page to land on, not a page nested in the table
+            return HttpResponse(headers={"HX-Redirect": reverse("provisioning:virtualmin_accounts")})
         return redirect("provisioning:virtualmin_accounts")
 
     sync_results: SyncResults = {
@@ -2160,11 +2190,7 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
 
     # If HTMX request, return partial template
     if request.headers.get("HX-Request"):
-        # Refresh the accounts data for the partial
-        accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
-            "-created_at"
-        )
-        return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
+        return render(request, "provisioning/virtualmin/partials/accounts_table.html", _accounts_table_context(request))
 
     return redirect("provisioning:virtualmin_accounts")
 
@@ -2243,10 +2269,9 @@ def virtualmin_account_suspend(request: HttpRequest, account_id: str) -> HttpRes
             return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
         else:
             # Coming from accounts list, return updated table
-            accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
-                "-created_at"
+            return render(
+                request, "provisioning/virtualmin/partials/accounts_table.html", _accounts_table_context(request)
             )
-            return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
 
     return redirect("provisioning:virtualmin_accounts")
 
@@ -2287,10 +2312,9 @@ def virtualmin_account_activate(request: HttpRequest, account_id: str) -> HttpRe
             return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
         else:
             # Coming from accounts list, return updated table
-            accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
-                "-created_at"
+            return render(
+                request, "provisioning/virtualmin/partials/accounts_table.html", _accounts_table_context(request)
             )
-            return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
 
     return redirect("provisioning:virtualmin_accounts")
 
@@ -2333,10 +2357,9 @@ def virtualmin_account_toggle_protection(request: HttpRequest, account_id: str) 
                 return render(request, "provisioning/virtualmin/partials/quick_actions.html", context)
             else:
                 # Coming from accounts list, return updated table
-                accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
-                    "-created_at"
+                return render(
+                    request, "provisioning/virtualmin/partials/accounts_table.html", _accounts_table_context(request)
                 )
-                return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
 
     return redirect("provisioning:virtualmin_accounts")
 
