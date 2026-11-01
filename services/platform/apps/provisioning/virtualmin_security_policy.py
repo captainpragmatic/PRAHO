@@ -563,7 +563,8 @@ def _verify_listeners(listeners: list[str]) -> None:
             _fail()
         address, port = fields[4].rsplit(":", 1)
         address = address.strip("[]").split("%", 1)[0]
-        loopback = address not in {"*", "0.0.0.0", "::"} and ipaddress.ip_address(address).is_loopback
+        # This compares listener evidence; it does not open or bind a socket.
+        loopback = address not in {"*", "0.0.0.0", "::"} and ipaddress.ip_address(address).is_loopback  # nosec B104 - reject wildcard evidence before checking loopback.
         if fields[0] == "tcp" and (port in {"80", "443", "9876", "10000"} or (loopback and port in LOOPBACK_TCP_PORTS)):
             continue
         if fields[0] == "udp" and ((loopback and port == "53") or port in {"68", "546"}):

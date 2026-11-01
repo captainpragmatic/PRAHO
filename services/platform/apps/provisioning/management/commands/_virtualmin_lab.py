@@ -233,7 +233,8 @@ def prepare_lab_ssh_policy(state_dir: Path, node: LabNode) -> None:
     inject = state_dir / node.key / "inject"
     write_private(inject / "operator_authorized_keys", public_key + "\n")
     template_path = Path(__file__).resolve().parents[6] / "deploy/ansible/roles/ssh-hardening/templates/sshd_config.j2"
-    template = Environment(undefined=StrictUndefined, autoescape=False).from_string(template_path.read_text())  # noqa: S701 -- SSH configuration, not HTML
+    # Render native OpenSSH syntax; HTML escaping would corrupt configuration values.
+    template = Environment(undefined=StrictUndefined, autoescape=False).from_string(template_path.read_text())  # noqa: S701  # nosec B701 - validated OpenSSH configuration, not HTML.
     write_private(
         inject / "sshd_config",
         template.render(
