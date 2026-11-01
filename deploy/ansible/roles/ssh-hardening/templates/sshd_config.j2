@@ -25,7 +25,8 @@ ClientAliveInterval 300
 ClientAliveCountMax 2
 PrintMotd no
 AcceptEnv LANG LC_*
-Subsystem sftp internal-sftp
+# External SFTP honors disabled account login shells during Virtualmin migration barriers.
+Subsystem sftp /usr/lib/openssh/sftp-server
 {% if ssh_webmin_tunnel_enabled | default(false) %}
 # BEGIN PRAHO WEBMIN TUNNEL
 Match User praho-webmin-tunnel

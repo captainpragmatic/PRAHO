@@ -71,7 +71,10 @@ def test_settle_lets_a_command_finish_by_itself(chaos: Chaos, quick: Path) -> No
 
     assert in_flight_operations(container) == []
     record = _records(quick)
-    assert "finished by itself" in record and "ended" not in record
+    assert "finished by itself within the wait" in record.splitlines()
+    # Full process diagnostics can contain "unattended-upgrades". Only a
+    # termination action line means settle ended the command itself.
+    assert not any(line.startswith("ended after ") for line in record.splitlines())
 
 
 def test_settle_records_nothing_on_a_quiet_node(chaos: Chaos, quick: Path) -> None:

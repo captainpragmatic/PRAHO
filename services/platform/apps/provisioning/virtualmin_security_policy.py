@@ -45,9 +45,12 @@ SSH_BASELINE = {
 }
 TUNNEL_KEY_OPTIONS = ["permitopen=127.0.0.1:10000", "port-forwarding", "restrict"]
 MAX_OPERATOR_KEYS = 128
+# Public SHA-256 fingerprints of the two reviewed canonical SSH configurations.
+SSH_CONFIG_PRIMARY_SHA256 = "c669752c5b7bfb7598e54762b055b17ec4f1c816f049e17022dfca8f16d07ecf"
+SSH_CONFIG_DUAL_KEYS_SHA256 = "07febb4eb6e488686aec753740b361d418469b382ccd2bbcab22cd7ee6e493a1"
 SSH_CONFIG_DIGESTS = {
-    ".ssh/authorized_keys": "cd3fdcac7ae7ea9100df642f6f04a02be80430504a9ad2955a1731eabd5cd509",
-    ".ssh/authorized_keys .ssh/authorized_keys2": "2c600d931ac0f9b36b3081a827273f1b3b60c602b938bf841033a687504a4be0",
+    ".ssh/authorized_keys": SSH_CONFIG_PRIMARY_SHA256,
+    ".ssh/authorized_keys .ssh/authorized_keys2": SSH_CONFIG_DUAL_KEYS_SHA256,
 }
 
 

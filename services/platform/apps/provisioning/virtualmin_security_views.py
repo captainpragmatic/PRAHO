@@ -17,6 +17,7 @@ from django_q.models import Task
 from django_q.tasks import async_task
 
 from apps.infrastructure.permissions import can_deploy_nodes, is_staff_or_superuser
+from apps.ui.widgets import PRAHOCheckboxWidget, PRAHOTextAreaWidget
 
 from .virtualmin_models import VirtualminServer
 from .virtualmin_node_capability import destination_refusal
@@ -29,38 +30,49 @@ if TYPE_CHECKING:
 
 class SourceAcknowledgmentForm(forms.Form):
     review_id = forms.UUIDField(widget=forms.HiddenInput)
-    reason = forms.CharField(label=_("Responsibility for retained services"), max_length=2000, widget=forms.Textarea)
+    reason = forms.CharField(
+        label=_("Responsibility for retained services"),
+        max_length=2000,
+        widget=PRAHOTextAreaWidget(attrs={"rows": 3, "id": "id_source_security_reason"}),
+    )
     acknowledged = forms.BooleanField(
         label=_(
             "I understand that hardening will be skipped, existing access and services remain, "
             "and this node is retained as a migration source."
-        )
+        ),
+        widget=PRAHOCheckboxWidget(attrs={"id": "id_source_security_acknowledged"}),
     )
 
 
 class HardeningApprovalForm(forms.Form):
     review_id = forms.UUIDField(widget=forms.HiddenInput)
     reason = forms.CharField(
-        label=_("Service evacuation and operator responsibility"), max_length=2000, widget=forms.Textarea
+        label=_("Service evacuation and operator responsibility"),
+        max_length=2000,
+        widget=PRAHOTextAreaWidget(attrs={"rows": 3, "id": "id_hardening_security_reason"}),
     )
     acknowledged = forms.BooleanField(
         label=_(
             "I accept the listed access, firewall, package and service changes and their interruption. "
             "Mail, DNS and other affected services have been evacuated or may be stopped. "
             "I have the approved operator SSH key and understand the recovery limits."
-        )
+        ),
+        widget=PRAHOCheckboxWidget(attrs={"id": "id_hardening_security_acknowledged"}),
     )
 
 
 class PolicyVerificationForm(forms.Form):
     reason = forms.CharField(
-        label=_("Recovery actions and verification responsibility"), max_length=2000, widget=forms.Textarea
+        label=_("Recovery actions and verification responsibility"),
+        max_length=2000,
+        widget=PRAHOTextAreaWidget(attrs={"rows": 3, "id": "id_verification_security_reason"}),
     )
     acknowledged = forms.BooleanField(
         label=_(
             "I confirmed that the failed attempt and its remote commands have stopped. "
             "Reinspect and verify the applied policy without replaying hardening."
-        )
+        ),
+        widget=PRAHOCheckboxWidget(attrs={"id": "id_verification_security_acknowledged"}),
     )
 
 

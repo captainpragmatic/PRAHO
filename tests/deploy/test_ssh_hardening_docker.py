@@ -27,11 +27,21 @@ def docker(*args: str, input_text: str | None = None, check: bool = True) -> sub
 def ssh_target(request: pytest.FixtureRequest) -> Iterator[str]:
     version = str(request.param)
     image = f"praho-ssh-test:{version}"
-    built = docker("build", "--build-arg", f"UBUNTU_VERSION={version}", "-t", image,
-                   "-f", str(ROOT / "tests/deploy/ssh/Dockerfile"), str(ROOT / "tests/deploy/ssh"), check=False)
+    built = docker(
+        "build",
+        "--build-arg",
+        f"UBUNTU_VERSION={version}",
+        "-t",
+        image,
+        "-f",
+        str(ROOT / "tests/deploy/ssh/Dockerfile"),
+        str(ROOT / "tests/deploy/ssh"),
+        check=False,
+    )
     assert built.returncode == 0, built.stderr[-4000:]
-    container = docker("run", "-d", "--privileged", "--cgroupns=private", "--tmpfs", "/run",
-                       "--tmpfs", "/run/lock", image).stdout.strip()
+    container = docker(
+        "run", "-d", "--privileged", "--cgroupns=private", "--tmpfs", "/run", "--tmpfs", "/run/lock", image
+    ).stdout.strip()
     try:
         docker("cp", str(ROOT / "deploy/ansible"), f"{container}:/work")
         docker("exec", container, "systemctl", "is-system-running", "--wait", check=False)
@@ -44,18 +54,44 @@ def ssh_target(request: pytest.FixtureRequest) -> Iterator[str]:
         docker("exec", container, "chmod", "600", "/root/.ssh/authorized_keys")
         disabled = docker("exec", container, "cat", "/root/disabled.pub").stdout
         docker("exec", "-i", container, "tee", "/root/.ssh/authorized_keys2", input_text=disabled)
-        docker("exec", "-i", container, "tee", "-a", "/etc/ssh/sshd_config", input_text="\nAuthorizedKeysFile .ssh/authorized_keys\n")
+        docker(
+            "exec",
+            "-i",
+            container,
+            "tee",
+            "-a",
+            "/etc/ssh/sshd_config",
+            input_text="\nAuthorizedKeysFile .ssh/authorized_keys\n",
+        )
         docker("exec", container, "systemctl", "restart", "ssh.socket", "ssh.service")
         host_key = docker("exec", container, "cat", "/etc/ssh/ssh_host_ed25519_key.pub").stdout
         docker("exec", "-i", container, "tee", "/root/known_hosts", input_text="127.0.0.1 " + host_key)
         docker("exec", container, "useradd", "--create-home", "--shell", "/bin/bash", "ssh-test-user")
-        docker("exec", "-i", container, "chpasswd", input_text=f"root:{secrets.token_urlsafe(24)}\nssh-test-user:{secrets.token_urlsafe(24)}\n")
-        inventory = {"all": {"children": {"praho": {"hosts": {"target": {
-            "ansible_host": "127.0.0.1", "ansible_user": "root", "ansible_port": 22,
-            "ansible_ssh_private_key_file": "/root/controller",
-            "ansible_python_interpreter": "/usr/bin/python3",
-            "ansible_ssh_common_args": "-o StrictHostKeyChecking=yes -o HostKeyAlias=127.0.0.1 -o UserKnownHostsFile=/root/known_hosts",
-        }}}}}}
+        docker(
+            "exec",
+            "-i",
+            container,
+            "chpasswd",
+            input_text=f"root:{secrets.token_urlsafe(24)}\nssh-test-user:{secrets.token_urlsafe(24)}\n",
+        )
+        inventory = {
+            "all": {
+                "children": {
+                    "praho": {
+                        "hosts": {
+                            "target": {
+                                "ansible_host": "127.0.0.1",
+                                "ansible_user": "root",
+                                "ansible_port": 22,
+                                "ansible_ssh_private_key_file": "/root/controller",
+                                "ansible_python_interpreter": "/usr/bin/python3",
+                                "ansible_ssh_common_args": "-o StrictHostKeyChecking=yes -o HostKeyAlias=127.0.0.1 -o UserKnownHostsFile=/root/known_hosts",
+                            }
+                        }
+                    }
+                }
+            }
+        }
         docker("exec", "-i", container, "tee", "/work/test-inventory.json", input_text=json.dumps(inventory))
         yield container
     finally:
@@ -66,31 +102,82 @@ def harden(
     container: str, port: int = 22, extra: dict[str, str | int] | None = None, sources: str = "127.0.0.1/32"
 ) -> subprocess.CompletedProcess[str]:
     # Host vars are changed rather than extra-vars, so set_fact can perform the handoff.
-    docker("exec", container, "/opt/controller/bin/python", "-c",
-           "import json; p='/work/test-inventory.json'; v=json.load(open(p)); "
-           f"v['all']['children']['praho']['hosts']['target']['ansible_port']={port}; "
-           "open(p,'w').write(json.dumps(v))")
+    docker(
+        "exec",
+        container,
+        "/opt/controller/bin/python",
+        "-c",
+        "import json; p='/work/test-inventory.json'; v=json.load(open(p)); "
+        f"v['all']['children']['praho']['hosts']['target']['ansible_port']={port}; "
+        "open(p,'w').write(json.dumps(v))",
+    )
     docker("exec", "-i", container, "tee", "/work/test-vars.json", input_text=json.dumps(extra or {}))
-    return docker("exec", "-w", "/work", "-e", "PRAHO_SSH_PUBLIC_KEYS_FILE=/root/operator.pub",
-                  "-e", "PRAHO_DEPLOY_KNOWN_HOSTS_FILE=/root/known_hosts",
-                  "-e", f"PRAHO_SSH_ALLOWED_CIDRS={sources}", container,
-                  "/opt/controller/bin/ansible-playbook", "-i", "test-inventory.json", "-e", "@/work/test-vars.json",
-                  "playbooks/ssh-hardening.yml", check=False)
+    return docker(
+        "exec",
+        "-w",
+        "/work",
+        "-e",
+        "PRAHO_SSH_PUBLIC_KEYS_FILE=/root/operator.pub",
+        "-e",
+        "PRAHO_DEPLOY_KNOWN_HOSTS_FILE=/root/known_hosts",
+        "-e",
+        f"PRAHO_SSH_ALLOWED_CIDRS={sources}",
+        container,
+        "/opt/controller/bin/ansible-playbook",
+        "-i",
+        "test-inventory.json",
+        "-e",
+        "@/work/test-vars.json",
+        "playbooks/ssh-hardening.yml",
+        check=False,
+    )
 
 
 def ssh(container: str, port: int, key: str = "controller", user: str = "root") -> subprocess.CompletedProcess[str]:
-    return docker("exec", container, "ssh", "-F", "/dev/null", "-p", str(port), "-o", "BatchMode=yes",
-                  "-o", "StrictHostKeyChecking=yes", "-o", "UserKnownHostsFile=/root/known_hosts",
-                  "-o", "HostKeyAlias=127.0.0.1", "-o", "IdentitiesOnly=yes",
-                  "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ConnectTimeout=3",
-                  "-i", f"/root/{key}", f"{user}@127.0.0.1", "id -u", check=False)
+    return docker(
+        "exec",
+        container,
+        "ssh",
+        "-F",
+        "/dev/null",
+        "-p",
+        str(port),
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "StrictHostKeyChecking=yes",
+        "-o",
+        "UserKnownHostsFile=/root/known_hosts",
+        "-o",
+        "HostKeyAlias=127.0.0.1",
+        "-o",
+        "IdentitiesOnly=yes",
+        "-o",
+        "ControlMaster=no",
+        "-o",
+        "ControlPath=none",
+        "-o",
+        "ConnectTimeout=3",
+        "-i",
+        f"/root/{key}",
+        f"{user}@127.0.0.1",
+        "id -u",
+        check=False,
+    )
 
 
 def test_socket_cutover_rejection_and_repeat(ssh_target: str) -> None:
     container = ssh_target
     original = docker("exec", container, "cat", "/etc/ssh/sshd_config").stdout
     restriction = "/etc/ssh/sshd_config.d/90-custom.conf"
-    docker("exec", "-i", container, "tee", restriction, input_text="Match User ssh-test-user\n    ForceCommand internal-sftp\n")
+    docker(
+        "exec",
+        "-i",
+        container,
+        "tee",
+        restriction,
+        input_text="Match User ssh-test-user\n    ForceCommand internal-sftp\n",
+    )
     rejected = harden(container)
     assert rejected.returncode != 0
     assert "custom SSH policy" in rejected.stdout, rejected.stdout[-4000:]
@@ -108,12 +195,23 @@ def test_socket_cutover_rejection_and_repeat(ssh_target: str) -> None:
     assert ssh(container, 22).stdout.strip() == "0"
     docker("exec", container, "iptables", "-D", *rule)
     # The bounded preflight listener exits after 20s even if its controller failed.
-    docker("exec", container, "timeout", "25", "sh", "-c", "while ss -lnt 'sport = :9876' | grep -q LISTEN; do sleep 1; done")
+    docker(
+        "exec",
+        container,
+        "timeout",
+        "25",
+        "sh",
+        "-c",
+        "while ss -lnt 'sport = :9876' | grep -q LISTEN; do sleep 1; done",
+    )
 
     # Fail after the dual listener is active, so this exercises actual rollback.
-    failed_handoff = harden(container, extra={
-        "ssh_probe_identity_file": "{{ '/root/controller' if ssh_proof_port | int == 22 else '/root/disabled' }}",
-    })
+    failed_handoff = harden(
+        container,
+        extra={
+            "ssh_probe_identity_file": "{{ '/root/controller' if ssh_proof_port | int == 22 else '/root/disabled' }}",
+        },
+    )
     assert failed_handoff.returncode != 0
     assert "Restore the last verified configuration" in failed_handoff.stdout
     assert docker("exec", container, "cat", "/etc/ssh/sshd_config").stdout == original
@@ -127,16 +225,84 @@ def test_socket_cutover_rejection_and_repeat(ssh_target: str) -> None:
     assert ssh(container, 9876, "disabled").returncode != 0
     assert ssh(container, 22).returncode != 0
     for user in ("root", "ssh-test-user"):
-        policy = docker("exec", container, "sshd", "-T", "-C", f"user={user},host=localhost,addr=127.0.0.1").stdout.splitlines()
+        policy = docker(
+            "exec", container, "sshd", "-T", "-C", f"user={user},host=localhost,addr=127.0.0.1"
+        ).stdout.splitlines()
         assert "authenticationmethods publickey" in policy
         assert "passwordauthentication no" in policy
         assert "kbdinteractiveauthentication no" in policy
+        assert ["subsystem", "sftp", "/usr/lib/openssh/sftp-server"] in [line.split() for line in policy]
     keys_before = docker("exec", container, "cat", "/root/.ssh/authorized_keys").stdout
     again = harden(container, 9876)
     assert again.returncode == 0, again.stdout[-7000:] + again.stderr[-1000:]
     assert docker("exec", container, "cat", "/root/.ssh/authorized_keys").stdout == keys_before
     assert ssh(container, 9876).stdout.strip() == "0"
     assert ssh(container, 22).returncode != 0
+
+
+def test_missing_external_sftp_refuses_before_changing_ssh_policy(ssh_target: str) -> None:
+    container = ssh_target
+    original = docker("exec", container, "cat", "/etc/ssh/sshd_config").stdout
+    docker("exec", container, "mv", "/usr/lib/openssh/sftp-server", "/usr/lib/openssh/sftp-server.disabled")
+    rejected = harden(container)
+    assert rejected.returncode != 0
+    assert "Require the external SFTP server" in rejected.stdout, rejected.stdout[-4000:]
+    assert docker("exec", container, "cat", "/etc/ssh/sshd_config").stdout == original
+    assert ssh(container, 22).stdout.strip() == "0"
+
+
+def test_sftp_writes_follow_the_account_login_shell(ssh_target: str) -> None:
+    container = ssh_target
+    result = harden(container)
+    assert result.returncode == 0, result.stdout[-6000:] + result.stderr[-1000:]
+    key_dir = "/home/ssh-test-user/.ssh"
+    docker("exec", container, "mkdir", "-m", "700", key_dir)
+    docker("exec", container, "cp", "/root/operator.pub", key_dir + "/authorized_keys")
+    docker("exec", container, "chmod", "600", key_dir + "/authorized_keys")
+    docker("exec", container, "chown", "-R", "ssh-test-user:ssh-test-user", key_dir)
+    destination = "/home/ssh-test-user/sftp-proof"
+
+    def upload(content: str) -> subprocess.CompletedProcess[str]:
+        docker("exec", "-i", container, "tee", "/root/sftp-payload", input_text=content)
+        return docker(
+            "exec",
+            "-i",
+            container,
+            "sftp",
+            "-F",
+            "/dev/null",
+            "-P",
+            "9876",
+            "-b",
+            "-",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=yes",
+            "-o",
+            "UserKnownHostsFile=/root/known_hosts",
+            "-o",
+            "HostKeyAlias=127.0.0.1",
+            "-o",
+            "IdentitiesOnly=yes",
+            "-i",
+            "/root/operator",
+            "ssh-test-user@127.0.0.1",
+            input_text=f"put /root/sftp-payload {destination}\n",
+            check=False,
+        )
+
+    enabled = upload("enabled\n")
+    assert enabled.returncode == 0, enabled.stderr
+    assert docker("exec", container, "cat", destination).stdout == "enabled\n"
+    docker("exec", container, "usermod", "--shell", "/bin/false", "ssh-test-user")
+    blocked = upload("held\n")
+    assert blocked.returncode != 0, "SFTP bypassed the disabled account login shell"
+    assert docker("exec", container, "cat", destination).stdout == "enabled\n"
+    docker("exec", container, "usermod", "--shell", "/bin/bash", "ssh-test-user")
+    released = upload("released\n")
+    assert released.returncode == 0, released.stderr
+    assert docker("exec", container, "cat", destination).stdout == "released\n"
 
 
 def test_ssh_is_admitted_only_from_the_allowlist(ssh_target: str) -> None:
@@ -186,11 +352,18 @@ def test_rollback_timer_recovers_a_delayed_controller(ssh_target: str, before_ac
     activation = next(index for index, task in enumerate(tasks) if task["name"].startswith("Activate staged"))
     # Start the exact transient rollback service synchronously, avoiding timer jitter.
     # In the before case the stale Ansible run then resumes its original activation task.
-    tasks.insert(activation if before_activation else activation + 1, {
-        "name": "Simulate rollback firing while controller is stalled",
-        "ansible.builtin.command": {"argv": ["systemctl", "start", "praho-ssh-{{ ssh_snapshot.path | basename }}.service"]},
-    })
-    docker("exec", "-i", container, "tee", "/work/roles/ssh-hardening/tasks/phase.yml", input_text=yaml.safe_dump(tasks))
+    tasks.insert(
+        activation if before_activation else activation + 1,
+        {
+            "name": "Simulate rollback firing while controller is stalled",
+            "ansible.builtin.command": {
+                "argv": ["systemctl", "start", "praho-ssh-{{ ssh_snapshot.path | basename }}.service"]
+            },
+        },
+    )
+    docker(
+        "exec", "-i", container, "tee", "/work/roles/ssh-hardening/tasks/phase.yml", input_text=yaml.safe_dump(tasks)
+    )
     original = docker("exec", container, "cat", "/etc/ssh/sshd_config").stdout
     result = harden(container, extra={"ssh_rollback_seconds": 60})
     assert result.returncode != 0
@@ -215,25 +388,53 @@ def test_application_python_and_postgresql_on_supported_ubuntu(ssh_target: str) 
     docker("exec", container, "touch", "/var/lib/apt/lists", "/var/lib/apt/periodic/update-success-stamp")
     native = ROOT / "deploy/ansible/roles/praho-native/tasks/main.yml"
     package_names = {
-        "Create keyrings directory", "Download PostgreSQL GPG key",
-        "Add PostgreSQL APT repository", "Install PostgreSQL 16",
+        "Create keyrings directory",
+        "Download PostgreSQL GPG key",
+        "Add PostgreSQL APT repository",
+        "Install PostgreSQL 16",
     }
     package_tasks = [task for task in yaml.safe_load(native.read_text()) if task.get("name") in package_names]
     assert len(package_tasks) == len(package_names)
-    playbook = [{"hosts": "localhost", "connection": "local", "gather_facts": True,
-                 "tasks": [{"ansible.builtin.include_role": {"name": "praho-native", "tasks_from": "runtime"}},
-                           *package_tasks]}]
+    playbook = [
+        {
+            "hosts": "localhost",
+            "connection": "local",
+            "gather_facts": True,
+            "tasks": [
+                {"ansible.builtin.include_role": {"name": "praho-native", "tasks_from": "runtime"}},
+                *package_tasks,
+            ],
+        }
+    ]
     docker("exec", "-i", container, "tee", "/work/runtime-test.yml", input_text=yaml.safe_dump(playbook))
-    installed = docker("exec", "-w", "/work", container, "/opt/controller/bin/ansible-playbook",
-                       "-i", "localhost,", "runtime-test.yml", check=False)
+    installed = docker(
+        "exec",
+        "-w",
+        "/work",
+        container,
+        "/opt/controller/bin/ansible-playbook",
+        "-i",
+        "localhost,",
+        "runtime-test.yml",
+        check=False,
+    )
     assert installed.returncode == 0, installed.stdout[-7000:] + installed.stderr[-1500:]
     postgres = docker("exec", container, "/usr/lib/postgresql/16/bin/postgres", "--version")
     assert "PostgreSQL) 16." in postgres.stdout
     python = docker("exec", container, "/opt/praho-python/bin/python3.13", "--version")
     assert python.stdout.startswith("Python 3.13.")
     # The Portal's separate identity must read the base interpreter outside /root.
-    portal = docker("exec", container, "runuser", "-u", "ssh-test-user", "--",
-                    "/opt/praho-python/bin/python3.13", "-c", "import ssl, sqlite3; print('runtime-readable')")
+    portal = docker(
+        "exec",
+        container,
+        "runuser",
+        "-u",
+        "ssh-test-user",
+        "--",
+        "/opt/praho-python/bin/python3.13",
+        "-c",
+        "import ssl, sqlite3; print('runtime-readable')",
+    )
     assert portal.stdout.strip() == "runtime-readable"
 
 
@@ -266,7 +467,9 @@ def test_swap_preparation_recovers_and_never_formats_existing_data(ssh_target: s
     docker("exec", "-i", container, "tee", "/work/test-bin/mkswap", input_text="#!/bin/sh\nexit 99\n")
     docker("exec", container, "chmod", "700", "/work/test-bin/mkswap")
     assert prepare().returncode == 99
-    assert docker("exec", container, "stat", "-c", "%s", "/var/lib/praho-swap/pending").stdout.strip() == str(32 * 1024**2)
+    assert docker("exec", container, "stat", "-c", "%s", "/var/lib/praho-swap/pending").stdout.strip() == str(
+        32 * 1024**2
+    )
     assert docker("exec", container, "test", "-e", "/swapfile", check=False).returncode != 0
     docker("exec", container, "rm", "/work/test-bin/mkswap")
     created = prepare()
@@ -280,16 +483,37 @@ def test_swap_preparation_recovers_and_never_formats_existing_data(ssh_target: s
 
     # A failed kernel activation must not put a broken swap entry into fstab.
     fstab = docker("exec", container, "cat", "/etc/fstab").stdout
-    docker("exec", "-i", container, "tee", "/work/test-bin/swapon", input_text=(
-        '#!/bin/sh\nif [ "$1" = "--show=NAME" ]; then exit 0; fi\nexit 77\n'
-    ))
+    docker(
+        "exec",
+        "-i",
+        container,
+        "tee",
+        "/work/test-bin/swapon",
+        input_text=('#!/bin/sh\nif [ "$1" = "--show=NAME" ]; then exit 0; fi\nexit 77\n'),
+    )
     docker("exec", container, "chmod", "700", "/work/test-bin/swapon")
-    play = [{"hosts": "localhost", "connection": "local", "gather_facts": False,
-             "vars": {"swap_size_mb": 32}, "environment": {"PATH": path},
-             "tasks": [{"ansible.builtin.include_role": {"name": "common", "tasks_from": "swap"}}]}]
+    play = [
+        {
+            "hosts": "localhost",
+            "connection": "local",
+            "gather_facts": False,
+            "vars": {"swap_size_mb": 32},
+            "environment": {"PATH": path},
+            "tasks": [{"ansible.builtin.include_role": {"name": "common", "tasks_from": "swap"}}],
+        }
+    ]
     docker("exec", "-i", container, "tee", "/work/swap-test.yml", input_text=yaml.safe_dump(play))
-    activation = docker("exec", "-w", "/work", container, "/opt/controller/bin/ansible-playbook",
-                        "-i", "localhost,", "swap-test.yml", check=False)
+    activation = docker(
+        "exec",
+        "-w",
+        "/work",
+        container,
+        "/opt/controller/bin/ansible-playbook",
+        "-i",
+        "localhost,",
+        "swap-test.yml",
+        check=False,
+    )
     assert activation.returncode != 0
     assert "Activate the swap file before making it persistent" in activation.stdout
     assert docker("exec", container, "cat", "/etc/fstab").stdout == fstab
@@ -304,7 +528,13 @@ def test_swap_retry_counts_only_unallocated_bytes(ssh_target: str) -> None:
     path = "/work/test-bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
     # Already allocated extents are reflected in df's remaining free bytes.
     # Sparse logical bytes must not receive credit for unallocated physical space.
-    cases = ((16, 16, 1048, True), (32, 32, 1040, True), (0, 0, 1040, False), (16, 16, 1032, False), (0, 32, 1040, False))
+    cases = (
+        (16, 16, 1048, True),
+        (32, 32, 1040, True),
+        (0, 0, 1040, False),
+        (16, 16, 1032, False),
+        (0, 32, 1040, False),
+    )
     for allocated_mb, logical_mb, available_mb, succeeds in cases:
         docker("exec", container, "touch", "/var/lib/praho-swap/pending")
         docker("exec", container, "chmod", "600", "/var/lib/praho-swap/pending")
@@ -312,20 +542,38 @@ def test_swap_retry_counts_only_unallocated_bytes(ssh_target: str) -> None:
             docker("exec", container, "fallocate", "-l", str(allocated_mb * 1024**2), "/var/lib/praho-swap/pending")
         if logical_mb > allocated_mb:
             docker("exec", container, "truncate", "-s", str(logical_mb * 1024**2), "/var/lib/praho-swap/pending")
-        docker("exec", "-i", container, "tee", "/work/test-bin/df", input_text=(
-            f"#!/bin/sh\nprintf 'Avail\\n{available_mb * 1024**2}\\n'\n"
-        ))
+        docker(
+            "exec",
+            "-i",
+            container,
+            "tee",
+            "/work/test-bin/df",
+            input_text=(f"#!/bin/sh\nprintf 'Avail\\n{available_mb * 1024**2}\\n'\n"),
+        )
         docker("exec", container, "chmod", "700", "/work/test-bin/df")
-        prepared = docker("exec", "-e", f"PATH={path}", container, "bash",
-                          "/work/roles/common/files/prepare-swap.sh", "32", check=False)
+        prepared = docker(
+            "exec",
+            "-e",
+            f"PATH={path}",
+            container,
+            "bash",
+            "/work/roles/common/files/prepare-swap.sh",
+            "32",
+            check=False,
+        )
         if succeeds:
             assert prepared.returncode == 0, prepared.stdout + prepared.stderr
             assert docker("exec", container, "stat", "-c", "%s", "/swapfile").stdout.strip() == str(32 * 1024**2)
-            assert docker("exec", container, "blkid", "-p", "-s", "TYPE", "-o", "value", "/swapfile").stdout.strip() == "swap"
+            assert (
+                docker("exec", container, "blkid", "-p", "-s", "TYPE", "-o", "value", "/swapfile").stdout.strip()
+                == "swap"
+            )
             docker("exec", container, "rm", "/swapfile")
         else:
             assert prepared.returncode != 0
             assert "leave at least 1 GiB free" in prepared.stderr
             assert docker("exec", container, "test", "-e", "/swapfile", check=False).returncode != 0
-            assert docker("exec", container, "stat", "-c", "%s", "/var/lib/praho-swap/pending").stdout.strip() == str(logical_mb * 1024**2)
+            assert docker("exec", container, "stat", "-c", "%s", "/var/lib/praho-swap/pending").stdout.strip() == str(
+                logical_mb * 1024**2
+            )
             docker("exec", container, "rm", "/var/lib/praho-swap/pending")

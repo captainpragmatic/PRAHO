@@ -13,7 +13,15 @@
       {% if can_decide %}
         <form method="post" class="space-y-4">
           {% csrf_token %}<input type="hidden" name="action" value="verify">
-          {{ verify_form.as_p }}
+          {{ verify_form.non_field_errors }}
+          <div class="space-y-2">
+            {{ verify_form.reason.label_tag }}
+            {{ verify_form.reason }}{{ verify_form.reason.errors }}
+          </div>
+          <label class="flex items-start gap-3 text-slate-300" for="{{ verify_form.acknowledged.id_for_label }}">
+            {{ verify_form.acknowledged }}<span>{{ verify_form.acknowledged.label }}</span>
+          </label>
+          {{ verify_form.acknowledged.errors }}
           {% trans "Verify applied policy without replay" as verify_label %}{% button verify_label type="submit" variant="secondary" %}
         </form>
       {% endif %}
@@ -59,13 +67,29 @@
       {% if network_ready %}
       <form method="post" class="space-y-4" hx-confirm="{% trans 'Apply every listed access and service change, including interruption and removal of affected packages?' %}">
         {% csrf_token %}<input type="hidden" name="action" value="apply">
-        {{ apply_form.as_p }}
+        {{ apply_form.non_field_errors }}{{ apply_form.review_id }}{{ apply_form.review_id.errors }}
+        <div class="space-y-2">
+          {{ apply_form.reason.label_tag }}
+          {{ apply_form.reason }}{{ apply_form.reason.errors }}
+        </div>
+        <label class="flex items-start gap-3 text-slate-300" for="{{ apply_form.acknowledged.id_for_label }}">
+          {{ apply_form.acknowledged }}<span>{{ apply_form.acknowledged.label }}</span>
+        </label>
+        {{ apply_form.acknowledged.errors }}
         {% trans "Apply reviewed hardening" as apply_label %}{% button apply_label type="submit" variant="danger" %}
       </form>
       {% endif %}
       <form method="post" class="space-y-4" hx-confirm="{% trans 'Keep existing access and services without applying hardening?' %}">
         {% csrf_token %}<input type="hidden" name="action" value="acknowledge">
-        {{ form.as_p }}
+        {{ form.non_field_errors }}{{ form.review_id }}{{ form.review_id.errors }}
+        <div class="space-y-2">
+          {{ form.reason.label_tag }}
+          {{ form.reason }}{{ form.reason.errors }}
+        </div>
+        <label class="flex items-start gap-3 text-slate-300" for="{{ form.acknowledged.id_for_label }}">
+          {{ form.acknowledged }}<span>{{ form.acknowledged.label }}</span>
+        </label>
+        {{ form.acknowledged.errors }}
         {% trans "Keep as migration source" as acknowledge_label %}{% button acknowledge_label type="submit" variant="secondary" %}
       </form>
     {% endif %}
