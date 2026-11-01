@@ -359,8 +359,9 @@ def retry_line_for_staff(item_id: UUID | str, *, actor: User) -> Result[str, str
         if job is None:
             return Err(_("There is no failed create job to retry for this line."))
         now = timezone.now()
+        budget = max(job.max_retries, 1)  # a job created with no retries still gets the one asked for
         rearmed = VirtualminProvisioningJob.objects.filter(pk=job.pk, status="failed").update(
-            next_retry_at=now, retry_count=max(job.max_retries - 1, 0), updated_at=now
+            next_retry_at=now, max_retries=budget, retry_count=budget - 1, updated_at=now
         )
         if not rearmed:
             transaction.set_rollback(True)
@@ -374,7 +375,7 @@ def retry_line_for_staff(item_id: UUID | str, *, actor: User) -> Result[str, str
             description=f"Staff retried the failed hosting line {line.product_name}",
             actor_type="user",
             old_values={"provisioning_status": "failed", "job_retry_count": job.retry_count},
-            new_values={"provisioning_status": "pending", "job_retry_count": max(job.max_retries - 1, 0)},
+            new_values={"provisioning_status": "pending", "job_retry_count": budget - 1},
             metadata={
                 "order_id": str(line.order_id),
                 "order_number": line.order.order_number,

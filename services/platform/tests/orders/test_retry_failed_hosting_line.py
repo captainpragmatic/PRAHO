@@ -14,24 +14,33 @@ What it refuses, and why each matters:
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
+from django.contrib.messages import get_messages
 from django.test import Client
 from django.urls import reverse
+from django.utils import timezone
 
 from apps.audit.models import AuditEvent
 from apps.billing.refund_models import Refund
 from apps.common.types import Retriability
 from apps.customers.models import Customer
-from apps.orders.hosting_fulfilment import fulfil_hosting_line, retry_line_for_staff
-from apps.orders.models import Order
+from apps.orders.hosting_fulfilment import (
+    DISPATCH_LOST_AFTER,
+    fulfil_hosting_line,
+    recover_hosting_lines,
+    retry_line_for_staff,
+)
+from apps.orders.models import Order, OrderItem
 from apps.provisioning.models import Service
-from apps.provisioning.virtualmin_models import VirtualminAccount
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
+from apps.provisioning.virtualmin_tasks import process_failed_virtualmin_jobs
 from apps.users.models import User
 from tests.helpers.fsm_helpers import force_status
 from tests.orders.test_hosting_fulfilment import HostingLineCase
 
 ASYNC = "django_q.tasks.async_task"
+SWEEP_ASYNC = "apps.provisioning.virtualmin_tasks.async_task"
 
 
 class RetryFailedLineCase(HostingLineCase):
@@ -93,6 +102,52 @@ class RetryLineTests(RetryFailedLineCase):
         fulfil_hosting_line(self.line.pk)
         self._reload()
         self.assertEqual(self.line.provisioning_status, "completed")
+
+    def sweep(self) -> list[tuple[object, ...]]:
+        with patch(SWEEP_ASYNC, return_value="task-1") as dispatched:
+            process_failed_virtualmin_jobs()
+        return [call.args for call in dispatched.call_args_list]
+
+    def test_the_sweep_claims_the_rearmed_job_instead_of_disarming_it(self) -> None:
+        self.retry().unwrap()
+        self.assertEqual(
+            self.sweep(), [("apps.provisioning.virtualmin_tasks.retry_virtualmin_job", str(self.job.pk), ANY)]
+        )
+        self.job.refresh_from_db()
+        self.assertEqual((self.job.status, self.job.retry_count), ("pending", self.job.max_retries))
+
+    def test_a_job_created_with_no_retries_still_gets_the_attempt(self) -> None:
+        VirtualminProvisioningJob.objects.filter(pk=self.job.pk).update(max_retries=0, retry_count=0)
+        self.retry().unwrap()
+        self.assertEqual(len(self.sweep()), 1)
+        self.job.refresh_from_db()
+        self.assertEqual((self.job.status, self.job.retry_count, self.job.max_retries), ("pending", 1, 1))
+
+    def test_a_lost_fulfilment_message_is_recovered(self) -> None:
+        with patch(ASYNC), self.captureOnCommitCallbacks(execute=False):
+            retry_line_for_staff(self.line.pk, actor=self.manager).unwrap()
+        OrderItem.objects.filter(pk=self.line.pk).update(updated_at=timezone.now() - DISPATCH_LOST_AFTER * 2)
+        self.assertEqual(recover_hosting_lines()["lines"], 1)
+        self.line.refresh_from_db()
+        self.assertEqual(self.line.provisioning_status, "in_progress")
+
+    def test_rerunning_fulfilment_and_the_sweep_after_a_retry_is_idempotent(self) -> None:
+        """Sequential re-runs, as recovery and a second sweep make them; exclusive claims are claim_for_retry's CAS."""
+        self.retry().unwrap()
+        self.assertEqual(fulfil_hosting_line(self.line.pk).unwrap(), "in_progress")
+        self.assertEqual(fulfil_hosting_line(self.line.pk).unwrap(), "in_progress")
+        self.assertEqual(len(self.sweep()), 1)
+        self.assertEqual(self.sweep(), [])  # the claimed job is pending now, not failed
+        self.assertEqual(VirtualminProvisioningJob.objects.filter(account=self.account).count(), 1)
+        self.line.refresh_from_db()
+        self.assertEqual(self.line.provisioning_status, "in_progress")
+
+    def test_a_suspension_after_the_retry_holds_the_line(self) -> None:
+        self.retry().unwrap()
+        Customer.objects.filter(pk=self.customer.pk).update(status="suspended")
+        self.assertEqual(fulfil_hosting_line(self.line.pk).unwrap(), "held")
+        self.line.refresh_from_db()
+        self.assertEqual(self.line.provisioning_status, "pending")
 
     def test_a_second_retry_is_refused(self) -> None:
         self.retry().unwrap()
@@ -162,15 +217,24 @@ class RetryLineViewTests(RetryFailedLineCase):
 
 
 class ServiceActivateRefusesFailedTests(RetryFailedLineCase):
-    def test_activate_does_not_revive_a_failed_service(self) -> None:
-        """service_activate accepted failed (the FSM allows it) with no cancellation or suspension check."""
+    def activate(self) -> list[str]:
         Service.objects.filter(pk=self.service.pk).update(status="failed")
         admin = User.objects.create_user(email="activate-admin@example.test", is_staff=True, staff_role="admin")
         client = Client()
         client.force_login(admin)
-        client.post(reverse("provisioning:service_activate", args=[self.service.pk]))
+        response = client.post(reverse("provisioning:service_activate", args=[self.service.pk]))
         self.service.refresh_from_db()
         self.assertEqual(self.service.status, "failed")
+        return [str(m) for m in get_messages(response.wsgi_request)]
+
+    def test_activate_does_not_revive_a_failed_service_and_points_to_its_line(self) -> None:
+        """service_activate accepted failed (the FSM allows it) with no cancellation or suspension check."""
+        self.assertEqual(self.activate(), ["A failed service can't be activated here; retry its order line instead."])
+
+    def test_a_failed_service_with_no_failed_line_is_not_sent_to_one(self) -> None:
+        """The legacy API confirm path fails a Service with no failed line behind it."""
+        OrderItem.objects.filter(pk=self.line.pk).update(provisioning_status="completed")
+        self.assertEqual(self.activate(), ["A failed service can't be activated; it was never set up."])
 
 
 class RetryOnTheOrderPageTests(RetryFailedLineCase):
@@ -209,6 +273,14 @@ class RetryOnTheOrderPageTests(RetryFailedLineCase):
         self.job.mark_attention("lost the node's answer")
         self.retry_buttons(self.manager)
         self.assertIn("resolve it on the job page first", self.page)
+        self.assertNotIn(
+            reverse("orders:order_item_retry", kwargs={"pk": self.order.pk, "item_pk": self.line.pk}), self.page
+        )
+
+    def test_a_failed_order_shows_its_own_reason(self) -> None:
+        Order.objects.filter(pk=self.order.pk).update(status="failed")
+        self.retry_buttons(self.manager)
+        self.assertIn("Only a line of an order being provisioned can be retried", self.page)
         self.assertNotIn(
             reverse("orders:order_item_retry", kwargs={"pk": self.order.pk, "item_pk": self.line.pk}), self.page
         )

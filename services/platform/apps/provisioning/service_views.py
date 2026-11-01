@@ -132,8 +132,9 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # Only staff can manage services (edit/suspend)
     can_manage = user.is_staff_user and service.status in ["active", "suspended"]
 
-    # A real hosting failure leaves the Service active and fails its order line; a failed Service is one whose order
-    # was cancelled. The page points to the line, where staff retry it (orders: retry_line_for_staff).
+    # A real hosting failure leaves the Service active and fails its order line; order cancellation (and the legacy
+    # API confirm path) fail the Service itself. The page points to the line, where staff retry it
+    # (orders: retry_line_for_staff).
     from apps.orders.models import OrderItem  # noqa: PLC0415  # ADR-0007
 
     failed_line = (
@@ -361,9 +362,15 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
 
     if request.method == "POST":
         if service.status == "failed":
-            # The FSM allows failed -> active, but here it would skip every check fulfilment makes: a failed
-            # Service is one whose order was cancelled. A real hosting failure is retried on its order line.
-            messages.error(request, _("A failed service can't be activated here; retry its order line instead."))
+            from apps.orders.models import OrderItem  # noqa: PLC0415  # ADR-0007
+
+            # The FSM allows failed -> active, but that only flips the status: nothing is provisioned, and none of
+            # fulfilment's checks run. Order cancellation fails a Service, and so does the legacy API confirm path
+            # (provision_service_task) on any error. A hosting failure is retried on its order line, when it has one.
+            if OrderItem.objects.filter(service=service, provisioning_status="failed").exists():
+                messages.error(request, _("A failed service can't be activated here; retry its order line instead."))
+            else:
+                messages.error(request, _("A failed service can't be activated; it was never set up."))
             return _back_to_service(request, pk)
         try:
             service.activate()
