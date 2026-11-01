@@ -32,6 +32,7 @@ from apps.infrastructure.deployment_lifecycle import (
     provider_token_fingerprint,
     recorded_provider_resources,
 )
+from apps.infrastructure.server_lifetimes import close_server_lifetimes
 
 if TYPE_CHECKING:
     from apps.infrastructure.cloud_gateway import CloudProviderGateway
@@ -214,6 +215,9 @@ class NodeTeardown:
         self.ssh_manager = ssh_manager
         self.registration = registration
         self.user = user
+        # Set by the cloud step only when the token that created the resources searched the provider and
+        # deleted what it found. Re-deploy needs this proof; a teardown that did not search grants none.
+        self.proved_absent = False
 
     def run(self) -> Result[bool, str]:
         from apps.infrastructure.deployment_service import NodeDeploymentService  # noqa: PLC0415  # Circular
@@ -233,15 +237,21 @@ class NodeTeardown:
         revoked = self.ssh_manager.delete_deployment_key(deployment, user=self.user)
         if revoked.is_err():
             return Err(f"SSH key revocation failed: {revoked.unwrap_err()}")
+        proof = {"resources_proved_absent_for": deployment.correlation_id} if self.proved_absent else {}
         owned_transition(
-            self.lease, deployment, "destroyed", "Node destroyed", release=True, destroyed_at=timezone.now()
+            self.lease, deployment, "destroyed", "Node destroyed", release=True, destroyed_at=timezone.now(), **proof
         )
         return Ok(True)
 
     # -- Provider resources -------------------------------------------------
 
     def _may_hold_server(self) -> bool:
-        return bool(self.deployment.external_node_id) or self.deployment.server_create_state in ("intent", "unknown")
+        # "created" counts too: a row whose server id was cleared still had a server, so it must be searched.
+        return bool(self.deployment.external_node_id) or self.deployment.server_create_state in (
+            "intent",
+            "unknown",
+            "created",
+        )
 
     def _reconcile(self, reason: str) -> Result[bool, str]:
         owned_update(self.lease, self.deployment, needs_reconciliation=True, reconciliation_reason=reason)
@@ -253,7 +263,7 @@ class NodeTeardown:
         # create answer was lost is still discovered even when no server was ever requested.
         reached_provider = bool(deployment.provider_token_fingerprint) or self._may_hold_server()
         if not reached_provider and not self._recorded_firewall_ids():
-            return Ok(True)  # never reached the provider
+            return Ok(True)  # never reached the provider: nothing to delete, and nothing searched
         if not self.api_token:
             return Err("No provider API token for teardown")
         stored = deployment.provider_token_fingerprint
@@ -265,11 +275,14 @@ class NodeTeardown:
         servers = self._delete_servers(gateway, trusted=trusted)
         if servers.is_err():
             return servers
-        owned_update(self.lease, deployment, external_node_id="", ipv4_address=None, ipv6_address=None)
+        # Every server is proved gone: its billable lifetimes end here.
+        close_server_lifetimes(self.lease, deployment, external_node_id="", ipv4_address=None, ipv6_address=None)
         firewalls = self._delete_firewalls(gateway)
         if firewalls.is_err():
             return firewalls
-        return self._delete_ssh_keys(gateway)
+        keys = self._delete_ssh_keys(gateway)
+        self.proved_absent = keys.is_ok() and trusted
+        return keys
 
     def _delete_servers(self, gateway: CloudProviderGateway, *, trusted: bool) -> Result[bool, str]:
         deployment = self.deployment

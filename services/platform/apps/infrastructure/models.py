@@ -581,6 +581,9 @@ class NodeDeployment(models.Model):
     # What an operator's reconciliation proved or attested, with who, when and the evidence. Kept apart
     # from the creator provenance and the create state, which stay as history.
     reconciliation_record = models.JSONField(default=dict, blank=True, editable=False)
+    # The correlation id whose provider resources a teardown or reconciliation proved gone: re-deploying
+    # a row that had a server needs this proof for its current attempt.
+    resources_proved_absent_for = models.UUIDField(null=True, blank=True, editable=False)
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
@@ -738,6 +741,18 @@ class NodeDeployment(models.Model):
         return attested and self.server_create_state in ("unknown", "intent")
 
     @property
+    def proved_empty(self) -> bool:
+        """Destroyed, and a teardown or reconciliation proved this attempt's provider resources gone."""
+        return (
+            self.status == "destroyed"
+            and self.resources_proved_absent_for is not None
+            and self.resources_proved_absent_for == self.correlation_id
+            and not (self.external_node_id or self.dns_record_ids or self.virtualmin_server_id)
+            and not self.needs_reconciliation
+            and not self.server_lifetimes.filter(ended_at__isnull=True).exists()
+        )
+
+    @property
     def can_retry(self) -> bool:
         """A failed deployment can be retried unless its provider resources must be reconciled first."""
         return self.status == "failed" and not self.needs_reconciliation
@@ -783,7 +798,7 @@ class NodeDeployment(models.Model):
         "stopped": ["completed", "destroying", "failed"],
         "failed": ["pending", "destroying"],  # Can retry or destroy
         "destroying": ["destroyed", "failed"],
-        # Terminal, except a re-deploy of a row that never got a server (it keeps the hostname).
+        # Terminal, except a re-deploy (a row that never got a server, or one proved empty; it keeps the hostname).
         "destroyed": ["pending"],
     }
 
@@ -809,7 +824,14 @@ class NodeDeployment(models.Model):
             setattr(self, name, value)
 
     def calculate_running_hours(self) -> float:
-        """Calculate hours the node has been running"""
+        """Calculate hours the node has been running: across its server lifetimes when it has any."""
+        from apps.infrastructure.cost_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            lifetime_totals,
+        )
+
+        totals = lifetime_totals(self)
+        if totals is not None:
+            return float(totals[0])
 
         if not self.started_at:
             return 0.0
@@ -822,7 +844,14 @@ class NodeDeployment(models.Model):
         return delta.total_seconds() / 3600
 
     def estimate_cost(self) -> float:
-        """Estimate current cost based on running hours and node size"""
+        """Estimate current cost: each server lifetime at its recorded rate, else running hours at the size's rate."""
+        from apps.infrastructure.cost_service import (  # noqa: PLC0415  # Deferred: avoids circular import
+            lifetime_totals,
+        )
+
+        totals = lifetime_totals(self)
+        if totals is not None:
+            return round(float(totals[1]), 4)
         if not self.node_size:
             return 0.0
 
@@ -891,6 +920,43 @@ class NodeDeploymentLog(models.Model):
 
     def __str__(self) -> str:
         return f"[{self.level.upper()}] {self.phase}: {self.message[:50]}"
+
+
+class NodeServerLifetime(models.Model):
+    """One server's billable window: from the create intent (or the confirmed create) until teardown proves it gone.
+
+    A deployment that is re-deployed keeps every earlier lifetime, so its costs never lose a window. The rate is a
+    snapshot: later catalogue price changes do not reprice history, and a resize closes the window and opens a
+    successor at the new rate. A blank ``server_id`` means the create outcome was never confirmed.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    deployment = models.ForeignKey(
+        NodeDeployment, on_delete=models.CASCADE, related_name="server_lifetimes", verbose_name=_("Deployment")
+    )
+    server_id = models.CharField(max_length=100, blank=True, default="", verbose_name=_("Provider Server ID"))
+    # The attempt that opened the window: a never-created attestation removes only its own attempt's windows.
+    correlation_id = models.UUIDField(verbose_name=_("Attempt"))
+    node_size = models.ForeignKey(NodeSize, on_delete=models.PROTECT, related_name="+", verbose_name=_("Size"))
+    monthly_cost_eur = models.DecimalField(max_digits=10, decimal_places=2, verbose_name=_("Monthly Cost (EUR)"))
+    started_at = models.DateTimeField(verbose_name=_("Started At"))
+    ended_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Ended At"))
+    legacy = models.BooleanField(
+        default=False, verbose_name=_("Legacy Window"), help_text=_("Saved from the deployment's own timestamps")
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "infrastructure_node_server_lifetimes"
+        db_table_comment = "Billable window of each server a node deployment created, priced at a snapshot rate."
+        verbose_name = _("Node Server Lifetime")
+        verbose_name_plural = _("Node Server Lifetimes")
+        ordering = ["started_at"]
+        indexes = [models.Index(fields=["deployment", "ended_at"])]
+
+    def __str__(self) -> str:
+        return f"{self.deployment_id}:{self.server_id or 'unconfirmed'} {self.started_at:%Y-%m-%d %H:%M}"
 
 
 class NodeDeploymentCostRecord(models.Model):

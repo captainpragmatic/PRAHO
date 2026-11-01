@@ -109,6 +109,7 @@ infrastructure.DriftReport               # child of DriftCheck (individual findi
 infrastructure.DriftSnapshot             # cloud snapshot tracking (operational/derived artifact, append-only)
 infrastructure.NodeDeploymentCostRecord  # append-only cost records (operational data)
 infrastructure.NodeDeploymentLog         # IS the deployment audit trail (append-only log)
+infrastructure.NodeServerLifetime        # derived cost windows, written only by audited lifecycle operations
 infrastructure.PanelType        # static panel type definitions (reference data, rarely changes)
 notifications.EmailCampaign     # campaign management (future: will get signals when campaign service is built)
 notifications.UnsubscribeToken  # short-lived HMAC token for email unsubscribe (no business state, rotated frequently)

@@ -398,7 +398,7 @@ def redeploy_node_task(
     user_id: int | None = None,
     operation_token: str | None = None,
 ) -> dict[str, Any]:
-    """Re-deploy a failed or destroyed deployment that never got a server, keeping its hostname.
+    """Re-deploy a failed or destroyed deployment, keeping its hostname (never got a server, or proved empty).
 
     Credentials are fetched at execution time. A refusal before the claim leaves the row as it was; the
     service settles a refused start under its own claim.

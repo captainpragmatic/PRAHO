@@ -1,4 +1,8 @@
-"""Reconcile a node deployment flagged ``needs_reconciliation``: prove, or attest, that nothing it owned remains.
+"""Reconcile a node deployment: prove, or attest, that nothing it owned remains.
+
+Flagged rows (``needs_reconciliation``) are the main case. An unflagged failed or destroyed row can be reconciled
+too, to record the proof re-deploy needs (``resources_proved_absent_for``): with a never-created attestation for
+an unknown create outcome, or, for a destroyed row, by the same search.
 
 Teardown flags a row it cannot prove torn down, typically one whose server-create outcome is unknown under a
 provider token that was never recorded. Retry, the sweeps and re-deploy refuse flagged rows. An operator runs
@@ -36,6 +40,7 @@ from apps.infrastructure.deployment_lifecycle import (
     claim_operation,
     legacy_resource_names,
     owned_transition,
+    owned_update,
     provider_token_fingerprint,
     recorded_provider_resources,
     unique_dns_owner_tag,
@@ -43,6 +48,7 @@ from apps.infrastructure.deployment_lifecycle import (
 from apps.infrastructure.dns_gateway import get_dns_gateway
 from apps.infrastructure.permissions import can_destroy_nodes
 from apps.infrastructure.provider_config import get_provider_token
+from apps.infrastructure.server_lifetimes import close_server_lifetimes, delete_unconfirmed_lifetimes
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 from apps.settings.services import SettingsService
 
@@ -52,6 +58,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 RECONCILABLE_STATES = ("failed", "destroying")
+# An unflagged row: a never-created attestation (failed or destroyed), or an absence proof for a destroyed row.
+UNFLAGGED_STATES = ("failed", "destroyed")
 # Messages and log phases deploy_node writes only once the provider returned a server.
 _CREATED_MESSAGES = ("Server created successfully", "Server provisioned with IP", "Server already exists")
 _POST_CREATE_PHASES = (
@@ -114,6 +122,8 @@ def creation_evidence(deployment: NodeDeployment) -> list[str]:
         logs.filter(message__startswith=m).exists() for m in _CREATED_MESSAGES
     ):
         signs.append("the deployment log records a created server")
+    confirmed = deployment.server_lifetimes.filter(ended_at__isnull=True).exclude(server_id="")
+    signs.extend(f"server {lt.server_id} has an open billable lifetime" for lt in confirmed)
     return signs
 
 
@@ -124,11 +134,29 @@ def _md5_fingerprint(public_key: str) -> str:
     return ":".join(digest[i : i + 2] for i in range(0, len(digest), 2))
 
 
-def _precondition_refusal(deployment: NodeDeployment, *, quiet_since: Any) -> str:
-    if not deployment.needs_reconciliation:
+def _scope_refusal(deployment: NodeDeployment, *, never_created: bool) -> str:
+    """A flagged row, or an unflagged one this request can settle (never-created, or a destroyed row's proof)."""
+    if deployment.needs_reconciliation:
+        if deployment.status not in RECONCILABLE_STATES:
+            return f"Cannot reconcile a deployment in status '{deployment.status}'"
+        return ""
+    if deployment.status not in UNFLAGGED_STATES:
         return "The deployment is not flagged for reconciliation"
-    if deployment.status not in RECONCILABLE_STATES:
-        return f"Cannot reconcile a deployment in status '{deployment.status}'"
+    if deployment.dns_record_ids:
+        return "The deployment still holds DNS records and is not flagged; destroy it instead"
+    if deployment.status == "failed" and not never_created:
+        return (
+            "The deployment is not flagged for reconciliation; destroy it, or attest that its server was never "
+            "created with --attest-never-created"
+        )
+    return ""
+
+
+def _precondition_refusal(deployment: NodeDeployment, *, quiet_since: Any, never_created: bool) -> str:
+    """Whether the row may be searched."""
+    scope = _scope_refusal(deployment, never_created=never_created)
+    if scope:
+        return scope
     if deployment.external_node_id:
         return (
             "The deployment still has a server id: restore the provider token that created it, "
@@ -255,6 +283,15 @@ def _prove_dns_absent(deployment: NodeDeployment) -> list[str]:
     return searched
 
 
+def _post_claim_refusal(locked: NodeDeployment, target: str, record: dict[str, Any]) -> str:
+    """The claimed row must be the one that was searched: same flag, identifiers, DNS, token and create state."""
+    expected = {name: value for name, value in record["snapshot"].items() if name != "status"}
+    current = {name: getattr(locked, name) for name in expected}
+    if locked.status != target or current != expected:
+        return "The deployment changed while it was being reconciled"
+    return ""
+
+
 def _claim_and_settle(
     deployment: NodeDeployment, quiet_since: Any, record: dict[str, Any], operator: Any, ssh_manager: Any
 ) -> None:
@@ -267,43 +304,61 @@ def _claim_and_settle(
     from apps.infrastructure.models import NodeDeployment as Model  # noqa: PLC0415  # Deferred: circular import
     from apps.infrastructure.models import NodeDeploymentLog  # noqa: PLC0415
 
+    searched_status = record["snapshot"]["status"]
+    flagged = record["snapshot"]["needs_reconciliation"]
+    # A destroyed row stays destroyed: the claim takes it without a transition, and the settlement only records.
+    target = "destroyed" if searched_status == "destroyed" else "destroying"
     with transaction.atomic():
         claim = claim_operation(
             deployment.pk,
-            from_states=RECONCILABLE_STATES,
-            to_status="destroying",
+            from_states=RECONCILABLE_STATES if flagged else (searched_status,),
+            to_status=target,
             kind="reconcile",
             stale_before=quiet_since,
         )
         if claim.is_err():
             raise _RefusalError(claim.unwrap_err())
+        lease = claim.unwrap()
         locked = Model.objects.get(pk=deployment.pk)
-        refusal = _precondition_refusal(locked, quiet_since=timezone.now() + timedelta(seconds=1))
-        snapshot = record["snapshot"]
-        if refusal or (locked.external_node_id, locked.virtualmin_server_id, locked.dns_record_ids) != (
-            snapshot["external_node_id"],
-            snapshot["virtualmin_server_id"],
-            snapshot["dns_record_ids"],
-        ):
-            raise _RefusalError(refusal or "The deployment changed while it was being reconciled")
+        refusal = _post_claim_refusal(locked, target, record)
+        if refusal:
+            raise _RefusalError(refusal)
         # Revoked after the claim: the vault write touches the row, and before the claim it would break
         # the quiet-window check. Inside the transaction, a later failure undoes it too.
         revoked = ssh_manager.delete_deployment_key(locked, user=operator)
         if revoked.is_err():
             raise _RefusalError(f"SSH key revocation failed: {revoked.unwrap_err()}")
         locked.refresh_from_db()
-        owned_transition(
-            claim.unwrap(),
-            locked,
-            "destroyed",
-            "Reconciled: nothing it owned remains",
-            release=True,
-            destroyed_at=timezone.now(),
-            dns_record_ids=[],
-            needs_reconciliation=False,
-            reconciliation_reason="",
-            reconciliation_record=record,
-        )
+        if record["never_created_attested"]:
+            delete_unconfirmed_lifetimes(locked)  # Attested never created: those windows billed nothing.
+        else:
+            close_server_lifetimes(lease, locked)  # Proved gone: every window ends here.
+        settled = {
+            "dns_record_ids": [],
+            "needs_reconciliation": False,
+            "reconciliation_reason": "",
+            "reconciliation_record": record,
+            "resources_proved_absent_for": locked.correlation_id,
+        }
+        if target == "destroyed":
+            owned_update(
+                lease,
+                locked,
+                operation_token=None,
+                operation_kind="",
+                destroyed_at=locked.destroyed_at or timezone.now(),
+                **settled,
+            )
+        else:
+            owned_transition(
+                lease,
+                locked,
+                "destroyed",
+                "Reconciled: nothing it owned remains",
+                release=True,
+                destroyed_at=timezone.now(),
+                **settled,
+            )
         NodeDeploymentLog.objects.create(
             deployment=locked,
             level="INFO",
@@ -311,7 +366,8 @@ def _claim_and_settle(
             message=f"Reconciled by {record['operator']} ({record['provenance']}); settled destroyed",
         )
         InfrastructureAuditService.log_destroy_completed(
-            locked, InfrastructureAuditContext(user=operator, metadata={"mode": "reconcile", **record})
+            locked,
+            InfrastructureAuditContext(user=operator, metadata={"mode": "reconcile", "flagged": flagged, **record}),
         )
 
 
@@ -337,7 +393,7 @@ def reconcile_deployment(request: ReconcileRequest) -> Result[ReconcileReport, s
     if operator is None:
         return Err(f"{request.operator_email} is not an active staff user with the destroy permission")
     quiet_since = timezone.now() - quiet_window()
-    refusal = _precondition_refusal(deployment, quiet_since=quiet_since)
+    refusal = _precondition_refusal(deployment, quiet_since=quiet_since, never_created=request.attest_never_created)
     if refusal:
         return Err(refusal)
     token = get_provider_token(deployment.provider)
@@ -370,6 +426,8 @@ def reconcile_deployment(request: ReconcileRequest) -> Result[ReconcileReport, s
         "correlation_id": str(deployment.correlation_id),
         "credential_fingerprint": credential,
         "snapshot": {
+            "status": deployment.status,
+            "needs_reconciliation": deployment.needs_reconciliation,
             "external_node_id": deployment.external_node_id,
             "virtualmin_server_id": deployment.virtualmin_server_id,
             "dns_record_ids": deployment.dns_record_ids,
@@ -389,4 +447,12 @@ def reconcile_deployment(request: ReconcileRequest) -> Result[ReconcileReport, s
         return _record_refusal(deployment, f"Settlement failed: {error}", operator, record)
     report.settled = True
     logger.info(f"✅ [Reconcile:{deployment.hostname}] Settled destroyed ({provenance})")
+    if request.attest_never_created:
+        # Costs recorded while the create outcome was unknown described a server attested never to have existed.
+        from apps.infrastructure.cost_service import recalculate_recorded_costs  # noqa: PLC0415  # Deferred import
+
+        try:
+            recalculate_recorded_costs(Model.objects.get(pk=deployment.pk))
+        except Exception as error:  # The settlement stands; the next recalculation of those periods corrects them.
+            logger.warning(f"⚠️ [Reconcile:{deployment.hostname}] Cost records not recalculated: {error}")
     return Ok(report)
