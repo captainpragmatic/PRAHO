@@ -20,10 +20,9 @@ const fields = {
   "char-counter": {textContent: "11"},
   "file-input": {value: "attachment.txt"},
   "file-list": {innerHTML: "attachment.txt", classList: {add() {}}},
-  "submit-text": {textContent: "Sending..."},
-  "submit-spinner": {classList: {add() {}}}
+  "reply-submit": {disabled: true, classList: {add() {}, remove() {}}}
 };
-const button = {disabled: true};
+const button = fields["reply-submit"];
 const form = {
   id: "reply-form",
   message: "Draft reply",
