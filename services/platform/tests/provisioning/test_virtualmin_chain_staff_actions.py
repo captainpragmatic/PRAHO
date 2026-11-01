@@ -23,9 +23,9 @@ from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService
 from apps.settings.services import SettingsService
 from apps.users.models import User
+from tests.helpers.csrf import body_csrf_token
 from tests.provisioning.test_virtualmin_account_exclusion import ExclusionCase
 from tests.provisioning.test_virtualmin_chain_state import ChainFixtures
-from tests.helpers.csrf import body_csrf_token
 
 FLAG = "provisioning.incremental_backups_enabled"
 

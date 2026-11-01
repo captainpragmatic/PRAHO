@@ -41,3 +41,10 @@ class AccountSettingsTabTests(VirtualminViewsFixture):
         tab = self.settings_tab()
         self.assertIn("Not set", tab)
         self.assertIn("50 GB", tab)
+
+    def test_quotas_keep_their_precision(self) -> None:
+        for disk_mb, shown in ((512, "512 MB"), (1536, "1.5 GB"), (10240, "10 GB")):
+            with self.subTest(disk_mb=disk_mb):
+                self.account.disk_quota_mb = disk_mb
+                self.account.save(update_fields=["disk_quota_mb"])
+                self.assertIn(shown, self.settings_tab())

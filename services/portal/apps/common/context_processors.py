@@ -8,7 +8,7 @@ from django.http import HttpRequest
 from django.utils.translation import gettext as _
 
 from apps.common.account_health import get_account_health
-from apps.common.decorators import BILLING_ROLES
+from apps.common.decorators import BILLING_ROLES, _get_selected_customer_id
 from apps.common.localisation_services import get_company_identity
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def _billing_nav_locked(request: HttpRequest) -> str:
     Reads the role from the session's cached memberships, never the API: this runs on every page. An unknown role
     leaves the link alone; the billing views still check it (require_billing_access).
     """
-    customer_id = str(request.session.get("customer_id"))
+    customer_id = str(_get_selected_customer_id(request))  # the company the billing views check
     for membership in request.session.get("user_memberships", []) or []:
         if str(membership.get("customer_id")) == customer_id:
             if membership.get("role") not in BILLING_ROLES:

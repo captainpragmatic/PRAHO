@@ -25,9 +25,27 @@ URL_NAME = re.compile(r"\{%\s*url\s+['\"]([\w:.-]+)['\"]")
 INLINE_HANDLER = re.compile(r"""\son[a-z]+\s*=\s*['"]""")
 
 
+def _route_exists(name: str) -> bool:
+    """False for a missing route or a misspelt namespace; a route that only needs arguments exists."""
+    try:
+        reverse(name)
+    except NoReverseMatch as error:
+        message = str(error)
+        return (
+            "is not a valid view function or pattern name" not in message
+            and "is not a registered namespace" not in message
+        )
+    return True
+
+
 class TemplateUrlNamesTests(SimpleTestCase):
+    def test_the_check_catches_a_missing_route_and_a_misspelt_namespace(self) -> None:
+        self.assertFalse(_route_exists("users:register"))
+        self.assertFalse(_route_exists("usres:user_profile"))
+        self.assertTrue(_route_exists("users:user_profile"))
+        self.assertTrue(_route_exists("provisioning:service_detail"))  # needs an argument; still a real route
+
     def test_every_named_url_in_platform_templates_exists(self) -> None:
-        unknown = set()
         names = set()
         for path in (PLATFORM / "templates").rglob("*.html"):
             if "styleguide" in path.parts:
@@ -35,12 +53,7 @@ class TemplateUrlNamesTests(SimpleTestCase):
             names.update(URL_NAME.findall(path.read_text(encoding="utf-8")))
         self.assertGreater(len(names), 200)  # the scan finds the tags at all
         self.assertIn("audit:management_dashboard", names)  # including the newest (mobile menu)
-        for name in names:
-            try:
-                reverse(name)
-            except NoReverseMatch as error:
-                if "is not a valid view function or pattern name" in str(error):
-                    unknown.add(name)
+        unknown = {name for name in names if not _route_exists(name)}
         self.assertEqual(sorted(unknown), [])
 
 

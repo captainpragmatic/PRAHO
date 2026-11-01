@@ -59,3 +59,16 @@ class BillingNavLockTests(SimpleTestCase):
         from apps.common.decorators import BILLING_ROLES  # noqa: PLC0415
 
         self.assertEqual(set(BILLING_ROLES), {"owner", "billing"})
+
+
+@patch("apps.common.context_processors.get_account_health", return_value=None)
+class BillingNavFollowsTheSelectedCompanyTests(SimpleTestCase):
+    """A member switches companies: the menu reads the company the billing views will check, not the login one."""
+
+    def test_owner_of_the_selected_company_keeps_billing(self, _health) -> None:
+        request = _request(None)
+        request.session["user_memberships"] = [{"customer_id": 7, "role": "tech"}, {"customer_id": 8, "role": "owner"}]
+        request.session["selected_customer_id"] = "8"
+        self.assertFalse(portal_context(request).get("billing_nav_locked"))
+        request.session["selected_customer_id"] = "7"
+        self.assertEqual(str(portal_context(request)["billing_nav_locked"]), REASON)

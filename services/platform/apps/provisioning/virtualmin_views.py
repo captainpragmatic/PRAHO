@@ -326,6 +326,18 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
 # ===============================================================================
 
 
+def _quota_text(megabytes: int | None) -> str:
+    """A stored quota as a person reads it: MB below 1 GB, GB with one decimal above, -1 as Unlimited."""
+    if megabytes is None or megabytes == 0:
+        return str(_("Not set"))
+    if megabytes < 0:
+        return str(_("Unlimited"))
+    if megabytes < 1024:  # noqa: PLR2004  # MB in a GB
+        return f"{megabytes} MB"
+    gigabytes = megabytes / 1024
+    return f"{gigabytes:.0f} GB" if gigabytes.is_integer() else f"{gigabytes:.1f} GB"
+
+
 def _page_redirect(request: HttpRequest, to: str, **kwargs: Any) -> HttpResponse:
     """Go to the next page; htmx gets HX-Redirect, so the address bar follows instead of a page swapped into body."""
     destination = reverse(to, kwargs=kwargs)
@@ -370,9 +382,16 @@ def _accounts_table_context(request: HttpRequest) -> dict[str, Any]:
             if value
         }
     )
+    bulk_filters = urlencode(
+        {key: value for key, value in (("server", server_filter), ("status", status_filter)) if value}
+    )
+    bulk_url = reverse("provisioning:virtualmin_bulk_actions")
     return {
         "accounts": page,
         "extra_params": f"&{kept}" if kept else "",
+        "bulk_actions_url": f"{bulk_url}?{bulk_filters}" if bulk_filters else bulk_url,
+        # An htmx swap of the table also refreshes the header's Bulk Actions link (hx-swap-oob), so it keeps the filter.
+        "swap_bulk_link": bool(request.headers.get("HX-Request")),
         "status_filter": status_filter,
         "server_filter": server_filter,
         "search_query": search_query,
@@ -438,14 +457,8 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
         {"text": "Accounts"},  # Current page - no URL
     ]
 
-    bulk_filters = urlencode(
-        {key: value for key, value in (("server", server_filter), ("status", status_filter)) if value}
-    )
-    bulk_url = reverse("provisioning:virtualmin_bulk_actions")
-
     context = {
         "page_title": "Virtualmin Accounts",
-        "bulk_actions_url": f"{bulk_url}?{bulk_filters}" if bulk_filters else bulk_url,
         **table,
         "accounts_page": accounts_page,
         "table_data": table_data,
@@ -528,6 +541,8 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
         "restore_pair_url": reverse("provisioning:virtualmin_account_restore_pair", args=[account.id]),
+        "disk_quota_text": _quota_text(account.disk_quota_mb),
+        "bandwidth_quota_text": _quota_text(account.bandwidth_quota_mb),
         "hold_reenable_url": reverse("provisioning:virtualmin_account_hold_reenable", args=[account.id]),
         "hold_restore_safety_url": reverse("provisioning:virtualmin_account_hold_restore_safety", args=[account.id]),
         # The pair restore and the base/differential buttons are offered only while differential backups are enabled.

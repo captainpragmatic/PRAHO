@@ -1,5 +1,6 @@
 {% load localisation_tags ui_components %}
 {% load i18n %}
+{% if swap_bulk_link %}<span id="bulk-actions-link" hx-swap-oob="true">{% trans "Bulk Actions" as bt_bulk %}{% button bt_bulk href=bulk_actions_url variant="secondary" %}</span>{% endif %}
 
 {% if accounts %}
 <!-- Accounts Table -->
@@ -129,7 +130,7 @@
         {% if request.GET.search or request.GET.status or request.GET.plan %}
             {% trans "Clear Filters" as bt7 %}{% button bt7 href="." variant="secondary" %}
         {% endif %}
-        {% trans "Create Account" as bt8 %}{% button bt8 href=new_account_url variant="primary" %}
+        {% url 'provisioning:virtualmin_account_new' as new_account_url %}{% trans "Create Account" as bt8 %}{% button bt8 href=new_account_url variant="primary" %}
     </div>
 </div>
 {% endif %}

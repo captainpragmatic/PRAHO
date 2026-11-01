@@ -84,3 +84,15 @@ class AccountsListPagingTests(VirtualminViewsFixture):
         response = self.client.post(reverse("provisioning:virtualmin_accounts_sync"), HTTP_HX_REQUEST="true")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["HX-Redirect"], self.url)
+
+    def test_filtering_updates_the_bulk_actions_link_too(self) -> None:
+        response = self.client.get(self.url, {"server": str(self.server.pk)}, HTTP_HX_REQUEST="true")
+        oob = [a for t, a in Markup(response.content.decode()).elements if a.get("hx-swap-oob")]
+        self.assertEqual(len(oob), 1)
+        self.assertEqual(oob[0].get("id"), "bulk-actions-link")
+        self.assertIn(f"server={self.server.pk}", response.content.decode())
+
+    def test_an_empty_search_still_offers_a_working_create_account(self) -> None:
+        response = self.client.get(self.url, {"search": "no-such-account"}, HTTP_HX_REQUEST="true")
+        links = [a.get("href") for t, a in Markup(response.content.decode()).elements if t == "a"]
+        self.assertIn(reverse("provisioning:virtualmin_account_new"), links)

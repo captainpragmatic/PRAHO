@@ -430,11 +430,11 @@
                         </div>
                         <div>
                             <dt class="text-sm font-medium text-slate-400">{% trans "Disk quota" %}</dt>
-                            <dd class="mt-1 text-slate-100">{% if account.disk_quota_mb %}{% widthratio account.disk_quota_mb 1024 1 %} GB{% else %}{% trans "Not set" %}{% endif %}</dd>
+                            <dd class="mt-1 text-slate-100">{{ disk_quota_text }}</dd>
                         </div>
                         <div>
                             <dt class="text-sm font-medium text-slate-400">{% trans "Bandwidth quota" %}</dt>
-                            <dd class="mt-1 text-slate-100">{% if account.bandwidth_quota_mb == -1 %}{% trans "Unlimited" %}{% elif account.bandwidth_quota_mb %}{% widthratio account.bandwidth_quota_mb 1024 1 %} GB{% else %}{% trans "Not set" %}{% endif %}</dd>
+                            <dd class="mt-1 text-slate-100">{{ bandwidth_quota_text }}</dd>
                         </div>
                         <div>
                             <dt class="text-sm font-medium text-slate-400">{% trans "Features" %}</dt>
