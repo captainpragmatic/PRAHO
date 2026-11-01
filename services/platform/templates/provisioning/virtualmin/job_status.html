@@ -106,17 +106,41 @@
             <div class="bg-amber-900/20 border border-amber-700 rounded-lg p-6 space-y-4">
                 <h3 class="text-sm font-medium text-amber-300">{% trans "This job needs an operator" %}</h3>
                 <p class="text-sm text-slate-300">
+                    {% if is_creation_review %}
+                    {% trans "This is a creation review. Acknowledging it records your review; it does not change the service or run a native command." %}
+                    {% else %}
                     {% trans "The account stays locked for backups, restores and deletes until the job is resolved." %}
+                    {% endif %}
                 </p>
+                {% if creation_review_off_id %}
+                <p class="text-sm text-slate-300">
+                  <a class="text-blue-400 hover:text-blue-300" href="{% url 'provisioning:virtualmin_job_status' creation_review_off_id %}">{% trans "Inspect the linked disable operation before acknowledging this creation." %}</a>
+                </p>
+                {% endif %}
                 {% trans 'Resolution note' as note_aria_label %}{% trans 'What did you check?' as note_placeholder %}
                 {% input_field "note" html_id="job-resolution-note" aria_label=note_aria_label maxlength=200 placeholder=note_placeholder %}
+                {% if is_receipt_off %}
+                <div id="receipt-off-review" class="space-y-3">
+                  <p class="text-sm text-slate-300">{% trans "Verify all commands for this exact resource have stopped. Reading a disabled domain does not prove a command has stopped. Platform will check the recorded node, owner and disabled domain before releasing this operation; creation will not replay." %}</p>
+                  <p class="text-sm text-slate-300">{% trans "Recorded resource:" %} {{ job.account.domain }} · {{ job.account.virtualmin_username }} · {{ job.server.hostname }}</p>
+                  {% trans "I verified all commands for the recorded resource have stopped." as stopped_label %}
+                  {% trans "I checked the recorded node, domain and owner against the actual target." as resource_label %}
+                  {% checkbox_field "commands_stopped" html_id="off-commands-stopped" label=stopped_label required=True variant="warning" %}
+                  {% checkbox_field "resource_confirmed" html_id="off-resource-confirmed" label=resource_label required=True variant="warning" %}
+                  <input type="hidden" name="off_review_fingerprint" value="{{ off_review_fingerprint|default:'' }}">
+                </div>
+                {% endif %}
                 <div class="flex items-center space-x-3">
                     {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
                     <button class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-500 transition-colors"
                             hx-post="{% url 'provisioning:virtualmin_job_resolve' job.id %}"
                             hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                            hx-include="#job-resolution-note"
-                            {% if half_restore_safety_backup_id %}
+                            hx-include="{% if is_receipt_off %}#job-resolution-note,#receipt-off-review{% else %}#job-resolution-note{% endif %}"
+                            {% if is_receipt_off %}
+                            hx-confirm="{% trans 'Confirm the commands have stopped and the exact resource identity was checked. Platform will read native ownership and disabled state, record your proof and release this operation if verified. Normal current service policy can resume hosting after release.' %}"
+                            {% elif is_creation_review %}
+                            hx-confirm="{% trans 'Acknowledge the verified creation recovery history. The linked disable operation must be settled first; this acknowledgement does not change the service or issue a native command.' %}"
+                            {% elif half_restore_safety_backup_id %}
                             hx-confirm="{% blocktrans with backup_id=half_restore_safety_backup_id %}The restore had already started, so the domain may be half-restored. Confirming releases the barrier but the domain stays disabled, and nothing enables it again until you re-enable it as it is or restore the safety backup {{ backup_id }}. Continue?{% endblocktrans %}"
                             {% else %}
                             hx-confirm="{% trans 'Confirm the remote operation has stopped. This releases the account.' %}"
