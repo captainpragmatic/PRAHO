@@ -94,6 +94,7 @@ class SubmissionLockOrderConcurrencyTests(TransactionTestCase):
 
     def _wait_for_finalizer(self, pid: int, owner_pid: int, pending: Future[SubmissionResult]) -> None:
         deadline, poll = monotonic() + 10, Event()
+        row = None
         while monotonic() < deadline:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT pg_stat_clear_snapshot()")
@@ -101,14 +102,14 @@ class SubmissionLockOrderConcurrencyTests(TransactionTestCase):
                     "SELECT wait_event_type, pg_blocking_pids(pid), query FROM pg_stat_activity WHERE pid = %s", [pid]
                 )
                 row = cursor.fetchone()
-            if row and owner_pid in row[1]:
-                self.assertEqual(row[0], "Lock")
+            # Activity and lock-manager samples can straddle entry into the wait.
+            if row and row[0] == "Lock" and owner_pid in row[1]:
                 self.assertTrue(row[2].startswith("SELECT"), row[2])
                 return
             if pending.done():
                 self.fail(f"Public upload finished before its finalizer waited: {pending.result()}")
             poll.wait(0.01)
-        self.fail("Public finalizer did not wait on the duplicate submission's invoice lock")
+        self.fail(f"Public finalizer did not reach the invoice lock: pid={pid}, owner={owner_pid}, last_sample={row!r}")
 
     def _race(self, outcome: UploadResponse | NetworkError) -> SubmissionResult:
         upload_entered, upload_return, invoice_locked, duplicate_continue = Event(), Event(), Event(), Event()
