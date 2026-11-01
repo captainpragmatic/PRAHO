@@ -1,0 +1,8 @@
+{% load i18n %}
+{% if account_banner %}
+  {% include "components/account_status_banner.html" with banner=account_banner %}
+{% endif %}
+{% if maintenance_unavailable %}
+  {% trans "Maintenance information is temporarily unavailable. Please check again shortly." as unavailable_label %}
+  <p class="max-w-7xl mx-auto px-4 py-2 text-sm text-slate-400" role="status">{{ unavailable_label|force_escape }}</p>
+{% endif %}

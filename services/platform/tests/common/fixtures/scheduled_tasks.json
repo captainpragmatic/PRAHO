@@ -441,6 +441,15 @@
     "cluster": null
   },
   {
+    "name": "infra_node_maintenance",
+    "func": "apps.infrastructure.node_maintenance_tasks.tick_node_maintenance",
+    "schedule_type": "I",
+    "minutes": 1,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
     "name": "infra_recover_stale_remediations",
     "func": "apps.infrastructure.tasks.recover_stale_remediations_task",
     "schedule_type": "I",

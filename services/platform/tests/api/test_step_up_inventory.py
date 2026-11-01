@@ -45,6 +45,8 @@ GUARDED: dict[str, str] = {
 }
 
 EXEMPT: dict[str, str] = {
+    "api/maintenance/summary/": "a customer-owned signed read; no mutation, native inspection, or operation admission",
+    "api/maintenance/services/<int:service_id>/": "a current-owner signed read with uniform foreign/missing refusal",
     "api/users/login/": "signed out: it opens the session, and counts as the check",
     "api/users/session/validate/": "session machinery, writes nothing",
     "api/users/session/end/": "logout only ends the session",
@@ -162,6 +164,7 @@ PROVEN_BY: dict[str, str] = {
     "api/dns/zones/<uuid:zone_id>/records/<uuid:record_id>/": _DNS,
     "api/services/<int:service_id>/actions/": "tests.api.test_service_action_requests.ServiceActionRequestTests.test_a_request_needs_a_recent_identity_check",
 }
+
 
 def _routes() -> Iterator[tuple[str, object]]:
     def walk(patterns: list[object], prefix: str) -> Iterator[tuple[str, object]]:

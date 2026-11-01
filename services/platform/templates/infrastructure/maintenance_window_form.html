@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% load i18n ui_components %}
+{% block content %}
+<div class="max-w-5xl mx-auto p-6 space-y-6">
+  {% translate "Server maintenance" as page_heading %}<h1 class="text-2xl font-semibold text-white">{{ page_heading|force_escape }} · {{ node.name }}</h1>
+  {% translate "A notice does not authorize a restart. Review affected services and active operations before starting work." as authority_note %}<p class="text-sm text-slate-300">{{ authority_note|force_escape }}</p>
+  {% for error in form.non_field_errors %}{% alert error|force_escape variant="danger" %}{% endfor %}
+  {% for hidden in form.hidden_fields %}{% for error in hidden.errors %}{% alert error|force_escape variant="danger" %}{% endfor %}{% endfor %}
+
+  {% include "infrastructure/partials/node_maintenance.html" with maintenance_full_controls=True %}
+
+  {% if policy_form and maintenance_can_edit_policy or not policy_form and maintenance_can_schedule %}
+    <section class="rounded-lg border border-slate-700 bg-slate-800 p-6 space-y-4">
+      {% if policy_form %}
+        {% translate "Configure permitted maintenance intervals" as form_heading %}
+      {% else %}
+        {% translate "Schedule maintenance" as form_heading %}
+      {% endif %}
+      <h2 class="text-lg font-semibold text-white">{{ form_heading|force_escape }}</h2>
+      {% if not policy_form %}
+        {% translate "Scheduling records the expected impact; it does not start work. Notices are normally due 48 hours before maintenance, or immediately when scheduled later. Short windows without downtime are quiet. Customer maintenance preferences apply." as notice_effect %}
+        <p class="text-sm text-slate-300">{{ notice_effect|force_escape }}</p>
+      {% endif %}
+      <form id="{% if policy_form %}maintenance-policy-form{% else %}maintenance-create-form{% endif %}" method="post" class="space-y-4">
+        {% csrf_token %}
+        {% include "infrastructure/partials/maintenance_form_fields.html" %}
+        {% button form_heading|force_escape type="submit" variant="primary" %}
+      </form>
+    </section>
+  {% endif %}
+</div>
+{% endblock %}

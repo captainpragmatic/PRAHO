@@ -18,8 +18,13 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.common.types import Err, Result
-from apps.infrastructure.deployment_lifecycle import invalidate_stale_operation
+from apps.infrastructure.deployment_lifecycle import invalidate_stale_operation, settle_unissued_task
 from apps.infrastructure.deployment_service import get_deployment_service
+from apps.infrastructure.node_maintenance_execution import (
+    QueuedNodeOperationGuard,
+    bind_native_queue,
+    prepare_native_queue,
+)
 from apps.infrastructure.validation_service import get_validation_service
 
 if TYPE_CHECKING:
@@ -58,7 +63,7 @@ NODE_DEPLOYMENT_TASK_TIMEOUT_SECONDS = 3 * 60 * 60
 NODE_DESTROY_TASK_TIMEOUT_SECONDS = 30 * 60
 # Lifecycle tasks run once: a failed or timed-out run is acknowledged instead of replayed by the broker
 # hours later. Recovery is the application's (the operation token and the sweeps), never the queue's.
-LIFECYCLE_TASK_OPTIONS: dict[str, Any] = {"ack_failure": True}
+LIFECYCLE_TASK_OPTIONS: dict[str, Any] = {"ack_failure": True, "sync": False}
 
 
 class OperationReservationError(Exception):
@@ -99,10 +104,16 @@ def _fail_before_first_phase(deployment: Any, error: str, operation_token: str |
 
     with transaction.atomic():
         locked = NodeDeployment.objects.select_for_update().get(pk=deployment.pk)
-        reserved_elsewhere = operation_token is not None and str(locked.operation_token) != operation_token
+        reserved_elsewhere = (
+            locked.operation_token is not None
+            if operation_token is None
+            else str(locked.operation_token) != operation_token
+        )
         if locked.status == "pending" and not reserved_elsewhere:
             locked.transition_to("failed", f"Deployment did not start: {error}")
-            NodeDeployment.objects.filter(pk=locked.pk).update(operation_token=None, operation_kind="")
+            NodeDeployment.objects.filter(pk=locked.pk).update(
+                operation_token=None, operation_kind="", operation_reserved_at=None
+            )
     return {"success": False, "deployment_id": deployment.pk, "hostname": deployment.hostname, "error": error}
 
 
@@ -110,6 +121,7 @@ def _token(operation_token: str | None) -> uuid.UUID | None:
     return uuid.UUID(operation_token) if operation_token else None
 
 
+@settle_unissued_task
 def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure, each failing the row.
     deployment_id: int,
     provider_id: int,
@@ -210,6 +222,7 @@ def deploy_node_task(  # noqa: PLR0911  # One early return per pre-start failure
     }
 
 
+@settle_unissued_task
 def destroy_node_task(
     deployment_id: int,
     provider_id: int,
@@ -298,6 +311,7 @@ def destroy_node_task(
     }
 
 
+@settle_unissued_task
 def retry_deployment_task(
     deployment_id: int,
     provider_id: int,
@@ -391,6 +405,7 @@ def retry_deployment_task(
     }
 
 
+@settle_unissued_task
 def redeploy_node_task(
     deployment_id: int,
     provider_id: int,
@@ -733,11 +748,14 @@ def recover_stuck_deployments_task() -> dict[str, Any]:
 # ===============================================================================
 
 
+@QueuedNodeOperationGuard("resize")
 def upgrade_node_task(
     deployment_id: int,
     new_size_id: int,
     provider_id: int,
     user_id: int | None = None,
+    *,
+    maintenance_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to upgrade a node to a new size.
@@ -836,11 +854,14 @@ def upgrade_node_task(
     }
 
 
+@QueuedNodeOperationGuard("security")
 def maintenance_task(
     deployment_id: int,
     playbooks: list[str] | None = None,
     extra_vars: dict[str, Any] | None = None,
     user_id: int | None = None,
+    *,
+    maintenance_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to run maintenance playbooks on a node.
@@ -915,11 +936,14 @@ def maintenance_task(
     }
 
 
+@QueuedNodeOperationGuard("stop")
 def stop_node_task(
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
     force: bool = False,
+    *,
+    maintenance_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to stop (power off) a node.
@@ -1010,10 +1034,13 @@ def stop_node_task(
     }
 
 
+@QueuedNodeOperationGuard("start")
 def start_node_task(
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    *,
+    maintenance_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to start (power on) a node.
@@ -1104,10 +1131,13 @@ def start_node_task(
     }
 
 
+@QueuedNodeOperationGuard("reboot")
 def reboot_node_task(
     deployment_id: int,
     provider_id: int,
     user_id: int | None = None,
+    *,
+    maintenance_token: str | None = None,
 ) -> dict[str, Any]:
     """
     Async task to reboot a node.
@@ -1202,6 +1232,7 @@ def reboot_node_task(
 # ===============================================================================
 
 
+@transaction.atomic
 def queue_deploy_node(
     deployment_id: int,
     provider_id: int,
@@ -1242,6 +1273,7 @@ def queue_deploy_node(
     return task_id
 
 
+@transaction.atomic
 def queue_destroy_node(
     deployment_id: int,
     provider_id: int,
@@ -1286,6 +1318,7 @@ def queue_destroy_node(
     return task_id
 
 
+@transaction.atomic
 def queue_retry_deployment(
     deployment_id: int,
     provider_id: int,
@@ -1323,6 +1356,7 @@ def queue_retry_deployment(
     return task_id
 
 
+@transaction.atomic
 def queue_redeploy_node(
     deployment_id: int,
     provider_id: int,
@@ -1349,6 +1383,7 @@ def queue_redeploy_node(
     return str(task_id)
 
 
+@transaction.atomic
 def queue_upgrade_node(
     deployment_id: int,
     new_size_id: int,
@@ -1371,20 +1406,26 @@ def queue_upgrade_node(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    maintenance_token = prepare_native_queue(deployment_id, "resize")
     task_id = async_task(
         "apps.infrastructure.tasks.upgrade_node_task",
         deployment_id,
         new_size_id,
         provider_id,
         user_id,
+        maintenance_token=str(maintenance_token),
+        sync=False,
+        timeout=40 * 60,
         task_name=f"upgrade_node_{deployment_id}",
         hook="apps.infrastructure.tasks.lifecycle_complete_hook",
     )
+    bind_native_queue(maintenance_token, task_id)
 
     logger.info(f"[Queue] Upgrade queued: deployment_id={deployment_id}, task_id={task_id}")
     return task_id
 
 
+@transaction.atomic
 def queue_maintenance(
     deployment_id: int,
     playbooks: list[str] | None = None,
@@ -1407,20 +1448,26 @@ def queue_maintenance(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    maintenance_token = prepare_native_queue(deployment_id, "security")
     task_id = async_task(
         "apps.infrastructure.tasks.maintenance_task",
         deployment_id,
         playbooks,
         extra_vars,
         user_id,
+        maintenance_token=str(maintenance_token),
+        sync=False,
+        timeout=40 * 60,
         task_name=f"maintenance_{deployment_id}",
         hook="apps.infrastructure.tasks.lifecycle_complete_hook",
     )
+    bind_native_queue(maintenance_token, task_id)
 
     logger.info(f"[Queue] Maintenance queued: deployment_id={deployment_id}, task_id={task_id}")
     return task_id
 
 
+@transaction.atomic
 def queue_stop_node(
     deployment_id: int,
     provider_id: int,
@@ -1442,20 +1489,26 @@ def queue_stop_node(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    maintenance_token = prepare_native_queue(deployment_id, "stop")
     task_id = async_task(
         "apps.infrastructure.tasks.stop_node_task",
         deployment_id,
         provider_id,
         user_id,
         force=force,
+        maintenance_token=str(maintenance_token),
+        sync=False,
+        timeout=40 * 60,
         task_name=f"stop_node_{deployment_id}",
         hook="apps.infrastructure.tasks.lifecycle_complete_hook",
     )
+    bind_native_queue(maintenance_token, task_id)
 
     logger.info(f"[Queue] Stop queued: deployment_id={deployment_id}, task_id={task_id}")
     return task_id
 
 
+@transaction.atomic
 def queue_start_node(
     deployment_id: int,
     provider_id: int,
@@ -1476,19 +1529,25 @@ def queue_start_node(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    maintenance_token = prepare_native_queue(deployment_id, "start")
     task_id = async_task(
         "apps.infrastructure.tasks.start_node_task",
         deployment_id,
         provider_id,
         user_id,
+        maintenance_token=str(maintenance_token),
+        sync=False,
+        timeout=40 * 60,
         task_name=f"start_node_{deployment_id}",
         hook="apps.infrastructure.tasks.lifecycle_complete_hook",
     )
+    bind_native_queue(maintenance_token, task_id)
 
     logger.info(f"[Queue] Start queued: deployment_id={deployment_id}, task_id={task_id}")
     return task_id
 
 
+@transaction.atomic
 def queue_reboot_node(
     deployment_id: int,
     provider_id: int,
@@ -1509,14 +1568,19 @@ def queue_reboot_node(
         async_task,  # Deferred: django-q task  # Deferred: avoids circular import
     )
 
+    maintenance_token = prepare_native_queue(deployment_id, "reboot")
     task_id = async_task(
         "apps.infrastructure.tasks.reboot_node_task",
         deployment_id,
         provider_id,
         user_id,
+        maintenance_token=str(maintenance_token),
+        sync=False,
+        timeout=40 * 60,
         task_name=f"reboot_node_{deployment_id}",
         hook="apps.infrastructure.tasks.lifecycle_complete_hook",
     )
+    bind_native_queue(maintenance_token, task_id)
 
     logger.info(f"[Queue] Reboot queued: deployment_id={deployment_id}, task_id={task_id}")
     return task_id
@@ -1942,7 +2006,19 @@ def apply_scheduled_remediations_task() -> dict[str, Any]:
 
     claimed = 0
     for pk in due_pks:
-        with transaction.atomic():
+        from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server ownership
+            locked_deployment_gate,
+            maintenance_refusal,
+        )
+
+        deployment_id = DriftRemediationRequest.objects.filter(pk=pk).values_list("deployment_id", flat=True).first()
+        if deployment_id is None:
+            continue
+        with locked_deployment_gate(deployment_id) as deployment:
+            if deployment is None:
+                continue
+            if deployment.virtualmin_server_id and maintenance_refusal(deployment.virtualmin_server_id):
+                continue
             updated = DriftRemediationRequest.objects.filter(pk=pk, status="scheduled").update(
                 status="approved", execution_claimed_at=now
             )
@@ -1952,6 +2028,7 @@ def apply_scheduled_remediations_task() -> dict[str, Any]:
                     pk,
                     task_name=f"remediation_{pk}",
                     timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
+                    sync=False,
                 )
                 claimed += 1
 
