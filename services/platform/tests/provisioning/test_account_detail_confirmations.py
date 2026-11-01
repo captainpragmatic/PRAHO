@@ -104,7 +104,14 @@ class AccountDetailConfirmationTests(SimpleTestCase):
             loaders=[
                 (
                     "django.template.loaders.locmem.Loader",
-                    {"base.html": ("{% block content %}{% endblock %}{% block extra_modals %}{% endblock %}")},
+                    # The modal comes from base.html, as on the real page (base.html includes it once).
+                    {
+                        "base.html": (
+                            "{% block content %}{% endblock %}"
+                            '{% include "components/dangerous_action_modal.html" %}'
+                            "{% block extra_modals %}{% endblock %}"
+                        )
+                    },
                 ),
                 "django.template.loaders.filesystem.Loader",
             ],

@@ -615,6 +615,4 @@ function confirmAccountDelete(button) {
 </script>
 {% endblock %}
 
-{% block extra_modals %}
-{% include "components/dangerous_action_modal.html" %}
-{% endblock %}
+{# base.html already includes the dangerous-action modal; a second copy answered every confirm twice. #}

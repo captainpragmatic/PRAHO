@@ -28,7 +28,7 @@
     cancelEditItemOrModal: true,
     cancelExpandableEditAction: true,
     closeEventDetail: true,
-    closeModal: true,
+    closeGdprModal: true,
     confirmAccountDeleteAction: true,
     confirmDisable: true,
     confirmProtectionToggleAction: true,

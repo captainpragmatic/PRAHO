@@ -396,7 +396,8 @@ document.addEventListener("alpine:init", function () {
 // Preserved from settings/_form_js.html: warn before leaving with unsaved settings.
 window.addEventListener("beforeunload", function (event) {
   const form = document.querySelector("[data-settings-form]");
-  if (form && form.__x && Object.keys(form.__x.$data.dirty).length > 0) {
+  const data = form && window.Alpine ? window.Alpine.$data(form) : null;
+  if (data && Object.keys(data.dirty || {}).length > 0) {
     event.preventDefault();
   }
 });
