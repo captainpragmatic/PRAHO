@@ -134,6 +134,45 @@ def on_block() -> dict[str, Any]:
     return WORKFLOW[True] if True in WORKFLOW else WORKFLOW["on"]  # YAML 1.1 reads the key `on` as True
 
 
+def test_component_diagnostics_require_an_explicit_manual_dispatch_and_have_a_distinct_job() -> None:
+    suite = on_block()["workflow_dispatch"]["inputs"]["suite"]
+    assert suite["options"] == ["full", "drift", "components"]
+    assert suite["default"] == "full"
+    job = WORKFLOW["jobs"]["components-diagnostic"]
+    assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.suite == 'components'"
+    assert "needs" not in job, "Diagnostics must not depend on a scheduled/full proof job"
+    assert job["runs-on"] == "ubuntu-24.04"
+    assert 1 <= job["timeout-minutes"] <= 90
+    assert "components-diagnostic" not in WORKFLOW["jobs"]["notify-scheduled-failure"]["needs"]
+    assert "inputs.suite == 'full'" in WORKFLOW["jobs"]["nightly-full"]["if"]
+    assert "components" not in WORKFLOW["jobs"]["nightly-full"]["if"]
+
+
+def test_component_diagnostics_use_only_the_component_boundary_with_unconditional_evidence_and_cleanup() -> None:
+    steps = WORKFLOW["jobs"]["components-diagnostic"]["steps"]
+    checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["fetch-depth"] == 0
+    setup = [step for step in steps if step.get("uses") == "./.github/actions/virtualmin-lab-setup"]
+    assert len(setup) == 1
+    assert setup[0].get("with", {}).get("browser", "false") == "false"
+    commands = [step for step in steps if "run" in step and step["run"].startswith("make ")]
+    assert [shlex.split(step["run"]) for step in commands] == [
+        ["make", "virtualmin-lab-up"],
+        ["make", "test-virtualmin-components"],
+        ["make", "virtualmin-lab-down"],
+    ], "A diagnostic run must not substitute full/queue/release evidence or run unrelated lab legs"
+    assert commands[-1]["if"] == "always()"
+    upload = [step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@")]
+    assert len(upload) == 1
+    assert upload[0]["if"] == "always()"
+    assert upload[0]["with"]["path"] == "output/virtualmin-lab/components/"
+    assert upload[0]["with"]["name"] == "virtualmin-components-diagnostics"
+    assert steps.index(upload[0]) < steps.index(commands[-1])
+    diagnostics = next(step for step in steps if step.get("name") == "Lab diagnostics")
+    assert diagnostics["if"] == "failure()"
+    assert "vmlab-component-source" in diagnostics["run"]
+
+
 def test_the_queue_runs_the_lab_when_a_change_can_break_it() -> None:
     # `pull-request` is a required check: a workflow skipped by a paths filter never reports, so the
     # selection lives in a job, and the job it gates reports success when skipped. It reports on every

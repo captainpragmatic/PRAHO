@@ -41,7 +41,7 @@ on:
       suite:
         description: Which run to start
         type: choice
-        options: [full, drift]
+        options: [full, drift, components]
         default: full
 
 permissions:
@@ -136,6 +136,7 @@ jobs:
           path: |
             output/playwright/virtualmin-lab/
             output/virtualmin-lab/faults/
+            output/virtualmin-lab/components/
             logs/virtualmin_e2e_server.log
           if-no-files-found: ignore
           retention-days: 14
@@ -145,6 +146,49 @@ jobs:
         run: |
           make virtualmin-lab-down
           deploy/virtualmin-lab/lab.sh node-down || true
+
+  # ---------------------------------------------------------------------------
+  # Explicit runner diagnostics only; this job never qualifies the full lab.
+  # ---------------------------------------------------------------------------
+  components-diagnostic:
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'components'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Validate cached image inputs against its recorded revision.
+
+      - uses: ./.github/actions/virtualmin-lab-setup
+
+      - name: Start the lab
+        run: make virtualmin-lab-up
+
+      - name: Component diagnostics (not full lab qualification)
+        run: make test-virtualmin-components
+
+      - name: Lab diagnostics
+        if: failure()
+        run: |
+          docker ps -a
+          for node in vmlab-a vmlab-b vmlab-minio vmlab-component-source; do
+            echo "::group::docker logs ${node}"
+            docker logs --tail 200 "${node}" || true
+            echo "::endgroup::"
+          done
+
+      - name: Upload component diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtualmin-components-diagnostics
+          path: output/virtualmin-lab/components/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop the lab
+        if: always()
+        run: make virtualmin-lab-down
 
   # ---------------------------------------------------------------------------
   # Nightly drift: the contract suite against whatever Virtualmin ships today.

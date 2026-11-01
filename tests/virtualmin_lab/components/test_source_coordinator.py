@@ -341,6 +341,7 @@ def prepare_native_target(exported: dict, helpers: Path, password: str, *, activ
             execute("rm", "-rf", "--", directory)
 
 
+@pytest.mark.usefixtures("native_target_site_observation")
 @pytest.mark.parametrize("activate_target", [False, True])
 def test_native_source_coordinator_preserves_retained_services(
     mixed_source: MixedSource, activate_target: bool

@@ -297,6 +297,7 @@ def _native_dns(lab: Lab, domain: str, name: str, ipv4: str, ipv6: str | None = 
     )
 
 
+@pytest.mark.usefixtures("native_target_site_observation")
 @pytest.mark.parametrize("cancel_at_verifying", [False, True], ids=["completed_cleanup", "rollback_cleanup"])
 def test_real_component_worker_uses_consumed_approval_and_preserves_imported_mail_dns_auth(  # noqa: C901, PLR0912, PLR0915 -- one real two-node lifecycle with exact failure cleanup
     mixed_source: MixedSource,
