@@ -19,7 +19,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.billing.currency_service import default_selling_currency
 from apps.billing.models import Currency
-from apps.common.decorators import admin_required, staff_required_strict
+from apps.common.decorators import admin_required, is_administrator, staff_required_strict
 from apps.common.mixins import get_search_context
 from apps.common.utils import json_error, json_success
 from apps.common.validators import log_security_event
@@ -102,6 +102,7 @@ def product_list(request: HttpRequest) -> HttpResponse:
                 {
                     "products": products,
                     "search_query": search_query,
+                    "can_manage_catalog": is_administrator(request.user),
                 },
             )
 
@@ -121,6 +122,8 @@ def product_list(request: HttpRequest) -> HttpResponse:
             "product_type_choices": Product.PRODUCT_TYPES,
             # Metadata
             "is_staff_user": True,
+            # Creating, editing, toggling and pricing are @admin_required: the page uses the same rule.
+            "can_manage_catalog": is_administrator(request.user),
         }
 
         return render(request, "products/product_list.html", context)
@@ -185,6 +188,7 @@ def product_detail(request: HttpRequest, slug: str) -> HttpResponse:
             "relationships_to": relationships_to,
             "bundle_memberships": bundle_memberships,
             "is_staff_user": True,
+            "can_manage_catalog": is_administrator(request.user),
         }
 
         return render(request, "products/product_detail.html", context)
@@ -446,6 +450,7 @@ def product_prices(request: HttpRequest, slug: str) -> HttpResponse:
             "currencies": currencies,
             "billing_period_choices": ProductPrice.BILLING_PERIODS,
             "is_staff_user": True,
+            "can_manage_catalog": is_administrator(request.user),
         }
 
         return render(request, "products/product_prices.html", context)
