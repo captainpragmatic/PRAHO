@@ -371,9 +371,13 @@
       });
   }
 
+  // Each item change refreshes the summary; only the latest refresh may swap, so an older answer that arrives last
+  // can't overwrite a newer one.
+  var summaryGeneration = 0;
   function refreshFinancialSummary() {
     var financialSummary = document.getElementById("financial-summary");
     if (!financialSummary) { return; }
+    var generation = ++summaryGeneration;
     fetch(base() + "/", {
       method: "GET",
       headers: {
@@ -385,8 +389,11 @@
       .then(function (response) { return response.text(); })
       .then(function (html) {
         var doc = new DOMParser().parseFromString(html, "text/html");
+        if (generation !== summaryGeneration) { return; }
         var fresh = doc.getElementById("financial-summary");
-        if (fresh && financialSummary) { financialSummary.outerHTML = fresh.outerHTML; }
+        // Look it up again: an earlier refresh may have replaced the element captured before the fetch.
+        var current = document.getElementById("financial-summary");
+        if (fresh && current) { current.outerHTML = fresh.outerHTML; }
       })
       .catch(function (error) {
         if (leaving) { return; }
