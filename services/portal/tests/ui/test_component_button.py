@@ -162,10 +162,12 @@ class ButtonDisabledTests(SimpleTestCase):
         # Check for the HTML boolean attribute form (not the CSS "disabled:" prefix)
         self.assertIn("disabled>", result)
 
-    def test_disabled_anchor_uses_aria_disabled(self) -> None:
+    def test_disabled_anchor_renders_as_a_disabled_button(self) -> None:
+        """aria-disabled and tabindex=-1 don't stop a click, so a disabled link loses its href."""
         result = _render('{% button "Go" href="/path/" disabled=True %}')
-        self.assertIn('aria-disabled="true"', result)
-        self.assertIn('tabindex="-1"', result)
+        self.assertNotIn('href="/path/"', result)
+        self.assertIn("<button", result)
+        self.assertIn(" disabled>", result)
 
     def test_enabled_button_has_no_disabled_attr(self) -> None:
         # Tailwind uses "disabled:opacity-50" CSS class — check for the HTML

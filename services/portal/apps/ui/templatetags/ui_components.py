@@ -347,14 +347,11 @@ def button(
             ("data-confirm-text", config.confirm_text),
             ("data-submit-form", config.submit_form),
             ("aria-label", config.aria_label),
-            ("data-loading", config.loading and not config.href),
+            ("data-loading", config.loading and not (config.href and not config.disabled)),
             ("data-copy", config.data_copy),
             ("data-invoke", config.data_invoke),
             ("data-confirm", config.data_confirm),
             ("hx-include", htmx.hx_include),
-            # A disabled link writes both itself (button.html's <a> branch).
-            ("tabindex", config.disabled and config.href),
-            ("aria-disabled", config.disabled and config.href),
         )
         if value
     )

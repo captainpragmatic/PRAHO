@@ -60,13 +60,12 @@ class OwnershipTests(SimpleTestCase):
                 self.assertEqual(names.count(attribute), 1, attrs)
                 self.assertEqual(dict(attrs)[attribute], "mine")
 
-    def test_a_disabled_link_keeps_its_own_tabindex_and_aria_disabled(self) -> None:
-        _html, attrs = render('href="/x/" disabled=True attrs=\'tabindex="3" aria-disabled="false"\'')
-        names = [name for name, _value in attrs]
-        self.assertEqual(names.count("tabindex"), 1, attrs)
-        self.assertEqual(names.count("aria-disabled"), 1, attrs)
-        self.assertEqual(dict(attrs)["tabindex"], "-1")
-        self.assertEqual(dict(attrs)["aria-disabled"], "true")
+    def test_a_disabled_link_cannot_be_followed_and_says_why(self) -> None:
+        """aria-disabled and tabindex=-1 don't stop a click; a disabled link renders as a disabled button."""
+        html, attrs = render('href="/x/" disabled=True title=tricky')
+        self.assertNotIn('href="/x/"', html)
+        self.assertIn("disabled", dict(attrs))
+        self.assertIn('title="' + "Say &quot;yes&quot; &amp; it&#x27;s &lt;b&gt;done&lt;/b&gt;" + '"', html)
 
     def test_attrs_still_adds_what_the_component_does_not_write(self) -> None:
         _html, attrs = render('attrs=\'data-copy="theirs" tabindex="3"\'')
