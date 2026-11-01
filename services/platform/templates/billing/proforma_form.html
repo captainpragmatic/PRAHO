@@ -219,8 +219,7 @@
                     <div class="line-total min-w-0 whitespace-nowrap tabular-nums text-sm px-2 py-2 bg-slate-600 rounded-md text-white font-medium text-right">{{ line.line_total }}</div>
                   </div>
                   <div class="col-span-2 md:col-span-1 min-w-0 flex md:block justify-end">
-                    {# tmpl-allow TMPL002: icon-only remove button (x icon, no text label) wired by class remove-line; the button tag always renders a text label span #}
-                    <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors">{% icon "x" %}</button>
+                    {% trans "Remove line" as remove_line_label %}{% button remove_line_label variant="danger" size="sm" icon="x" icon_only=True aria_label=remove_line_label class_="remove-line" %}
                   </div>
                 </div>
                 {% endfor %}
@@ -256,8 +255,7 @@
                     <div class="line-total min-w-0 whitespace-nowrap tabular-nums text-sm px-2 py-2 bg-slate-600 rounded-md text-white font-medium text-right">0.00</div>
                   </div>
                   <div class="col-span-2 md:col-span-1 min-w-0 flex md:block justify-end">
-                    {# tmpl-allow TMPL002: icon-only remove button (x icon, no text label) wired by class remove-line; the button tag always renders a text label span; starts disabled and the script toggles disabled plus opacity classes #}
-                    <button type="button" class="remove-line bg-red-600 hover:bg-red-700 text-white px-3 py-2 rounded-md font-medium transition-colors opacity-50 cursor-not-allowed" disabled>{% icon "x" %}</button>
+                    {% trans "Remove line" as remove_line_label %}{% button remove_line_label variant="danger" size="sm" icon="x" icon_only=True aria_label=remove_line_label class_="remove-line" disabled=True %}
                   </div>
                 </div>
               {% endif %}

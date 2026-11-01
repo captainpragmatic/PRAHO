@@ -80,11 +80,13 @@
           </div>
 
           <!-- Remove Button -->
-          {# tmpl-allow TMPL002: needs button responsive_label #}
-          <button hx-post="{% url 'orders:remove_from_cart' %}" hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}", "domain_name": "{{ item.domain_name|escapejs }}"}' hx-target="#cart-items" hx-swap="outerHTML" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-htmx-after="cart-updated" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="text-slate-400 hover:text-red-400 transition-colors p-2 rounded hover:bg-slate-700" aria-label="{% trans 'Remove from cart' %}">
-            <span>{% icon "x" size="sm" css_class="text-slate-400" %}</span>
-            <span class="ml-1 text-sm hidden sm:inline">{% trans "Remove" %}</span>
-          </button>
+          <span class="cart-line-remove inline-flex">
+            <input type="hidden" name="product_slug" value="{{ item.product_slug }}">
+            <input type="hidden" name="billing_period" value="{{ item.billing_period }}">
+            <input type="hidden" name="domain_name" value="{{ item.domain_name }}">
+            {% url 'orders:remove_from_cart' as remove_url %}{% trans "Remove" as remove_label %}{% trans 'Remove from cart' as remove_name %}{% trans 'Are you sure you want to remove this product from cart?' as remove_confirm %}
+            {% button remove_label variant="ghost" size="sm" icon="x" label_class="hidden sm:inline" aria_label=remove_name hx_post=remove_url hx_include="closest .cart-line-remove" hx_target="#cart-items" hx_swap="outerHTML" hx_confirm=remove_confirm attrs='data-htmx-after="cart-updated"' %}
+          </span>
         </div>
       </div>
     </div>
