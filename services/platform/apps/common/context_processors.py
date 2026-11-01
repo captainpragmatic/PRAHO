@@ -7,6 +7,7 @@ from typing import Any
 
 from django.conf import settings
 from django.http import HttpRequest
+from django.utils.translation import gettext as _
 
 
 def _maintenance_mode_active() -> bool:
@@ -206,13 +207,19 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
 
     # Staff/Admin Navigation Items
     if request.user.is_staff_user:
+        # The invoice list is billing-staff only (billing_staff_required): others see why, not a refusal.
+        can_open_invoices = getattr(request.user, "can_manage_financial_data", False)
+        invoices_locked = "" if can_open_invoices else _("Only billing staff can open invoices.")
+        invoices_item: dict[str, Any] = {"text": "Invoices", "url": "/billing/invoices/", "icon": "receipt"}
+        if invoices_locked:
+            invoices_item.update(disabled=True, reason=invoices_locked)
         business_items = [
             {"text": "Customers", "url": "/customers/", "icon": "users"},
             {"text": "Products", "url": "/products/", "icon": "orders"},
             {"text": "Orders", "url": "/orders/", "icon": "clipboard"},
             {"text": "Promotions", "url": "/promotions/admin/", "icon": "gift"},
             {"divider": True},
-            {"text": "Invoices", "url": "/billing/invoices/", "icon": "receipt"},
+            invoices_item,
             {"text": "Services", "url": "/provisioning/services/", "icon": "services"},
             {"text": "Domains", "url": "/domains/", "icon": "globe"},
             {"divider": True},
@@ -238,6 +245,7 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
         return {
             "business_items": business_items,
             "support_items": support_items,
+            "nav_invoices_locked": invoices_locked,
         }
 
     # Customer User Navigation Items

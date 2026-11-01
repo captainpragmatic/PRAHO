@@ -222,9 +222,15 @@
         </div>
 
         <div class="mt-4 text-center">
+          {% if nav_invoices_locked %}
+          <span class="inline-flex items-center text-slate-500 cursor-not-allowed" aria-disabled="true" title="{{ nav_invoices_locked }}">
+            {% trans 'View all' %} → <span class="sr-only">({{ nav_invoices_locked }})</span>
+          </span>
+          {% else %}
           <a href="{% url 'billing:invoice_list' %}" class="inline-flex items-center text-blue-400 hover:text-blue-300">
             {% trans 'View all' %} →
           </a>
+          {% endif %}
         </div>
       </div>
     </div>

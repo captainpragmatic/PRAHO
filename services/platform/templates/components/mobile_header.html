@@ -61,7 +61,7 @@
                     {% include 'components/mobile_nav_item.html' with url_name='customers:list' title='Customers' subtitle='Manage client accounts' staff_only=True icon_name='users' %}
                     {% include 'components/mobile_nav_item.html' with url_name='products:product_list' title='Products' subtitle='Manage hosting packages' staff_only=True icon_name='orders' %}
                     {% include 'components/mobile_nav_item.html' with url_name='orders:order_list' title='Orders' subtitle='Order management' icon_name='shopping-cart' %}
-                    {% include 'components/mobile_nav_item.html' with url_name='billing:invoice_list' title='Invoices' subtitle='Invoices & payments' icon_name='invoices' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='billing:invoice_list' title='Invoices' subtitle='Invoices & payments' icon_name='invoices' disabled=nav_invoices_locked reason=nav_invoices_locked %}
                     {% include 'components/mobile_nav_item.html' with url_name='provisioning:services' title='Services' subtitle='Hosting & provisioning' icon_name='services' %}
                     {% include 'components/mobile_nav_item.html' with url_name='domains:list' title='Domains' subtitle='Domain management' icon_name='domain' %}
                 </div>

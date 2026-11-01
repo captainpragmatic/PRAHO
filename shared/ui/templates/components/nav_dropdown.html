@@ -32,6 +32,15 @@
       {% for item in items %}
         {% if item.divider %}
           <div class="border-t border-slate-700 my-1"></div>
+        {% elif item.disabled %}
+          {# A page this user can't open: shown with the reason, not offered as a link the view would refuse. #}
+          <span class="group flex items-center px-4 py-2 text-sm text-slate-500 cursor-not-allowed" role="menuitem" aria-disabled="true" title="{{ item.reason }}">
+            {% if item.icon %}
+              {% icon item.icon size="sm" css_class="mr-3 opacity-50" %}
+            {% endif %}
+            {{ item.text }}
+            <span class="sr-only">({{ item.reason }})</span>
+          </span>
         {% else %}
           <a href="{{ item.url }}"
              class="group flex items-center px-4 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700 transition-colors"

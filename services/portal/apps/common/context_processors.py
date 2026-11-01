@@ -8,6 +8,7 @@ from django.http import HttpRequest
 from django.utils.translation import gettext as _
 
 from apps.common.account_health import get_account_health
+from apps.common.decorators import BILLING_ROLES
 from apps.common.localisation_services import get_company_identity
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,21 @@ def company_identity(request: HttpRequest) -> dict[str, object]:
     return {"company": get_company_identity()}
 
 
+def _billing_nav_locked(request: HttpRequest) -> str:
+    """Why the Billing menu is unavailable, or "" when it isn't (or the role isn't known yet).
+
+    Reads the role from the session's cached memberships, never the API: this runs on every page. An unknown role
+    leaves the link alone; the billing views still check it (require_billing_access).
+    """
+    customer_id = str(request.session.get("customer_id"))
+    for membership in request.session.get("user_memberships", []) or []:
+        if str(membership.get("customer_id")) == customer_id:
+            if membership.get("role") not in BILLING_ROLES:
+                return _("Only owners and billing members can open billing.")
+            return ""
+    return ""
+
+
 def portal_context(request: HttpRequest) -> dict[str, object]:
     """Add portal-specific context and authenticated account navigation to templates."""
     context: dict[str, object] = {
@@ -40,6 +56,8 @@ def portal_context(request: HttpRequest) -> dict[str, object]:
             context["account_banner"] = get_account_health(request)
         except Exception as e:
             logger.warning("⚠️ [ContextProcessor] Account health check failed: %s", e)
+
+        context["billing_nav_locked"] = _billing_nav_locked(request)
 
         # "My Account" nav dropdown items — available on every authenticated page
         context["account_menu_items"] = [
