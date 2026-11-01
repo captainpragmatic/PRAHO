@@ -1328,6 +1328,7 @@ virtualmin-lab-build:
 
 .PHONY: virtualmin-lab-component-source-up
 virtualmin-lab-component-source-up: virtualmin-lab-ensure
+	@$(VIRTUALMIN_LAB_SH) ensure-image
 	@docker build -f deploy/virtualmin-lab/mixed-source/Dockerfile -t praho-virtualmin-lab-mixed-source:8.3.0 deploy/virtualmin-lab
 	@$(PYTHON_PLATFORM_LAB_MANAGE) virtualmin_lab_component_source
 
