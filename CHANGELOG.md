@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Hosting provisioning no longer deadlocks with immediate subscription cancellation on PostgreSQL; it observes cancellation before validating the service and refuses a changed customer safely (#823).
+
 - Hosting fulfilment and staff completion now survive a concurrent plan change while waiting for a service lock, and use the current plan to choose automatic or manual delivery (#816).
 - Renewal preparation now reloads payment mandates and service eligibility after waiting for a subscription lock. Concurrent automatic-payment changes no longer abort the renewal run, and a service that opts out while preparation waits is excluded (#813).
 - e-Factura submission finalizers now lock the invoice before its document, matching duplicate submissions. Recording an ANAF result no longer deadlocks a concurrent active-claim check; accepted results, retry policy and unknown-outcome quarantine are preserved (#818).
