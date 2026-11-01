@@ -36,8 +36,10 @@ def portal_context(request: HttpRequest) -> dict[str, object]:
 
     # Account health banner — only for authenticated users with a session
     if request.session.get("customer_id") and request.session.get("user_id"):
+        context["account_status_authenticated"] = bool(getattr(request, "customer_id", None))
         try:
             context["account_banner"] = get_account_health(request)
+            context["maintenance_unavailable"] = getattr(request, "maintenance_unavailable", False)
         except Exception as e:
             logger.warning("⚠️ [ContextProcessor] Account health check failed: %s", e)
 

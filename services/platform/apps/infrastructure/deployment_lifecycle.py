@@ -11,9 +11,11 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from functools import wraps
+from inspect import signature
 from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ValidationError
@@ -40,6 +42,50 @@ class OperationLease:
     deployment_id: int
     token: uuid.UUID
     kind: str
+
+
+def settle_unissued_reservation(deployment_id: int, expected_token: uuid.UUID) -> bool:
+    """Release only the exact still-unissued enqueue reservation, never a claimed native operation."""
+    from apps.infrastructure.node_maintenance_gate import locked_deployment_gate  # noqa: PLC0415  # Shared lock order
+
+    with locked_deployment_gate(deployment_id) as row:
+        if row is None or row.operation_token != expected_token or row.operation_reserved_at is None:
+            return False
+        return bool(
+            type(row)
+            .objects.filter(pk=row.pk, operation_token=expected_token, operation_reserved_at=row.operation_reserved_at)
+            .update(operation_token=None, operation_kind="", operation_reserved_at=None, updated_at=timezone.now())
+        )
+
+
+def settle_unissued_task[**P, R](function: Callable[P, R]) -> Callable[P, R]:
+    """A returned/failed queue leaf cannot strand its own preclaim reservation."""
+    call_signature = signature(function)
+
+    @wraps(function)
+    def wrapped(*args: P.args, **kwargs: P.kwargs) -> R:
+        arguments = call_signature.bind(*args, **kwargs).arguments
+        try:
+            return function(*args, **kwargs)
+        finally:
+            deployment_id, raw_token = arguments.get("deployment_id"), arguments.get("operation_token")
+            if isinstance(deployment_id, int) and isinstance(raw_token, str):
+                try:
+                    token = uuid.UUID(raw_token)
+                except ValueError:
+                    pass  # A malformed old payload has no authority over a current reservation.
+                else:
+                    settle_unissued_reservation(deployment_id, token)
+
+    return wrapped
+
+
+def _refuse_preclaim(row: NodeDeployment, expected_token: uuid.UUID | None, reason: str) -> Err[str]:
+    if expected_token is not None and row.operation_token == expected_token and row.operation_reserved_at is not None:
+        type(row).objects.filter(
+            pk=row.pk, operation_token=expected_token, operation_reserved_at=row.operation_reserved_at
+        ).update(operation_token=None, operation_kind="", operation_reserved_at=None, updated_at=timezone.now())
+    return Err(reason)
 
 
 # The deployment-log messages that record a firewall the deploy created and a key it uploaded.
@@ -111,26 +157,34 @@ def claim_operation(  # noqa: PLR0911, PLR0913  # Every argument is one claim co
     from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
 
     allowed = tuple(from_states)
-    with transaction.atomic():
-        # Join-free lock: a waited FOR UPDATE re-reads only the locked row.
-        row = NodeDeployment.objects.select_for_update().filter(pk=deployment_id).first()
+    from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server ownership
+        deployment_maintenance_refusal,
+        locked_deployment_gate,
+    )
+
+    with locked_deployment_gate(deployment_id) as row:
         if row is None:
             return Err(f"Deployment {deployment_id} not found")
+        if refusal := deployment_maintenance_refusal(row):
+            return _refuse_preclaim(row, expected_token, refusal)
         if row.status not in allowed:
-            return Err(f"Cannot {kind} node in status '{row.status}'")
+            return _refuse_preclaim(row, expected_token, f"Cannot {kind} node in status '{row.status}'")
         if expected_token is not None and row.operation_token != expected_token:
-            return Err(f"Cannot {kind} node: another operation owns it")
+            return _refuse_preclaim(row, expected_token, f"Cannot {kind} node: another operation owns it")
         if require_reconciled and row.needs_reconciliation:
-            return Err(f"Cannot {kind} node: reconcile it first ({row.reconciliation_reason})")
+            return _refuse_preclaim(
+                row, expected_token, f"Cannot {kind} node: reconcile it first ({row.reconciliation_reason})"
+            )
         if stale_before is not None and row.updated_at >= stale_before:
-            return Err(f"Cannot {kind} node: it was updated recently")
+            return _refuse_preclaim(row, expected_token, f"Cannot {kind} node: it was updated recently")
         if row.status != to_status and not row.is_valid_transition(to_status):
-            return Err(f"Cannot transition from '{row.status}' to '{to_status}'")
+            return _refuse_preclaim(row, expected_token, f"Cannot transition from '{row.status}' to '{to_status}'")
         token = uuid.uuid4()
         updates: dict[str, Any] = {
             "status": to_status,
             "operation_token": token,
             "operation_kind": kind,
+            "operation_reserved_at": None,
             "updated_at": timezone.now(),
         }
         if message:
@@ -157,11 +211,16 @@ def reserve_operation(
     live one whose token a reservation would take.
     """
     from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server ownership
+        deployment_maintenance_refusal,
+        locked_deployment_gate,
+    )
 
-    with transaction.atomic():
-        row = NodeDeployment.objects.select_for_update().filter(pk=deployment_id).first()
+    with locked_deployment_gate(deployment_id) as row:
         if row is None:
             return Err(f"Deployment {deployment_id} not found")
+        if refusal := deployment_maintenance_refusal(row):
+            return Err(refusal)
         parked = row.needs_reconciliation and row.status in tuple(flagged_states)
         if row.status not in tuple(from_states) and not parked:
             return Err(f"Cannot {kind} node in status '{row.status}'")
@@ -169,7 +228,7 @@ def reserve_operation(
             return Err(f"Cannot {kind} node: reconcile it first ({row.reconciliation_reason})")
         token = uuid.uuid4()
         NodeDeployment.objects.filter(pk=deployment_id).update(
-            operation_token=token, operation_kind=kind, updated_at=timezone.now()
+            operation_token=token, operation_kind=kind, operation_reserved_at=timezone.now(), updated_at=timezone.now()
         )
     return Ok(token)
 

@@ -95,6 +95,13 @@ class InfrastructureConfig(AppConfig):
             except Exception:
                 logger.error("Failed to register schedule: infra_%s", name, exc_info=True)
 
+        from .node_maintenance_tasks import setup_node_maintenance_schedule  # Models are now migrated.
+
+        try:
+            setup_node_maintenance_schedule()
+        except Exception:
+            logger.error("Failed to register schedule: infra_node_maintenance", exc_info=True)
+
     @staticmethod
     def _sync_providers_on_first_boot(sender: type, **kwargs: object) -> None:
         """Sync provider catalog on first boot if no providers exist."""
