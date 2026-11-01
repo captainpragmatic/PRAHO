@@ -47,6 +47,7 @@ from .virtualmin_gateway import (
     VirtualminGateway,
     classify_virtualmin_application_error,
     get_virtualmin_config,
+    get_virtualmin_timeouts,
     is_customer_domain_row,
 )
 from .virtualmin_models import (
@@ -497,7 +498,12 @@ class VirtualminProvisioningService:
             )
 
             # Make API call
-            result = gateway.call("create-domain", params, correlation_id=job.correlation_id)
+            result = gateway.call(
+                "create-domain",
+                params,
+                correlation_id=job.correlation_id,
+                timeout_seconds=get_virtualmin_timeouts()["PROVISIONING_TIMEOUT"],
+            )
 
             if result.is_ok():
                 response = result.unwrap()

@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Account creation now waits for the configured provisioning timeout instead of the shorter general API timeout (#828).
+  An expired provisioning timeout still records an unknown outcome without replaying the creation.
+
 - Hosting provisioning no longer deadlocks with immediate subscription cancellation on PostgreSQL; it observes cancellation before validating the service and refuses a changed customer safely (#823).
 
 - Hosting fulfilment and staff completion now survive a concurrent plan change while waiting for a service lock, and use the current plan to choose automatic or manual delivery (#816).
