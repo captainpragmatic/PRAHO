@@ -23,6 +23,8 @@ web=Path('/etc/apache2/sites-available')/(request['domain']+'.conf')
 original_domain=domain.read_bytes();original_web=web.read_bytes()
 shadow=hashlib.sha256(subprocess.check_output(['getent','shadow',request['owner']])).hexdigest()
 evidence=module.inspect_source(request)
+callback_versions,callback_preparation=module._callbacks()
+assert not callback_preparation,callback_preparation
 assert domain.read_bytes()==original_domain and web.read_bytes()==original_web,'Inspection changed native configuration'
 assert hashlib.sha256(subprocess.check_output(['getent','shadow',request['owner']])).hexdigest()==shadow,'Inspection changed Unix authentication'
 print(json.dumps(evidence,sort_keys=True))
@@ -82,7 +84,7 @@ def test_native_inspection_reports_mail_routing_preparation_without_service_muta
         assert {"mail", "dns", "authentication", "mysql"} <= set(facts["retained"]["services"])
         assert "HTTP" in " ".join(facts["preparation"])
         assert "SPF" in " ".join(facts["preparation"])
-        assert not any("callbacks" in item for item in facts["preparation"])
+        assert any("native Apache callbacks (scriptalias)" in item for item in facts["preparation"]), facts["preparation"]
         remote = collect_source_components(lab.server, request)
         assert remote.authority_digest == manifest.authority_digest
     finally:

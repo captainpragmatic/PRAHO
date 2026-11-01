@@ -338,7 +338,8 @@ def test_real_component_worker_uses_consumed_approval_and_preserves_imported_mai
     }
     migration = None
     actor = None
-    with tempfile.TemporaryDirectory(prefix="praho-worker-native-", dir="/private/tmp") as temporary:
+    temporary_root = Path("/private/tmp") if Path("/private/tmp").is_dir() else Path(tempfile.gettempdir())
+    with tempfile.TemporaryDirectory(prefix="praho-worker-native-", dir=temporary_root) as temporary:
         try:
             for lab in (source, target):
                 assert lab.gateway.call("info", {"multiline": ""}).is_ok()
