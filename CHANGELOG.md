@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Hosting fulfilment and staff completion now survive a concurrent plan change while waiting for a service lock, and use the current plan to choose automatic or manual delivery (#816).
 - Renewal preparation now reloads payment mandates and service eligibility after waiting for a subscription lock. Concurrent automatic-payment changes no longer abort the renewal run, and a service that opts out while preparation waits is excluded (#813).
 - e-Factura submission finalizers now lock the invoice before its document, matching duplicate submissions. Recording an ANAF result no longer deadlocks a concurrent active-claim check; accepted results, retry policy and unknown-outcome quarantine are preserved (#818).
 - **A deploy no longer waits forever on a dropped SSH connection.** The native and dev deploy inventories send SSH keepalives (`ServerAliveInterval=30`, `ServerAliveCountMax=4`): a link that drops silently mid-play is noticed within two minutes and the run fails as unreachable, where a staging promotion had sat an hour on a task the host had already finished. After a failed promotion the `staging` branch has not moved, but the server may be part-way through the deploy (code or migrations applied, services not yet restarted) until a promotion succeeds; running it again is safe. The host answers the probes while a quiet task runs, so long tasks are unaffected. Rsync deploys (dev only) keep their own SSH connection.

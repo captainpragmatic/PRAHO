@@ -87,7 +87,9 @@ def _lock(item_id: UUID | str) -> tuple[OrderItem, Service | None] | None:
     line = OrderItem.objects.select_for_update(of=("self",)).select_related("order").get(pk=item_id)
     if line.service_id is None:
         return line, None
-    service = Service.objects.select_for_update(of=("self",)).select_related("service_plan").get(pk=line.service_id)
+    # A waiting locking join can lose a Service whose plan FK changes. Resolve
+    # the plan afterward, from the current FK on this join-free locked row.
+    service = Service.objects.select_for_update(of=("self",)).get(pk=line.service_id)
     return line, service
 
 
