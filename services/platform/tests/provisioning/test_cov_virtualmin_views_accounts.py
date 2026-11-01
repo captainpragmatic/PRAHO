@@ -207,7 +207,9 @@ class VirtualminAccountCoverageTests(VirtualminViewsFixture):
                         HTTP_HX_CURRENT_URL=f"https://testserver{detail}",
                     )
                     self.assertEqual(enqueue.call_args_list, [])
-                self.assertRedirects(response, detail, fetch_redirect_response=False)
+                # htmx gets HX-Redirect, so the address bar follows (a 302 was swapped into the page's body).
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response["HX-Redirect"], detail)
                 self.service.refresh_from_db()
                 self.account.refresh_from_db()
                 self.assertEqual((self.service.status, self.service.suspension_reason), (expected, reason))

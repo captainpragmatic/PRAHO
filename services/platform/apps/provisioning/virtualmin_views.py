@@ -326,6 +326,14 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
 # ===============================================================================
 
 
+def _page_redirect(request: HttpRequest, to: str, **kwargs: Any) -> HttpResponse:
+    """Go to the next page; htmx gets HX-Redirect, so the address bar follows instead of a page swapped into body."""
+    destination = reverse(to, kwargs=kwargs)
+    if request.headers.get("HX-Request"):
+        return HttpResponse(headers={"HX-Redirect": destination})
+    return redirect(destination)
+
+
 ACCOUNTS_PER_PAGE = 25
 
 
@@ -670,7 +678,7 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         resolved = resolve_chain_job(job, resolved_by=actor, note=str(note))
         if resolved.is_err():
             messages.error(request, resolved.unwrap_err())
-            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+            return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
         rows = 1
     elif job.status == "attention" and is_pair_job(job.operation, job.parameters or {}):
         # A pair restore leaves the domain behind a maintenance page and disabled: the node is
@@ -678,7 +686,7 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         resolved = resolve_pair_job(job, resolved_by=actor, note=str(note))
         if resolved.is_err():
             messages.error(request, resolved.unwrap_err())
-            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+            return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
         rows = 1
     else:
         # CharField job status; attention -> failed is the only edge.
@@ -700,7 +708,7 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         messages.success(request, _("Job marked resolved. The account is unlocked."))
     else:
         messages.error(request, _("Only a job awaiting attention can be resolved."))
-    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required
@@ -718,13 +726,13 @@ def virtualmin_job_node_lost(request: HttpRequest, job_id: str) -> HttpResponse:
         resolved = resolve_chain_job_node_lost(job, resolved_by=actor, note=str(note))
     if resolved.is_err():
         messages.error(request, resolved.unwrap_err())
-        return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+        return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
     from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
 
     job.refresh_from_db()
     audit_job_status_transition(job, actor_type="user", user=request.user if request.user.is_authenticated else None)
     messages.success(request, _("Job marked resolved as node lost. The account is unlocked."))
-    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required
@@ -758,7 +766,7 @@ def virtualmin_account_hold_reenable(request: HttpRequest, account_id: str) -> H
         messages.success(request, _("The hold is released. The domain will be enabled again as it is."))
     else:
         messages.error(request, _("This account is not held."))
-    return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.pk)
 
 
 @login_required
@@ -771,7 +779,7 @@ def virtualmin_account_hold_restore_safety(request: HttpRequest, account_id: str
     safety_id = account.restore_hold_safety_backup_id
     if not account.restore_hold or not safety_id:
         messages.error(request, _("This account has no safety backup to restore."))
-        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+        return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.pk)
     actor = request.user.email if request.user.is_authenticated else "system"
     created = VirtualminBackupManagementService(account.server).create_restore_job(
         account=account,
@@ -782,10 +790,10 @@ def virtualmin_account_hold_restore_safety(request: HttpRequest, account_id: str
         messages.error(
             request, _("Could not start the restore of the safety backup: %(error)s") % {"error": created.unwrap_err()}
         )
-        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+        return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.pk)
     _audit_hold_decision(request, account, "restore_safety_backup", detail={"safety_backup_id": safety_id})
     messages.success(request, _("Restoring the safety backup. The hold ends when it completes."))
-    return redirect("provisioning:virtualmin_job_status", job_id=created.unwrap().pk)
+    return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=created.unwrap().pk)
 
 
 def _audit_hold_decision(
@@ -875,17 +883,17 @@ def virtualmin_account_chain_backup(request: HttpRequest, account_id: str, role:
         return HttpResponseBadRequest("Unknown backup role")
     if not VirtualminBackupManagementService.incremental_backups_enabled():
         messages.error(request, _("Differential backups are not enabled."))
-        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+        return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.pk)
 
     management = VirtualminBackupManagementService(account.server)
     take = management.take_base_backup if role == "base" else management.take_differential_backup
     created = take(account, initiated_by=f"staff:{cast(User, request.user).email}")
     if created.is_err():
         messages.error(request, _("The backup could not be started: {error}").format(error=created.unwrap_err()))
-        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+        return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.pk)
     job = created.unwrap()
     messages.success(request, _("Base backup queued.") if role == "base" else _("Differential backup queued."))
-    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required
@@ -2266,14 +2274,14 @@ def virtualmin_account_suspend(request: HttpRequest, account_id: str) -> HttpRes
         referer = request.headers.get("HX-Current-URL", "")
         if f"accounts/{account.id}/" in referer:
             # Coming from detail page, refresh the page
-            return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+            return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.id)
         else:
             # Coming from accounts list, return updated table
             return render(
                 request, "provisioning/virtualmin/partials/accounts_table.html", _accounts_table_context(request)
             )
 
-    return redirect("provisioning:virtualmin_accounts")
+    return _page_redirect(request, "provisioning:virtualmin_accounts")
 
 
 @login_required
@@ -2309,14 +2317,14 @@ def virtualmin_account_activate(request: HttpRequest, account_id: str) -> HttpRe
         referer = request.headers.get("HX-Current-URL", "")
         if f"accounts/{account.id}/" in referer:
             # Coming from detail page, refresh the page
-            return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+            return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.id)
         else:
             # Coming from accounts list, return updated table
             return render(
                 request, "provisioning/virtualmin/partials/accounts_table.html", _accounts_table_context(request)
             )
 
-    return redirect("provisioning:virtualmin_accounts")
+    return _page_redirect(request, "provisioning:virtualmin_accounts")
 
 
 @login_required
