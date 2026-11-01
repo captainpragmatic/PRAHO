@@ -37,6 +37,7 @@ def _module(filename: str, name: str) -> Any:
 journals = _module("praho-component-journal.py", "component_target_receipts")
 preflight = _module("praho-component-target-preflight.py", "component_target_namespace")
 archives = _module("praho-component-target-archive.py", "component_target_archives")
+usage_writers = _module("praho-component-usage.py", "component_target_usage")
 
 
 def native(program: str, arguments: list[str]) -> str:
@@ -351,28 +352,33 @@ class TargetCoordinator:
                 return self._held(state, private)
             if state["phase"] != "prepared":
                 raise ValueError("Native target restoration is unprepared or interrupted; inspect before replaying")
-            self._domain(state, held=True)
-            state["phase"] = "restoring"
-            self.journal.write(state)
-            recovery = self._recovery()
-            recovery.stage_cron(
-                self.archive,
-                self.checksum,
-                self.journal.directory / (self.operation + ".cron"),
-                self.journal.directory / (self.operation + ".json"),
-                self._identity(state),
-            )
-            self._pair("restore", state)
-            site = Path("/etc/apache2/sites-available") / (self.domain + ".conf")
-            state["web_sha256"] = hashlib.sha256(archives.source.inspection._read(site).encode()).hexdigest()
-            self.journal.write(state)
-            self._web(state).apply()
-            if self.manifest["databases"]:
-                self._sql(state, private).apply()
-            receipt = self._held(state, private)
-            state.update(phase="held", held_receipt_sha256=receipt["target_receipt_sha256"])
-            self.journal.write(state)
-            return receipt
+            with usage_writers.UsageWriterGuard() as usage:
+                self._domain(state, held=True)
+                state["phase"] = "restoring"
+                self.journal.write(state)
+                recovery = self._recovery()
+                recovery.stage_cron(
+                    self.archive,
+                    self.checksum,
+                    self.journal.directory / (self.operation + ".cron"),
+                    self.journal.directory / (self.operation + ".json"),
+                    self._identity(state),
+                )
+                self._pair("restore", state)
+                # Native restore replaces the vhost from an unmanaged source.
+                # Finish the qualified telemetry repair before sealing its bytes;
+                # the periodic writer uses this same lock and then has no edit.
+                usage.reconcile()
+                site = Path("/etc/apache2/sites-available") / (self.domain + ".conf")
+                state["web_sha256"] = hashlib.sha256(archives.source.inspection._read(site).encode()).hexdigest()
+                self.journal.write(state)
+                self._web(state).apply()
+                if self.manifest["databases"]:
+                    self._sql(state, private).apply()
+                receipt = self._held(state, private)
+                state.update(phase="held", held_receipt_sha256=receipt["target_receipt_sha256"])
+                self.journal.write(state)
+                return receipt
 
     def verify(self) -> dict[str, Any]:
         with self.journal.locked():

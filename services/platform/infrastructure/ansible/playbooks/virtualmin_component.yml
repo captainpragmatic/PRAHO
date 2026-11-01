@@ -85,6 +85,7 @@
             mode: '0700'
           loop:
             - praho-component-target.py
+            - praho-component-usage.py
             - praho-component-target-preflight.py
             - praho-component-target-archive.py
             - praho-component-target-database.py

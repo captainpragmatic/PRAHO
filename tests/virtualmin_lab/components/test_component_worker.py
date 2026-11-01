@@ -10,8 +10,11 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -108,6 +111,86 @@ if source.coordinator.journal.path.exists():
    state['phase']='fixture_removed';source.coordinator.journal.write(state)
 print('owned_source_fixture_holds_retired')
 """
+
+SOURCE_RETIREMENT_DIAGNOSTIC = r"""
+import importlib.util,json,sys
+from pathlib import Path
+d=json.load(sys.stdin)
+result={'phase':None,'completed':None,'pending':None,'error_code':None}
+try:
+ path=Path(d['directory'])/'praho-component-journal.py'
+ spec=importlib.util.spec_from_file_location('fixture_retirement_diagnostic',path)
+ module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+ journal=module.ComponentJournal(Path('/var/lib/praho/component-sources'),d['domain_id'],{
+  'operation_id':d['operation_id'],'scope_digest':d['authority'],
+  'boot_id':Path('/proc/sys/kernel/random/boot_id').read_text().strip()})
+ if journal.directory.resolve()!=journal.directory:raise ValueError('directory')
+ if journal.directory.exists():module.ComponentJournal._private(journal.directory.lstat(),directory=True)
+ state=journal.read()
+ if state is None:
+  result['error_code']='journal_missing'
+ else:
+  journal.assert_owned(state)
+  phases={'applying','held','committing','committed','releasing','released','retiring','retired','fixture_removed'}
+  steps={'web','database','paths','files','cron','ingress','export'}
+  if state.get('phase') not in phases:raise ValueError('phase')
+  result['phase']=state['phase']
+  retirement=state.get('retirement')
+  if retirement is not None:
+   if not isinstance(retirement,dict):raise ValueError('retirement')
+   completed=retirement.get('completed');pending=retirement.get('pending')
+   if not isinstance(completed,list) or len(completed)>len(steps):raise ValueError('completed')
+   if any(not isinstance(step,str) or step not in steps for step in completed):raise ValueError('completed')
+   if pending is not None and (not isinstance(pending,str) or pending not in steps):raise ValueError('pending')
+   result.update(completed=completed,pending=pending)
+except Exception as error:
+ result['error_code']=type(error).__name__
+print(json.dumps(result,separators=(',',':')))
+"""
+
+
+@contextmanager
+def _preserve_primary_failure_during_cleanup() -> Iterator[None]:
+    primary = sys.exception()
+    try:
+        yield
+    except Exception as error:
+        if primary is None:
+            raise
+        primary.add_note("Component fixture cleanup also failed; error_code=" + type(error).__name__)
+
+
+def _record_failure_before_cleanup(
+    source: Lab, directory: str, request: dict, migration: VirtualminMigration, failure: BaseException
+) -> None:
+    """Expose only the safe bridge error and exact owned journal's bounded progress."""
+    diagnostic = {}
+    try:
+        bridge = MigrationBridge.objects.filter(migration_id=migration.pk).first()
+        last_error = bridge.evidence.get("last_error", "") if bridge is not None else ""
+        if isinstance(last_error, str) and len(last_error) <= 4096:
+            diagnostic["bridge_last_error"] = last_error
+        else:
+            diagnostic["bridge_error_code"] = "invalid_or_oversized"
+        diagnostic["source_retirement"] = json.loads(
+            _private_script(
+                source,
+                SOURCE_RETIREMENT_DIAGNOSTIC,
+                {
+                    "directory": directory,
+                    "domain_id": request["domain_id"],
+                    "operation_id": str(migration.pk),
+                    "authority": migration.component_approval.review.authority_digest,
+                },
+                timeout=30,
+            )
+        )
+    except Exception as error:
+        diagnostic["diagnostic_error_code"] = type(error).__name__
+    message = "PRAHO_COMPONENT_CLEANUP_FAILURE=" + json.dumps(diagnostic, ensure_ascii=True, separators=(",", ":"))
+    print(message, flush=True)
+    failure.add_note(message)
+
 
 TARGET_CLEANUP = r"""
 import importlib.util,json
@@ -565,58 +648,62 @@ print('actual_target_private_artifacts_retired')
                 mixed_source.domain + ":80:127.0.0.1", "http://" + mixed_source.domain + "/component-db.php",
             )) == json.loads(public), "Final private artifact retirement changed the live target application"
         finally:
-            if migration is not None:
-                migration.refresh_from_db()
-                _private_script(
-                    source,
-                    SOURCE_CLEANUP,
-                    {
-                        "directory": source_directory,
-                        "request": request,
-                        "operation_id": str(migration.pk),
-                        "authority": migration.component_approval.review.authority_digest,
-                    },
-                )
-                if migration.restore_issued:
-                    operation = target_operation_variables(migration, migration.pk, "target_prepare")[
-                        "component_operation"
-                    ]
+            primary_failure = sys.exception()
+            if primary_failure is not None and migration is not None:
+                _record_failure_before_cleanup(source, source_directory, request, migration, primary_failure)
+            with _preserve_primary_failure_during_cleanup():
+                if migration is not None:
+                    migration.refresh_from_db()
                     _private_script(
-                        target,
-                        TARGET_CLEANUP,
+                        source,
+                        SOURCE_CLEANUP,
                         {
-                            "directory": target_directory,
-                            "manifest": migration.component_approval.review.manifest,
+                            "directory": source_directory,
+                            "request": request,
                             "operation_id": str(migration.pk),
-                            "operation": operation,
+                            "authority": migration.component_approval.review.authority_digest,
                         },
                     )
-                bridge = MigrationBridge.objects.filter(migration=migration).first()
-                if bridge is not None and bridge.status not in {"failed", "torn_down"}:
-                    bridge.fail()
-                    bridge.evidence = {
-                        **bridge.evidence,
-                        "last_error": "Disposable native fixture explicitly retired both owned nodes and transport after proof",
-                    }
-                    bridge.save()
-                if migration.status not in {"completed", "failed", "rolled_back"}:
-                    # fsm-bypass: explicit owned-lab teardown after preserving failure evidence above.
-                    VirtualminMigration.objects.filter(pk=migration.pk).update(
-                        status="failed", lease_token=None, worker_lease_expires_at=None
+                    if migration.restore_issued:
+                        operation = target_operation_variables(migration, migration.pk, "target_prepare")[
+                            "component_operation"
+                        ]
+                        _private_script(
+                            target,
+                            TARGET_CLEANUP,
+                            {
+                                "directory": target_directory,
+                                "manifest": migration.component_approval.review.manifest,
+                                "operation_id": str(migration.pk),
+                                "operation": operation,
+                            },
+                        )
+                    bridge = MigrationBridge.objects.filter(migration=migration).first()
+                    if bridge is not None and bridge.status not in {"failed", "torn_down"}:
+                        bridge.fail()
+                        bridge.evidence = {
+                            **bridge.evidence,
+                            "last_error": "Disposable native fixture explicitly retired both owned nodes and transport after proof",
+                        }
+                        bridge.save()
+                    if migration.status not in {"completed", "failed", "rolled_back"}:
+                        # fsm-bypass: explicit owned-lab teardown after preserving failure evidence above.
+                        VirtualminMigration.objects.filter(pk=migration.pk).update(
+                            status="failed", lease_token=None, worker_lease_expires_at=None
+                        )
+                    # fsm-bypass: exact disposable native target was removed; preserve its historical Platform rows.
+                    Service.objects.filter(pk=migration.account.service_id).update(status="terminated")
+                    VirtualminAccount.objects.filter(pk=migration.account_id).update(status="terminated")
+                for server in (source.server, target_server):
+                    for name, value in original_servers[server.pk].items():
+                        setattr(server, name, value)
+                    server.save(update_fields=[*original_servers[server.pk], "updated_at"])
+                for name, value in original_settings.items():
+                    restored = (
+                        value
+                        if value is not None
+                        else (False if name.endswith("enabled") else "/var/lib/praho/migration-spool")
                     )
-                # fsm-bypass: exact disposable native target was removed; preserve its historical Platform rows.
-                Service.objects.filter(pk=migration.account.service_id).update(status="terminated")
-                VirtualminAccount.objects.filter(pk=migration.account_id).update(status="terminated")
-            for server in (source.server, target_server):
-                for name, value in original_servers[server.pk].items():
-                    setattr(server, name, value)
-                server.save(update_fields=[*original_servers[server.pk], "updated_at"])
-            for name, value in original_settings.items():
-                restored = (
-                    value
-                    if value is not None
-                    else (False if name.endswith("enabled") else "/var/lib/praho/migration-spool")
-                )
-                assert SettingsService.update_setting(name, restored).is_ok()
-            source.exec("rm", "-rf", "--", source_directory)
-            target.exec("rm", "-rf", "--", target_directory)
+                    assert SettingsService.update_setting(name, restored).is_ok()
+                source.exec("rm", "-rf", "--", source_directory)
+                target.exec("rm", "-rf", "--", target_directory)

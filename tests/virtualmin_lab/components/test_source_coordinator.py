@@ -163,6 +163,21 @@ try:
  assert created['phase']=='prepared' and created['target_domain_id'].isdecimal()
  restored=target.restore()
  assert restored['phase']=='held'
+ # Exercise the real periodic writer after the sealed receipt. Its known
+ # logging directives must already be present, without accepting new bytes.
+ import hashlib
+ site=Path('/etc/apache2/sites-available')/(source['domain']+'.conf')
+ hold=target._web(target._state()).path
+ def file_identity(path):
+  metadata=path.stat()
+  return hashlib.sha256(path.read_bytes()).hexdigest(),metadata.st_ino,metadata.st_mtime_ns
+ before=file_identity(site),file_identity(hold)
+ repaired=subprocess.run(['/usr/bin/perl','/usr/local/libexec/praho-usage-metadata.pl','reconcile'],
+  capture_output=True,text=True,timeout=60,check=False)
+ assert repaired.returncode==0,'The real installed usage reconciler failed'
+ assert repaired.stdout.strip()=='PRAHO_USAGE_RECONCILED changed=0',repaired.stdout
+ assert (file_identity(site),file_identity(hold))==before,'Usage repair changed a sealed native website or hold'
+ target.verify()
  private_file=Path(source['home'])/'public_html/root-private'
  assert private_file.read_bytes()==b'component source root-private fixture'
  assert private_file.stat().st_uid==0 and private_file.stat().st_mode & 0o777==0o600

@@ -6,8 +6,10 @@ import re
 import subprocess
 from pathlib import Path
 
+from apps.infrastructure.ansible_service import AnsibleService
 from apps.provisioning.management.commands._virtualmin_lab import (
     LAB_LOOPBACK,
+    lab_transport,
     load_state,
     refuse_unless_lab_settings,
 )
@@ -47,8 +49,7 @@ else:
 """
 
 
-def ensure_target_frontend() -> str:
-    """Prepare only an absent lab-B default; existing qualified policy is read-only."""
+def _managed_target() -> VirtualminServer:
     refuse_unless_lab_settings()
     node = load_state().node("vm-b")
     assert node == next(item for item in NODES if item.key == "vm-b"), "Unexpected managed lab target identity"
@@ -57,6 +58,21 @@ def ensure_target_frontend() -> str:
     assert deployment is not None and deployment.hostname == node.deployment_hostname
     assert deployment.ipv4_address == LAB_LOOPBACK and deployment.ssh_port == node.ssh_port
     assert server.api_port == node.api_port
+    return server
+
+
+def ensure_target_usage() -> None:
+    """Qualify the actual managed-target writer even in the standalone suite."""
+    server = _managed_target()
+    with lab_transport(load_state()):
+        outcome = AnsibleService().run_playbook(server.node_deployment, "virtualmin_usage.yml", timeout_seconds=600)
+    assert outcome.is_ok(), "Managed lab target usage preparation failed"
+    assert outcome.unwrap().success, "Managed lab target usage preparation did not complete"
+
+
+def ensure_target_frontend() -> str:
+    """Prepare only an absent lab-B default; existing qualified policy is read-only."""
+    _managed_target()
 
     def execute(*arguments: str, payload: str | None = None) -> str:
         result = subprocess.run(  # noqa: S603 -- fixed managed lab B and literal fixture operations; no credentials
