@@ -67,6 +67,13 @@ from .virtualmin_pair_restore import (
     resolve_pair_job,
     resolve_pair_job_node_lost,
 )
+from .virtualmin_revoked_create import OFF_SOURCE_KEY, RECEIPT_KEY, receipt_off_can_retry
+from .virtualmin_revoked_create_review import (
+    creation_review_off_id,
+    off_review_fingerprint,
+    resolve_creation_review,
+    resolve_off_review,
+)
 from .virtualmin_service import (
     VirtualminBackupManagementService,
     VirtualminProvisioningService,
@@ -639,9 +646,29 @@ def virtualmin_bridge_control(request: HttpRequest, account_id: str) -> HttpResp
 def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
     """Operator terminal resolution of an attention (uncertain) backup/restore job."""
     job = get_object_or_404(VirtualminProvisioningJob, pk=job_id)
-    note = request.POST.get("note", "").strip() or _("operator confirmed remote state")
+    raw_note = request.POST.get("note", "").strip()
+    note = raw_note or _("operator confirmed remote state")
     actor = request.user.email if request.user.is_authenticated else "system"
-    if job.status == "attention" and is_chain_job(job.operation, job.parameters):
+    creation_review = resolve_creation_review(job, actor=cast(User, request.user), reason=raw_note)
+    if creation_review.is_err():
+        messages.error(request, creation_review.unwrap_err())
+        return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    if job.operation == "suspend_domain" and OFF_SOURCE_KEY in (job.parameters or {}):
+        resolved_off = resolve_off_review(
+            job,
+            actor=cast(User, request.user),
+            reason=raw_note,
+            commands_stopped=request.POST.get("commands_stopped") == "on",
+            resource_confirmed=request.POST.get("resource_confirmed") == "on",
+            fingerprint=request.POST.get("off_review_fingerprint", ""),
+        )
+        if resolved_off.is_err():
+            messages.error(request, resolved_off.unwrap_err())
+            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+        rows = 1
+    elif creation_review.unwrap():
+        rows = 1
+    elif job.status == "attention" and is_chain_job(job.operation, job.parameters):
         # A base or differential step may still be running on the node: confirm it is stopped
         # (cancel marker under the lock), clear the chain, then release.
         resolved = resolve_chain_job(job, resolved_by=actor, note=str(note))
@@ -674,7 +701,16 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         audit_job_status_transition(
             job, actor_type="user", user=request.user if request.user.is_authenticated else None
         )
-        messages.success(request, _("Job marked resolved. The account is unlocked."))
+        messages.success(
+            request,
+            _("Job review recorded.")
+            if (
+                job.operation == "create_domain"
+                or OFF_SOURCE_KEY in (job.parameters or {})
+                or RECEIPT_KEY in (job.result or {})
+            )
+            else _("Job marked resolved. The account is unlocked."),
+        )
     else:
         messages.error(request, _("Only a job awaiting attention can be resolved."))
     return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
@@ -2428,6 +2464,10 @@ def virtualmin_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
         "breadcrumb_items": breadcrumb_items,
         "can_retry": _job_can_be_retried(job),
         "can_resolve": job.status == "attention",
+        "is_receipt_off": job.operation == "suspend_domain" and OFF_SOURCE_KEY in (job.parameters or {}),
+        "is_creation_review": job.operation == "create_domain",
+        "off_review_fingerprint": off_review_fingerprint(job),
+        "creation_review_off_id": creation_review_off_id(job),
         "half_restore_safety_backup_id": (
             str((job.parameters or {}).get("safety_backup_id", ""))
             if job.status == "attention"
@@ -2458,6 +2498,8 @@ def _job_can_be_retried(job: VirtualminProvisioningJob) -> bool:
         and job.retry_count < job.max_retries
         and job.operation in _RETRYABLE_OPERATIONS
         and job.account_id is not None
+        and not (job.operation == "create_domain" and RECEIPT_KEY in (job.result or {}))
+        and (OFF_SOURCE_KEY not in (job.parameters or {}) or receipt_off_can_retry(job))
     )
 
 
@@ -2477,8 +2519,16 @@ def virtualmin_job_retry(request: HttpRequest, job_id: str) -> HttpResponse:
         return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
     now = timezone.now()
     VirtualminProvisioningJob.objects.filter(pk=job.pk, status="failed").update(next_retry_at=now, updated_at=now)
+    observation = (
+        {"observed_job_id": str(job.pk)}
+        if job.operation == "create_domain"
+        and job.account is not None
+        and Service.objects.filter(pk=job.account.service_id, customer__status="suspended").exists()
+        else {}
+    )
     transaction.on_commit(
-        lambda: async_task("apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs"), robust=True
+        lambda: async_task("apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs", **observation),
+        robust=True,
     )
     messages.success(request, _("The job is queued for another attempt."))
     return redirect("provisioning:virtualmin_job_status", job_id=job.pk)

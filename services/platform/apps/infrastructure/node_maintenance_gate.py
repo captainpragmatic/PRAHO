@@ -57,9 +57,19 @@ def locked_deployment_gate(deployment_id: int) -> Iterator[NodeDeployment | None
     raise ValidationError(_("The deployment's server binding keeps changing; reload before retrying."))
 
 
-def begin_account_job(account: VirtualminAccount, job: VirtualminProvisioningJob) -> str | None:
-    """Publish/recheck the existing domain job under Account→sortedServers, before native I/O."""
-    from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer  # noqa: PLC0415
+def begin_account_job(
+    account: VirtualminAccount, job: VirtualminProvisioningJob, *, preserve_claim: bool = False
+) -> str | None:
+    """Publish/recheck the existing domain job under Account→sortedServers, before native I/O.
+
+    An already-running nonce owner opts into a pure claim recheck. Its caller
+    settles refusals with that exact claim; this gate never restarts its budget.
+    """
+    from apps.provisioning.virtualmin_models import (  # noqa: PLC0415  # Shared native admission
+        VirtualminAccount,
+        VirtualminProvisioningJob,
+        VirtualminServer,
+    )
 
     with transaction.atomic():
         locked = VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=account.pk)
@@ -68,14 +78,33 @@ def begin_account_job(account: VirtualminAccount, job: VirtualminProvisioningJob
             .filter(pk__in=(locked.server_id, job.server_id))
             .order_by("pk")
         )
+        if preserve_claim:
+            current = VirtualminProvisioningJob.objects.select_for_update(of=("self",)).filter(pk=job.pk).first()
+            if (
+                current is None
+                or job.status != "running"
+                or job.claimed_at is None
+                or job.started_at is None
+                or (
+                    current.status,
+                    current.claimed_at,
+                    current.started_at,
+                    current.account_id,
+                    current.server_id,
+                    current.operation,
+                )
+                != (job.status, job.claimed_at, job.started_at, job.account_id, job.server_id, job.operation)
+            ):
+                return "The account operation no longer owns its recorded running claim."
         if job.operation != "create_domain" and locked.server_id != job.server_id:
             return "The account moved to another server; review the operation before retrying."
         for node in nodes:
             if refusal := maintenance_refusal(node.pk):
                 return refusal
-        if job._state.adding:
-            job.save()
-        job.mark_started()
+        if not preserve_claim:
+            if job._state.adding:
+                job.save()
+            job.mark_started()
     return None
 
 

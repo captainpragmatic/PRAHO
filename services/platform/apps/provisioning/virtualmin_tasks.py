@@ -1932,7 +1932,21 @@ def _recover_expired_claims(now: datetime) -> int:
     return VirtualminProvisioningJob.recover_expired_claims(lease_cutoff, now + timedelta(minutes=5), now=now)
 
 
-def process_failed_virtualmin_jobs() -> dict[str, Any]:
+def _due_retry_jobs(now: datetime, observed_job_id: str) -> models.QuerySet[VirtualminProvisioningJob]:
+    jobs = VirtualminProvisioningJob.objects.filter(
+        status="failed", retry_count__lt=models.F("max_retries"), next_retry_at__lte=now
+    )
+    if observed_job_id:
+        # Staff observation still uses the ordinary bounded claim/nonce. The
+        # consumer rechecks policy before any new native creation.
+        jobs = jobs.filter(pk=observed_job_id)
+    else:
+        # Held creates neither spend attempts nor occupy the fairness cap.
+        jobs = jobs.exclude(operation="create_domain", account__service__customer__status="suspended")
+    return jobs.select_related("server", "account").order_by("next_retry_at", "pk")
+
+
+def process_failed_virtualmin_jobs(*, observed_job_id: str = "") -> dict[str, Any]:
     """
     Retry sweep with a leased-claim protocol: each due failed job is claimed by
     a conditional update (attempt consumed at claim time, so a broken dispatch
@@ -1951,13 +1965,7 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
             status="failed", retry_count__gte=models.F("max_retries"), next_retry_at__isnull=False
         ).update(next_retry_at=None)
 
-        retryable_jobs = (
-            VirtualminProvisioningJob.objects.filter(
-                status="failed", retry_count__lt=models.F("max_retries"), next_retry_at__lte=now
-            )
-            .select_related("server", "account")
-            .order_by("next_retry_at", "pk")  # deterministic fairness under the 50-job cap
-        )
+        retryable_jobs = _due_retry_jobs(now, observed_job_id)
 
         results: dict[str, Any] = {
             "total_jobs": retryable_jobs.count(),
@@ -2011,7 +2019,9 @@ def process_failed_virtualmin_jobs() -> dict[str, Any]:
                 except Exception as enqueue_error:
                     # Enqueue failed: return the job to the failed pool with a
                     # future retry window instead of stranding it pending.
-                    VirtualminProvisioningJob.restore_after_enqueue_failure(job.pk, now + timedelta(minutes=5))
+                    VirtualminProvisioningJob.restore_after_enqueue_failure(
+                        job.pk, now + timedelta(minutes=5), claimed_at=now
+                    )
                     results["skipped_jobs"] += 1
                     results["jobs"].append(
                         {
