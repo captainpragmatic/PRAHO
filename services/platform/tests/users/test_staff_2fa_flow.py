@@ -24,6 +24,7 @@ import pyotp
 from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
+from freezegun import freeze_time
 
 from apps.audit.models import AuditEvent
 from apps.settings.services import SettingsService
@@ -132,13 +133,15 @@ class TOTPSetupTests(StaffTestBase):
         self.assertIn(reverse("users:login"), response["Location"])
 
     def test_the_previous_code_is_accepted_as_at_sign_in(self) -> None:
-        secret = self.setup_page().context["secret"]
-        previous = pyotp.TOTP(secret).at(time.time() - 30)
+        # Generation and submission describe the same window, even across a scheduler delay.
+        with freeze_time():
+            secret = self.setup_page().context["secret"]
+            previous = pyotp.TOTP(secret).at(time.time() - 30)
 
-        self.client.post(self.url, {"token": previous, "password": PASSWORD})
+            self.client.post(self.url, {"token": previous, "password": PASSWORD})
 
-        self.user.refresh_from_db()
-        self.assertTrue(self.user.two_factor_enabled)
+            self.user.refresh_from_db()
+            self.assertTrue(self.user.two_factor_enabled)
 
     def test_setup_needs_the_current_password(self) -> None:
         secret = self.setup_page().context["secret"]

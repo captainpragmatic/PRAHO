@@ -16,6 +16,7 @@ from django.contrib.sessions.backends.db import SessionStore
 from django.db import IntegrityError, transaction
 from django.test import RequestFactory, TestCase
 from django.utils import timezone
+from freezegun import freeze_time
 
 from apps.users.mfa import (
     MFAService,
@@ -283,13 +284,15 @@ class EnhancedTOTPServiceTest(TestCase):
         """Test TOTP token verification with time window"""
         secret = "JBSWY3DPEHPK3PXP"  # Valid base32 secret
 
-        # Generate token from previous window
         totp = pyotp.TOTP(secret)
-        past_token = totp.at(timezone.now().timestamp() - 30)  # 30 seconds ago
+        with freeze_time("2026-11-02 15:52:29.900000+00:00") as clock:
+            past_token = totp.at(timezone.now().timestamp() - 30)
+            self.assertTrue(self.totp_service.verify_token(secret, past_token))
 
-        # Should verify within window
-        is_valid = self.totp_service.verify_token(secret, past_token)
-        self.assertTrue(is_valid)
+            # At the next boundary the same code is two windows old and must expire.
+            # Use the raw-secret path so refusal proves expiry, not a prior replay claim.
+            clock.move_to("2026-11-02 15:52:30.100000+00:00")
+            self.assertFalse(self.totp_service.verify_token(secret, past_token))
 
     def test_verify_token_empty_secret(self) -> None:
         """Test TOTP token verification with empty secret"""
