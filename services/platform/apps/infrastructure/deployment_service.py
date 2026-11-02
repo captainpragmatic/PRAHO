@@ -77,6 +77,7 @@ from apps.infrastructure.server_lifetimes import (
     close_server_lifetimes,
     confirm_lifetime,
     discard_lifetime,
+    gone_server_fields,
     open_lifetime_id,
     open_pending_lifetime,
     save_legacy_window,
@@ -2368,7 +2369,8 @@ class NodeDeploymentService:
                 raise ValueError(dns.unwrap_err())
             result = execution.delete_resources()
             if execution.servers_absent:
-                owned_update(lease, deployment)
+                # The row's servers are proved gone: their id and addresses go with them, as in teardown.
+                owned_update(lease, deployment, **gone_server_fields())
                 deactivate_api_credential(deployment)
             if result.is_err():
                 raise ValueError(result.unwrap_err())
