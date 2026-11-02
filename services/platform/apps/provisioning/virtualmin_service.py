@@ -58,6 +58,7 @@ from .virtualmin_gateway import (
     VirtualminGateway,
     classify_virtualmin_application_error,
     get_virtualmin_config,
+    get_virtualmin_timeouts,
     is_customer_domain_row,
 )
 from .virtualmin_models import (
@@ -617,6 +618,7 @@ class VirtualminProvisioningService:
                 bandwidth_quota_mb=account.bandwidth_quota_mb,
             )
 
+            provisioning_timeout = get_virtualmin_timeouts()["PROVISIONING_TIMEOUT"]
             refusal = self._creation_dispatch_refusal(
                 account,
                 job,
@@ -625,7 +627,12 @@ class VirtualminProvisioningService:
             )
             if refusal is not None:
                 return refusal
-            result = gateway.call("create-domain", params, correlation_id=job.correlation_id)
+            result = gateway.call(
+                "create-domain",
+                params,
+                correlation_id=job.correlation_id,
+                timeout_seconds=provisioning_timeout,
+            )
 
             if result.is_ok():
                 response = result.unwrap()

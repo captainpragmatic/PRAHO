@@ -6,10 +6,11 @@ import json
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
-from typing import Any
+from typing import Any, Literal
 from unittest import skipUnless
 from unittest.mock import patch
 
+from django.core.cache import cache
 from django.db import close_old_connections, connection, connections
 from django.test import Client
 from django.urls import reverse
@@ -21,15 +22,20 @@ from apps.common.types import Retriability
 from apps.orders.models import Order
 from apps.orders.services import OrderService, StatusChangeData
 from apps.provisioning.models import Service
+from apps.provisioning.virtualmin_gateway import get_virtualmin_timeouts
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_node_capability import destination_refusal
 from apps.provisioning.virtualmin_security import acknowledge_source, connection_identity, record_inspection
 from apps.provisioning.virtualmin_tasks import provision_virtualmin_account
+from apps.settings.models import SystemSetting
+from apps.settings.services import SettingsService
 from apps.users.models import User
 from tests.provisioning import test_virtualmin_create_retry_policy as fixtures
 from tests.provisioning.test_node_security_policy import node_policy_evidence
 
 SWEEP = "apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs"
+TIMEOUT_SETTING_KEY = "virtualmin.request_timeout_seconds"
+Boundary = Literal["node", "timeout_settings"]
 
 
 class CombinedRetryFixture(fixtures.CreateRetryFixture):
@@ -159,14 +165,25 @@ class CreateRetryNodeCapabilityTests(CombinedRetryFixture):
 
 @skipUnless(connection.vendor == "postgresql", "Real concurrent public revocation needs PostgreSQL")
 class CreateRetryFinalBoundaryTests(CombinedRetryFixture):
-    def _run_retry_at_node(
+    @staticmethod
+    def _matches_boundary(sql: str, params: Any, boundary: Boundary) -> bool:
+        if boundary == "node":
+            return "FOR UPDATE" in sql and (f"FROM {connection.ops.quote_name(VirtualminServer._meta.db_table)}" in sql)
+        return (
+            sql.lstrip().startswith("SELECT")
+            and f"FROM {connection.ops.quote_name(SystemSetting._meta.db_table)}" in sql
+            and TIMEOUT_SETTING_KEY in (params or ())
+        )
+
+    def _run_retry_at_boundary(
         self,
         packet: dict[str, Any],
         preflight_done: Event,
-        node_locked: Event,
-        release: Event,
+        pause_events: tuple[Event, Event],
         worker_pid: list[int],
+        boundary: Boundary,
     ) -> dict[str, Any]:
+        boundary_read, release = pause_events
         close_old_connections()
         try:
             with connection.cursor() as cursor:
@@ -179,16 +196,13 @@ class CreateRetryFinalBoundaryTests(CombinedRetryFixture):
             def observe(execute: Callable[..., Any], sql: str, params: Any, many: bool, context: dict[str, Any]) -> Any:
                 nonlocal latched
                 result = execute(sql, params, many, context)
-                if (
-                    not latched
-                    and preflight_done.is_set()
-                    and "FOR UPDATE" in sql
-                    and f"FROM {connection.ops.quote_name(VirtualminServer._meta.db_table)}" in sql
-                ):
+                if not latched and preflight_done.is_set() and self._matches_boundary(sql, params, boundary):
                     latched = True
-                    self.assertTrue(connection.in_atomic_block)
-                    node_locked.set()
-                    self.assertTrue(release.wait(15), "Public cancellation never committed at the real node gate")
+                    self.assertEqual(connection.in_atomic_block, boundary == "node")
+                    boundary_read.set()
+                    self.assertTrue(
+                        release.wait(15), "Public cancellation never committed at the observed SQL boundary"
+                    )
                 return result
 
             with connection.execute_wrapper(observe):
@@ -196,7 +210,7 @@ class CreateRetryFinalBoundaryTests(CombinedRetryFixture):
         finally:
             connections.close_all()
 
-    def _cancel_order(self, writer_pid: list[int]) -> bool:
+    def _cancel_order(self, writer_pid: list[int], *, reconcile: bool) -> bool:
         close_old_connections()
         try:
             with connection.cursor() as cursor:
@@ -209,12 +223,31 @@ class CreateRetryFinalBoundaryTests(CombinedRetryFixture):
             self.assertTrue(result.is_ok(), result)
             self.assertEqual(Order.objects.get(pk=order.pk).status, "cancelled")
             self.assertEqual(Service.objects.get(pk=self.service.pk).status, "suspended")
+            if reconcile:
+                native_calls = len(self.gateway.get_calls())
+                outcomes = self._deliver_owned(fixtures.RECONCILE, str(self.service.pk))
+                self.assertTrue(outcomes, "Public cancellation did not publish normal reconciliation")
+                self.assertTrue(
+                    all(outcome.get("action") in {"noop", "operation_active"} for outcome in outcomes), outcomes
+                )
+                self.assertEqual(len(self.gateway.get_calls()), native_calls)
             return True
         finally:
             connections.close_all()
 
     def test_real_order_cancellation_at_final_node_sql_is_seen_by_last_dispatch_check(self) -> None:
+        self._assert_cancel_at_boundary("node")
+
+    def test_real_cancellation_during_timeout_settings_read_prevents_new_create(self) -> None:
+        # Only the service-level budget lookup is covered. Gateway internals and
+        # the check-to-RPC network gap still need the existing post-acceptance OFF.
+        self._assert_cancel_at_boundary("timeout_settings")
+
+    def _assert_cancel_at_boundary(self, boundary: Boundary) -> None:
         self._failed_public_create()
+        original_secret = bytes(self.account.encrypted_password)
+        original_identity = self.job.parameters["node_connection_identity"]
+        original_count = VirtualminServer.objects.get(pk=self.server.pk).current_domains
         swept = self._due_sweep()
         self.assertTrue(swept["success"], swept)
         packets = [
@@ -225,13 +258,17 @@ class CreateRetryFinalBoundaryTests(CombinedRetryFixture):
         self.assertEqual(len(packets), 1)
         packet = SignedPackage.loads(packets[0].payload)
         packets[0].delete()
-        preflight_done, node_locked, release = Event(), Event(), Event()
+        preflight_done, boundary_read, release = Event(), Event(), Event()
         worker_pid = []
         writer_pid = []
         actual_templates = self.gateway.list_templates
 
         def templates() -> Any:
             result = actual_templates()
+            if boundary == "timeout_settings":
+                # Cool only this real value after native preflight. Preserve the
+                # invalidation token, every other cache entry and the actual getter.
+                cache.delete(SettingsService._get_cache_key(TIMEOUT_SETTING_KEY), version=SettingsService.CACHE_VERSION)
             preflight_done.set()
             return result
 
@@ -239,15 +276,21 @@ class CreateRetryFinalBoundaryTests(CombinedRetryFixture):
             patch.object(self.gateway, "list_templates", side_effect=templates),
             ThreadPoolExecutor(max_workers=2) as pool,
         ):
-            pending = pool.submit(self._run_retry_at_node, packet, preflight_done, node_locked, release, worker_pid)
+            pending = pool.submit(
+                self._run_retry_at_boundary, packet, preflight_done, (boundary_read, release), worker_pid, boundary
+            )
             try:
-                self.assertTrue(node_locked.wait(15), "Did not reach the actual final node SELECT FOR UPDATE")
-                self.assertTrue(pool.submit(self._cancel_order, writer_pid).result(timeout=15))
+                self.assertTrue(boundary_read.wait(15), f"Did not reach the actual {boundary} SQL boundary")
+                self.assertTrue(
+                    pool.submit(self._cancel_order, writer_pid, reconcile=boundary == "timeout_settings").result(
+                        timeout=15
+                    )
+                )
                 self.assertNotEqual(worker_pid, writer_pid)
                 print(
                     json.dumps(
                         {
-                            "latch": "actual_final_node_query",
+                            "latch": f"actual_{boundary}_query",
                             "worker_pid": worker_pid[0],
                             "public_order_writer_pid": writer_pid[0],
                             "public_cancel_committed_before_release": True,
@@ -263,3 +306,27 @@ class CreateRetryFinalBoundaryTests(CombinedRetryFixture):
             "Fresh CREATE crossed public cancellation after the last service/account check",
         )
         self.assertIsNone(self.gateway.domain_state_of(self.account.domain))
+        if boundary == "timeout_settings":
+            self.account.refresh_from_db()
+            self.job.refresh_from_db()
+            self.assertEqual(self.job.status, "failed")
+            self.assertIsNone(self.job.next_retry_at)
+            self.assertEqual(self.account.status, "error")
+            self.assertEqual(bytes(self.account.encrypted_password), original_secret)
+            self.assertEqual(self.job.parameters["node_connection_identity"], original_identity)
+            self.assertEqual(VirtualminServer.objects.get(pk=self.server.pk).current_domains, original_count)
+            self.assertEqual(len(self.gateway.get_calls("enable-domain")), 0)
+            self.assertEqual(len(self.gateway.get_calls("delete-domain")), 0)
+            self.assertNotIn("revoked_creation", self.job.result)
+
+    def test_public_retry_preserves_real_provisioning_timeout(self) -> None:
+        self._failed_public_create()
+        # Exercise the real configuration source, not a mocked timeout getter.
+        self.assertEqual(get_virtualmin_timeouts()["PROVISIONING_TIMEOUT"], 180)
+        with patch.object(self.gateway, "call", wraps=self.gateway.call) as external_calls:
+            result = self._retry_through_public_sweep()
+        self.assertTrue(result["success"], result)
+        creates = [call for call in external_calls.call_args_list if call.args[0] == "create-domain"]
+        self.assertEqual(len(creates), 1)
+        self.assertEqual(creates[0].kwargs["timeout_seconds"], 180)
+        self.assertEqual(len(self.gateway.get_calls("create-domain")), 2)

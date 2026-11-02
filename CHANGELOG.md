@@ -50,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Staging:** reconcile `-001`/`-002` with the command (check the Hetzner console first, then `--attest-no-resources --attest-never-created --evidence ...`) before re-deploying them.
 - **Leaving a customer view returns its tab to the customer's Platform page.** Leave customer view, logging out of the view, and a view that ends while its tab is open (Platform ends it, its time runs out, or the feature is switched off) now answer with a short page that takes the tab back to that customer on Platform, instead of the portal's login page, which staff never use. It navigates by script with a link as fallback: the portal's CSP `form-action 'self'` stops a browser following a redirect to Platform after a form post. A customer's own logout is unchanged (ADR-0065).
 
+- Account creation now waits for the configured provisioning timeout instead of the shorter general API timeout (#828).
+  An expired provisioning timeout still records an unknown outcome without replaying the creation.
+
+- Hosting provisioning no longer deadlocks with immediate subscription cancellation on PostgreSQL; it observes cancellation before validating the service and refuses a changed customer safely (#823).
+
 ### Security
 
 - **Review existing Virtualmin nodes before conversion.** Staff can inspect access and services, acknowledge an unchanged migration source, or approve the exact web-only conversion. The worker reinspects, persists and proves a dedicated API identity before restricting interactive access, and keeps interrupted attempts fenced for verification. Web nodes use a convergent dual-stack host firewall, loopback-only interactive Webmin access through a restricted operator tunnel, and explicit six-feature account creation.

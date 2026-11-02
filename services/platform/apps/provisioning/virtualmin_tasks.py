@@ -20,7 +20,7 @@ from django_q.tasks import async_task, schedule
 
 from apps.audit.services import AuditContext, AuditEventData, AuditService
 from apps.common.types import Retriability, retriability_of
-from apps.provisioning.models import Service
+from apps.provisioning.models import Service, ServicePlan
 
 from .domain_veto import (
     blocking_domain_status,
@@ -392,10 +392,21 @@ def provision_virtualmin_account(
 
 def _validate_service_for_provisioning_secure(service_id: str) -> dict[str, Any]:
     """Validate service exists and is ready for provisioning with atomic locking."""
+    from apps.customers.models import Customer  # noqa: PLC0415  # Cross-app lock boundary.
+
     try:
-        # Use select_for_update to prevent race conditions
-        service = Service.objects.select_for_update().select_related("customer", "service_plan").get(id=service_id)
-    except Service.DoesNotExist:
+        # Immediate cancellation locks Customer before Service. A joined locking
+        # read can instead own Service while waiting for Customer and deadlock.
+        # The unlocked customer ID only routes the first lock; recheck it before
+        # using that customer or caching any related objects on the locked row.
+        customer_id = Service.objects.values_list("customer_id", flat=True).get(pk=service_id)
+        customer = Customer.objects.select_for_update(of=("self",)).get(pk=customer_id)
+        service = Service.objects.select_for_update(of=("self",)).get(pk=service_id)
+        if service.customer_id != customer.pk:
+            return {"success": False, "error": "Service customer changed during provisioning"}
+        service.customer = customer
+        service.service_plan = ServicePlan.objects.select_for_update(of=("self",)).get(pk=service.service_plan_id)
+    except (Service.DoesNotExist, Customer.DoesNotExist):
         error_msg = f"Service {service_id} not found"
         logger.error(f"❌ [VirtualminTask] {error_msg}")
         log_security_event_safe("virtualmin_task_service_not_found", {"service_id": service_id}, service_id)
