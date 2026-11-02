@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Failed hosting creation retries now honor cancellation and customer suspension, including changes made after a retry was queued. Uncertain earlier creates are checked on their recorded node without recreating them or changing credentials. A resource created after its hosting intent was revoked is disabled through a recorded recovery job; an uncertain disable keeps its account hold until staff verify the exact disabled owner and confirm outstanding commands have stopped (#827).
+- Recording a provider storno now locks its original invoice without locking the shared currency. Unrelated customers' invoices can commit concurrently; correction and original-invoice serialization remain protected (#832).
 - Hosting fulfilment and staff completion now survive a concurrent plan change while waiting for a service lock, and use the current plan to choose automatic or manual delivery (#816).
 - Renewal preparation now reloads payment mandates and service eligibility after waiting for a subscription lock. Concurrent automatic-payment changes no longer abort the renewal run, and a service that opts out while preparation waits is excluded (#813).
 - e-Factura submission finalizers now lock the invoice before its document, matching duplicate submissions. Recording an ANAF result no longer deadlocks a concurrent active-claim check; accepted results, retry policy and unknown-outcome quarantine are preserved (#818).

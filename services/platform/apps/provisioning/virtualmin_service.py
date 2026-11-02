@@ -14,8 +14,9 @@ import re
 import secrets
 import string
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -41,6 +42,15 @@ from .virtualmin_backup_service import (
     VirtualminBackupService,
 )
 from .virtualmin_create_node_identity import lock_create_retry_node
+from .virtualmin_create_retry_binding import (
+    CreateRetryBinding,
+    binding_current,
+    park_changed_binding,
+    password_fingerprint,
+    retry_binding,
+    settle_retry_created,
+)
+from .virtualmin_create_retry_policy import create_retry_policy, creation_intent
 from .virtualmin_domain_state import DOMAIN_STATE_PROGRAMS, domain_state_params
 from .virtualmin_drain_service import coordinate_health_failure
 from .virtualmin_gateway import (
@@ -56,6 +66,16 @@ from .virtualmin_models import (
     VirtualminServer,
 )
 from .virtualmin_node_capability import destination_refusal
+from .virtualmin_revoked_create import (
+    OFF_SOURCE_KEY,
+    OffClaim,
+    off_authority,
+    off_claim,
+    owns_off_claim,
+    queue_revoked_create_off,
+    retire_closed_off_claim,
+    settle_off,
+)
 from .virtualmin_security import connection_identity
 from .virtualmin_units import quota_parameters
 from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE, WEB_ONLY_VIRTUALMIN_FEATURES, VirtualminValidator
@@ -353,6 +373,8 @@ class VirtualminProvisioningService:
                             "template": template,
                             "recovery_seed": account.get_recovery_seed(),
                             "node_connection_identity": connection_identity(server),
+                            "creation_intent": creation_intent(creation_data.service.pk, purpose="create"),
+                            "creation_credential_generation": password_fingerprint(account),
                         }
                     ),
                     correlation_id=f"create_domain_{account.id}",
@@ -447,6 +469,11 @@ class VirtualminProvisioningService:
                             "template": account.template_name or DEFAULT_VIRTUALMIN_TEMPLATE,
                             "recovery_seed": account.get_recovery_seed(),
                             "node_connection_identity": connection_identity(server),
+                            "creation_intent": creation_intent(account.service_id, purpose="reprovision"),
+                            "creation_credential_generation": password_fingerprint(account),
+                            "reprovision_source_server_id": str(
+                                VirtualminAccount.objects.values_list("server_id", flat=True).get(pk=account.pk)
+                            ),
                         }
                     ),
                     correlation_id=f"reprovision_domain_{account.id}",
@@ -482,27 +509,84 @@ class VirtualminProvisioningService:
         logger.info(f"✅ [VirtualminService] Successfully created domain {account.domain}")
         on_account_ready(account)
 
+    def _prepare_creation(
+        self, account: VirtualminAccount, job: VirtualminProvisioningJob, *, retry: bool
+    ) -> Err[str] | None:
+        account.server.refresh_from_db(fields=["is_draining"])
+        if account.server.is_draining:
+            job.mark_failed("Target server is draining", retriability=Retriability.RETRIABLE)
+            return Err("Target server is draining", retriability=Retriability.RETRIABLE)
+        from apps.infrastructure.node_maintenance_gate import begin_account_job  # noqa: PLC0415  # Native admission
+
+        capability_refusal = destination_refusal(account.server)
+        if refusal := capability_refusal or begin_account_job(account, job, preserve_claim=retry):
+            retriability = Retriability.NOT_RETRIABLE if capability_refusal else Retriability.RETRIABLE
+            return self._creation_refusal(account, job, refusal, retry=retry, retriability=retriability)
+        self._apply_default_quotas(account)
+        return None
+
+    @staticmethod
+    def _creation_refusal(
+        account: VirtualminAccount,
+        job: VirtualminProvisioningJob,
+        refusal: str,
+        *,
+        retry: bool,
+        retriability: Retriability,
+    ) -> Err[str]:
+        if retry:
+            with transaction.atomic():
+                VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=account.pk)
+                current = VirtualminProvisioningJob.objects.select_for_update(of=("self",)).get(pk=job.pk)
+                if (
+                    current.status == job.status == "running"
+                    and current.claimed_at == job.claimed_at
+                    and current.started_at == job.started_at
+                    and current.account_id == job.account_id
+                    and current.server_id == job.server_id
+                    and current.operation == job.operation
+                ):
+                    current.mark_failed(refusal, retriability=retriability)
+        else:
+            job.mark_failed(refusal, retriability=retriability)
+        return Err(refusal, retriability=retriability)
+
+    def _creation_dispatch_refusal(
+        self,
+        account: VirtualminAccount,
+        job: VirtualminProvisioningJob,
+        *,
+        retry: bool,
+        before_create: Callable[[], Err[str] | None] | None,
+    ) -> Err[str] | None:
+        target = lock_create_retry_node(account, job)
+        if target.is_err():
+            return Err(target.unwrap_err())
+        if refusal := destination_refusal(target.unwrap()):
+            return self._creation_refusal(
+                account,
+                job,
+                refusal,
+                retry=retry,
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        # The original account/service/generation callback is the final DB check.
+        return before_create() if before_create is not None else None
+
     def _execute_domain_creation(  # noqa: PLR0911, PLR0915  # Verified create and atomic node-ownership commit
-        self, account: VirtualminAccount, job: VirtualminProvisioningJob
+        self,
+        account: VirtualminAccount,
+        job: VirtualminProvisioningJob,
+        *,
+        before_create: Callable[[], Err[str] | None] | None = None,
+        settle_created: Callable[[dict[str, Any]], Result[dict[str, Any], str]] | None = None,
     ) -> Result[dict[str, Any], str]:
         """Execute domain creation on Virtualmin server with validation and rollback"""
         try:
-            account.server.refresh_from_db(fields=["is_draining"])
-            if account.server.is_draining:
-                job.mark_failed("Target server is draining", retriability=Retriability.RETRIABLE)
-                return Err("Target server is draining", retriability=Retriability.RETRIABLE)
-            if refusal := destination_refusal(account.server):
-                job.mark_failed(refusal, retriability=Retriability.NOT_RETRIABLE)
-                return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
+            refusal = self._prepare_creation(account, job, retry=settle_created is not None)
+            if refusal is not None:
+                return refusal
             gateway = self._get_gateway(account.server)
-
-            # Recheck the queued domain job under the same server gate as a new window claim.
-            from apps.infrastructure.node_maintenance_gate import begin_account_job  # noqa: PLC0415  # Native admission
-
-            if refusal := begin_account_job(account, job):
-                job.mark_failed(refusal, retriability=Retriability.RETRIABLE)
-                return Err(refusal, retriability=Retriability.RETRIABLE)
-            self._apply_default_quotas(account)
 
             # ===============================================================================
             # PHASE 1: PRE-FLIGHT VALIDATION 🚀 (Quick Win)
@@ -533,16 +617,25 @@ class VirtualminProvisioningService:
                 bandwidth_quota_mb=account.bandwidth_quota_mb,
             )
 
-            # Make API call
-            target = lock_create_retry_node(account, job)
-            if target.is_err():
-                return Err(target.unwrap_err())
+            refusal = self._creation_dispatch_refusal(
+                account,
+                job,
+                retry=settle_created is not None,
+                before_create=before_create,
+            )
+            if refusal is not None:
+                return refusal
             result = gateway.call("create-domain", params, correlation_id=job.correlation_id)
 
             if result.is_ok():
                 response = result.unwrap()
 
                 if response.success:
+                    if settle_created is not None:
+                        # Retry settlement owns its fresh binding/claim checks.
+                        # A post-acceptance bookkeeping failure must never delete
+                        # the actual resource or replay the creation command.
+                        return settle_created(response.data)
                     # Track successful domain creation for potential rollback
                     rollback_operations.append(
                         {
@@ -1380,7 +1473,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Error deleting account {account.domain}: {e}")
             return Err(str(e))
 
-    def retry_job(self, job: VirtualminProvisioningJob) -> Result[bool, str] | Result[MigrationResumeOutcome, str]:
+    def retry_job(self, job: VirtualminProvisioningJob) -> Result[bool, str] | Result[MigrationResumeOutcome, str]:  # noqa: PLR0911  # Dispatch existing operation-specific owners.
         """
         Re-run a failed job on its EXISTING account and job rows.
 
@@ -1396,6 +1489,22 @@ class VirtualminProvisioningService:
         if job.operation == "create_domain":
             return self._retry_create_domain(account, job)
         if job.operation in ("suspend_domain", "unsuspend_domain", "delete_domain"):
+            if OFF_SOURCE_KEY in (job.parameters or {}):
+                claim = off_claim(job)
+                if claim is None:
+                    return Err("Receipt-bound OFF delivery no longer owns its claim")
+                try:
+                    return self._execute_revoked_create_off(account, job, claim)
+                except Exception:
+                    # The native OFF may have succeeded. Never compensate by
+                    # enabling/deleting or replaying an unknown command.
+                    settle_off(
+                        job,
+                        claim,
+                        phase="uncertain",
+                        message="Receipt-bound OFF settlement failed; verify native state before resolution",
+                    )
+                    return Err("Receipt-bound OFF needs operator verification")
             return self._execute_lifecycle_operation(account, job)
         if job.operation == "migrate_domain":
             from .virtualmin_migration_service import resume_migration  # noqa: PLC0415  # Circular
@@ -1409,6 +1518,10 @@ class VirtualminProvisioningService:
         create-domain must finalize local state, never re-create or rotate
         credentials; an absent remote domain re-runs creation on the same rows.
         """
+        binding = retry_binding(account, job)
+        if binding is None:
+            return Err("Original create target/account binding changed")
+        account.server = job.server
         account.server.refresh_from_db(fields=["is_draining"])
         if account.server.is_draining:
             job.mark_failed("Target server is draining", retriability=Retriability.RETRIABLE)
@@ -1419,15 +1532,26 @@ class VirtualminProvisioningService:
         account.server = target.unwrap()
         gateway = self._get_gateway(account.server)
         owner_result = gateway.get_domain_owner(account.domain)
+        if not binding_current(binding, job.pk):
+            park_changed_binding(
+                binding,
+                job.pk,
+                native_outcome="adopted"
+                if owner_result.is_ok() and owner_result.unwrap() == binding.owner
+                else "unknown",
+            )
+            return Err("Create retry lost its original account/claim binding during observation")
         if owner_result.is_err():
             # An unreachable probe is NOT evidence of absence — creating here
             # could double-create. Keep the job failed for a later attempt.
+            job.mark_attention("Original create ownership observation unavailable; no absence or mutation authority")
             return Err(f"Ownership probe failed: {owner_result.unwrap_err()}")
 
         owner = owner_result.unwrap()
         if owner == "":
             # Present but owner indeterminate: never adopt blindly, never
             # re-create over it — retry later.
+            job.mark_attention("Original create ownership is indeterminate; native review required")
             return Err(f"Remote domain {account.domain} exists but ownership is indeterminate")
         if owner is not None and owner != account.virtualmin_username:
             # Same name, different owner: never adopt. Terminal conflict.
@@ -1438,33 +1562,132 @@ class VirtualminProvisioningService:
         if owner is not None:
             # Remote domain exists on OUR server for OUR account row: the
             # original create succeeded past the response. Finalize in place.
-            previously_active = account.status == "active"
-            with transaction.atomic():
-                target = lock_create_retry_node(account, job)
-                if target.is_err():
-                    return Err(target.unwrap_err())
-                # fsm-bypass: CharField status
-                account.status = "active"
-                account.status_message = ""
-                if account.provisioned_at is None:
-                    account.provisioned_at = timezone.now()
-                account.save(update_fields=["status", "status_message", "provisioned_at", "updated_at"])
-
-                if not previously_active:
-                    # Exactly-once: the failed original never incremented
-                    VirtualminServer.objects.filter(pk=account.server_id).update(
-                        current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
-                    )
-
-                job.mark_completed({"recovered": "remote domain already present"})
+            settled = self._settle_observed_create(account, job, binding)
+            if settled.is_err():
+                return Err(settled.unwrap_err())
             logger.info(f"✅ [VirtualminService] Retry converged existing remote domain {account.domain}")
-            on_account_ready(account)
-            return Ok(True)
+            return self._finish_create_retry(account, job, native_outcome="adopted")
 
-        creation_result = self._execute_domain_creation(account, job)
+        refusal = self._create_retry_refusal(account, job)
+        if refusal is not None:
+            return refusal
+
+        creation_result = self._execute_domain_creation(
+            account,
+            job,
+            before_create=lambda: self._retry_dispatch_refusal(account, job, binding),
+            settle_created=lambda data: settle_retry_created(binding, job.pk, data, native_outcome="created"),
+        )
         if creation_result.is_err():
             return Err(creation_result.unwrap_err())
-        return Ok(True)
+        return self._finish_create_retry(account, job, native_outcome="created")
+
+    @staticmethod
+    def _settle_observed_create(
+        account: VirtualminAccount,
+        job: VirtualminProvisioningJob,
+        binding: CreateRetryBinding,
+    ) -> Result[dict[str, Any], str]:
+        with transaction.atomic():
+            target = lock_create_retry_node(account, job)
+            if target.is_err():
+                return Err(target.unwrap_err())
+            return settle_retry_created(
+                binding,
+                job.pk,
+                {"recovered": "remote domain already present"},
+                native_outcome="adopted",
+            )
+
+    def _retry_dispatch_refusal(
+        self, account: VirtualminAccount, job: VirtualminProvisioningJob, binding: CreateRetryBinding
+    ) -> Err[str] | None:
+        if not binding_current(binding, job.pk):
+            park_changed_binding(binding, job.pk, native_outcome="not_issued")
+            return Err("Create retry lost its account/claim binding before native dispatch")
+        return self._create_retry_refusal(account, job)
+
+    @staticmethod
+    def _finish_create_retry(
+        account: VirtualminAccount, job: VirtualminProvisioningJob, *, native_outcome: str
+    ) -> Result[bool, str]:
+        # This is deliberately after the common create executor returned, outside
+        # its database-error compensation that deletes a freshly created domain.
+        account = VirtualminAccount.objects.select_related("server").get(pk=account.pk)
+        job.refresh_from_db()
+        policy = create_retry_policy(account, job)
+        if policy.allowed:
+            on_account_ready(account)
+            return Ok(True)
+        try:
+            if (
+                policy.revoked
+                and native_outcome != "adopted"
+                and not policy.customer_held
+                and policy.service_status in ("active", "suspended", "terminated", "expired")
+            ):
+                from .virtualmin_tasks import reconcile_virtualmin_service_state_async  # noqa: PLC0415
+
+                reconcile_virtualmin_service_state_async(str(account.service_id))
+            elif policy.revoked:
+                queue_revoked_create_off(
+                    account.pk, job.pk, native_outcome="adopted" if native_outcome == "adopted" else "created"
+                )
+            else:
+                job.mark_attention(
+                    policy.reason,
+                    {
+                        **job.result,
+                        "creation_review": {
+                            "domain": account.domain,
+                            "owner": account.virtualmin_username,
+                            "server_id": str(account.server_id),
+                            "native_outcome": native_outcome,
+                        },
+                    },
+                )
+        except Exception:
+            job.mark_attention(
+                "Native create succeeded; policy recovery publication needs review",
+                {
+                    **job.result,
+                    "creation_review": {
+                        "domain": account.domain,
+                        "owner": account.virtualmin_username,
+                        "server_id": str(account.server_id),
+                        "native_outcome": native_outcome,
+                    },
+                },
+            )
+        return Err("Native creation succeeded after hosting intent changed; recovery/review required")
+
+    @staticmethod
+    def _create_retry_refusal(
+        account: VirtualminAccount, job: VirtualminProvisioningJob, *, owned_remote: bool = False
+    ) -> Err[str] | None:
+        policy = create_retry_policy(account, job)
+        if policy.allowed:
+            return None
+        unknown_original = (job.result or {}).get(
+            "retriability", Retriability.UNKNOWN.value
+        ) == Retriability.UNKNOWN.value
+        if policy.review or owned_remote or unknown_original:
+            evidence = dict(job.result or {})
+            if owned_remote:
+                evidence["creation_review"] = {
+                    "domain": account.domain,
+                    "owner": account.virtualmin_username,
+                    "server_id": str(account.server_id),
+                    "phase": "owned_remote_review",
+                    "service_status": policy.service_status,
+                }
+            job.mark_attention(policy.reason, evidence)
+        else:
+            job.mark_failed(
+                policy.reason,
+                retriability=Retriability.RETRIABLE if policy.customer_held else Retriability.NOT_RETRIABLE,
+            )
+        return Err(policy.reason)
 
     @staticmethod
     def _lifecycle_exclusion_refusal(account: VirtualminAccount, job: VirtualminProvisioningJob) -> Err[str] | None:
@@ -1592,6 +1815,138 @@ class VirtualminProvisioningService:
                 reconcile_virtualmin_service_state_async(str(account.service_id))
         logger.info(f"✅ [VirtualminService] Retry completed {job.operation} for {account.domain}")
         return Ok(True)
+
+    def _execute_revoked_create_off(  # noqa: PLR0911  # Distinct binding, native and claim outcomes.
+        self, account: VirtualminAccount, job: VirtualminProvisioningJob, claim: OffClaim
+    ) -> Result[bool, str]:
+        """Only the validated receipt owner may disable a pipeline-owned resource.
+
+        Ordinary lifecycle eligibility is unchanged. Like its retry executor this
+        path has no native enable/delete compensation after an accepted OFF.
+        """
+        retired = retire_closed_off_claim(job, claim=claim)
+        if retired.is_err():
+            return Err(retired.unwrap_err())
+        if retired.unwrap():
+            return Err("Receipt-bound OFF recovery is already closed; this delivery cannot replay")
+        account = VirtualminAccount.objects.select_related("server").get(pk=account.pk)
+        if account_has_active_migration(account):
+            job.mark_failed("Account has an active migration", retriability=Retriability.RETRIABLE)
+            return Err("Account has an active migration")
+        exclusion = self._receipt_off_exclusion(account, job, claim)
+        if exclusion is not None:
+            return exclusion
+        checked = self._receipt_off_preflight(account, job, claim)
+        if checked.is_err():
+            return Err(checked.unwrap_err())
+        account, enabled = checked.unwrap()
+        data: dict[str, Any] = {"observed_disabled": True}
+        if enabled:
+            if not owns_off_claim(claim):
+                return Err("Receipt-bound OFF claim expired before dispatch")
+            result = self._get_gateway(account.server).call(
+                "disable-domain", domain_state_params(account.domain), correlation_id=job.correlation_id
+            )
+            if result.is_err():
+                return self._off_failed(job, claim, str(result.unwrap_err()), retriability_of(result))
+            response = result.unwrap()
+            if not response.success:
+                return self._off_failed(
+                    job,
+                    claim,
+                    str(response.data.get("error", "OFF failed")),
+                    classify_virtualmin_application_error(response),
+                )
+            data = response.data
+        if not settle_off(job, claim, phase="disabled", data=data):
+            return Err("Receipt-bound OFF completed after its claim was superseded; review retained")
+        # A legitimate policy restoration during I/O owns the final enabled state.
+        current = VirtualminAccount.objects.select_related("server").get(pk=account.pk)
+        authority = off_authority(job, current)
+        if authority is not None and authority[2].allowed:
+            from .virtualmin_tasks import reconcile_virtualmin_service_state_async  # noqa: PLC0415
+
+            reconcile_virtualmin_service_state_async(str(current.service_id))
+        return Ok(True)
+
+    def _receipt_off_exclusion(
+        self, account: VirtualminAccount, job: VirtualminProvisioningJob, claim: OffClaim
+    ) -> Err[str] | None:
+        from apps.infrastructure.node_maintenance_gate import begin_account_job  # noqa: PLC0415  # Native admission
+
+        if refusal := begin_account_job(account, job, preserve_claim=True):
+            settle_off(job, claim, phase="pending", message=refusal)
+            return Err(refusal, retriability=Retriability.RETRIABLE)
+        return self._lifecycle_exclusion_refusal(account, job)
+
+    @staticmethod
+    def _off_failed(
+        job: VirtualminProvisioningJob, claim: OffClaim, message: str, retriability: Retriability
+    ) -> Err[str]:
+        phase: Literal["uncertain", "pending", "refused"] = "uncertain"
+        if retriability is Retriability.RETRIABLE:
+            phase = "pending"
+        elif retriability is Retriability.NOT_RETRIABLE:
+            phase = "refused"
+        settle_off(
+            job,
+            claim,
+            phase=phase,
+            message=message,
+            data={"native_failure_retriability": retriability.value, "native_failure_reason": message},
+        )
+        return Err(message, retriability=retriability)
+
+    def _receipt_off_preflight(
+        self, account: VirtualminAccount, job: VirtualminProvisioningJob, claim: OffClaim
+    ) -> Result[tuple[VirtualminAccount, bool], str]:
+        account = VirtualminAccount.objects.select_related("server").get(pk=account.pk)
+        refusal = self._receipt_off_refusal(account, job, claim)
+        if refusal is not None:
+            return refusal
+        observed = self._get_gateway(account.server).get_domain_state(account.domain)
+        if observed.is_err():
+            settle_off(job, claim, phase="uncertain", message="Cannot verify exact native ownership before OFF")
+            return Err("Cannot verify exact native ownership before OFF")
+        state = observed.unwrap()
+        if (
+            state.get("exists") is not True
+            or state.get("owner") != account.virtualmin_username
+            or type(state.get("enabled")) is not bool
+        ):
+            settle_off(
+                job, claim, phase="uncertain", message="Native resource identity/state does not match OFF receipt"
+            )
+            return Err("Native resource identity/state does not match OFF receipt")
+        # The native observation may have taken time; re-read binding and policy
+        # before the command, never use account.service cached before that I/O.
+        refreshed = VirtualminAccount.objects.select_related("server").get(pk=account.pk)
+        refusal = self._receipt_off_refusal(refreshed, job, claim)
+        if refusal is not None:
+            return refusal
+        return Ok((refreshed, state["enabled"]))
+
+    @staticmethod
+    def _receipt_off_refusal(
+        account: VirtualminAccount, job: VirtualminProvisioningJob, claim: OffClaim
+    ) -> Err[str] | None:
+        if not owns_off_claim(claim):
+            return Err("Receipt-bound OFF delivery was superseded")
+        authority = off_authority(job, account)
+        if authority is not None and authority[2].revoked:
+            return None
+        restored = authority is not None and authority[2].allowed
+        settled = settle_off(
+            job,
+            claim,
+            phase="restored" if restored else "uncertain",
+            message="OFF intent superseded" if restored else "OFF authority needs verification",
+        )
+        if restored and settled:
+            from .virtualmin_tasks import reconcile_virtualmin_service_state_async  # noqa: PLC0415
+
+            reconcile_virtualmin_service_state_async(str(account.service_id))
+        return Err("Receipt-bound OFF is no longer authorized")
 
     def _select_best_server(
         self,

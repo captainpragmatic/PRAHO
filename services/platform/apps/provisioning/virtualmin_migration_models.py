@@ -380,9 +380,11 @@ def account_has_active_operation(account: VirtualminAccount, *, ignore_job_id: u
     if account_has_active_migration(account):
         return True
     active = VirtualminProvisioningJob.objects.filter(
+        models.Q(operation__in=_EXCLUSIVE_JOB_OPERATIONS, status__in=_ACTIVE_JOB_STATUSES)
+        | models.Q(
+            operation="suspend_domain", status__in=_ACTIVE_JOB_STATUSES, parameters__revoked_create_job_id__isnull=False
+        ),
         account_id=account.pk,
-        operation__in=_EXCLUSIVE_JOB_OPERATIONS,
-        status__in=_ACTIVE_JOB_STATUSES,
     )
     if ignore_job_id is not None:
         active = active.exclude(pk=ignore_job_id)
@@ -409,7 +411,10 @@ def account_blocks_reconcile(account: VirtualminAccount) -> bool:
         return True
     return VirtualminProvisioningJob.objects.filter(
         models.Q(operation__in=("restore_domain", "delete_domain"), status__in=_ACTIVE_JOB_STATUSES)
-        | models.Q(operation__in=_EXCLUSIVE_JOB_OPERATIONS, status="running"),
+        | models.Q(operation__in=_EXCLUSIVE_JOB_OPERATIONS, status="running")
+        | models.Q(
+            operation="suspend_domain", status__in=_ACTIVE_JOB_STATUSES, parameters__revoked_create_job_id__isnull=False
+        ),
         account_id=account.pk,
     ).exists()
 

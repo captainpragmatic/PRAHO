@@ -805,14 +805,27 @@ class VirtualminProvisioningJob(models.Model):
                     started_at=job.started_at,
                     updated_at=job.updated_at,
                 )
-                if job.status == "running" and job.operation in UNCERTAIN_WHEN_INTERRUPTED_OPERATIONS:
+                receipt_off = job.operation == "suspend_domain" and "revoked_create_job_id" in (job.parameters or {})
+                if receipt_off:
+                    retired = cls._retire_closed_receipt(job)
+                    if retired is not None:
+                        recovered += retired
+                        continue
+                exhausted_dispatch = receipt_off and job.status == "pending" and job.retry_count >= job.max_retries
+                if exhausted_dispatch or (
+                    job.status == "running" and (job.operation in UNCERTAIN_WHEN_INTERRUPTED_OPERATIONS or receipt_off)
+                ):
                     # A dead delete worker may have deleted the domain: replaying it blind, and
                     # releasing the account's exclusion, is not safe. An operator resolves it.
                     recovered += cls._recover_usage_fenced(
                         job,
                         fenced,
                         status="attention",
-                        status_message="Worker interrupted; execution deadline exceeded",
+                        status_message=(
+                            "Receipt-bound OFF dispatch budget exhausted; operator verification required"
+                            if exhausted_dispatch
+                            else "Worker interrupted; execution deadline exceeded"
+                        ),
                         next_retry_at=None,
                         claimed_at=None,
                         updated_at=recovery_time,
@@ -835,11 +848,43 @@ class VirtualminProvisioningJob(models.Model):
             return changed
 
     @classmethod
-    def restore_after_enqueue_failure(cls, job_id: Any, retry_at: Any) -> int:
+    def restore_after_enqueue_failure(cls, job_id: Any, retry_at: Any, *, claimed_at: Any = None) -> int:
         """Return a claimed-but-undispatched job to the failed pool."""
-        return cls.objects.filter(pk=job_id, status="pending").update(
-            status="failed", claimed_at=None, next_retry_at=retry_at, updated_at=timezone.now()
+        pending = cls.objects.filter(pk=job_id, status="pending")
+        if claimed_at is not None:
+            pending = pending.filter(claimed_at=claimed_at)
+        receipt_off = pending.filter(
+            operation="suspend_domain",
+            parameters__revoked_create_job_id__isnull=False,
         )
+        snapshot = receipt_off.first()
+        if snapshot is not None:
+            retired = cls._retire_closed_receipt(snapshot)
+            if retired is not None:
+                return retired
+            pending = pending.filter(
+                claimed_at=snapshot.claimed_at,
+                started_at=snapshot.started_at,
+                updated_at=snapshot.updated_at,
+            )
+            if snapshot.retry_count >= snapshot.max_retries:
+                return pending.update(
+                    status="attention",
+                    claimed_at=None,
+                    next_retry_at=None,
+                    updated_at=timezone.now(),
+                    status_message="Receipt-bound OFF dispatch budget exhausted; operator verification required",
+                )
+        return pending.update(status="failed", claimed_at=None, next_retry_at=retry_at, updated_at=timezone.now())
+
+    @staticmethod
+    def _retire_closed_receipt(job: VirtualminProvisioningJob) -> int | None:
+        from .virtualmin_revoked_create import retire_closed_off_claim  # noqa: PLC0415  # Circular models.
+
+        retired = retire_closed_off_claim(job)
+        if retired.is_err():
+            return 0
+        return 1 if retired.unwrap() else None
 
     @classmethod
     def terminalize(cls, job_id: Any) -> int:

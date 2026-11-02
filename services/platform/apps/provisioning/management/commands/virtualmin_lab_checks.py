@@ -6,8 +6,9 @@ never touches the round-trip domain on vm-a. Each check fails the command:
 1. create-domain on 8.x (provisioning): an absent domain probes as absent;
    `create_virtualmin_account` creates the server with the "Default Settings"
    template, the default feature set and the recovery seed as its description;
-   a create retry after the server vanished re-creates it, and a second retry
-   converges without creating.
+   a failed request retries through its claimed queue delivery; an accepted
+   create with a lost reply converges through authorized observation without
+   creating again, and stale deliveries perform no native I/O.
 2. Differential base kept: with a base established by a plain full backup, the
    ordinary full backup, the config-only backup and the migration backup
    parameters leave the base snapshot byte-identical. (The pre-restore safety
@@ -62,10 +63,16 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from decimal import Decimal
+from http import HTTPStatus
 from typing import Any
+from unittest.mock import patch
 
+import requests
+from django.conf import settings
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
+from django.test import Client, override_settings
+from django.urls import reverse
 
 from apps.provisioning.management.commands._virtualmin_lab import (
     LabNode,
@@ -220,13 +227,68 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------- check 1
 
-    def _check_create_domain(self, server: Any, node: LabNode) -> Any:
-        from apps.provisioning.virtualmin_gateway import listing_attribute  # noqa: PLC0415
-        from apps.provisioning.virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415
+    def _claimed_create_retry(self, client: Client, job: Any) -> tuple[dict[str, Any], tuple[str, str]]:
+        """Admit through staff Retry, then consume only this check's exact broker publications."""
+        from django_q.models import OrmQ  # noqa: PLC0415  # Lab-only broker driver.
+
+        from apps.provisioning.virtualmin_tasks import (  # noqa: PLC0415
+            process_failed_virtualmin_jobs,
+            retry_virtualmin_job,
+        )
+
+        status_url = reverse("provisioning:virtualmin_job_status", args=[job.pk])
+        retry_url = reverse("provisioning:virtualmin_job_retry", args=[job.pk])
+        page = client.get(status_url, HTTP_HOST="localhost")
+        self._ok("staff can inspect the failed create", page.status_code == HTTPStatus.OK, page.status_code)
+        token = client.cookies.get(settings.CSRF_COOKIE_NAME)
+        if token is None:
+            raise CommandError("The retry page must supply a CSRF token")
+        denied = client.post(retry_url, HTTP_HOST="localhost")
+        self._ok("a tokenless retry is refused", denied.status_code == HTTPStatus.FORBIDDEN, denied.status_code)
+        before = set(OrmQ.objects.values_list("pk", flat=True))
+        posted = client.post(retry_url, {"csrfmiddlewaretoken": token.value}, HTTP_HOST="localhost")
+        self._ok("staff admits the failed create retry", posted.status_code == HTTPStatus.FOUND, posted.status_code)
+        sweeps = [
+            row
+            for row in OrmQ.objects.exclude(pk__in=before)
+            if row.task.get("func") == "apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs"
+        ]
+        self._ok("staff Retry publishes one normal sweep", len(sweeps) == 1, len(sweeps))
+        # Route only this exact staff-authorized lab job. The general sweep
+        # publication belongs to this POST; unrelated queued work stays intact.
+        self._ok("the owned sweep publication is consumed once", OrmQ.objects.filter(pk=sweeps[0].pk).delete()[0] == 1)
+        sweep = process_failed_virtualmin_jobs(observed_job_id=str(job.pk))
+        self._ok(
+            "the exact job is leased by the public sweep", sweep.get("results", {}).get("retried_jobs") == 1, sweep
+        )
+        job.refresh_from_db()
+        tasks = [
+            row
+            for row in OrmQ.objects.all()
+            if row.task.get("func") == "apps.provisioning.virtualmin_tasks.retry_virtualmin_job"
+            and tuple(row.task.get("args", ())) == (str(job.pk), job.claimed_at.isoformat())
+            and not row.task.get("kwargs")
+        ]
+        self._ok("the owned retry has its actual persisted nonce", len(tasks) == 1, len(tasks))
+        args = (str(tasks[0].task["args"][0]), str(tasks[0].task["args"][1]))
+        self._ok("the owned retry publication is consumed once", OrmQ.objects.filter(pk=tasks[0].pk).delete()[0] == 1)
+        return retry_virtualmin_job(*args), args
+
+    def _check_create_domain(self, server: Any, node: LabNode) -> Any:  # noqa: PLR0915 -- One fault/claim/convergence proof.
+        from apps.common.types import Retriability, retriability_of  # noqa: PLC0415
+        from apps.provisioning.management.commands._virtualmin_lab import LAB_STAFF_EMAIL  # noqa: PLC0415
+        from apps.provisioning.virtualmin_gateway import (  # noqa: PLC0415
+            VirtualminGateway,
+            VirtualminResponseParser,
+            listing_attribute,
+        )
+        from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob  # noqa: PLC0415
         from apps.provisioning.virtualmin_service import (  # noqa: PLC0415
             VirtualminAccountCreationData,
             VirtualminProvisioningService,
         )
+        from apps.provisioning.virtualmin_tasks import retry_virtualmin_job  # noqa: PLC0415
+        from apps.users.models import User  # noqa: PLC0415
 
         self.stdout.write("Check 1: create-domain on Virtualmin 8.x through the provisioning service")
         gateway = self._gateway(server)
@@ -236,13 +298,91 @@ class Command(BaseCommand):
         self._ok("an absent domain probes as absent (state)", state.is_ok() and not state.unwrap()["exists"], state)
 
         provisioning = VirtualminProvisioningService(server)
-        created = provisioning.create_virtualmin_account(
-            VirtualminAccountCreationData(
-                service=self._service(), domain=CHECK_DOMAIN, username=CHECK_USER, server=server
+        server.refresh_from_db(fields=["current_domains"])
+        initial_domains = server.current_domains
+        native_http = VirtualminGateway._execute_http_request
+        phase, accepted = "unaccepted", 0
+        wire_calls: list[str] = []
+
+        def transport(gateway: Any, params: dict[str, Any], **kwargs: Any) -> Any:
+            nonlocal accepted
+            program = str(params.get("program"))
+            wire_calls.append(program)
+            if (
+                program == "create-domain"
+                and str(params.get("domain")) == CHECK_DOMAIN
+                and gateway.server.pk == server.pk
+            ):
+                if phase == "unaccepted":
+                    # Every automatic attempt is known not to have reached Native.
+                    raise requests.exceptions.ConnectTimeout("Lab create: not dispatched")
+                response = native_http(gateway, params, **kwargs)
+                accepted += 1
+                self._ok(
+                    "the real CREATE response confirms completion",
+                    VirtualminResponseParser.parse_response(response.text, program)["success"],
+                )
+                if phase == "lost":
+                    raise requests.exceptions.ReadTimeout("Lab create: completed response lost")
+                return response
+            return native_http(gateway, params, **kwargs)
+
+        middleware = list(settings.MIDDLEWARE)
+        csrf = "django.middleware.csrf.CsrfViewMiddleware"
+        if csrf not in middleware:
+            middleware.append(csrf)
+        with (
+            override_settings(SETTINGS_MODULE=settings.SETTINGS_MODULE, MIDDLEWARE=middleware),
+            patch.object(VirtualminGateway, "_execute_http_request", transport),
+        ):
+            service = self._service()
+            failed = provisioning.create_virtualmin_account(
+                VirtualminAccountCreationData(service=service, domain=CHECK_DOMAIN, username=CHECK_USER, server=server)
             )
-        )
-        self._ok("create_virtualmin_account succeeds", created.is_ok(), created)
-        account = created.unwrap()
+            self._ok(
+                "the undispatched create is a real retriable failure",
+                failed.is_err() and retriability_of(failed) is Retriability.RETRIABLE,
+                failed,
+            )
+            account = VirtualminAccount.objects.get(service=service)
+            encrypted_password = account.encrypted_password
+            job = VirtualminProvisioningJob.objects.get(account=account, operation="create_domain")
+            self._ok(
+                "the first failure creates no native domain",
+                gateway.get_domain_owner(CHECK_DOMAIN).unwrap() is None and accepted == 0,
+            )
+            client = Client(enforce_csrf_checks=True)
+            client.force_login(User.objects.get(email=LAB_STAFF_EMAIL, is_active=True, is_superuser=True))
+            phase = "lost"
+            retried, first_args = self._claimed_create_retry(client, job)
+            job.refresh_from_db()
+            self._ok(
+                "an accepted lost reply stays UNKNOWN without replay",
+                not retried["success"] and job.status == "failed" and job.next_retry_at is None and accepted == 1,
+                retried,
+            )
+            phase = "observe"
+            recovered, _ = self._claimed_create_retry(client, job)
+            job.refresh_from_db()
+            account.refresh_from_db()
+            self._ok(
+                "the claimed retry converges the owned present domain",
+                recovered["success"] and job.result.get("recovered") == "remote domain already present",
+                recovered,
+            )
+            self._ok(
+                "recovery preserves credentials and creates only once",
+                account.encrypted_password == encrypted_password and accepted == 1,
+            )
+            server.refresh_from_db(fields=["current_domains"])
+            self._ok("the recovered account increments placement once", server.current_domains == initial_domains + 1)
+            before = len(wire_calls)
+            stale = retry_virtualmin_job(*first_args)
+            self._ok(
+                "stale retry delivery performs no native I/O",
+                stale.get("action") == "stale_claim_discarded" and len(wire_calls) == before,
+                stale,
+            )
         row = gateway.call("list-domains", {"domain": CHECK_DOMAIN, "multiline": ""}).unwrap().data["data"][0]
         values = row["values"]
         self._ok("template is Default Settings", listing_attribute(values, "Template") == "Default Settings", values)
@@ -251,22 +391,6 @@ class Command(BaseCommand):
         description = listing_attribute(values, "Description")
         self._ok("recovery seed stored as the description", description.startswith("PRAHO="), description)
 
-        # Create retry: the server vanished after the first create.
-        deleted = gateway.call("delete-domain", {"domain": CHECK_DOMAIN}, timeout_seconds=600)
-        self._ok("server removed behind PRAHO's back", deleted.is_ok() and deleted.unwrap().success, deleted)
-        job = VirtualminProvisioningJob.objects.filter(account=account, operation="create_domain").latest("created_at")
-        retried = provisioning._retry_create_domain(account, job)
-        exists = gateway.get_domain_owner(CHECK_DOMAIN)
-        self._ok(
-            "create retry re-creates the absent server", retried.is_ok() and exists.unwrap() == CHECK_USER, retried
-        )
-        again = provisioning._retry_create_domain(account, job)
-        job.refresh_from_db()
-        self._ok(
-            "a second retry converges without creating",
-            again.is_ok() and job.result.get("recovered") == "remote domain already present",
-            job.result,
-        )
         account.refresh_from_db()
         return account
 
