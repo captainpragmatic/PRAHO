@@ -77,11 +77,10 @@ from apps.infrastructure.server_lifetimes import (
     close_server_lifetimes,
     confirm_lifetime,
     discard_lifetime,
-    open_lifetime_id,
     open_pending_lifetime,
+    prepare_lifetime_for_resize,
     save_legacy_window,
     split_lifetime_for_resize,
-    start_lifetimes_at_resize,
 )
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 from apps.infrastructure.validation_service import NodeValidationReport, get_validation_service
@@ -1299,7 +1298,7 @@ class NodeDeploymentService:
             # The earlier server's window, if it lives only in the row's timestamps, is kept before the reset
             # (under the claim just taken, in this transaction).
             if not locked.never_got_a_server:
-                save_legacy_window(locked, timezone.now())
+                save_legacy_window(locked, timezone.now(), allow_created_at_fallback=True)
             locked.node_size = new_size
             locked.set_max_domains_from_size()
             owned_update(
@@ -1498,9 +1497,16 @@ class NodeDeploymentService:
         return ""
 
     @staticmethod
+    def _prepare_resize_lifetime(deployment: NodeDeployment, server_id: str, old_size: NodeSize) -> uuid.UUID | None:
+        """Commit issuance and the old-rate window together; leave no locks across provider I/O."""
+        with transaction.atomic():
+            mark_node_operation_issued(deployment, "resize")
+            with native_write_guard(deployment):
+                return prepare_lifetime_for_resize(deployment, server_id, old_size)
+
+    @staticmethod
     def _record_resize(
         deployment: NodeDeployment,
-        old_size: NodeSize,
         new_size: NodeSize,
         lifetime_id: uuid.UUID | None,
         server_id: str,
@@ -1527,9 +1533,7 @@ class NodeDeploymentService:
                 row.node_size = new_size
                 row.save(update_fields=["node_size", "updated_at"])
                 # The hours before the resize keep the old rate; a successor bills the new one.
-                split_lifetime_for_resize(lifetime_id, server_id, new_size) or start_lifetimes_at_resize(
-                    row, server_id, old_size, new_size
-                )
+                split_lifetime_for_resize(lifetime_id, server_id, new_size)
             deployment.node_size = new_size
         except Exception as error:  # The resize happened: keep the size, flag the cost window.
             if Model.objects.filter(**same_attempt).update(node_size=new_size, updated_at=timezone.now()):
@@ -1577,7 +1581,6 @@ class NodeDeploymentService:
         # The billable window this resize changes: bound to this server, so a teardown or re-deploy that
         # closes or replaces it meanwhile is never reopened.
         resized_server = str(deployment.external_node_id)
-        lifetime_id = open_lifetime_id(deployment, resized_server)
 
         try:
             # Log the upgrade start
@@ -1596,7 +1599,7 @@ class NodeDeploymentService:
 
             # Use provider-agnostic command execution
             provider_type = deployment.provider.provider_type
-            mark_node_operation_issued(deployment, "resize")
+            lifetime_id = self._prepare_resize_lifetime(deployment, resized_server, old_size)
             result = run_provider_command(
                 provider_type=provider_type,
                 operation="resize",
@@ -1636,7 +1639,7 @@ class NodeDeploymentService:
                 return Err(error_msg)
 
             with native_write_guard(deployment):
-                self._record_resize(deployment, old_size, new_size, lifetime_id, resized_server)
+                self._record_resize(deployment, new_size, lifetime_id, resized_server)
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,

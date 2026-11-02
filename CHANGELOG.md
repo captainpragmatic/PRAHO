@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve legacy node cost history when redeploying a reconciled unknown-create deployment or recording its first resize (#838). Historical hours retain their old rate; teardown closes the captured resize window without late results reopening it. Fresh and never-created deployments acquire no fabricated historical charges.
+
 - Billing row locks load related data in a fresh statement after waiting on PostgreSQL (#805). Usage invoices use the locked customer's current fiscal identity before calculating tax; renewal eligibility, frozen amounts and existing collection consent controls are retained.
 
 - **Platform buttons outside a form work on staging.** The Platform's CSRF cookie is HttpOnly and pages gave htmx no token, so service Suspend/Activate, the mobile product toggles and the Virtualmin account Delete were refused with 403 (local development hid it by turning CSRF off; it doesn't any more). Every page now gives htmx and `fetch()` the token, a stale tab is told to reload, and dev names the Platform's cookie `platform_csrftoken` so it can't overwrite the Portal's.
