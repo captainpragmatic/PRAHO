@@ -11,6 +11,7 @@ from datetime import date
 from playwright.sync_api import Page, expect
 
 from tests.e2e.helpers import BASE_URL
+from tests.e2e.helpers.filter_tabs import click_tab
 from tests.e2e.helpers.isolation import verify_isolation
 
 
@@ -120,16 +121,16 @@ def test_services_list_page_structure(monitored_customer_page: Page) -> None:
 def test_services_tab_filtering(monitored_customer_page: Page) -> None:
     page = monitored_customer_page
     page.goto(f"{BASE_URL}/services/")
-    page.get_by_role("tab", name="Active").click()
+    click_tab(page, "active")
     expect(page.locator("#list-filter-active-tab")).to_have_value("active")
     expect(page.locator("tr[data-href]")).to_have_count(20)
     for row in page.locator("tr[data-href]").all():
         expect(row.locator("td").nth(3)).to_have_text("Active")
-    page.get_by_role("tab", name="Suspended").click()
+    click_tab(page, "suspended")
     expect(page.locator("#list-filter-active-tab")).to_have_value("suspended")
     expect(page.locator("tr[data-href]")).to_have_count(0)
     expect(page.get_by_role("heading", name="No Suspended services")).to_be_visible()
-    page.get_by_role("tab", name="All", exact=False).click()
+    click_tab(page, "")
     expect(page.locator("tr[data-href]")).to_have_count(20)
 
 

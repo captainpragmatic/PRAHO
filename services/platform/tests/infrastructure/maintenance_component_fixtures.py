@@ -3,7 +3,6 @@
 import base64
 import json
 import secrets
-from datetime import time
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
@@ -27,6 +26,7 @@ from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_node_capability import destination_refusal
 from apps.provisioning.virtualmin_security import acknowledge_source, connection_identity, record_inspection
 from apps.settings.services import SettingsService
+from tests.infrastructure.maintenance_policy_fixtures import maintenance_policy_times
 from tests.infrastructure.maintenance_security_fixtures import MaintenanceSecurityFixture
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment
 from tests.mocks.virtualmin_mock import MockVirtualminGateway
@@ -126,12 +126,13 @@ class MaintenanceComponentFixture(MaintenanceSecurityFixture):
         self.assertTrue(activated.is_ok(), activated)
         self.target.refresh_from_db()
         self.assertIsNone(destination_refusal(self.target))
+        starts_time, ends_time = maintenance_policy_times()
         NodeMaintenancePolicy.objects.create(
             node=self.target,
             timezone="UTC",
             weekdays=list(range(7)),
-            starts_time=time(0),
-            ends_time=time(23, 59),
+            starts_time=starts_time,
+            ends_time=ends_time,
             max_defer_minutes=30,
         )
         self.facts = component_manifest()
