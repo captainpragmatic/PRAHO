@@ -231,8 +231,10 @@ class Wp16AccountOrdersTests(SimpleTestCase):
         self.assertIn('aria-label="Order notes"', source)
         self.assertIn("@change=\"paymentMethod = 'card'\"", source)
         self.assertIn("@change=\"paymentMethod = 'bank_transfer'\"", source)
-        for hook in ("checkout-submit", "button-text", "button-loading"):
-            self.assertIn(f'id="{hook}"', source)
+        # The submit is the button component; checkout's script uses its .btn-label and toggles .is-loading.
+        self.assertIn('id="checkout-submit"', source)
+        for hook in ("btn-label", "btn-spinner"):
+            self.assertIn(hook, source)
 
     def test_company_fields_keep_constraints_values_and_all_errors(self) -> None:
         for template, names in (

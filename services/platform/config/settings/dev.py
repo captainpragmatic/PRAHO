@@ -83,8 +83,11 @@ DISABLE_ACCOUNT_LOCKOUT = True
 # A new list: insert() would also change base.MIDDLEWARE, which `from .base import *` shares.
 MIDDLEWARE = [*MIDDLEWARE[:1], "debug_toolbar.middleware.DebugToolbarMiddleware", *MIDDLEWARE[1:]]
 
-# Disable CSRF middleware for API development (allows Portal login)
-MIDDLEWARE = [mw for mw in MIDDLEWARE if "CsrfViewMiddleware" not in mw]
+# CSRF stays on, as on staging: a control that sends no token must fail here too. Portal login and the other
+# service-to-service endpoints are DRF or explicitly exempt, so they never needed it off.
+# The Portal also runs on localhost and its scripts read its own `csrftoken` cookie; cookies ignore the port, so the
+# Platform's HttpOnly cookie gets its own name rather than overwriting the Portal's (e2e and lab inherit this).
+CSRF_COOKIE_NAME = "platform_csrftoken"
 
 # ===============================================================================
 # DEVELOPMENT APPS

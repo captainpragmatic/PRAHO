@@ -160,13 +160,7 @@
                         <!-- Submit Button -->
                         <div class="flex items-center space-x-2">
                             {% trans "Cancel" as cancel_label %}{% button cancel_label type="button" size="sm" variant="secondary" data_action="reset-form" attrs='data-reset-target="#reply-form" data-counter-target="#char-counter"' %}
-                            {# tmpl-allow TMPL002: needs button label_id and spinner_id for #submit-text/#submit-spinner #}
-                            <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-slate-800 disabled:opacity-50 disabled:cursor-not-allowed"> {# tmpl-allow TMPL005: needs button label_id and spinner_id #}
-                                <svg class="w-4 h-4 mr-2 hidden" id="submit-spinner" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                                </svg>
-                                <span id="submit-text">{% trans 'Send Reply' %}</span>
-                            </button>
+                            {% trans 'Send Reply' as send_reply_label %}{% button send_reply_label type="submit" variant="primary" button_id="reply-submit" loading=True %}
                         </div>
                     </div>
                 </div>

@@ -5,6 +5,7 @@
 {% block title %}{{ product.name }} - {% trans "Product Details" %} - PRAHO Platform{% endblock %}
 
 {% block content %}
+{% if not can_manage_catalog %}{% trans "Only administrators can change the product catalog." as catalog_lock %}{% endif %}
 <div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
   <!-- Header with Actions -->
   <div class="flex justify-between items-start mb-6">
@@ -25,7 +26,7 @@
 
     <div class="flex space-x-3">
       {% url 'products:product_edit' slug=product.slug as edit_url %}
-      {% trans "Edit" as bt1 %}{% button bt1 variant="secondary" href=edit_url %}
+      {% trans "Edit" as bt1 %}{% button bt1 variant="secondary" href=edit_url disabled=catalog_lock title=catalog_lock %}
       {% url 'products:product_prices' slug=product.slug as prices_url %}
       {% trans "Pricing" as bt2 %}{% button bt2 variant="primary" href=prices_url %}
     </div>
@@ -241,11 +242,11 @@
           <div class="flex items-center justify-between">
             <span class="text-slate-400">{% trans 'Active' %}</span>
             {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
-            <button class="toggle-switch"
+            <button class="toggle-switch"{% if catalog_lock %} type="button" disabled title="{{ catalog_lock }}"{% else %}
                     hx-post="{% url 'products:product_toggle_active' slug=product.slug %}"
                     hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
                     hx-target="this"
-                    hx-swap="outerHTML">
+                    hx-swap="outerHTML"{% endif %}>
               {% if product.is_active %}
                 {% trans "Active" as bt9 %}{% badge bt9 variant="success" %}
               {% else %}
@@ -258,11 +259,11 @@
           <div class="flex items-center justify-between">
             <span class="text-slate-400">{% trans 'Public' %}</span>
             {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
-            <button class="toggle-switch"
+            <button class="toggle-switch"{% if catalog_lock %} type="button" disabled title="{{ catalog_lock }}"{% else %}
                     hx-post="{% url 'products:product_toggle_public' slug=product.slug %}"
                     hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
                     hx-target="this"
-                    hx-swap="outerHTML">
+                    hx-swap="outerHTML"{% endif %}>
               {% if product.is_public %}
                 {% trans "Public" as bt11 %}{% badge bt11 variant="info" %}
               {% else %}
@@ -275,11 +276,11 @@
           <div class="flex items-center justify-between">
             <span class="text-slate-400">{% trans 'Featured' %}</span>
             {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
-            <button class="toggle-switch"
+            <button class="toggle-switch"{% if catalog_lock %} type="button" disabled title="{{ catalog_lock }}"{% else %}
                     hx-post="{% url 'products:product_toggle_featured' slug=product.slug %}"
                     hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
                     hx-target="this"
-                    hx-swap="outerHTML">
+                    hx-swap="outerHTML"{% endif %}>
               {% if product.is_featured %}
                 {% trans "Featured" as bt13 %}{% badge bt13 variant="success" %}
               {% else %}
@@ -296,7 +297,7 @@
 
         <div class="space-y-3">
           {% url 'products:product_edit' slug=product.slug as edit_url %}
-          {% trans "Edit Product" as bt15 %}{% button bt15 variant="primary" href=edit_url class="w-full" %}
+          {% trans "Edit Product" as bt15 %}{% button bt15 variant="primary" href=edit_url class="w-full" disabled=catalog_lock title=catalog_lock %}
 
           {% url 'products:product_prices' slug=product.slug as prices_url %}
           {% trans "Manage Pricing" as bt16 %}{% button bt16 variant="secondary" href=prices_url class="w-full" %}

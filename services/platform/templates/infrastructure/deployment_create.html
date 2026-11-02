@@ -173,11 +173,7 @@
             <!-- Actions -->
             <div class="flex justify-end space-x-4">
                 {% trans "Cancel" as cancel_label %}{% button cancel_label variant="outline" href=cancel_url %}
-                {# tmpl-allow TMPL002: :disabled="!canSubmit" binding; components accept no executable attributes (apps/ui/attributes.py) #}
-                <button type="submit" :disabled="!canSubmit"
-                        class="px-6 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors">
-                    {% trans "Start Deployment" %}
-                </button>
+                {% trans "Start Deployment" as start_deploy_label %}{% button start_deploy_label type="submit" variant="primary" alpine_disabled="!canSubmit" %}
             </div>
         </form>
     </div>

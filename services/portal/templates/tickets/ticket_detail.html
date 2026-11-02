@@ -45,10 +45,6 @@
 document.addEventListener('DOMContentLoaded', function() {
     const textarea = document.querySelector('textarea[name="message"]');
     const charCounter = document.getElementById('char-counter');
-    const submitBtn = document.querySelector('#reply-form button[type="submit"]');
-    const submitText = document.getElementById('submit-text');
-    const submitSpinner = document.getElementById('submit-spinner');
-
     // Character counter
     if (textarea && charCounter) {
         textarea.addEventListener('input', function() {
@@ -204,26 +200,24 @@ document.addEventListener('DOMContentLoaded', function() {
 // HTMX event listeners
 document.addEventListener('htmx:beforeRequest', function(e) {
     if (e.detail.elt.id === 'reply-form') {
-        const submitBtn = document.querySelector('#reply-form button[type="submit"]');
-        const submitText = document.getElementById('submit-text');
-        const submitSpinner = document.getElementById('submit-spinner');
-
-        if (submitBtn) submitBtn.disabled = true;
-        if (submitText) submitText.textContent = '{% trans "Sending..." %}';
-        if (submitSpinner) submitSpinner.classList.remove('hidden');
+        // The button component's spinner shows while .is-loading is set (assets/css/input.css).
+        const submitBtn = document.getElementById('reply-submit');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.classList.add('is-loading');
+        }
     }
 });
 
 document.addEventListener('htmx:afterRequest', function(e) {
     if (e.detail.elt.id === 'reply-form') {
-        const submitBtn = document.querySelector('#reply-form button[type="submit"]');
-        const submitText = document.getElementById('submit-text');
-        const submitSpinner = document.getElementById('submit-spinner');
+        const submitBtn = document.getElementById('reply-submit');
         const charCounter = document.getElementById('char-counter');
 
-        if (submitBtn) submitBtn.disabled = false;
-        if (submitText) submitText.textContent = '{% trans "Send Reply" %}';
-        if (submitSpinner) submitSpinner.classList.add('hidden');
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('is-loading');
+        }
 
         // Only clear draft state after the reply form has actually been replaced.
         if (document.body.contains(e.detail.elt)) return;

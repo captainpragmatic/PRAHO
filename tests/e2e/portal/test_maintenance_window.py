@@ -92,7 +92,7 @@ class MaintenanceSwitch:
                 {"changes": {KEY: active}, "baselines": {KEY: self._baseline()}, "reason": "E2E maintenance window"}
             ),
             headers={
-                "X-CSRFToken": self._session.cookies.get("csrftoken"),
+                "X-CSRFToken": self._session.cookies.get("platform_csrftoken"),
                 "Content-Type": "application/json",
                 "Referer": PLATFORM_BASE_URL,
             },

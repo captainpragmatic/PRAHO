@@ -542,7 +542,7 @@ document.addEventListener('DOMContentLoaded', function() {
             // so a slow network or the 600ms reload window cannot double-submit.
             if (submitBtn) submitBtn.disabled = true;
 
-            fetch(this.action, {
+            window.platformFetch(this.action, {
                 method: 'POST',
                 body: formData,
                 headers: {
@@ -587,6 +587,10 @@ document.addEventListener('DOMContentLoaded', function() {
             .catch((err) => {
                 // session_expired already navigated away — nothing to render.
                 if (err && err.message === 'session_expired') return;
+                if (err && err.csrfReload) {  // platformFetch already said to reload
+                    if (submitBtn) submitBtn.disabled = false;
+                    return;
+                }
                 {% trans "An error occurred while updating the status." as status_error_msg %}
                 errorDiv.textContent = '{{ status_error_msg|escapejs }}';
                 errorDiv.classList.remove('hidden');
@@ -727,7 +731,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
     submitBtn.disabled = true;
     submitBtn.innerHTML = '{% trans "Processing..." %}';
 
-    fetch(this.action, {
+    window.platformFetch(this.action, {
         method: 'POST',
         body: formData,
         headers: {
@@ -749,7 +753,7 @@ document.getElementById('refundForm').addEventListener('submit', function(e) {
     .catch(error => {
         console.error('Error:', error);
         {% trans "An error occurred while processing the refund." as refund_error_msg %}
-        alert('{{ refund_error_msg|escapejs }}');
+        if (!error.csrfReload) alert('{{ refund_error_msg|escapejs }}');  // else platformFetch said to reload
         // Re-enable button
         submitBtn.disabled = false;
         submitBtn.innerHTML = '{% trans "Process Refund" %}';
@@ -864,7 +868,7 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
     submitBtn.disabled = true;
     submitBtn.innerHTML = '{% trans "Submitting..." %}';
 
-    fetch(this.action, {
+    window.platformFetch(this.action, {
         method: 'POST',
         body: formData,
         headers: {
@@ -888,7 +892,7 @@ document.getElementById('orderRefundRequestForm').addEventListener('submit', fun
     .catch(error => {
         console.error('Error:', error);
         {% trans "An error occurred. Please try again." as generic_error_msg %}
-        alert('{{ generic_error_msg|escapejs }}');
+        if (!error.csrfReload) alert('{{ generic_error_msg|escapejs }}');  // else platformFetch said to reload
         // Re-enable button
         submitBtn.disabled = false;
         submitBtn.innerHTML = '{% trans "Submit Request" %}';

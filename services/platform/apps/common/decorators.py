@@ -108,9 +108,8 @@ def billing_staff_required(view_func: Callable[..., HttpResponse]) -> Callable[.
     def wrapper(request: HttpRequest, *args: Any, **kwargs: Any) -> HttpResponse:
         user = request.user
 
-        # Check if user has billing privileges
-        allowed_roles = ["admin", "billing", "manager"]
-        if not (user.is_superuser or getattr(user, "staff_role", "") in allowed_roles):
+        # The one financial-operations rule (User.can_manage_financial_data), which templates read too.
+        if not getattr(user, "can_manage_financial_data", False):
             messages.error(request, _("❌ Access denied. Billing staff privileges required."))
             return redirect("dashboard")
 

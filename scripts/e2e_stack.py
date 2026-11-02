@@ -182,7 +182,9 @@ def login(base: str, path: str, email: str, password: str, expected_path: str) -
     session = requests.Session()
     response = session.get(base + path, timeout=10)
     response.raise_for_status()
-    token = session.cookies.get("csrftoken")
+    # A fresh session holds only this service's cookie: the Platform's has its own name locally (dev settings),
+    # so it can't overwrite the Portal's `csrftoken` on localhost.
+    token = session.cookies.get("platform_csrftoken") or session.cookies.get("csrftoken")
     if not token:
         raise RuntimeError(f"No CSRF cookie from {base + path}")
     response = session.post(

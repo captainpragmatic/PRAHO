@@ -189,4 +189,30 @@
     var base = sel.dataset.hrefBase || "";
     safeNavigate(base + encodeURIComponent(sel.value));
   });
+
+  function metaContent(name) {
+    var meta = document.querySelector('meta[name="' + name + '"]');
+    return meta ? meta.content : "";
+  }
+
+  // fetch() with the page's CSRF token (the cookie is HttpOnly; base.html puts the token in <meta name="csrf-token">).
+  // A refused token (403 marked X-CSRF-Failure: reload, a stale tab) shows the reload message and rejects with
+  // error.csrfReload set; the request is never replayed. Any other answer, a refused permission included, goes to the
+  // caller unchanged.
+  window.platformFetch = function (url, options) {
+    var settings = Object.assign({}, options || {});
+    settings.headers = Object.assign({}, settings.headers || {}, { "X-CSRFToken": metaContent("csrf-token") });
+    return window.fetch(url, settings).then(function (response) {
+      if (response.status === 403 && response.headers.get("X-CSRF-Failure") === "reload") {
+        var message = metaContent("csrf-reload-message");
+        if (window.showToast) {
+          window.showToast("error", message);
+        }
+        var error = new Error(message);
+        error.csrfReload = true;
+        throw error;
+      }
+      return response;
+    });
+  };
 })();

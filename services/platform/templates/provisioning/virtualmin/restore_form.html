@@ -80,7 +80,8 @@
                     </div>
                     {% endif %}
 
-                    <form method="post" hx-post="{{ request.get_full_path }}" hx-target="#restore-form-container" hx-swap="outerHTML">
+                    {# A native post: success redirects to the job page and a validation error re-renders, both full pages. #}
+                    <form method="post">
                         {% csrf_token %}
                         <div id="restore-form-container">
                             <div class="space-y-6">

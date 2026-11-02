@@ -430,7 +430,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
     submitBtn.disabled = true;
     submitBtn.innerHTML = '{% trans "Processing..." %}';
 
-    fetch(this.action, {
+    window.platformFetch(this.action, {
         method: 'POST',
         body: formData,
         headers: {
@@ -452,7 +452,7 @@ document.getElementById('invoiceRefundForm').addEventListener('submit', function
     .catch(error => {
         console.error('Error:', error);
         {% trans "An error occurred while processing the refund." as refund_error_msg %}
-        alert('{{ refund_error_msg|escapejs }}');
+        if (!error.csrfReload) alert('{{ refund_error_msg|escapejs }}');  // else platformFetch said to reload
         // Re-enable button
         submitBtn.disabled = false;
         submitBtn.innerHTML = '{% trans "Process Refund" %}';
@@ -569,7 +569,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     submitBtn.disabled = true;
     submitBtn.innerHTML = '{% trans "Submitting..." %}';
 
-    fetch(this.action, {
+    window.platformFetch(this.action, {
         method: 'POST',
         body: formData,
         headers: {
@@ -593,7 +593,7 @@ document.getElementById('invoiceRefundRequestForm').addEventListener('submit', f
     .catch(error => {
         console.error('Error:', error);
         {% trans "An error occurred. Please try again." as generic_error_msg %}
-        alert('{{ generic_error_msg|escapejs }}');
+        if (!error.csrfReload) alert('{{ generic_error_msg|escapejs }}');  // else platformFetch said to reload
         // Re-enable button
         submitBtn.disabled = false;
         submitBtn.innerHTML = '{% trans "Submit Request" %}';

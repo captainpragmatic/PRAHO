@@ -5,6 +5,7 @@
 {% block title %}{% trans "Product Catalog" %} - PRAHO Platform{% endblock %}
 
 {% block content %}
+{% if not can_manage_catalog %}{% trans "Only administrators can change the product catalog." as catalog_lock %}{% endif %}
 <div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
   <!-- Header -->
   <div class="sm:flex sm:items-center mb-6">
@@ -18,7 +19,7 @@
     </div>
     <div class="mt-4 sm:ml-16 sm:mt-0 sm:flex-none">
       {% url 'products:product_create' as create_product_url %}
-      {% trans "New Product" as bt1 %}{% button bt1 variant="primary" href=create_product_url %}
+      {% trans "New Product" as bt1 %}{% button bt1 variant="primary" href=create_product_url disabled=catalog_lock title=catalog_lock %}
     </div>
   </div>
 

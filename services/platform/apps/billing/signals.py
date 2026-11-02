@@ -1662,6 +1662,23 @@ def _update_billing_refund_metrics(invoice: Invoice) -> None:
 # ===============================================================================
 
 
+def _invoice_email_context(invoice: Invoice) -> dict[str, object]:
+    """Expose recorded invoice fields expected by seeded templates, retaining custom model context."""
+    from apps.notifications.services import _portal_invoice_url
+
+    return {
+        "invoice": invoice,
+        "customer": invoice.customer,
+        "customer_name": invoice.bill_to_name,
+        "invoice_number": invoice.display_number,
+        "invoice_date": timezone.localtime(invoice.issued_at or invoice.created_at).strftime("%Y-%m-%d"),
+        "total_amount": str(invoice.total),
+        "currency": invoice.currency_id,
+        "due_date": timezone.localtime(invoice.due_at).strftime("%Y-%m-%d") if invoice.due_at else "N/A",
+        "invoice_url": _portal_invoice_url(invoice) if invoice.number else "",
+    }
+
+
 def _send_invoice_created_email(invoice: Invoice) -> None:
     """Send invoice created notification"""
     with best_effort_atomic(logger=logger, scope="Invoice", message="Failed to send created email"):
@@ -1670,7 +1687,7 @@ def _send_invoice_created_email(invoice: Invoice) -> None:
         EmailService.send_template_email(
             template_key="invoice_created",
             recipient=invoice.bill_to_email or invoice.customer.primary_email,
-            context={"invoice": invoice, "customer": invoice.customer, "invoice_lines": invoice.lines.all()},
+            context={**_invoice_email_context(invoice), "invoice_lines": invoice.lines.all()},
         )
 
 
@@ -1682,7 +1699,7 @@ def _send_invoice_issued_email(invoice: Invoice) -> None:
         EmailService.send_template_email(
             template_key="invoice_issued",
             recipient=invoice.bill_to_email or invoice.customer.primary_email,
-            context={"invoice": invoice, "customer": invoice.customer},
+            context=_invoice_email_context(invoice),
             priority="high",
         )
 
@@ -1695,7 +1712,7 @@ def _send_payment_received_email(invoice: Invoice) -> None:
         EmailService.send_template_email(
             template_key="payment_received",
             recipient=invoice.bill_to_email or invoice.customer.primary_email,
-            context={"invoice": invoice, "customer": invoice.customer},
+            context=_invoice_email_context(invoice),
         )
 
 
@@ -1708,8 +1725,7 @@ def _send_invoice_overdue_email(invoice: Invoice) -> None:
             template_key="invoice_overdue",
             recipient=invoice.bill_to_email or invoice.customer.primary_email,
             context={
-                "invoice": invoice,
-                "customer": invoice.customer,
+                **_invoice_email_context(invoice),
                 "days_overdue": (timezone.now() - invoice.due_at).days if invoice.due_at else 0,
             },
             priority="high",
@@ -1724,7 +1740,7 @@ def _send_invoice_voided_email(invoice: Invoice) -> None:
         EmailService.send_template_email(
             template_key="invoice_voided",
             recipient=invoice.bill_to_email or invoice.customer.primary_email,
-            context={"invoice": invoice, "customer": invoice.customer},
+            context=_invoice_email_context(invoice),
         )
 
 
