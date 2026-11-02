@@ -14,6 +14,7 @@ from apps.provisioning.models import Service
 from apps.provisioning.virtualmin_tasks import reconcile_virtualmin_service_state
 from tests.billing.test_subscription_invoice_payments import _SubscriptionInvoicePaymentFixture
 from tests.common.postgres_locking import backend_pid, database_worker, wait_for_blocker
+from tests.helpers.task_queue import quiet_task_queue
 
 
 @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL cancellation/reconciliation row waits")
@@ -21,7 +22,7 @@ class ReconciliationCancellationLockTests(_SubscriptionInvoicePaymentFixture, Tr
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
-        self.enterContext(patch("django_q.tasks.async_task"))
+        quiet_task_queue(self)
         super().setUp()
         Service.objects.filter(pk=self.service.pk).update(domain="reconciliation.example.com")
 

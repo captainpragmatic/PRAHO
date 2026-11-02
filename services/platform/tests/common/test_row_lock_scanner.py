@@ -89,3 +89,16 @@ return final_cleanup.get(pk=pk)
     return current
 '''
         self.assertEqual(lock_join_lines(source), [4])
+
+    def test_conditional_expression_and_comprehension_conditions_are_discovered(self) -> None:
+        query = 'M.objects.select_for_update().select_related("customer")'
+        cases = [
+            f'answer = "yes" if {query} else "no"',
+            f'answer = "yes" if {query}.first() else "no"',
+            f'answer = [item for item in items if {query}]',
+            f'answer = [item for item in items if {query}.first()]',
+            f'rows += {query}',
+        ]
+        for source in cases:
+            with self.subTest(source=source):
+                self.assertEqual(lock_join_lines(source), [1])

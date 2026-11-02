@@ -3,7 +3,6 @@
 from datetime import timedelta
 from threading import Event
 from unittest import skipUnless
-from unittest.mock import patch
 from uuid import uuid4
 
 from django.db import connection, transaction
@@ -15,13 +14,14 @@ from apps.provisioning.virtualmin_migration_models import MigrationBridge, Virtu
 from apps.provisioning.virtualmin_migration_service import VirtualminMigrationService
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer
 from tests.common.postgres_locking import backend_pid, database_worker, wait_for_blocker
+from tests.helpers.task_queue import quiet_task_queue
 from tests.provisioning import test_virtualmin_tasks as fixtures
 
 
 @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL actual waits and deadlock detection")
 class BridgeCleanupLockTests(TransactionTestCase):
     def setUp(self) -> None:
-        self.enterContext(patch("django_q.tasks.async_task"))
+        quiet_task_queue(self)
         fixtures.VirtualminTaskTestBase.setUp(self)
         self.target = VirtualminServer.objects.create(name="Bridge target", hostname="bridge-target.example.test",
                                                      api_username="praho-acl", legacy_security_admission=True)
@@ -85,6 +85,14 @@ class BridgeCleanupLockTests(TransactionTestCase):
         self.bridge.refresh_from_db()
         self.assertEqual(self.bridge.evidence["lease_token"], first_token)
         self.assertEqual(first.pk, self.bridge.pk)
+
+    def test_terminal_result_survives_a_subsequent_account_move(self) -> None:
+        next_server = VirtualminServer.objects.create(name="Next target", hostname="next-target.example.test", api_username="praho-acl")
+        VirtualminAccount.objects.filter(pk=self.account.pk).update(server=next_server)
+        for status in ("torn_down", "failed"):
+            MigrationBridge.objects.filter(pk=self.bridge.pk).update(status=status)  # fsm-bypass: terminal replay fixture
+            with self.subTest(status=status):
+                self.assertEqual(_claim(str(self.migration.pk), str(uuid4())), (None, status))
 
     def test_unfinished_hint_locks_only_bridge_and_keeps_terminal_precedence(self) -> None:
         VirtualminMigration.objects.filter(pk=self.migration.pk).update(status="pending")  # fsm-bypass: unfinished fixture

@@ -15,6 +15,7 @@ from apps.users.models import CustomerMembership, User
 from tests.common.postgres_locking import backend_pid, database_worker, wait_for_blocker
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 from tests.helpers.portal_session import BoundSessionMixin
+from tests.helpers.task_queue import quiet_task_queue
 from tests.orders import test_confirm_order_concurrency as fixtures
 
 
@@ -26,7 +27,7 @@ class ConfirmOrderLockWaitTests(BoundSessionMixin, HMACTestMixin, TransactionTes
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
-        self.enterContext(patch("django_q.tasks.async_task", return_value="queued-confirmation"))
+        quiet_task_queue(self)
         fixtures.TestC2ConfirmOrderIdempotency.setUp(self)
         InvoiceSequence.objects.get_or_create(scope="subscription", defaults={"prefix": "SUB"})
         self.owner = User.objects.create_user(email="confirmation-owner@example.test")

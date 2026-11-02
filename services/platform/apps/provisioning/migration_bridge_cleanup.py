@@ -160,6 +160,9 @@ def _claim(migration_id: str, token: str) -> tuple[MigrationBridge | None, str]:
         }
         migration = VirtualminMigration.objects.select_for_update(of=("self",)).get(pk=identifier)
         bridge = MigrationBridge.objects.select_for_update(of=("self",)).get(migration_id=identifier)
+        # Completed cleanup remains replayable after a later account migration.
+        if bridge.status in {"torn_down", "failed"}:
+            return None, bridge.status
         if (
             len(server_ids) != len(servers) or hint["migration__source_server_id"] == hint["migration__target_server_id"]
             or migration.account_id != account.pk
@@ -180,8 +183,6 @@ def _claim(migration_id: str, token: str) -> tuple[MigrationBridge | None, str]:
         bridge.migration = migration
         bridge.source_server = servers[bridge.source_server_id]
         bridge.target_server = servers[bridge.target_server_id]
-        if bridge.status in {"torn_down", "failed"}:
-            return None, bridge.status
         if bridge.migration.status != "completed":
             return None, "waiting"
         expires = _date(bridge.evidence.get("expires_at"))

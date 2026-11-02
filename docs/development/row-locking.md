@@ -205,6 +205,16 @@ Observed proof so far:
   against the earlier helper. An ordinary uncorrelated membership subquery stays
   supported with two statements. The complete helper and public billing-batch
   controls pass together (19 tests).
+- Review controls preserve a terminal Bridge result after a later account move:
+  terminal status is checked immediately after locking Bridge, before live
+  cleanup ownership validation. The previous ordering returns `waiting` and
+  fails the unchanged replay regression again when restored in the proof clone.
+- Scanner review canaries cover conditional-expression tests, comprehension
+  predicates and augmented collection assignment. All 12 structural tests pass;
+  restoring the earlier scanner reproduces four failed discoveries. The latest
+  focused PostgreSQL review run passes 37 tests. New concurrency fixtures use
+  the broker-level `quiet_task_queue` helper to prevent lazy imports capturing a
+  global `async_task` mock.
 - Structural normalization uses the zero-site guard plus the existing business
   regressions. Protected payment convergence is not advertised as a newly
   reproduced public mandate race, and erasure proof uses actual rendered/stored

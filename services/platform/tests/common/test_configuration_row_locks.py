@@ -4,7 +4,6 @@ from datetime import timedelta
 from threading import Event
 from time import monotonic
 from unittest import skipUnless
-from unittest.mock import patch
 
 from django.core.cache import cache
 from django.db import connection
@@ -17,6 +16,7 @@ from apps.domains.services import DomainReconciliationService
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_tasks import provision_virtualmin_account
 from tests.common.postgres_locking import database_worker, wait_for_blocker
+from tests.helpers.task_queue import quiet_task_queue
 from tests.provisioning import test_virtualmin_tasks as fixtures
 
 
@@ -25,7 +25,7 @@ class ConfigurationRowLockTests(TransactionTestCase):
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
-        self.enterContext(patch("django_q.tasks.async_task"))
+        quiet_task_queue(self)
         fixtures.VirtualminTaskTestBase.setUp(self)
         # The public provisioning validator refuses a literal "test" DNS label.
         self.service.domain = "configuration.example.com"
