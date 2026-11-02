@@ -37,47 +37,15 @@
         </div>
         <div class="mt-4 sm:mt-0 flex items-center space-x-3">
             {% if account.is_active %}
-                {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
-                <button class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-500 transition-colors"
-                        hx-post="{{ suspend_url }}"
-                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-confirm="{% trans 'Are you sure you want to suspend this account?' %}"
-                        hx-swap="outerHTML"
-                        hx-target="body">
-                    {% trans "Suspend" %}
-                </button>
+                {% trans "Suspend" as suspend_label %}{% trans 'Are you sure you want to suspend this account?' as suspend_confirm %}{% button suspend_label variant="warning" hx_post=suspend_url hx_confirm=suspend_confirm hx_target="body" %}
             {% else %}
-                {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
-                <button class="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-500 transition-colors"
-                        hx-post="{{ activate_url }}"
-                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-confirm="{% trans 'Are you sure you want to activate this account?' %}"
-                        hx-swap="outerHTML"
-                        hx-target="body">
-                    {% trans "Activate" %}
-                </button>
+                {% trans "Activate" as activate_label %}{% trans 'Are you sure you want to activate this account?' as activate_confirm %}{% button activate_label variant="success" hx_post=activate_url hx_confirm=activate_confirm hx_target="body" %}
             {% endif %}
             {% trans "Backup Now" as bt4 %}{% button bt4 href=backup_url variant="primary" %}
             {% if incremental_backups_enabled %}
                 {% trans "Restore pair" as bt4b %}{% button bt4b href=restore_pair_url variant="secondary" %}
-                {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
-                <button class="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
-                        hx-post="{{ take_base_url }}"
-                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-confirm="{% trans 'Take a base backup? It is a complete backup of this account and starts a new chain: differential backups taken after it hold only what changed since it.' %}"
-                        hx-swap="outerHTML"
-                        hx-target="body">
-                    {% trans "Take base backup" %}
-                </button>
-                {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
-                <button class="px-4 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-600 transition-colors"
-                        hx-post="{{ take_differential_url }}"
-                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-confirm="{% trans 'Take a differential backup? It holds only what changed since the base backup, so restoring it needs that base backup as well.' %}"
-                        hx-swap="outerHTML"
-                        hx-target="body">
-                    {% trans "Take differential backup" %}
-                </button>
+                {% trans "Take base backup" as base_label %}{% trans 'Take a base backup? It is a complete backup of this account and starts a new chain: differential backups taken after it hold only what changed since it.' as base_confirm %}{% button base_label variant="secondary" hx_post=take_base_url hx_confirm=base_confirm hx_target="body" %}
+                {% trans "Take differential backup" as diff_label %}{% trans 'Take a differential backup? It holds only what changed since the base backup, so restoring it needs that base backup as well.' as diff_confirm %}{% button diff_label variant="secondary" hx_post=take_differential_url hx_confirm=diff_confirm hx_target="body" %}
             {% endif %}
         </div>
     </div>
@@ -92,25 +60,9 @@
             {% blocktrans with backup_id=account.restore_hold_safety_backup_id %}A pair restore was stopped after it had started restoring. Nothing re-enables the domain on its own. Re-enable it as it is, or restore the safety backup {{ backup_id }} that was taken just before the restore.{% endblocktrans %}
         </p>
         <div class="flex items-center space-x-3">
-            {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
-            <button class="px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-500 transition-colors"
-                    hx-post="{{ hold_reenable_url }}"
-                    hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                    hx-confirm="{% trans 'Re-enable the domain as it is? Its files and databases may be a mix of the base backup and the differential, or of what the stopped restore left.' %}"
-                    hx-swap="outerHTML"
-                    hx-target="body">
-                {% trans "Re-enable as is" %}
-            </button>
+            {% trans "Re-enable as is" as reenable_label %}{% trans 'Re-enable the domain as it is? Its files and databases may be a mix of the base backup and the differential, or of what the stopped restore left.' as reenable_confirm %}{% button reenable_label variant="warning" hx_post=hold_reenable_url hx_confirm=reenable_confirm hx_target="body" %}
             {% if account.restore_hold_safety_backup_id %}
-            {# tmpl-allow TMPL002: hx-headers embeds the CSRF token in inline JSON; the button tag's hx_headers needs a prebuilt string the template can only compose by chaining add filters onto the lazy csrf_token #}
-            <button class="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-500 transition-colors"
-                    hx-post="{{ hold_restore_safety_url }}"
-                    hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                    hx-confirm="{% blocktrans with backup_id=account.restore_hold_safety_backup_id %}Restore the safety backup {{ backup_id }}? It overwrites the domain with what it held just before the pair restore. The domain stays disabled until that restore completes.{% endblocktrans %}"
-                    hx-swap="outerHTML"
-                    hx-target="body">
-                {% blocktrans with backup_id=account.restore_hold_safety_backup_id %}Restore the safety backup {{ backup_id }}{% endblocktrans %}
-            </button>
+            {% blocktrans with backup_id=account.restore_hold_safety_backup_id asvar safety_label %}Restore the safety backup {{ backup_id }}{% endblocktrans %}{% blocktrans with backup_id=account.restore_hold_safety_backup_id asvar safety_confirm %}Restore the safety backup {{ backup_id }}? It overwrites the domain with what it held just before the pair restore. The domain stays disabled until that restore completes.{% endblocktrans %}{% button safety_label variant="danger" hx_post=hold_restore_safety_url hx_confirm=safety_confirm hx_target="body" %}
             {% endif %}
         </div>
     </div>
@@ -471,64 +423,25 @@
             <div x-show="activeTab === 'settings'" x-transition>
                 <div class="space-y-6">
                     <h3 class="text-lg font-semibold text-slate-100">{% trans "Account Settings" %}</h3>
-
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                        <!-- Basic Settings -->
-                        <div class="space-y-4">
-                            <h4 class="text-md font-medium text-slate-200">{% trans "Basic Settings" %}</h4>
-
-                            <div>
-                                <label for="account-contact-email" class="block text-sm font-medium text-slate-300 mb-1">
-                                    {% trans "Contact Email" %}
-                                </label>
-                                {# tmpl-allow TMPL001: components/input.html loads the static library, which the minimal Engine in tests/provisioning/test_account_detail_confirmations.py does not register #}
-                                <input id="account-contact-email" type="email" value="{{ account.contact_email|default:'' }}"
-                                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-
-                            <div>
-                                <label for="account-php-version" class="block text-sm font-medium text-slate-300 mb-1">
-                                    {% trans "PHP Version" %}
-                                </label>
-                                {# tmpl-allow TMPL003: literal PHP version options rendered inline; select components take a view-built options list #}
-                                <select id="account-php-version" class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                    <option>PHP 8.1</option>
-                                    <option>PHP 8.2</option>
-                                    <option>PHP 8.3</option>
-                                </select>
-                            </div>
+                    {# Read-only: what Platform stores for this account. Editing is a separate feature (plan quotas: #776). #}
+                    <dl class="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-4">
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Virtualmin template" %}</dt>
+                            <dd class="mt-1 text-slate-100">{{ account.template_name|default:_("Not set") }}</dd>
                         </div>
-
-                        <!-- Resource Limits -->
-                        <div class="space-y-4">
-                            <h4 class="text-md font-medium text-slate-200">{% trans "Resource Limits" %}</h4>
-
-                            <div>
-                                <label for="account-disk-quota" class="block text-sm font-medium text-slate-300 mb-1">
-                                    {% trans "Disk Quota" %} (GB)
-                                </label>
-                                {# tmpl-allow TMPL001: components/input.html loads the static library, which the minimal Engine in tests/provisioning/test_account_detail_confirmations.py does not register #}
-                                <input id="account-disk-quota" type="number" value="{{ account.disk_quota_gb|default:'' }}"
-                                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            </div>
-
-                            <div>
-                                <label for="account-bandwidth-quota" class="block text-sm font-medium text-slate-300 mb-1">
-                                    {% trans "Bandwidth Quota" %} (GB)
-                                </label>
-                                {# tmpl-allow TMPL001: components/input.html loads the static library, which the minimal Engine in tests/provisioning/test_account_detail_confirmations.py does not register #}
-                                <input id="account-bandwidth-quota" type="number" value="{% if account.bandwidth_quota_mb == -1 %}-1{% elif account.bandwidth_quota_mb %}{{ account.bandwidth_quota_mb|floatformat:0 }}{% endif %}"
-                                       placeholder="{% trans "Use -1 for unlimited" %}"
-                                       class="w-full px-3 py-2 bg-slate-900 border border-slate-600 rounded-md text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <p class="text-xs text-slate-400 mt-1">{% trans "Use -1 for unlimited bandwidth" %}</p>
-                            </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Disk quota" %}</dt>
+                            <dd class="mt-1 text-slate-100">{{ disk_quota_text }}</dd>
                         </div>
-                    </div>
-
-                    <div class="pt-6 border-t border-slate-700">
-                        {% trans "Save Changes" as bt22 %}{% button bt22 variant="primary" %}
-                        {% trans "Cancel" as bt23 %}{% button bt23 variant="secondary" %}
-                    </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Bandwidth quota" %}</dt>
+                            <dd class="mt-1 text-slate-100">{{ bandwidth_quota_text }}</dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-slate-400">{% trans "Features" %}</dt>
+                            <dd class="mt-1 text-slate-100">{% for name, enabled in account.features.items %}{% if enabled %}<span class="mr-2">{{ name }}</span>{% endif %}{% empty %}{% trans "Not set" %}{% endfor %}</dd>
+                        </div>
+                    </dl>
                 </div>
             </div>
         </div>
@@ -603,7 +516,10 @@ function confirmAccountDelete(button) {
             message: messageElement.innerHTML,
             confirmText: button.dataset.confirmText,
             action: function() {
+                // From the button, so the page's <body hx-headers> CSRF token goes with it; the view answers
+                // with HX-Redirect to the accounts list.
                 htmx.ajax('DELETE', url, {
+                    source: button,
                     target: 'body'
                 });
             }
@@ -613,6 +529,4 @@ function confirmAccountDelete(button) {
 </script>
 {% endblock %}
 
-{% block extra_modals %}
-{% include "components/dangerous_action_modal.html" %}
-{% endblock %}
+{# base.html already includes the dangerous-action modal; a second copy answered every confirm twice. #}

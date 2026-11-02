@@ -10,7 +10,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass
 from typing import Any, TypedDict, cast
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID
 
 from django.contrib import messages
@@ -18,7 +18,7 @@ from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth.models import AnonymousUser
 from django.core.paginator import Paginator
 from django.db import connections, models, transaction
-from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse
+from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -29,6 +29,7 @@ from django_q.tasks import async_task
 
 from apps.common.decorators import admin_required
 from apps.common.encryption import DecryptionError, EncryptionError
+from apps.common.http import page_redirect
 from apps.common.security_decorators import (
     audit_service_call,
     monitor_performance,
@@ -338,22 +339,47 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
 # ===============================================================================
 
 
-@login_required
-@user_passes_test(is_staff_or_superuser)
-@monitor_performance(max_duration_seconds=10.0, alert_threshold=3.0)
-def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
-    """📊 List all Virtualmin accounts with filtering and search."""
+def _quota_text(megabytes: int | None) -> str:
+    """A stored quota as a person reads it: MB below 1 GB, GB with one decimal above.
 
-    # Get base queryset
+    Unlimited is stored as 0 for disk (the gateway parses "unlimited" to 0; the field can't hold -1) and -1 for
+    bandwidth; None means no quota was recorded.
+    """
+    if megabytes is None:
+        return str(_("Not set"))
+    if megabytes <= 0:
+        return str(_("Unlimited"))
+    if megabytes < 1024:  # noqa: PLR2004  # MB in a GB
+        return f"{megabytes} MB"
+    gigabytes = megabytes / 1024
+    return f"{gigabytes:.0f} GB" if gigabytes.is_integer() else f"{gigabytes:.1f} GB"
+
+
+def _page_redirect(request: HttpRequest, to: str, **kwargs: Any) -> HttpResponse:
+    """Go to the next page; htmx gets HX-Redirect, so the address bar follows instead of a page swapped into body."""
+    return page_redirect(request, reverse(to, kwargs=kwargs))
+
+
+ACCOUNTS_PER_PAGE = 25
+
+
+def _accounts_query(request: HttpRequest) -> QueryDict:
+    """The list's filters: from the query string, or from the list URL an htmx action on that list was made on."""
+    if request.method == "GET":
+        return request.GET
+    return QueryDict(urlsplit(request.headers.get("HX-Current-URL", "")).query)
+
+
+def _accounts_table_context(request: HttpRequest) -> dict[str, Any]:
+    """The filtered, paginated accounts table, as the list page and every htmx render of it show it."""
+    query = _accounts_query(request)
+    status_filter = query.get("status", "")
+    server_filter = query.get("server", "")
+    search_query = query.get("search", "").strip()
+
     accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
         "-created_at"
     )
-
-    # Apply filters
-    status_filter = request.GET.get("status")
-    server_filter = request.GET.get("server")
-    search_query = request.GET.get("search", "").strip()
-
     if status_filter:
         accounts = accounts.filter(status=status_filter)
     if server_filter:
@@ -362,11 +388,44 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
         accounts = accounts.filter(
             models.Q(domain__icontains=search_query) | models.Q(service__customer__name__icontains=search_query)
         )
+    page = Paginator(accounts, ACCOUNTS_PER_PAGE).get_page(query.get("page"))
+    kept = urlencode(
+        {
+            key: value
+            for key, value in (("status", status_filter), ("server", server_filter), ("search", search_query))
+            if value
+        }
+    )
+    bulk_filters = urlencode(
+        {key: value for key, value in (("server", server_filter), ("status", status_filter)) if value}
+    )
+    bulk_url = reverse("provisioning:virtualmin_bulk_actions")
+    return {
+        "accounts": page,
+        "extra_params": f"&{kept}" if kept else "",
+        "bulk_actions_url": f"{bulk_url}?{bulk_filters}" if bulk_filters else bulk_url,
+        # An htmx swap of the table also refreshes the header's Bulk Actions link (hx-swap-oob), so it keeps the filter.
+        "swap_bulk_link": bool(request.headers.get("HX-Request")),
+        "status_filter": status_filter,
+        "server_filter": server_filter,
+        "search_query": search_query,
+        "last_updated": timezone.now(),
+    }
 
-    # Pagination
-    paginator = Paginator(accounts, 25)
-    page_number = request.GET.get("page")
-    accounts_page = paginator.get_page(page_number)
+
+@login_required
+@user_passes_test(is_staff_or_superuser)
+@monitor_performance(max_duration_seconds=10.0, alert_threshold=3.0)
+def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
+    """📊 List all Virtualmin accounts with filtering and search."""
+
+    table = _accounts_table_context(request)
+    # The filter form and pagination swap the table, not the page. htmx restoring a pushed URL it no longer caches
+    # also sends HX-Request, and swaps the answer into <body>: that one gets the whole page.
+    if request.headers.get("HX-Request") and not request.headers.get("HX-History-Restore-Request"):
+        return render(request, "provisioning/virtualmin/partials/accounts_table.html", table)
+    accounts_page = table["accounts"]
+    status_filter, server_filter, search_query = table["status_filter"], table["server_filter"], table["search_query"]
 
     # Prepare table data
     table_data = [
@@ -414,16 +473,10 @@ def virtualmin_accounts_list(request: HttpRequest) -> HttpResponse:
         {"text": "Accounts"},  # Current page - no URL
     ]
 
-    bulk_filters = urlencode(
-        {key: value for key, value in (("server", server_filter), ("status", status_filter)) if value}
-    )
-    bulk_url = reverse("provisioning:virtualmin_bulk_actions")
-
     context = {
         "page_title": "Virtualmin Accounts",
-        "bulk_actions_url": f"{bulk_url}?{bulk_filters}" if bulk_filters else bulk_url,
+        **table,
         "accounts_page": accounts_page,
-        "accounts": accounts_page,  # For template compatibility
         "table_data": table_data,
         "breadcrumb_items": breadcrumb_items,
         "table_columns": [
@@ -504,6 +557,8 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "backup_url": reverse("provisioning:virtualmin_account_backup", args=[account.id]),
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
         "restore_pair_url": reverse("provisioning:virtualmin_account_restore_pair", args=[account.id]),
+        "disk_quota_text": _quota_text(account.disk_quota_mb),
+        "bandwidth_quota_text": _quota_text(account.bandwidth_quota_mb),
         "hold_reenable_url": reverse("provisioning:virtualmin_account_hold_reenable", args=[account.id]),
         "hold_restore_safety_url": reverse("provisioning:virtualmin_account_hold_restore_safety", args=[account.id]),
         # The pair restore and the base/differential buttons are offered only while differential backups are enabled.
@@ -674,7 +729,7 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         resolved = resolve_chain_job(job, resolved_by=actor, note=str(note))
         if resolved.is_err():
             messages.error(request, resolved.unwrap_err())
-            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+            return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
         rows = 1
     elif job.status == "attention" and is_pair_job(job.operation, job.parameters or {}):
         # A pair restore leaves the domain behind a maintenance page and disabled: the node is
@@ -682,7 +737,7 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         resolved = resolve_pair_job(job, resolved_by=actor, note=str(note))
         if resolved.is_err():
             messages.error(request, resolved.unwrap_err())
-            return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+            return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
         rows = 1
     else:
         # CharField job status; attention -> failed is the only edge.
@@ -713,7 +768,7 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         )
     else:
         messages.error(request, _("Only a job awaiting attention can be resolved."))
-    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required
@@ -731,13 +786,13 @@ def virtualmin_job_node_lost(request: HttpRequest, job_id: str) -> HttpResponse:
         resolved = resolve_chain_job_node_lost(job, resolved_by=actor, note=str(note))
     if resolved.is_err():
         messages.error(request, resolved.unwrap_err())
-        return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+        return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
     from .virtualmin_signals import audit_job_status_transition  # noqa: PLC0415  # Circular
 
     job.refresh_from_db()
     audit_job_status_transition(job, actor_type="user", user=request.user if request.user.is_authenticated else None)
     messages.success(request, _("Job marked resolved as node lost. The account is unlocked."))
-    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required
@@ -771,7 +826,7 @@ def virtualmin_account_hold_reenable(request: HttpRequest, account_id: str) -> H
         messages.success(request, _("The hold is released. The domain will be enabled again as it is."))
     else:
         messages.error(request, _("This account is not held."))
-    return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+    return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.pk)
 
 
 @login_required
@@ -784,7 +839,7 @@ def virtualmin_account_hold_restore_safety(request: HttpRequest, account_id: str
     safety_id = account.restore_hold_safety_backup_id
     if not account.restore_hold or not safety_id:
         messages.error(request, _("This account has no safety backup to restore."))
-        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+        return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.pk)
     actor = request.user.email if request.user.is_authenticated else "system"
     created = VirtualminBackupManagementService(account.server).create_restore_job(
         account=account,
@@ -795,10 +850,10 @@ def virtualmin_account_hold_restore_safety(request: HttpRequest, account_id: str
         messages.error(
             request, _("Could not start the restore of the safety backup: %(error)s") % {"error": created.unwrap_err()}
         )
-        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+        return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.pk)
     _audit_hold_decision(request, account, "restore_safety_backup", detail={"safety_backup_id": safety_id})
     messages.success(request, _("Restoring the safety backup. The hold ends when it completes."))
-    return redirect("provisioning:virtualmin_job_status", job_id=created.unwrap().pk)
+    return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=created.unwrap().pk)
 
 
 def _audit_hold_decision(
@@ -888,17 +943,17 @@ def virtualmin_account_chain_backup(request: HttpRequest, account_id: str, role:
         return HttpResponseBadRequest("Unknown backup role")
     if not VirtualminBackupManagementService.incremental_backups_enabled():
         messages.error(request, _("Differential backups are not enabled."))
-        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+        return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.pk)
 
     management = VirtualminBackupManagementService(account.server)
     take = management.take_base_backup if role == "base" else management.take_differential_backup
     created = take(account, initiated_by=f"staff:{cast(User, request.user).email}")
     if created.is_err():
         messages.error(request, _("The backup could not be started: {error}").format(error=created.unwrap_err()))
-        return redirect("provisioning:virtualmin_account_detail", account_id=account.pk)
+        return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.pk)
     job = created.unwrap()
     messages.success(request, _("Base backup queued.") if role == "base" else _("Differential backup queued."))
-    return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+    return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
 
 
 @login_required
@@ -2032,7 +2087,8 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
 
     if not active_servers.exists():
         messages.error(request, _("No active Virtualmin servers found to sync from"))
-        return redirect("provisioning:virtualmin_accounts")
+        # a page to land on, not a page nested in the table
+        return page_redirect(request, reverse("provisioning:virtualmin_accounts"))
 
     sync_results: SyncResults = {
         "servers_checked": 0,
@@ -2227,11 +2283,7 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
 
     # If HTMX request, return partial template
     if request.headers.get("HX-Request"):
-        # Refresh the accounts data for the partial
-        accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
-            "-created_at"
-        )
-        return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
+        return render(request, "provisioning/virtualmin/partials/accounts_table.html", _accounts_table_context(request))
 
     return redirect("provisioning:virtualmin_accounts")
 
@@ -2307,15 +2359,14 @@ def virtualmin_account_suspend(request: HttpRequest, account_id: str) -> HttpRes
         referer = request.headers.get("HX-Current-URL", "")
         if f"accounts/{account.id}/" in referer:
             # Coming from detail page, refresh the page
-            return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+            return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.id)
         else:
             # Coming from accounts list, return updated table
-            accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
-                "-created_at"
+            return render(
+                request, "provisioning/virtualmin/partials/accounts_table.html", _accounts_table_context(request)
             )
-            return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
 
-    return redirect("provisioning:virtualmin_accounts")
+    return _page_redirect(request, "provisioning:virtualmin_accounts")
 
 
 @login_required
@@ -2351,15 +2402,14 @@ def virtualmin_account_activate(request: HttpRequest, account_id: str) -> HttpRe
         referer = request.headers.get("HX-Current-URL", "")
         if f"accounts/{account.id}/" in referer:
             # Coming from detail page, refresh the page
-            return redirect("provisioning:virtualmin_account_detail", account_id=account.id)
+            return _page_redirect(request, "provisioning:virtualmin_account_detail", account_id=account.id)
         else:
             # Coming from accounts list, return updated table
-            accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
-                "-created_at"
+            return render(
+                request, "provisioning/virtualmin/partials/accounts_table.html", _accounts_table_context(request)
             )
-            return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
 
-    return redirect("provisioning:virtualmin_accounts")
+    return _page_redirect(request, "provisioning:virtualmin_accounts")
 
 
 @login_required
@@ -2400,10 +2450,9 @@ def virtualmin_account_toggle_protection(request: HttpRequest, account_id: str) 
                 return render(request, "provisioning/virtualmin/partials/quick_actions.html", context)
             else:
                 # Coming from accounts list, return updated table
-                accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
-                    "-created_at"
+                return render(
+                    request, "provisioning/virtualmin/partials/accounts_table.html", _accounts_table_context(request)
                 )
-                return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
 
     return redirect("provisioning:virtualmin_accounts")
 
@@ -2433,14 +2482,9 @@ def virtualmin_account_delete(request: HttpRequest, account_id: str) -> HttpResp
         messages.error(request, f"❌ Error deleting account: {e}")
         logger.exception(f"🗑️ [AccountDelete] Exception deleting {account.domain}: {e}")
 
-    # If HTMX request, return updated table
-    if request.headers.get("HX-Request"):
-        accounts = VirtualminAccount.objects.select_related("server", "service", "service__customer").order_by(
-            "-created_at"
-        )
-        return render(request, "provisioning/virtualmin/partials/accounts_table.html", {"accounts": accounts})
-
-    return redirect("provisioning:virtualmin_accounts")
+    # Both Delete controls sit on the account's own page, which no longer shows anything once it's gone: send
+    # htmx to the accounts list as a full page (a bare table used to replace the whole <body>).
+    return page_redirect(request, reverse("provisioning:virtualmin_accounts"))
 
 
 @login_required
@@ -2534,6 +2578,44 @@ def virtualmin_job_retry(request: HttpRequest, job_id: str) -> HttpResponse:
     return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
 
 
+def _job_log_entries(job: VirtualminProvisioningJob) -> list[dict[str, str]]:
+    """A job's lifecycle as log entries, oldest first."""
+    logs: list[dict[str, str]] = []
+
+    # Add job lifecycle logs
+    logs.append(
+        {
+            "timestamp": job.created_at.isoformat(),
+            "level": "INFO",
+            "message": f"Job created: {job.operation} for {job.account.domain if job.account else 'unknown'}",
+        }
+    )
+
+    if job.started_at:
+        logs.append({"timestamp": job.started_at.isoformat(), "level": "INFO", "message": "Job started"})
+
+    if job.completed_at:
+        logs.append(
+            {
+                "timestamp": job.completed_at.isoformat(),
+                "level": "SUCCESS" if job.status == "completed" else "ERROR",
+                "message": f"Job {job.status}" + (f": {job.status_message}" if job.status_message else ""),
+            }
+        )
+
+    # Add response data as structured logs
+    if job.result:
+        logs.append(
+            {
+                "timestamp": (job.completed_at or job.updated_at).isoformat(),
+                "level": "DEBUG",
+                "message": f"Response: {job.result}",
+            }
+        )
+
+    return logs
+
+
 @login_required
 @user_passes_test(is_staff_or_superuser)
 @monitor_performance(max_duration_seconds=2.0, alert_threshold=1.0)
@@ -2541,42 +2623,13 @@ def virtualmin_job_logs(request: HttpRequest, job_id: str) -> HttpResponse:
     """📋 Show Virtualmin job logs and details."""
     job = get_object_or_404(VirtualminProvisioningJob, id=job_id)
 
-    # Return logs as JSON for HTMX requests
-    if request.headers.get("HX-Request"):
-        logs = []
-
-        # Add job lifecycle logs
-        logs.append(
-            {
-                "timestamp": job.created_at.isoformat(),
-                "level": "INFO",
-                "message": f"Job created: {job.operation} for {job.account.domain if job.account else 'unknown'}",
-            }
-        )
-
-        if job.started_at:
-            logs.append({"timestamp": job.started_at.isoformat(), "level": "INFO", "message": "Job started"})
-
-        if job.completed_at:
-            logs.append(
-                {
-                    "timestamp": job.completed_at.isoformat(),
-                    "level": "SUCCESS" if job.status == "completed" else "ERROR",
-                    "message": f"Job {job.status}" + (f": {job.status_message}" if job.status_message else ""),
-                }
-            )
-
-        # Add response data as structured logs
-        if job.result:
-            logs.append(
-                {
-                    "timestamp": (job.completed_at or job.updated_at).isoformat(),
-                    "level": "DEBUG",
-                    "message": f"Response: {job.result}",
-                }
-            )
-
-        return JsonResponse({"logs": logs})
+    # The job page's Live Logs panel (htmx) gets entries as markup it can swap in; a caller that asks for JSON gets it.
+    wants_json = "application/json" in request.headers.get("Accept", "")
+    if wants_json or request.headers.get("HX-Request"):
+        logs = _job_log_entries(job)
+        if wants_json:
+            return JsonResponse({"logs": logs})
+        return render(request, "provisioning/virtualmin/partials/job_log_entries.html", {"logs": logs})
 
     # Regular template render for non-HTMX requests
     context = {

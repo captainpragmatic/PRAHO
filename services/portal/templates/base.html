@@ -73,10 +73,7 @@
                   </a>
 
                   <!-- Billing -->
-                  <a href="/billing/invoices/"
-                    class="text-slate-300 hover:text-white px-2 py-2 rounded-md text-sm font-medium flex items-center">
-                    {% icon "invoices" size="sm" css_class="mr-1.5 opacity-70" %} {% trans 'Billing' %}
-                  </a>
+                  {% include "components/billing_nav_item.html" %}
 
                   <!-- My Services -->
                   <a href="/services/"

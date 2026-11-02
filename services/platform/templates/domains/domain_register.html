@@ -55,13 +55,7 @@
                                 class="flex-1 rounded-l-md border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-500 dark:placeholder-slate-400 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
                                 autocomplete="off"
                             >
-                            {# tmpl-allow TMPL002: right half of an input group (rounded-r-md, border-l-0 joined to #domain-search); the button tag always renders rounded-lg with its own border #}
-                            <button
-                                type="submit"
-                                class="inline-flex items-center px-4 py-2 border border-l-0 border-slate-300 dark:border-slate-600 rounded-r-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500"
-                            >
-                                {% icon "search" %} {% trans "Search" %}
-                            </button>
+                            {% trans "Search" as search_label %}{% button search_label type="submit" variant="primary" icon="search" joined="right" %}
                         </div>
                         <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">
                             {% trans "Enter the full domain name including extension (e.g., example.com)" %}
@@ -254,9 +248,8 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const formData = new FormData();
             formData.append('domain_name', domainName);
-            formData.append('csrfmiddlewaretoken', document.querySelector('[name=csrfmiddlewaretoken]').value);
 
-            const response = await fetch('{% url "domains:check_availability" %}', {
+            const response = await window.platformFetch('{% url "domains:check_availability" %}', {
                 method: 'POST',
                 body: formData
             });
@@ -370,6 +363,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 searchResults.appendChild(outerDiv);
             }
         } catch (error) {
+            if (error.csrfReload) {  // platformFetch already said to reload
+                searchResults.classList.add('hidden');
+                return;
+            }
             searchResults.innerHTML = `
                 <div class="border border-red-200 dark:border-red-700 rounded-lg p-4 bg-red-50 dark:bg-red-900/20">
                     <p class="text-red-600 dark:text-red-400">{% icon "x" %} {% trans "Error checking availability. Please try again." %}</p>

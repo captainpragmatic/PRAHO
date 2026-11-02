@@ -11,8 +11,8 @@ response change-set id with exact old/new display values -> restore inside a
 finally with an ORM fallback. One multi-key atomic change set and one
 server-process cache-invalidation canary (maintenance banner) run per sweep.
 NOT covered here: the browser widget layer (Playwright suite), deep consumer
-business behavior (integration suite), CSRF enforcement (disabled in dev;
-covered by unit tests).
+business behavior (integration suite). CSRF is enforced in dev, so every write sends the
+Platform's token.
 
 Full catalog sweep: every key changed via the real UI endpoints and restored.
 
@@ -76,11 +76,11 @@ except LoginFailedError as error:
     sys.exit(f"🔥 [QA sweep] {error}")
 except requests.ConnectionError:
     sys.exit(f"🔥 [QA sweep] nothing is listening on {BASE}. Start the platform with `make dev`.")
-CSRF_TOKEN = session.cookies.get("csrftoken") or page_token(session, BASE, "/settings/billing/")
+CSRF_TOKEN = session.cookies.get("platform_csrftoken") or page_token(session, BASE, "/settings/billing/")
 
 
 def csrf_headers() -> dict:
-    token = session.cookies.get("csrftoken") or CSRF_TOKEN
+    token = session.cookies.get("platform_csrftoken") or CSRF_TOKEN
     return {"X-CSRFToken": token, "Content-Type": "application/json", "Referer": BASE}
 
 

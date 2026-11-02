@@ -99,6 +99,23 @@ account_status_banner, cookie_consent_banner, customer_selector, rate_limit_inli
 ### Platform-Only (2)
 mobile_header, table_enhanced
 
+## The button component: what it may render (amended 2026-11)
+
+- **Alpine bindings are named arguments, never `attrs`.** `alpine_click`, `alpine_disabled`, `alpine_show` and
+  `alpine_text` render `@click`, `:disabled`, `x-show` and (on the label only) `x-text`. `attrs` keeps dropping every
+  executable attribute (`apps/ui/attributes.py`).
+- **Expressions are template literals.** Server data never goes inside one: it reaches the handler through a `data-*`
+  attribute the component method reads (`overrideField($el.dataset.key)`), and translated labels are `data-*`
+  attributes read by a getter. HTML escaping protects the attribute, not a JavaScript string inside it.
+- **Neither the CSP nor the `@alpinejs/csp` build is an XSS boundary.** Both run whatever expression the page
+  carries; the guarantee is that no expression is built from data.
+- **Every value is escaped once** (`force_escape`), including `{% trans … as v %}` values, which Django marks safe.
+- **The component owns what it writes.** `attrs` can't add a second copy of an attribute an argument writes.
+- **Misuse fails loudly.** An icon-only button needs a catalog icon and an `aria_label`; `formaction` must be a path on
+  this site, and an empty or `None` one is refused (dropping it would post to the form's own action).
+- **A disabled link renders as a disabled button**, so it can't be followed; its `title` is the reason.
+- **Both services' button arguments are pinned** by `tests/integration/test_cross_service_parity.py`.
+
 ## How to Add a New Shared Component
 
 1. Create `shared/ui/templates/components/{name}.html`

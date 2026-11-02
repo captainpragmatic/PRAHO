@@ -1,0 +1,18 @@
+{% load i18n static %}<!DOCTYPE html>
+<html lang="{{ LANGUAGE_CODE }}" class="h-full bg-slate-900">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% trans "Page expired" %}</title>
+  <link rel="stylesheet" href="{% static 'css/tailwind.min.css' %}">
+</head>
+<body class="h-full bg-slate-900 text-slate-100">
+  <main class="min-h-screen flex items-center justify-center px-4">
+    <div class="max-w-md text-center space-y-4">
+      <h1 class="text-xl font-semibold">{% trans "Page expired" %}</h1>
+      <p class="text-slate-300">{{ message }}</p>
+      <p><a class="text-blue-400 underline" href="{{ back_url }}">{% trans "Reload" %}</a></p>
+    </div>
+  </main>
+</body>
+</html>

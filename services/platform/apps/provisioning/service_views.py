@@ -15,6 +15,7 @@ from django.db import transaction
 from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
@@ -24,6 +25,7 @@ from apps.billing.currency_policy import (
     require_current_selling_policy,
 )
 from apps.common.decorators import staff_required_strict
+from apps.common.http import page_redirect
 from apps.customers.models import Customer
 from apps.users.models import User
 
@@ -131,9 +133,26 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # Only staff can manage services (edit/suspend)
     can_manage = user.is_staff_user and service.status in ["active", "suspended"]
 
+    # A real hosting failure leaves the Service active and fails its order line; order cancellation (and the legacy
+    # API confirm path) fail the Service itself. The page points to the line, where staff retry it
+    # (orders: retry_line_for_staff).
+    from apps.orders.models import OrderItem  # noqa: PLC0415  # ADR-0007
+
+    failed_line = (
+        OrderItem.objects.filter(service=service, provisioning_status="failed")
+        .select_related("order")
+        .order_by("-created_at")
+        .first()
+    )
+    cancelled_with_order = service.status == "failed" and (
+        OrderItem.objects.filter(service=service, order__status="cancelled").exists()
+    )
+
     context = {
         "service": service,
         "can_manage": can_manage,
+        "failed_line": failed_line,
+        "cancelled_with_order": cancelled_with_order,
     }
 
     return render(request, "provisioning/service_detail.html", context)
@@ -284,6 +303,11 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     return render(request, "provisioning/service_form.html", context, status=response_status)
 
 
+def _back_to_service(request: HttpRequest, pk: int) -> HttpResponse:
+    """Return to the service page; htmx gets HX-Redirect, since the page's buttons swap into a hidden container."""
+    return page_redirect(request, reverse("provisioning:service_detail", kwargs={"pk": pk}))
+
+
 @staff_required_strict
 def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
     """⏸️ Suspend hosting service"""
@@ -308,16 +332,16 @@ def service_suspend(request: HttpRequest, pk: int) -> HttpResponse:
                     domain=service.domain, status=service.status
                 ),
             )
-            return redirect("provisioning:service_detail", pk=pk)
+            return _back_to_service(request, pk)
         except ConcurrentTransition:
             messages.error(
                 request,
                 _("❌ Service {domain} was modified concurrently. Please try again.").format(domain=service.domain),
             )
-            return redirect("provisioning:service_detail", pk=pk)
+            return _back_to_service(request, pk)
 
         messages.success(request, _("⏸️ Service {domain} has been suspended!").format(domain=service.domain))
-        return redirect("provisioning:service_detail", pk=pk)
+        return _back_to_service(request, pk)
 
     return render(request, "provisioning/service_suspend.html", {"service": service})
 
@@ -335,6 +359,17 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
         return redirect("provisioning:services")
 
     if request.method == "POST":
+        if service.status == "failed":
+            from apps.orders.models import OrderItem  # noqa: PLC0415  # ADR-0007
+
+            # The FSM allows failed -> active, but that only flips the status: nothing is provisioned, and none of
+            # fulfilment's checks run. Order cancellation fails a Service, and so does the legacy API confirm path
+            # (provision_service_task) on any error. A hosting failure is retried on its order line, when it has one.
+            if OrderItem.objects.filter(service=service, provisioning_status="failed").exists():
+                messages.error(request, _("A failed service can't be activated here; retry its order line instead."))
+            else:
+                messages.error(request, _("A failed service can't be activated; it was never set up."))
+            return _back_to_service(request, pk)
         try:
             service.activate()
             service.save(update_fields=["status", "activated_at", "suspended_at", "suspension_reason", "updated_at"])
@@ -345,15 +380,15 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
                     domain=service.domain, status=service.status
                 ),
             )
-            return redirect("provisioning:service_detail", pk=pk)
+            return _back_to_service(request, pk)
         except ConcurrentTransition:
             messages.error(
                 request,
                 _("❌ Service {domain} was modified concurrently. Please try again.").format(domain=service.domain),
             )
-            return redirect("provisioning:service_detail", pk=pk)
+            return _back_to_service(request, pk)
 
         messages.success(request, _("▶️ Service {domain} has been activated!").format(domain=service.domain))
-        return redirect("provisioning:service_detail", pk=pk)
+        return _back_to_service(request, pk)
 
     return render(request, "provisioning/service_activate.html", {"service": service})

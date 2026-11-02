@@ -225,17 +225,7 @@
             </a>
 
             {% if can_submit %}
-              {# tmpl-allow TMPL002: needs button loading_label_ids #}
-              <button type="submit" id="checkout-submit" class="sm:w-auto w-full inline-flex items-center justify-center px-6 py-3 text-lg font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors focus:outline-none focus:ring-4 focus:ring-green-500/50"> {# tmpl-allow TMPL005: needs button loading_label_ids #}
-                <span id="button-text">{% trans "Continue to Payment" %}</span>
-                <span id="button-loading" class="hidden">
-                  <svg class="animate-spin h-5 w-5 mr-2" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
-                  {% trans "Processing..." %}
-                </span>
-              </button>
+              {% trans "Continue to Payment" as checkout_label %}{% button checkout_label type="submit" variant="success" size="xl" button_id="checkout-submit" loading=True class_="sm:w-auto w-full" %}
             {% else %}
               {% button _("Create order") variant="secondary" size="lg" disabled=True class_="sm:w-auto w-full" %}
             {% endif %}
@@ -436,17 +426,17 @@
 document.addEventListener('DOMContentLoaded', function() {
     const orderForm = document.querySelector('form[action="{% url 'orders:create_order' %}"]');
     const submitButton = document.getElementById('checkout-submit');
-    const buttonText = document.getElementById('button-text');
-    const buttonLoading = document.getElementById('button-loading');
+    // The button component: its label is .btn-label, and .is-loading shows its spinner (assets/css/input.css).
+    const buttonText = submitButton ? submitButton.querySelector('.btn-label') : null;
     const paymentMethodInputs = document.querySelectorAll('input[name="payment_method"]');
 
     function updateButtonText() {
         const selectedMethod = document.querySelector('input[name="payment_method"]:checked')?.value;
         if (buttonText) {
             if (selectedMethod === 'card') {
-                buttonText.innerHTML = '{% trans "Continue to Payment" %}';
+                buttonText.textContent = '{% trans "Continue to Payment" %}';
             } else if (selectedMethod === 'bank_transfer') {
-                buttonText.innerHTML = '{% trans "Create Order for Bank Transfer" %}';
+                buttonText.textContent = '{% trans "Create Order for Bank Transfer" %}';
             }
         }
     }
@@ -473,10 +463,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 // Show loading state
                 if (submitButton) submitButton.disabled = true;
-                if (buttonText && buttonLoading) {
-                    buttonText.classList.add('hidden');
-                    buttonLoading.classList.remove('hidden');
-                }
+                if (submitButton) submitButton.classList.add('is-loading');
 
                 // Determine the correct action URL
                 let actionUrl;
@@ -488,10 +475,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     {% trans "Please select a payment method" as select_payment_msg %}
                     showToast('error', '{{ select_payment_msg|escapejs }}');
                     if (submitButton) submitButton.disabled = false;
-                    if (buttonText && buttonLoading) {
-                        buttonText.classList.remove('hidden');
-                        buttonLoading.classList.add('hidden');
-                    }
+                    if (submitButton) submitButton.classList.remove('is-loading');
                     return false;
                 }
 
@@ -503,10 +487,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 {% trans "An error occurred. Please try again." as checkout_error_msg %}
                 showToast('error', '{{ checkout_error_msg|escapejs }}');
                 if (submitButton) submitButton.disabled = false;
-                if (buttonText && buttonLoading) {
-                    buttonText.classList.remove('hidden');
-                    buttonLoading.classList.add('hidden');
-                }
+                if (submitButton) submitButton.classList.remove('is-loading');
             }
         });
     }

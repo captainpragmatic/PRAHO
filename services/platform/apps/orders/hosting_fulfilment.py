@@ -290,3 +290,114 @@ def complete_line_for_staff(item_id: UUID | str, *, actor: User, activate_servic
         )
         logger.info("✅ [Orders] Staff marked line %s fulfilled", line.pk)
         return Ok("completed")
+
+
+def _retry_refusal(line: OrderItem, service: Service | None) -> str | None:  # noqa: PLR0911  # One reason per case
+    """Why staff can't retry this line, naming the route that fits instead; None when they can."""
+    from apps.billing.refund_models import Refund  # noqa: PLC0415  # ADR-0007
+    from apps.customers.lifecycle import is_suspended  # noqa: PLC0415  # ADR-0007
+    from apps.provisioning.virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # ADR-0007
+
+    order = line.order
+    if order.status == "cancelled":
+        return _("This order was cancelled; the customer places a new order.")
+    if order.status != "provisioning":
+        return _("Only a line of an order being provisioned can be retried; this order is %(status)s.") % {
+            "status": order.get_status_display()
+        }
+    if line.provisioning_status != "failed":
+        return _("This line isn't failed, so there is nothing to retry.")
+    if line.is_domain_line or service is None or service.status != "active" or not _is_automatic(service):
+        return _("PRAHO doesn't provision this line itself, so it can't be retried here.")
+    if is_suspended(order.customer_id):  # read under the Customer lock _lock holds
+        return _("The customer is suspended; unsuspend them before retrying.")
+    refund = Refund.objects.filter(
+        Q(order=order) | Q(invoice_id=order.invoice_id) if order.invoice_id else Q(order=order)
+    )
+    if refund.exclude(status__in=("rejected", "failed", "cancelled")).exists():
+        return _("This order has a refund; it can't be provisioned again.")
+    job = (
+        VirtualminProvisioningJob.objects.filter(account__service=service, operation="create_domain")
+        .order_by("-created_at")
+        .first()
+    )
+    if job is not None and job.status == "attention":
+        return _("The hosting account's create job needs attention; resolve it on the job page first.")
+    if job is None or job.status != "failed":
+        return _("There is no failed create job to retry for this line.")
+    return None
+
+
+def retry_line_for_staff(item_id: UUID | str, *, actor: User) -> Result[str, str]:
+    """Give a failed hosting line's create job one more attempt and reopen the line, in one transaction.
+
+    The line failed because its create job ran out of retries (or none was scheduled), while the Service stayed
+    active. Under the fulfilment locks this re-arms that job (the failed-job sweep disarms an exhausted job, so the
+    attempt count goes down too), moves the line failed -> pending and records who asked. After commit the sweep and
+    fulfilment run; recovery and the 15-minute sweep pick both up if those messages are lost.
+    """
+    from django_q.tasks import async_task  # noqa: PLC0415  # Deferred
+
+    from apps.audit.services import AuditService  # noqa: PLC0415  # ADR-0007
+    from apps.provisioning.virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # ADR-0007
+
+    from .tasks import get_task_time_limit  # noqa: PLC0415  # tasks imports this module
+
+    with transaction.atomic():
+        locked = _lock(item_id)
+        if locked is None:
+            return Err(_("This order line no longer exists."))
+        line, service = locked
+        refusal = _retry_refusal(line, service)
+        if refusal is not None:
+            return Err(refusal)
+        if service is None:  # _retry_refusal refuses a line without one; kept explicit for the type checker
+            return Err(_("This line has no service to retry."))
+        job = (
+            VirtualminProvisioningJob.objects.filter(account__service=service, operation="create_domain")
+            .order_by("-created_at")
+            .first()
+        )
+        if job is None:
+            return Err(_("There is no failed create job to retry for this line."))
+        now = timezone.now()
+        budget = max(job.max_retries, 1)  # a job created with no retries still gets the one asked for
+        rearmed = VirtualminProvisioningJob.objects.filter(pk=job.pk, status="failed").update(
+            next_retry_at=now, max_retries=budget, retry_count=budget - 1, updated_at=now
+        )
+        if not rearmed:
+            transaction.set_rollback(True)
+            return Err(_("The create job changed meanwhile; reload the page and try again."))
+        line.retry_provisioning()
+        line.provisioning_notes = ""  # the customer read "could not set up"; completion doesn't rewrite it
+        line.save(update_fields=["provisioning_status", "provisioning_notes", "updated_at"])
+        AuditService.log_simple_event(
+            event_type="provisioning_retried",
+            user=actor,
+            content_object=line,
+            description=f"Staff retried the failed hosting line {line.product_name}",
+            actor_type="user",
+            old_values={"provisioning_status": "failed", "job_retry_count": job.retry_count},
+            new_values={"provisioning_status": "pending", "job_retry_count": budget - 1},
+            metadata={
+                "order_id": str(line.order_id),
+                "order_number": line.order.order_number,
+                "service_id": str(service.pk),
+                "job_id": str(job.pk),
+            },
+        )
+        item = str(line.pk)
+        transaction.on_commit(
+            lambda: async_task("apps.provisioning.virtualmin_tasks.process_failed_virtualmin_jobs"), robust=True
+        )
+        transaction.on_commit(
+            lambda: async_task("apps.orders.tasks.provision_order_item", item, timeout=get_task_time_limit()),
+            robust=True,
+        )
+        logger.info("✅ [Orders] Staff %s retried failed line %s", actor.pk, line.pk)
+        return Ok("retried")
+
+
+def retry_refusal(line: OrderItem) -> str | None:
+    """Read-only form of the retry rule, for pages: the endpoint re-checks it under the locks."""
+    return _retry_refusal(line, line.service)

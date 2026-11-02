@@ -18,6 +18,7 @@ Optional Parameters:
 - icon_css: CSS classes for the icon (default: "text-slate-300 group-hover:text-white")
 - staff_only: Boolean, defaults to False
 - disabled: Boolean for coming soon items, defaults to False
+- reason: Why it is disabled (shown instead of the subtitle, and as a tooltip)
 - extra_classes: Additional CSS classes
 ===============================================================================
 {% endcomment %}
@@ -27,14 +28,14 @@ Optional Parameters:
 <!-- Navigation Item -->
 {% if not staff_only or user.is_staff_user %}
     {% if disabled %}
-        <div class="mobile-nav-item group opacity-50 cursor-not-allowed">
+        <div class="mobile-nav-item group opacity-50 cursor-not-allowed" aria-disabled="true"{% if reason %} title="{{ reason }}"{% endif %}>
             <div class="flex items-center space-x-5 p-4">
                 <div class="flex-shrink-0 w-16 h-16 bg-slate-700/50 rounded-2xl flex items-center justify-center">
                     {% if icon_name %}{% icon icon_name size="xl" css_class=icon_css|default:"text-slate-300 group-hover:text-white" %}{% else %}{{ icon|safe }}{% endif %}
                 </div>
                 <div class="flex-1 min-w-0">
                     <div class="text-xl font-semibold text-slate-400">{{ title }}</div>
-                    <div class="text-base text-slate-500">{{ subtitle }}</div>
+                    <div class="text-base text-slate-500">{{ reason|default:subtitle }}</div>
                 </div>
                 {% icon "lock" size="lg" css_class="text-slate-500" %}
             </div>

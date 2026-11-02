@@ -76,37 +76,29 @@
         </div>
     </div>
 
-    <!--  Provisioning Error Alert (shown only for failed services) -->
-    {% if service.status == 'failed' and service.provisioning_errors %}
+    <!-- Provisioning failures: where to go next -->
+    {% if cancelled_with_order %}
+    <div class="bg-slate-800 border border-slate-600 rounded-lg p-4 mb-6">
+        <h3 class="text-sm font-medium text-slate-200">{% trans 'Cancelled with its order' %}</h3>
+        <p class="mt-1 text-sm text-slate-400">{% trans 'This service failed because its order was cancelled. The customer places a new order to get it back.' %}</p>
+    </div>
+    {% elif failed_line %}
     <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
         <div class="flex items-start">
-            <div class="flex-shrink-0">
-                <span class="text-red-300 text-xl">{% icon "warning" %}</span>
-            </div>
+            <div class="flex-shrink-0"><span class="text-red-300 text-xl">{% icon "warning" %}</span></div>
             <div class="ml-3 flex-1">
-                <h3 class="text-sm font-medium text-red-200">{% trans 'Provisioning Failed' %}</h3>
-                <div class="mt-1">
-                    <p class="text-sm text-red-300">
-                        {% trans 'This service failed to provision automatically. Please review the error details below and take appropriate action.' %}
-                    </p>
-                    {% if service.last_provisioning_attempt %}
-                    <p class="text-xs text-red-400 mt-1">
-                        {% trans 'Last attempt:' %} {% localised_date service.last_provisioning_attempt "datetime" %}
-                    </p>
-                    {% endif %}
+                <h3 class="text-sm font-medium text-red-200">{% trans 'Provisioning failed' %}</h3>
+                <p class="mt-1 text-sm text-red-300">{% blocktrans with number=failed_line.order.order_number %}The hosting account for this service was not created. Retry it from its line on order {{ number }}.{% endblocktrans %}</p>
+                <div class="mt-3">
+                    {% url 'orders:order_detail' pk=failed_line.order_id as failed_order_url %}{% trans "Open the order" as open_order_label %}{% button open_order_label href=failed_order_url variant="secondary" size="sm" %}
                 </div>
-                <div class="mt-3 bg-red-800/50 rounded border border-red-600 p-3">
-                    <h4 class="text-xs font-medium text-red-200 mb-1">{% trans 'Error Details:' %}</h4>
-                    <pre class="text-xs text-red-300 whitespace-pre-wrap font-mono">{{ service.provisioning_errors }}</pre>
-                </div>
-                {% if can_manage %}
-                <div class="mt-3 flex items-center gap-2">
-                    {% trans "Retry Provisioning" as retry_btn %}{% button retry_btn variant="danger" size="sm" icon="refresh" %}
-                    {% trans "Add Admin Notes" as notes_btn %}{% button notes_btn variant="secondary" size="sm" icon="document" %}
-                </div>
-                {% endif %}
             </div>
         </div>
+    </div>
+    {% elif service.status == 'failed' and service.provisioning_errors %}
+    <div class="bg-red-900/50 border border-red-700 rounded-lg p-4 mb-6">
+        <h3 class="text-sm font-medium text-red-200">{% trans 'Provisioning Failed' %}</h3>
+        <pre class="mt-2 text-xs text-red-300 whitespace-pre-wrap font-mono">{{ service.provisioning_errors }}</pre>
     </div>
     {% endif %}
 

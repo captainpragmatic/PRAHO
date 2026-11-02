@@ -1,5 +1,6 @@
 {% load localisation_tags ui_components %}
 {% load i18n %}
+{% if swap_bulk_link %}<span id="bulk-actions-link" hx-swap-oob="true">{% trans "Bulk Actions" as bt_bulk %}{% button bt_bulk href=bulk_actions_url variant="secondary" %}</span>{% endif %}
 
 {% if accounts %}
 <!-- Accounts Table -->
@@ -7,7 +8,7 @@
     <div class="px-6 py-4 border-b border-slate-700">
         <div class="flex items-center justify-between">
             <h2 class="text-lg font-semibold text-slate-100">
-                {% trans "Hosting Accounts" %} ({{ accounts|length }})
+                {% trans "Hosting Accounts" %} ({{ accounts.paginator.count }})
             </h2>
             <div class="text-sm text-slate-400">
                 {% trans "Last updated:" %} <span id="last-updated">{% localised_date last_updated "time_seconds" %}</span>
@@ -108,64 +109,9 @@
         </table>
     </div>
 
-    <!-- Pagination -->
-    {% if is_paginated %}
-    <div class="bg-slate-900 px-4 py-3 border-t border-slate-700 sm:px-6">
-        <div class="flex items-center justify-between">
-            <div class="flex-1 flex justify-between sm:hidden">
-                {% if page_obj.has_previous %}
-                    {% trans "Previous" as bt5 %}{% button bt5 href="?page={{ page_obj.previous_page_number }}" variant="secondary" size="sm" %}
-                {% endif %}
-                {% if page_obj.has_next %}
-                    {% trans "Next" as bt6 %}{% button bt6 href="?page={{ page_obj.next_page_number }}" variant="secondary" size="sm" %}
-                {% endif %}
-            </div>
-            <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                <div>
-                    <p class="text-sm text-slate-400">
-                        {% trans "Showing" %}
-                        <span class="font-medium">{{ page_obj.start_index }}</span>
-                        {% trans "to" %}
-                        <span class="font-medium">{{ page_obj.end_index }}</span>
-                        {% trans "of" %}
-                        <span class="font-medium">{{ paginator.count }}</span>
-                        {% trans "results" %}
-                    </p>
-                </div>
-                <div>
-                    <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
-                        {% if page_obj.has_previous %}
-                            <a href="?page={{ page_obj.previous_page_number }}"
-                               class="relative inline-flex items-center px-2 py-2 rounded-l-md border border-slate-600 bg-slate-800 text-sm font-medium text-slate-400 hover:bg-slate-700 transition-colors">
-                                ‹
-                            </a>
-                        {% endif %}
-
-                        {% for num in page_obj.paginator.page_range %}
-                            {% if page_obj.number == num %}
-                                <span class="relative inline-flex items-center px-4 py-2 border border-blue-500 bg-blue-600 text-sm font-medium text-white">
-                                    {{ num }}
-                                </span>
-                            {% else %}
-                                <a href="?page={{ num }}"
-                                   class="relative inline-flex items-center px-4 py-2 border border-slate-600 bg-slate-800 text-sm font-medium text-slate-400 hover:bg-slate-700 transition-colors">
-                                    {{ num }}
-                                </a>
-                            {% endif %}
-                        {% endfor %}
-
-                        {% if page_obj.has_next %}
-                            <a href="?page={{ page_obj.next_page_number }}"
-                               class="relative inline-flex items-center px-2 py-2 rounded-r-md border border-slate-600 bg-slate-800 text-sm font-medium text-slate-400 hover:bg-slate-700 transition-colors">
-                                ›
-                            </a>
-                        {% endif %}
-                    </nav>
-                </div>
-            </div>
-        </div>
-    </div>
-    {% endif %}
+    <!-- Pagination (keeps the filters; htmx swaps the table only) -->
+    {% url 'provisioning:virtualmin_accounts' as accounts_url %}
+    {% include 'components/pagination.html' with page_obj=accounts extra_params=extra_params htmx_target='#accounts-container' htmx_url=accounts_url %}
 </div>
 
 {% else %}
@@ -174,17 +120,17 @@
     <span class="text-slate-400">{% icon "globe" size="2xl" %}</span>
     <h3 class="mt-4 text-lg font-medium text-slate-100">{% trans "No accounts found" %}</h3>
     <p class="mt-2 text-sm text-slate-400">
-        {% if request.GET.search or request.GET.status or request.GET.plan %}
+        {% if search_query or status_filter or server_filter %}
             {% trans "No accounts match your current filters. Try adjusting your search criteria." %}
         {% else %}
             {% trans "Get started by creating your first hosting account." %}
         {% endif %}
     </p>
     <div class="mt-6">
-        {% if request.GET.search or request.GET.status or request.GET.plan %}
-            {% trans "Clear Filters" as bt7 %}{% button bt7 href="." variant="secondary" %}
+        {% if search_query or status_filter or server_filter %}
+            {% url 'provisioning:virtualmin_accounts' as accounts_url %}{% trans "Clear Filters" as bt7 %}{% button bt7 href=accounts_url variant="secondary" %}
         {% endif %}
-        {% trans "Create Account" as bt8 %}{% button bt8 href=new_account_url variant="primary" %}
+        {% url 'provisioning:virtualmin_account_new' as new_account_url %}{% trans "Create Account" as bt8 %}{% button bt8 href=new_account_url variant="primary" %}
     </div>
 </div>
 {% endif %}

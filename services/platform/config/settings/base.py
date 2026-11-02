@@ -274,6 +274,8 @@ SESSION_SAVE_EVERY_REQUEST = True
 
 # CSRF settings
 CSRF_COOKIE_HTTPONLY = True
+# A refused token answers "reload the page", marked so the page's scripts can tell it from a refused permission.
+CSRF_FAILURE_VIEW = "apps.common.csrf_failure.csrf_failure"
 CSRF_TRUSTED_ORIGINS: list[str] = []
 # Note: CSRF_COOKIE_SECURE = True set in prod.py
 

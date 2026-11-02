@@ -162,10 +162,12 @@ class ButtonDisabledTests(SimpleTestCase):
         # Check for the HTML boolean attribute form (not the CSS "disabled:" prefix)
         self.assertIn("disabled>", result)
 
-    def test_disabled_anchor_uses_aria_disabled(self) -> None:
+    def test_disabled_anchor_renders_as_a_disabled_button(self) -> None:
+        """aria-disabled and tabindex=-1 don't stop a click, so a disabled link loses its href."""
         result = _render('{% button "Go" href="/path/" disabled=True %}')
-        self.assertIn('aria-disabled="true"', result)
-        self.assertIn('tabindex="-1"', result)
+        self.assertNotIn('href="/path/"', result)
+        self.assertIn("<button", result)
+        self.assertIn(" disabled>", result)
 
     def test_enabled_button_has_no_disabled_attr(self) -> None:
         # Tailwind uses "disabled:opacity-50" CSS class — check for the HTML
@@ -208,6 +210,11 @@ class ButtonHtmxTests(SimpleTestCase):
         result = _render('{% button "Load" hx_get="/api/" %}')
         self.assertIn("btn-spinner", result)
         self.assertIn("htmx-indicator", result)
+
+    def test_hx_sync_attribute(self) -> None:
+        """The Platform's button already took hx_sync; the Portal's rejected it (in tests) or dropped it."""
+        result = _render('{% button "Toggle" hx_post="/api/toggle/" hx_sync="this:drop" %}')
+        self.assertIn('hx-sync="this:drop"', result)
 
     def test_no_spinner_without_htmx(self) -> None:
         """A plain button with no HTMX attributes should not have a spinner."""
@@ -284,3 +291,14 @@ class ButtonIdTests(SimpleTestCase):
     def test_button_id_omitted_renders_no_id_attribute(self) -> None:
         result = _render('{% button "Attach" %}')
         self.assertNotIn(" id=", result)
+
+
+class PlansUpgradeButtonTests(SimpleTestCase):
+    """"Upgrade Plan" did nothing (no href, action or form); until portal upgrades exist it says so, disabled."""
+
+    def test_the_upgrade_button_is_disabled_and_says_why(self) -> None:
+        from django.template.loader import render_to_string  # noqa: PLC0415
+
+        html = render_to_string("services/plans_list.html", {"plans": [{"name": "Pro", "price_monthly": 10}]})
+        self.assertIn("Coming soon", html)
+        self.assertRegex(html, r"<button[^>]*\bdisabled\b[^>]*>\s*<span class=\"btn-label[^\"]*\">Upgrade Plan")

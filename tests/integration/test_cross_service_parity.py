@@ -6,6 +6,7 @@ stay in sync. These files are duplicated because Portal cannot import
 from Platform (service isolation), but they must remain identical.
 """
 
+import ast
 import json
 import re
 from pathlib import Path
@@ -72,6 +73,56 @@ class TestButtonAttributeParity(TestCase):
             (REPO_ROOT / "services/platform/apps/ui/attributes.py").read_bytes(),
             (REPO_ROOT / "services/portal/apps/ui/attributes.py").read_bytes(),
         )
+
+
+def _button_contract(service: str) -> dict[str, object]:
+    """What a service's {% button %} accepts, how it defaults, and what it hands button.html, read from source.
+
+    The two ui_components.py files can't be imported into one process (both are apps.ui.templatetags.ui_components),
+    so this parses them. The returned keys matter on their own: an argument that is accepted but never forwarded
+    renders nothing, which no rendering test of the other service would notice.
+    """
+    tree = ast.parse((REPO_ROOT / f"services/{service}/apps/ui/templatetags/ui_components.py").read_text())
+    fields: dict[str, tuple[str, str]] = {}
+    accepted: set[str] = set()
+    returned: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name in {"ButtonConfig", "HTMXAttributes"}:
+            for item in node.body:
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
+                    default = ast.unparse(item.value) if item.value is not None else ""
+                    fields[item.target.id] = (ast.unparse(item.annotation), default)
+        if isinstance(node, ast.FunctionDef) and node.name == "button":
+            for statement in ast.walk(node):
+                if isinstance(statement, ast.Return) and isinstance(statement.value, ast.Dict):
+                    returned = {key.value for key in statement.value.keys if isinstance(key, ast.Constant)}
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "_TAG_ARGUMENTS"
+            and isinstance(node.value, ast.Dict)
+        ):
+            for key, value in zip(node.value.keys, node.value.values, strict=True):
+                if isinstance(key, ast.Constant) and key.value == "button":
+                    accepted = {
+                        arg.value
+                        for call in ast.walk(value)
+                        if isinstance(call, ast.Call) and getattr(call.func, "id", "") == "_htmx"
+                        for arg in call.args
+                        if isinstance(arg, ast.Constant)
+                    }
+    return {"fields": fields, "htmx_accepted": accepted, "returned": returned}
+
+
+class TestButtonTagParity(TestCase):
+    """Both services' {% button %} take the same arguments, with the same defaults, and pass them all on."""
+
+    def test_the_button_contract_matches(self) -> None:
+        platform, portal = _button_contract("platform"), _button_contract("portal")
+        for part in ("fields", "htmx_accepted", "returned"):
+            with self.subTest(part=part):
+                self.assertTrue(platform[part], f"found no {part} in the platform's ui_components.py")
+                self.assertEqual(platform[part], portal[part])
 
 
 class TestCustomerViewReturnPath(TestCase):

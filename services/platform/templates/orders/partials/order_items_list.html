@@ -1,5 +1,5 @@
 {% load i18n %}
-{% load ui_components %}
+{% load ui_components order_lines %}
 {% load formatting %}
 
 <!-- Order Items Section with HTMX for real-time updates -->
@@ -114,6 +114,23 @@
                 {% trans "Active" as bt3 %}{% badge bt3 icon="check" variant="success" size="sm" %}
               {% elif item.provisioning_status == "failed" %}
                 {% trans "Failed" as bt4 %}{% badge bt4 variant="danger" size="sm" %}
+                {% if not item.is_domain_line %}
+                  {% trans "Retry" as retry_label %}
+                  {% if not can_fulfil_lines %}
+                    {% trans "Only admin or manager staff can retry a line." as retry_why %}
+                  {% else %}
+                    {% line_retry_refusal item as retry_why %}
+                  {% endif %}
+                  <div class="mt-2">
+                  {% if retry_why %}
+                    {% button retry_label variant="secondary" size="sm" icon="refresh" disabled=True title=retry_why %}
+                    <p class="mt-1 text-xs text-slate-400 max-w-xs whitespace-normal">{{ retry_why }}</p>
+                  {% else %}
+                    {% url 'orders:order_item_retry' pk=order.pk item_pk=item.pk as retry_url %}{% trans "Give this line's hosting account another attempt?" as retry_confirm %}
+                    {% button retry_label variant="warning" size="sm" icon="refresh" hx_post=retry_url hx_confirm=retry_confirm %}
+                  {% endif %}
+                  </div>
+                {% endif %}
               {% elif item.provisioning_status == "cancelled" %}
                 {% trans "Cancelled" as bt5 %}{% badge bt5 icon="x" variant="secondary" size="sm" %}
               {% else %}
@@ -124,25 +141,8 @@
               {% if edit_mode and can_edit and order.can_edit_items %}
                 {% comment %}Edit mode - expandable row controls{% endcomment %}
                 <div class="flex flex-col sm:flex-row space-y-1 sm:space-y-0 sm:space-x-2">
-                  {# tmpl-allow TMPL002: holds an icon span plus two responsive label spans (block sm:hidden / hidden sm:block); the button tag renders one text and one icon #}
-                  <button type="button"
-                          data-action="invoke" data-invoke="toggleExpandableEditAction" data-item-id="{{ item.id }}"
-                          class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded border border-blue-500 text-blue-400 hover:bg-blue-500 hover:text-white transition-colors min-h-[32px] sm:min-h-[28px]"
-                          title="{% trans 'Edit item inline' %}"
-                          id="edit-btn-{{ item.id }}">
-                    <span class="mr-1">{% icon "document" %}</span>
-                    <span class="block sm:hidden">{% trans "Edit" %}</span>
-                    <span class="hidden sm:block">{% trans "Edit" %}</span>
-                  </button>
-                  {# tmpl-allow TMPL002: holds an icon span plus two responsive label spans (block sm:hidden / hidden sm:block); the button tag renders one text and one icon #}
-                  <button type="button"
-                          data-action="invoke" data-invoke="deleteOrderItemAction" data-item-id="{{ item.id }}"
-                          class="inline-flex items-center justify-center px-2 py-1.5 text-xs font-medium rounded border border-red-500 text-red-400 hover:bg-red-500 hover:text-white transition-colors min-h-[32px] sm:min-h-[28px]"
-                          title="{% trans 'Delete item' %}">
-                    <span class="mr-1">{% icon "x" %}</span>
-                    <span class="block sm:hidden">{% trans "Delete" %}</span>
-                    <span class="hidden sm:block">{% trans "Delete" %}</span>
-                  </button>
+                  {% with item_id=item.id|stringformat:"s" %}{% with edit_id="edit-btn-"|add:item_id item_attr='data-item-id="'|add:item_id|add:'"' %}{% trans "Edit" as edit_item_label %}{% trans 'Edit item inline' as edit_item_title %}{% button edit_item_label variant="outline-primary" size="xs" icon="document" button_id=edit_id title=edit_item_title data_action="invoke" data_invoke="toggleExpandableEditAction" attrs=item_attr %}{% endwith %}{% endwith %}
+                  {% with item_id=item.id|stringformat:"s" %}{% with item_attr='data-item-id="'|add:item_id|add:'"' %}{% trans "Delete" as delete_item_label %}{% trans 'Delete item' as delete_item_title %}{% button delete_item_label variant="outline-danger" size="xs" icon="x" title=delete_item_title data_action="invoke" data_invoke="deleteOrderItemAction" attrs=item_attr %}{% endwith %}{% endwith %}
                 </div>
               {% elif is_staff and can_edit and order.can_edit_items %}
                 {% comment %}Detail view with edit access - show edit link{% endcomment %}

@@ -304,7 +304,7 @@ class DebugTraceMiddleware(TraceMiddleware):
             <div style="margin-bottom: 5px; color: {"#ff6b6b" if query_trace.get("duplicate_count", 0) > 0 else "#4ecdc4"};">
                 <strong>N+1 Detected:</strong> {query_trace.get("duplicate_count", 0)} patterns
             </div>
-            <button onclick="this.parentElement.remove()" style="
+            <button type="button" data-action="remove-self" data-remove-closest="div" style="
                 margin-top: 10px; background: #ff6b6b; border: none;
                 color: white; padding: 5px 10px; border-radius: 4px;
                 cursor: pointer;

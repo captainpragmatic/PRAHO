@@ -150,8 +150,9 @@
 
       <!-- Action Button -->
       <div class="px-6 py-4 border-t border-slate-700">
-        {% trans "Upgrade Plan" as submit_label %}
-        {% button submit_label type="button" variant="primary" class_="w-full" %}
+        {# Upgrading from the portal is coming (automatic, prorated); until then the button says so instead of doing nothing. #}
+        {% trans "Upgrade Plan" as submit_label %}{% trans "Coming soon: upgrade from the portal. To change plans now, open a ticket." as upgrade_soon %}
+        {% button submit_label type="button" variant="primary" class_="w-full" disabled=True title=upgrade_soon %}
       </div>
     </div>
     {% endfor %}

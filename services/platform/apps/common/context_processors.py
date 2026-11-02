@@ -7,6 +7,7 @@ from typing import Any
 
 from django.conf import settings
 from django.http import HttpRequest
+from django.utils.translation import gettext as _
 
 
 def _maintenance_mode_active() -> bool:
@@ -51,64 +52,6 @@ def user_permissions(request: HttpRequest) -> dict[str, Any]:
         },
         "user_role": getattr(request.user, "role", "user"),
         "can_access_admin": getattr(request.user, "is_staff_user", False),
-    }
-
-
-def navigation_context(request: HttpRequest) -> dict[str, Any]:
-    """Navigation context for templates"""
-    nav_items = [
-        {
-            "name": "Dashboard",
-            "url": "/",
-            "icon": "dashboard",
-            "active": request.path == "/",
-        },
-        {
-            "name": "Clienți",
-            "url": "/customers/",
-            "icon": "users",
-            "active": request.path.startswith("/customers/"),
-            "permission": "customers.view_customer",
-        },
-        {
-            "name": "Facturare",
-            "url": "/billing/",
-            "icon": "credit-card",
-            "active": request.path.startswith("/billing/"),
-            "permission": "billing.view_invoice",
-        },
-        {
-            "name": "Tickete",
-            "url": "/tickets/",
-            "icon": "message-circle",
-            "active": request.path.startswith("/tickets/"),
-            "permission": "tickets.view_ticket",
-        },
-        {
-            "name": "Servicii",
-            "url": "/provisioning/",
-            "icon": "server",
-            "active": request.path.startswith("/provisioning/"),
-            "permission": "provisioning.view_service",
-        },
-    ]
-
-    # Filter navigation by permissions
-    if request.user.is_authenticated:
-        # ⚡ PERFORMANCE: Use list comprehension for better performance
-        nav_items = [
-            item
-            for item in nav_items
-            if "permission" not in item
-            or (isinstance(item["permission"], str) and request.user.has_perm(item["permission"]))
-        ]
-    else:
-        # Anonymous users see limited navigation
-        nav_items = [item for item in nav_items if "permission" not in item]
-
-    return {
-        "nav_items": nav_items,
-        "current_path": request.path,
     }
 
 
@@ -206,13 +149,19 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
 
     # Staff/Admin Navigation Items
     if request.user.is_staff_user:
+        # The invoice list is billing-staff only (billing_staff_required): others see why, not a refusal.
+        can_open_invoices = getattr(request.user, "can_manage_financial_data", False)
+        invoices_locked = "" if can_open_invoices else _("Only billing staff can open invoices.")
+        invoices_item: dict[str, Any] = {"text": "Invoices", "url": "/billing/invoices/", "icon": "receipt"}
+        if invoices_locked:
+            invoices_item.update(disabled=True, reason=invoices_locked)
         business_items = [
             {"text": "Customers", "url": "/customers/", "icon": "users"},
             {"text": "Products", "url": "/products/", "icon": "orders"},
             {"text": "Orders", "url": "/orders/", "icon": "clipboard"},
             {"text": "Promotions", "url": "/promotions/admin/", "icon": "gift"},
             {"divider": True},
-            {"text": "Invoices", "url": "/billing/invoices/", "icon": "receipt"},
+            invoices_item,
             {"text": "Services", "url": "/provisioning/services/", "icon": "services"},
             {"text": "Domains", "url": "/domains/", "icon": "globe"},
             {"divider": True},
@@ -238,6 +187,7 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
         return {
             "business_items": business_items,
             "support_items": support_items,
+            "nav_invoices_locked": invoices_locked,
         }
 
     # Customer User Navigation Items

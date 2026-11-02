@@ -1064,11 +1064,6 @@ check-parity:
 	@$(VENV_DIR)/bin/python scripts/check_component_parity.py
 	@echo "✅ Component parity check complete!"
 
-check-parity-fix:
-	@echo "🔧 [Parity] Syncing divergent components (portal → platform)..."
-	@$(VENV_DIR)/bin/python scripts/check_component_parity.py --fix
-	@echo "✅ Parity fix complete — verify diffs before committing."
-
 css-audit:
 	@echo "📦 [CSS Audit] Measuring portal CSS bundle size..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

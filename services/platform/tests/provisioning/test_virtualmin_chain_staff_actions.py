@@ -23,6 +23,7 @@ from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService
 from apps.settings.services import SettingsService
 from apps.users.models import User
+from tests.helpers.csrf import body_csrf_token
 from tests.provisioning.test_virtualmin_account_exclusion import ExclusionCase
 from tests.provisioning.test_virtualmin_chain_state import ChainFixtures
 
@@ -73,7 +74,9 @@ class AccountPageTests(StaffActionCase):
         self.assertIn("Take differential backup", differential_button)
         for button in (base_button, differential_button):
             self.assertIn("hx-confirm=", button)
-            self.assertIn("X-CSRFToken", button, "a POST needs the token")
+            # A POST needs the token: it comes from the page's <body hx-headers>, not from each button.
+            self.assertNotIn("X-CSRFToken", button)
+        self.assertEqual(len(body_csrf_token(page)), 64)
         self.assertIn("complete backup", base_button)
         self.assertIn("only what changed", differential_button)
         self.assertIn(reverse("provisioning:virtualmin_account_restore_pair", args=[self.account.pk]), page)

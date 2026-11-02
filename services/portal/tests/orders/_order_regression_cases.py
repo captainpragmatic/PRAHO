@@ -90,19 +90,14 @@ class TestCartRemoveNoDuplicatePost(SimpleTestCase):
 
     def test_remove_button_has_no_inline_calculate_totals(self) -> None:
         """Cart-items partial remove button must not contain inline calculate_totals call."""
-        template_path = Path(__file__).resolve().parents[2] / "templates" / "orders" / "partials" / "cart_items.html"
-        content = template_path.read_text()
+        from tests.orders.cart_markup import cart_remove_buttons  # noqa: PLC0415
 
-        # Find the remove button line
-        for line in content.splitlines():
-            if "remove_from_cart" in line and "hx-post" in line:
-                # Should delegate the cartUpdated dispatch to csp-actions.js.
-                self.assertIn('data-htmx-after="cart-updated"', line)
-                # Should NOT have inline calculate_totals (that's handled by the global listener)
-                self.assertNotIn("calculate_totals", line)
-                break
-        else:
-            self.fail("Remove button not found in cart_items.html")
+        buttons = cart_remove_buttons()
+        self.assertEqual(len(buttons), 1, "Remove button not found in cart_items.html")
+        # Should delegate the cartUpdated dispatch to csp-actions.js.
+        self.assertEqual(buttons[0].get("data-htmx-after"), "cart-updated")
+        # Should NOT have inline calculate_totals (that's handled by the global listener)
+        self.assertNotIn("calculate_totals", str(buttons[0]))
 
 
 # ---------------------------------------------------------------------------

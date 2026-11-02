@@ -320,9 +320,13 @@ def require_customer_role(  # noqa: C901
     return decorator
 
 
+# Who may open billing; the nav reads the same set, so it never offers billing to a member the views refuse.
+BILLING_ROLES: tuple[str, ...] = ("owner", "billing")
+
+
 def require_billing_access(realtime_verification: bool = False) -> Callable[..., Any]:
     """🔒 Require billing access - owner or billing role"""
-    return require_customer_role(["owner", "billing"], realtime_verification)
+    return require_customer_role(list(BILLING_ROLES), realtime_verification)
 
 
 def require_support_access(

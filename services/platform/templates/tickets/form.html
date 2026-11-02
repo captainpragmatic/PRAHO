@@ -133,7 +133,7 @@
         services.forEach(service => {
           const option = document.createElement('option');
           option.value = service.id;
-          option.textContent = `${service.service_type} - ${service.name}`;
+          option.textContent = `${service.service_name} - ${service.service_plan__name}`;
           serviceSelect.appendChild(option);
         });
       })
@@ -144,7 +144,7 @@
 
   // Auto-populate subject based on ticket type
   document.getElementById('ticket_type').addEventListener('change', function () {
-    const subjectField = document.getElementById('subject');
+    const subjectField = document.getElementById('input-subject');
     const type = this.value;
 
     if (!subjectField.value) {
