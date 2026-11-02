@@ -257,7 +257,7 @@ class RefundService:
                 if invoice_result.is_err():
                     return Err(f"Failed to process refund: {invoice_result.unwrap_err()}")
 
-                order = lock_one_and_load(Order.objects.select_related("customer").filter(id=order_id))
+                order = lock_one_and_load(Order.objects.filter(id=order_id).select_related("customer"))
                 if (
                     order.customer_id != order_snapshot.customer_id
                     or order.invoice_id != order_snapshot.invoice_id
@@ -553,7 +553,7 @@ class RefundService:
         """
         try:
             # SECURITY: Lock the order row to prevent concurrent refund processing
-            order = lock_one_and_load(Order.objects.select_related("customer").filter(id=order_id))
+            order = lock_one_and_load(Order.objects.filter(id=order_id).select_related("customer"))
             return Ok(order)
         except Order.DoesNotExist:
             return Err("Failed to process refund: Order not found")
@@ -740,7 +740,7 @@ class RefundService:
                     return Err(f"Failed to process refund: {payment_result.unwrap_err()}")
                 payment = payment_result.unwrap()
 
-                invoice = lock_one_and_load(Invoice.objects.select_related("customer").filter(id=invoice_id))
+                invoice = lock_one_and_load(Invoice.objects.filter(id=invoice_id).select_related("customer"))
                 if invoice.customer_id != invoice_snapshot.customer_id:
                     return Err("Failed to process refund: Invoice payment linkage changed; retry refund")
 
@@ -787,7 +787,7 @@ class RefundService:
         """
         try:
             # SECURITY: Lock the invoice row to prevent concurrent refund processing
-            invoice = lock_one_and_load(Invoice.objects.select_related("customer").filter(id=invoice_id))
+            invoice = lock_one_and_load(Invoice.objects.filter(id=invoice_id).select_related("customer"))
             return Ok(invoice)
         except Invoice.DoesNotExist:
             return Err("Failed to process refund: Invoice not found")
