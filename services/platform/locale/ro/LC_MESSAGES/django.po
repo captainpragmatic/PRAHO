@@ -30516,3 +30516,12 @@ msgstr "O migrare de componente finalizată necesită încă retragerea nativă 
 
 msgid "A terminal component migration still has unresolved native holds on this server."
 msgstr "O migrare de componente încheiată are încă restricții native nerezolvate pe acest server."
+
+msgid "The original create no longer owns its recovery claim."
+msgstr "Crearea inițială nu mai deține rezervarea pentru recuperare."
+
+msgid "Resolve the node's hardening attempt before recovering its original create."
+msgstr "Rezolvați operațiunea de securizare a nodului înainte de a recupera crearea inițială."
+
+msgid "The original create node identity changed. Verify its recorded target and outcome before retrying."
+msgstr "Identitatea nodului pentru crearea inițială s-a schimbat. Verificați destinația înregistrată și rezultatul înainte de a reîncerca."

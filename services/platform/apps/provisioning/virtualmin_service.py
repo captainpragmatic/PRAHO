@@ -40,6 +40,7 @@ from .virtualmin_backup_service import (
     RestoreConfig,
     VirtualminBackupService,
 )
+from .virtualmin_create_node_identity import lock_create_retry_node
 from .virtualmin_domain_state import DOMAIN_STATE_PROGRAMS, domain_state_params
 from .virtualmin_drain_service import coordinate_health_failure
 from .virtualmin_gateway import (
@@ -55,6 +56,7 @@ from .virtualmin_models import (
     VirtualminServer,
 )
 from .virtualmin_node_capability import destination_refusal
+from .virtualmin_security import connection_identity
 from .virtualmin_units import quota_parameters
 from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE, WEB_ONLY_VIRTUALMIN_FEATURES, VirtualminValidator
 
@@ -321,6 +323,7 @@ class VirtualminProvisioningService:
                 admission = self._lock_open_server(server)
                 if admission.is_err():
                     return Err(admission.unwrap_err(), retriability=retriability_of(admission))
+                server = admission.unwrap()
                 account = VirtualminAccount(
                     domain=domain,
                     service=creation_data.service,
@@ -349,6 +352,7 @@ class VirtualminProvisioningService:
                             "username": username,
                             "template": template,
                             "recovery_seed": account.get_recovery_seed(),
+                            "node_connection_identity": connection_identity(server),
                         }
                     ),
                     correlation_id=f"create_domain_{account.id}",
@@ -411,6 +415,7 @@ class VirtualminProvisioningService:
                 admitted = self._lock_open_server(server)
                 if admitted.is_err():
                     return Err(admitted.unwrap_err(), retriability=retriability_of(admitted))
+                server = admitted.unwrap()
                 # Rotate password — the pre-loss secret cannot be recovered.
                 VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=account.pk)
                 from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server admission
@@ -441,6 +446,7 @@ class VirtualminProvisioningService:
                             "username": account.virtualmin_username,
                             "template": account.template_name or DEFAULT_VIRTUALMIN_TEMPLATE,
                             "recovery_seed": account.get_recovery_seed(),
+                            "node_connection_identity": connection_identity(server),
                         }
                     ),
                     correlation_id=f"reprovision_domain_{account.id}",
@@ -528,6 +534,9 @@ class VirtualminProvisioningService:
             )
 
             # Make API call
+            target = lock_create_retry_node(account, job)
+            if target.is_err():
+                return Err(target.unwrap_err())
             result = gateway.call("create-domain", params, correlation_id=job.correlation_id)
 
             if result.is_ok():
@@ -1404,9 +1413,10 @@ class VirtualminProvisioningService:
         if account.server.is_draining:
             job.mark_failed("Target server is draining", retriability=Retriability.RETRIABLE)
             return Err("Target server is draining", retriability=Retriability.RETRIABLE)
-        if refusal := destination_refusal(account.server):
-            job.mark_failed(refusal, retriability=Retriability.NOT_RETRIABLE)
-            return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
+        target = lock_create_retry_node(account, job)
+        if target.is_err():
+            return Err(target.unwrap_err())
+        account.server = target.unwrap()
         gateway = self._get_gateway(account.server)
         owner_result = gateway.get_domain_owner(account.domain)
         if owner_result.is_err():
@@ -1430,6 +1440,9 @@ class VirtualminProvisioningService:
             # original create succeeded past the response. Finalize in place.
             previously_active = account.status == "active"
             with transaction.atomic():
+                target = lock_create_retry_node(account, job)
+                if target.is_err():
+                    return Err(target.unwrap_err())
                 # fsm-bypass: CharField status
                 account.status = "active"
                 account.status_message = ""

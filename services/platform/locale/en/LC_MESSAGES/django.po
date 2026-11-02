@@ -8187,3 +8187,12 @@ msgstr "A completed component migration still needs verified native retirement o
 
 msgid "A terminal component migration still has unresolved native holds on this server."
 msgstr "A terminal component migration still has unresolved native holds on this server."
+
+msgid "The original create no longer owns its recovery claim."
+msgstr "The original create no longer owns its recovery claim."
+
+msgid "Resolve the node's hardening attempt before recovering its original create."
+msgstr "Resolve the node's hardening attempt before recovering its original create."
+
+msgid "The original create node identity changed. Verify its recorded target and outcome before retrying."
+msgstr "The original create node identity changed. Verify its recorded target and outcome before retrying."
