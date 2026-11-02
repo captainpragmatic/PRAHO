@@ -1,6 +1,6 @@
 """Real public account admission and node claims serialize on the same server."""
 
-from datetime import time, timedelta
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -15,18 +15,20 @@ from apps.provisioning.service_models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService
 from apps.users.models import User
+from tests.infrastructure.maintenance_policy_fixtures import maintenance_policy_times
 
 
 class MaintenanceAdmissionFixture:
     def setUp(self) -> None:
         self.actor = User.objects.create_superuser(email="admission-operator@example.test", password=None)
         self.node = VirtualminServer.objects.create(name="Admission node", hostname="admission.example.test")
+        starts_time, ends_time = maintenance_policy_times()
         NodeMaintenancePolicy.objects.create(
             node=self.node,
             timezone="UTC",
             weekdays=list(range(7)),
-            starts_time=time(0),
-            ends_time=time(23, 59),
+            starts_time=starts_time,
+            ends_time=ends_time,
             max_defer_minutes=30,
         )
         self.customer = Customer.objects.create(name="Admission customer")

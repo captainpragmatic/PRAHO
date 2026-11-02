@@ -64,7 +64,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
             step_names.index(_CONCURRENCY_STEP_NAME),
             step_names.index(_PLATFORM_STEP_NAME),
         )
-        self.assertEqual(concurrency_step["timeout-minutes"], 5)
+        self.assertEqual(concurrency_step["timeout-minutes"], 15)
         self.assertNotIn("continue-on-error", concurrency_step)
         expected_environment = {
             "DJANGO_SETTINGS_MODULE": "config.settings.ci",

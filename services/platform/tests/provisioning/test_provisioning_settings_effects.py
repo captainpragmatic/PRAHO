@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Generator, Iterable, Iterator
+from concurrent.futures import Future, as_completed
 from contextlib import contextmanager
 from dataclasses import replace
 from decimal import Decimal
 from io import StringIO
 from threading import Event, Lock
 from typing import ClassVar
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import UUID
 
 from django.contrib.messages import get_messages
@@ -199,23 +200,52 @@ class ProvisioningSettingsEffectTests(TestCase):
         self.assertEqual(service._generate_username_from_domain("unused.example.test"), "unused")
 
     def test_overall_health_check_timeout_records_an_unfinished_collection(self) -> None:
-        self.set_setting("provisioning.overall_health_check_timeout", 1)
         account = VirtualminAccount(domain="slow.example.test")
+        # Known future states and a fixed batch clock keep both controls independent of scheduler speed.
+        for budget, completed in ((1, False), (3, True)):
+            with self.subTest(budget=budget, completed=completed):
+                self.set_setting("provisioning.overall_health_check_timeout", budget)
+                future: Future[tuple[VirtualminAccount, bool, str | None]] = Future()
+                if completed:
+                    future.set_result(healthy_check(account))
+                    self.assertTrue(future.done())
+                else:
+                    self.assertTrue(future.set_running_or_notify_cancel())
+                    self.assertTrue(future.running())
+                    self.assertFalse(future.done())
+                executor = Mock()
+                executor.submit.return_value = future
 
-        def slow_check(account: VirtualminAccount) -> tuple[VirtualminAccount, bool, str | None]:
-            Event().wait(1.2)
-            return healthy_check(account)
+                def collect(
+                    futures: Iterable[Future[tuple[VirtualminAccount, bool, str | None]]],
+                    *,
+                    timeout: float,
+                    expected_budget: int = budget,
+                ) -> Iterator[Future[tuple[VirtualminAccount, bool, str | None]]]:
+                    self.assertEqual(timeout, float(expected_budget))
+                    return as_completed(futures, timeout=timeout)
 
-        with patch.object(views, "_perform_single_health_check", side_effect=slow_check):
-            result = views._execute_bulk_health_check([account])
-        self.assertEqual(result.successful_count, 0)
-        self.assertEqual((result.total_processed, result.failed_count), (1, 1))
-        self.assertTrue(any(account.domain in error and "timed out" in error for error in result.errors), result.errors)
-        self.assertFalse(result.rollback_performed)
-        self.set_setting("provisioning.overall_health_check_timeout", 3)
-        with patch.object(views, "_perform_single_health_check", side_effect=slow_check):
-            result = views._execute_bulk_health_check([account])
-        self.assertEqual((result.successful_count, result.failed_count, result.errors), (1, 0, []))
+                with (
+                    patch.object(views.time, "perf_counter", return_value=100.0),
+                    patch.object(views, "ThreadPoolExecutor", return_value=executor),
+                    patch.object(views, "as_completed", side_effect=collect) as collector,
+                ):
+                    result = views._execute_bulk_health_check([account])
+                collector.assert_called_once_with({future: account}, timeout=float(budget))
+                executor.submit.assert_called_once()
+                self.assertEqual(
+                    executor.submit.call_args.args[1:], (views._health_check_until_deadline, account, 100.0 + budget)
+                )
+                executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+                self.assertEqual(result.total_processed, 1)
+                self.assertFalse(result.rollback_performed)
+                if completed:
+                    self.assertEqual((result.successful_count, result.failed_count, result.errors), (1, 0, []))
+                else:
+                    self.assertEqual((result.successful_count, result.failed_count), (0, 1))
+                    self.assertTrue(
+                        any(account.domain in error and "timed out" in error for error in result.errors), result.errors
+                    )
 
 
 @override_settings(CACHES=LOCMEM, DISABLE_AUDIT_SIGNALS=True)

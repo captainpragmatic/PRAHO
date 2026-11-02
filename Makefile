@@ -676,7 +676,7 @@ test-platform-postgres-gated:
 	@modules=$$($(PWD)/$(VENV_DIR)/bin/python scripts/pg_gated_test_modules.py) || exit 1; \
 	if [ -z "$$modules" ]; then echo "🔥 [Platform] The PostgreSQL-gated scan found no modules" >&2; exit 1; fi; \
 	cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python manage.py test $$modules \
-		--settings=config.settings.ci --verbosity=2 --noinput
+		--settings=config.settings.ci --verbosity=2 --noinput $(POSTGRES_TEST_FLAGS)
 
 # The whole platform suite on PostgreSQL, for the nightly run and every release candidate (PRs run
 # the full suite on SQLite plus test-platform-postgres-gated). Needs a running PostgreSQL, as above.
@@ -684,7 +684,7 @@ test-platform-postgres-gated:
 test-platform-postgres-full:
 	@echo "🐘 [Platform] Whole platform suite on PostgreSQL..."
 	@cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python manage.py test tests \
-		--settings=config.settings.ci --parallel --verbosity=1 --noinput
+		--settings=config.settings.ci --parallel --verbosity=1 --noinput $(POSTGRES_TEST_FLAGS)
 
 
 test:
@@ -859,7 +859,7 @@ lint-portal:
 	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/portal/apps services/portal/templates
 	@echo "✅ Portal linting complete!"
 
-lint:
+lint: lint-row-locks
 ifdef FILE
 	@echo "🔍 [Lint] Checking: $(FILE)"
 	@$(VENV_DIR)/bin/ruff check $(FILE) --config=pyproject.toml
@@ -919,6 +919,15 @@ else
 	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/ruff check . --fix --config=../../pyproject.toml || true
 	@echo "✅ Auto-fix complete — review changes before committing."
 endif
+
+# Expand this scope to all apps after the second #805 audit PR.
+ROW_LOCK_SCOPE ?= billing
+.PHONY: lint-row-locks row-lock-census
+lint-row-locks:
+	@$(PYTHON_PLATFORM) -m apps.common.row_lock_scanner --scope "$(ROW_LOCK_SCOPE)"
+
+row-lock-census:
+	@$(PYTHON_PLATFORM) -m apps.common.row_lock_scanner --inventory $(ROW_LOCK_CENSUS_ARGS)
 
 lint-health:
 	@echo "🏥 [Health] Code health scan..."

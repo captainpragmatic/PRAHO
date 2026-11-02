@@ -19,7 +19,7 @@ from django.utils import timezone
 from apps.billing.currency_models import Currency
 from apps.billing.gateways.base import PaymentConfirmResult, PaymentIntentResult
 from apps.billing.gateways.stripe_gateway import StripeGateway
-from apps.billing.invoice_models import Invoice, InvoiceLine
+from apps.billing.invoice_models import Invoice, InvoiceLine, InvoiceSequence
 from apps.billing.metering_models import BillingCycle, UsageAggregation, UsageMeter
 from apps.billing.payment_convergence import PaymentSuccessService
 from apps.billing.payment_models import Payment, PaymentRetryAttempt, PaymentRetryPolicy, RecurringPaymentSubmission
@@ -68,6 +68,9 @@ class _SubscriptionInvoicePaymentFixture:
     """Shared invoice-native recurring-billing fixture."""
 
     def setUp(self) -> None:
+        # TransactionTestCase flushes migration seeds; these fixtures also run
+        # after concurrency tests and against a preserved PostgreSQL database.
+        InvoiceSequence.objects.get_or_create(scope="default")
         self.currency, _ = Currency.objects.get_or_create(
             code="RON",
             defaults={

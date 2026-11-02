@@ -160,7 +160,7 @@ class ProviderStornoCurrencyLockConcurrencyTests(TransactionTestCase):
             try:
                 self.assertTrue(entered.wait(10), "Public staff recording did not lock its original invoice")
                 # No sequence, other Customer or unrelated Invoice row has been locked by the paused writer.
-                self.assertIn('"billing_currencies"', statements[0])
+                self.assertNotIn('"billing_currencies"', statements[0])
                 invoicing = executor.submit(self._connected, self._invoice, invoice_pids)
                 completed, query = self._completion_or_wait(invoicing, invoice_pids, owner_pids[0])
                 self.assertTrue(

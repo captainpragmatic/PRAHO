@@ -1,6 +1,6 @@
 """A migration/recovery names both servers, including a currently empty incoming target."""
 
-from datetime import time, timedelta
+from datetime import timedelta
 
 from django.utils import timezone
 
@@ -12,6 +12,7 @@ from apps.provisioning.virtualmin_migration_models import VirtualminMigration
 from apps.provisioning.virtualmin_migration_service import VirtualminMigrationService
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_recovery_service import VirtualminRecoveryService
+from tests.infrastructure.maintenance_policy_fixtures import maintenance_policy_times
 from tests.provisioning.test_virtualmin_migration_service import MigrationTestBase
 
 
@@ -33,12 +34,13 @@ class NodeMaintenanceMigrationAdmissionTests(MigrationTestBase):
                 deployment.transition_to(status)
 
     def running_window(self, node: VirtualminServer) -> None:
+        starts_time, ends_time = maintenance_policy_times()
         NodeMaintenancePolicy.objects.create(
             node=node,
             timezone="UTC",
             weekdays=list(range(7)),
-            starts_time=time(0),
-            ends_time=time(23, 59),
+            starts_time=starts_time,
+            ends_time=ends_time,
             max_defer_minutes=30,
         )
         starts_at = timezone.now() - timedelta(seconds=10)

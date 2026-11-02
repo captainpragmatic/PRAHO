@@ -13,6 +13,7 @@ from uuid import UUID
 from django.db import transaction
 from django.db.models import QuerySet
 
+from apps.common.row_locks import lock_many_and_load
 from apps.common.validators import log_security_event
 from apps.customers.models import (
     CustomerPaymentMethod,
@@ -332,12 +333,8 @@ def _bind_retry_result_before_gateway(payment: Payment, retry_attempt_id: UUID |
         return None
 
     with transaction.atomic():
-        retry = (
-            PaymentRetryAttempt.objects.select_for_update(of=("self",))
-            .select_related("payment")
-            .filter(id=retry_attempt_id)
-            .first()
-        )
+        retries = lock_many_and_load(PaymentRetryAttempt.objects.select_related("payment").filter(id=retry_attempt_id))
+        retry = retries[0] if retries else None
         if retry is None:
             return "Payment retry attempt does not exist"
         original = retry.payment

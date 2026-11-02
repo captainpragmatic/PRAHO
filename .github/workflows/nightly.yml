@@ -140,7 +140,8 @@ jobs:
       run: make lint
 
     - name: Concurrency tests (PostgreSQL)
-      timeout-minutes: 5
+      # This command also creates a fresh test database and applies the complete migration graph.
+      timeout-minutes: 15
       env:
         DJANGO_SETTINGS_MODULE: config.settings.ci
         DB_NAME: postgres

@@ -466,7 +466,6 @@ class SubscriptionService:
             with transaction.atomic():
                 locked_subscription = (
                     Subscription.objects.select_for_update(of=("self",))
-                    .select_related("service")
                     .get(pk=subscription.pk)
                 )
                 if locked_subscription.status != "cancelled" and not locked_subscription.cancel_at_period_end:
