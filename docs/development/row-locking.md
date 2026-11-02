@@ -197,6 +197,14 @@ Observed proof so far:
 - Reconciliation observes cancellation's exact Customer-lock wait and no longer
   dispatches a provisioning task from its pre-cancellation service snapshot.
   The eventual provisioning worker's existing inactive-Service refusal remains.
+- Reverting the four PR 2 behavioral corrections in an isolated clone reproduces
+  blocked Service inserts, blocked Domain COMMIT, and actual PostgreSQL deadlocks
+  between completed-migration rerun/cleanup and cancellation/reconciliation.
+  Restoring the corrections makes all seven unchanged PostgreSQL controls pass.
+- The helper rejects a locking subquery before issuing SQL; this refusal fails
+  against the earlier helper. An ordinary uncorrelated membership subquery stays
+  supported with two statements. The complete helper and public billing-batch
+  controls pass together (19 tests).
 - Structural normalization uses the zero-site guard plus the existing business
   regressions. Protected payment convergence is not advertised as a newly
   reproduced public mandate race, and erasure proof uses actual rendered/stored
