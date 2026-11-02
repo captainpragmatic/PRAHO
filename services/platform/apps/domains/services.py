@@ -1113,7 +1113,10 @@ class DomainReconciliationService:
 
             try:
                 with transaction.atomic():
-                    domain = Domain.objects.select_for_update().select_related("tld").get(pk=candidate.pk)
+                    domain = Domain.objects.select_for_update(of=("self",)).get(pk=candidate.pk)
+                    # Stable grace configuration, without blocking other domains'
+                    # deferred FK checks on this shared TLD through COMMIT.
+                    domain.tld = TLD.objects.select_for_update(of=("self",), no_key=True).get(pk=domain.tld_id)
                     if (
                         domain.status != "active"
                         or domain.expires_at is None

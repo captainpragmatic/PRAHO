@@ -26,6 +26,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.common.row_locks import lock_one_and_load
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
@@ -84,7 +85,7 @@ def _lock(item_id: UUID | str) -> tuple[OrderItem, Service | None] | None:
         return None
     order = Order.objects.select_for_update(of=("self",)).get(pk=order_id)
     Customer.all_objects.select_for_update(of=("self",)).filter(pk=order.customer_id).first()
-    line = OrderItem.objects.select_for_update(of=("self",)).select_related("order").get(pk=item_id)
+    line = lock_one_and_load(OrderItem.objects.select_related("order").filter(pk=item_id))
     if line.service_id is None:
         return line, None
     # A waiting locking join can lose a Service whose plan FK changes. Resolve

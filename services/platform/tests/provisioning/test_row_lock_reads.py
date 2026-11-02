@@ -7,49 +7,19 @@ statement keep the values of the statement's starting snapshot.
 
 from __future__ import annotations
 
-import ast
 from pathlib import Path
 
 from django.test import SimpleTestCase
 
+from apps.common.row_lock_scanner import lock_join_lines
+
 PROVISIONING = Path(__file__).resolve().parents[2] / "apps" / "provisioning"
-
-
-def _chain(call: ast.Call) -> list[ast.Call]:
-    """Every call in one method chain, from the outermost call down."""
-    calls = []
-    node: ast.expr = call
-    while isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-        calls.append(node)
-        node = node.func.value
-    return calls
-
-
-def lock_join_lines(source: str) -> list[int]:
-    """Lines where one chain both locks OF self (select_for_update(of=...)) and joins (select_related)."""
-    tree = ast.parse(source)
-    inner = {id(call) for node in ast.walk(tree) if isinstance(node, ast.Call) for call in _chain(node)[1:]}
-    lines = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call) or id(node) in inner:
-            continue  # Inspect each chain once, from its outermost call.
-        calls = _chain(node)
-        names = {call.func.attr for call in calls if isinstance(call.func, ast.Attribute)}
-        locks_self = [
-            call
-            for call in calls
-            if isinstance(call.func, ast.Attribute)
-            and call.func.attr == "select_for_update"
-            and any(keyword.arg == "of" for keyword in call.keywords)
-        ]
-        if locks_self and "select_related" in names:
-            lines.append(locks_self[0].lineno)
-    return sorted(lines)
 
 
 class LockJoinDetectionTests(SimpleTestCase):
     def test_catches_either_order_and_calls_in_between(self) -> None:
         cases = {
+            'M.objects.select_for_update().select_related("service").get(pk=1)': [1],
             'M.objects.select_for_update(of=("self",)).select_related("service").get(pk=1)': [1],
             'M.objects.select_related("service").select_for_update(of=("self",)).get(pk=1)': [1],
             'M.objects.select_for_update(of=("self",)).filter(pk=1).select_related("a__b").first()': [1],
@@ -59,9 +29,9 @@ class LockJoinDetectionTests(SimpleTestCase):
             with self.subTest(source=source):
                 self.assertEqual(lock_join_lines(source), expected)
 
-    def test_ignores_locks_of_every_joined_row_and_separate_statements(self) -> None:
+    def test_ignores_separate_statements_and_cleared_joins(self) -> None:
         cases = (
-            'M.objects.select_for_update().select_related("service").get(pk=1)',  # Joined rows are locked too.
+            'M.objects.select_for_update().select_related("service").select_related(None).get(pk=1)',
             'a = M.objects.select_for_update(of=("self",)).get(pk=1)\nb = M.objects.select_related("s").get(pk=1)',
         )
         for source in cases:

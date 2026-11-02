@@ -11,6 +11,7 @@ from django.utils import timezone
 from django_q.models import Schedule
 from django_q.tasks import schedule
 
+from apps.common.row_locks import lock_one_and_load
 from apps.notifications.services import NotificationService
 from apps.settings.services import SettingsService
 
@@ -64,7 +65,7 @@ def auto_close_inactive_tickets(*, now: datetime | None = None) -> AutoCloseResu
         notification: tuple[str, dict[str, object]] | None = None
         try:
             with transaction.atomic():
-                ticket = Ticket.objects.select_for_update(of=("self",)).select_related("customer").get(pk=ticket_id)
+                ticket = lock_one_and_load(Ticket.objects.select_related("customer").filter(pk=ticket_id))
                 if ticket.status != "waiting_on_customer" or ticket.updated_at > cutoff:
                     continue
 

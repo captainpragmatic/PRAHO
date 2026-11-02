@@ -21,6 +21,8 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.common.row_locks import lock_many_and_load
+
 from .models import Domain, DomainOrderItem
 
 if TYPE_CHECKING:
@@ -46,12 +48,11 @@ def _lock_line(domain_item: DomainOrderItem) -> OrderItem | None:
     from apps.orders.models import Order, OrderItem  # noqa: PLC0415  # Deferred: orders imports domains
 
     Order.objects.select_for_update(of=("self",)).filter(pk=domain_item.order_id).first()
-    return (
-        OrderItem.objects.select_for_update(of=("self",))
-        .select_related("order")
+    lines = lock_many_and_load(
+        OrderItem.objects.select_related("order")
         .filter(domain_order_item=domain_item, order_id=domain_item.order_id)
-        .first()
     )
+    return lines[0] if lines else None
 
 
 def claim_order_line(domain_item: DomainOrderItem) -> bool:

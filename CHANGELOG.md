@@ -36,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Complete the Platform row-lock audit (#805): load related rows after locking, retain explicit configuration and ownership protection, and enforce zero combined eager-loading/locking queries. Bridge cleanup uses migration admission's lock order; shared TLD and ServicePlan locks allow unrelated references to commit, and reconciliation rechecks cancellation before queueing provisioning.
+
 - Billing row locks load related data in a fresh statement after waiting on PostgreSQL (#805). Usage invoices use the locked customer's current fiscal identity before calculating tax; renewal eligibility, frozen amounts and existing collection consent controls are retained.
 
 - **Platform buttons outside a form work on staging.** The Platform's CSRF cookie is HttpOnly and pages gave htmx no token, so service Suspend/Activate, the mobile product toggles and the Virtualmin account Delete were refused with 403 (local development hid it by turning CSRF off; it doesn't any more). Every page now gives htmx and `fetch()` the token, a stale tab is told to reload, and dev names the Platform's cookie `platform_csrftoken` so it can't overwrite the Portal's.
