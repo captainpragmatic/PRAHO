@@ -22,6 +22,7 @@ from django.core.cache import cache
 from django.test import RequestFactory, TestCase, override_settings
 from django.utils import timezone
 from django.utils.functional import Promise
+from freezegun import freeze_time
 
 from apps.audit.models import AuditEvent, audit_mutation_allowed
 from apps.common.constants import MAX_LOGIN_ATTEMPTS
@@ -742,10 +743,11 @@ class MFASecurityTestCase(TestCase):
             # Should handle gracefully when encryption is not available
             MFAService.enable_totp(self.user)
 
+    @freeze_time("2026-11-02 15:52:29.900000+00:00")
     def test_totp_time_window_tolerance(self):
         """Test TOTP time window tolerance"""
         # Setup TOTP
-        secret = TOTPService.generate_secret()
+        secret = "JBSWY3DPEHPK3PXP"  # Fixed public fixture; adjacent codes must differ.
         self.user.two_factor_secret = secret
         self.user.two_factor_enabled = True
         self.user.save()
@@ -760,16 +762,12 @@ class MFASecurityTestCase(TestCase):
         result1 = TOTPService.verify_token(self.user, current_token, request)
         self.assertTrue(result1)
 
-        # Clear cache for next test
-        cache.clear()
-
         # Test previous time window (should work due to tolerance)
         prev_time = int(time.time()) - 30  # 30 seconds ago
         prev_token = totp.at(prev_time)
+        self.assertNotEqual(current_token, prev_token)
         result2 = TOTPService.verify_token(self.user, prev_token, request)
-        # This might pass or fail depending on the exact timing
-        # The important thing is it doesn't crash
-        self.assertIsInstance(result2, bool)
+        self.assertTrue(result2)
 
     @patch("apps.users.mfa.logger")
     def test_mfa_error_logging(self, mock_logger):

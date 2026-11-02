@@ -27,7 +27,10 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": str(E2E_DATABASE_PATH),
-        "OPTIONS": {"timeout": 30},
+        # The threaded browser server handles concurrent writes (e.g. consent and
+        # profile saves). Reserve the writer before reads, avoiding lock upgrades
+        # that SQLite refuses immediately even with a busy timeout.
+        "OPTIONS": {"timeout": 30, "transaction_mode": "IMMEDIATE"},
         # pytest's ORM tests must never write the running browser server's database.
         "TEST": {"NAME": ":memory:"},
     }

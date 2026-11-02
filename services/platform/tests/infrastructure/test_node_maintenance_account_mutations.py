@@ -1,6 +1,6 @@
 """Native account writers cannot bypass a running window through direct service calls."""
 
-from datetime import time, timedelta
+from datetime import timedelta
 
 from django.utils import timezone
 
@@ -8,18 +8,20 @@ from apps.infrastructure.node_maintenance_models import NodeMaintenancePolicy
 from apps.infrastructure.node_maintenance_service import change_window, create_window
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
 from apps.users.models import User
+from tests.infrastructure.maintenance_policy_fixtures import maintenance_policy_times
 from tests.provisioning.test_cov_provisioning_services_creation import VirtualminServiceCoverageCase
 
 
 class NodeMaintenanceAccountMutationTests(VirtualminServiceCoverageCase):
     def running_window(self) -> None:
         actor = User.objects.create_superuser(email="mutation-operator@example.test", password=None)
+        starts_time, ends_time = maintenance_policy_times()
         NodeMaintenancePolicy.objects.create(
             node=self.server,
             timezone="UTC",
             weekdays=list(range(7)),
-            starts_time=time(0),
-            ends_time=time(23, 59),
+            starts_time=starts_time,
+            ends_time=ends_time,
             max_defer_minutes=30,
         )
         starts_at = timezone.now() - timedelta(seconds=10)

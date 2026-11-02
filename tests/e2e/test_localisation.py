@@ -44,8 +44,14 @@ def test_profile_localisation_persists_and_can_inherit(page: Page, service: tupl
 
     def save() -> None:
         form = page.locator("form").filter(has=page.locator('select[name="date_format"]'))
-        with page.expect_navigation(wait_until="domcontentloaded"):
+        with (
+            page.expect_response(
+                lambda response: response.url == f"{base_url}{profile_path}" and response.request.method == "POST"
+            ) as saved,
+            page.expect_navigation(wait_until="domcontentloaded"),
+        ):
             form.locator('button[type="submit"]').click()
+        assert saved.value.status == 302, "Profile save did not succeed"
         expect(page).to_have_url(f"{base_url}{profile_path}")
 
     try:

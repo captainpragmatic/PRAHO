@@ -1,6 +1,6 @@
 """Approval, scheduling, due workers and accepting actual drift share the node gate."""
 
-from datetime import time, timedelta
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.utils import timezone
@@ -9,6 +9,7 @@ from apps.infrastructure.node_maintenance_models import NodeMaintenancePolicy
 from apps.infrastructure.node_maintenance_service import change_window, create_window
 from apps.infrastructure.tasks import apply_scheduled_remediations_task
 from apps.provisioning.virtualmin_models import VirtualminServer
+from tests.infrastructure.maintenance_policy_fixtures import maintenance_policy_times
 from tests.infrastructure.test_drift_remediation import DriftRemediationTestBase
 
 
@@ -20,12 +21,13 @@ class NodeMaintenanceDriftAdmissionTests(DriftRemediationTestBase):
         self.deployment.save(update_fields=["virtualmin_server"])
 
     def running_window(self) -> None:
+        starts_time, ends_time = maintenance_policy_times()
         NodeMaintenancePolicy.objects.create(
             node=self.node,
             timezone="UTC",
             weekdays=list(range(7)),
-            starts_time=time(0),
-            ends_time=time(23, 59),
+            starts_time=starts_time,
+            ends_time=ends_time,
             max_defer_minutes=30,
         )
         starts_at = timezone.now() - timedelta(seconds=10)
