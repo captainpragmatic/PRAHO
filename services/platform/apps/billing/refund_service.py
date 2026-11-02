@@ -25,6 +25,7 @@ from apps.billing.refund_models import (
     refunded_cents_for_invoice,
     resolved_invoice_id_of,
 )
+from apps.common.row_locks import lock_one_and_load
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.orders.models import Order
 
@@ -256,7 +257,7 @@ class RefundService:
                 if invoice_result.is_err():
                     return Err(f"Failed to process refund: {invoice_result.unwrap_err()}")
 
-                order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
+                order = lock_one_and_load(Order.objects.select_related("customer").filter(id=order_id))
                 if (
                     order.customer_id != order_snapshot.customer_id
                     or order.invoice_id != order_snapshot.invoice_id
@@ -552,7 +553,7 @@ class RefundService:
         """
         try:
             # SECURITY: Lock the order row to prevent concurrent refund processing
-            order = Order.objects.select_for_update(of=("self",)).select_related("customer").get(id=order_id)
+            order = lock_one_and_load(Order.objects.select_related("customer").filter(id=order_id))
             return Ok(order)
         except Order.DoesNotExist:
             return Err("Failed to process refund: Order not found")
@@ -739,7 +740,7 @@ class RefundService:
                     return Err(f"Failed to process refund: {payment_result.unwrap_err()}")
                 payment = payment_result.unwrap()
 
-                invoice = Invoice.objects.select_for_update(of=("self",)).select_related("customer").get(id=invoice_id)
+                invoice = lock_one_and_load(Invoice.objects.select_related("customer").filter(id=invoice_id))
                 if invoice.customer_id != invoice_snapshot.customer_id:
                     return Err("Failed to process refund: Invoice payment linkage changed; retry refund")
 
@@ -786,7 +787,7 @@ class RefundService:
         """
         try:
             # SECURITY: Lock the invoice row to prevent concurrent refund processing
-            invoice = Invoice.objects.select_for_update(of=("self",)).select_related("customer").get(id=invoice_id)
+            invoice = lock_one_and_load(Invoice.objects.select_related("customer").filter(id=invoice_id))
             return Ok(invoice)
         except Invoice.DoesNotExist:
             return Err("Failed to process refund: Invoice not found")
@@ -2612,7 +2613,7 @@ class RefundConvergenceService:
                 discovered_invoice_id = payment.invoice_id or (snapshot["invoice_id"] if snapshot else None)
                 RefundService._lock_document_context(discovered_invoice_id, snapshot["order_id"] if snapshot else None)
                 prior_invoice_id = payment.invoice_id
-                payment = Payment.objects.select_for_update(of=("self",)).select_related("currency").get(pk=payment.pk)
+                payment = lock_one_and_load(Payment.objects.select_related("currency").filter(pk=payment.pk))
                 if payment.invoice_id != prior_invoice_id:
                     return Err(
                         "Payment document changed; retry refund convergence", retriability=Retriability.RETRIABLE

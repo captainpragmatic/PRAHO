@@ -8,6 +8,8 @@ from uuid import UUID
 from django.db import transaction
 from django.utils import timezone
 
+from apps.common.row_locks import lock_one_and_load
+
 from .payment_models import Payment, RecurringPaymentSubmission
 
 if TYPE_CHECKING:
@@ -121,10 +123,9 @@ def record_recurring_submission_replay_started(
 ) -> RecurringPaymentSubmission:
     """Record one idempotent replay before the reconciler contacts Stripe."""
     with transaction.atomic():
-        submission = (
-            RecurringPaymentSubmission.objects.select_for_update(of=("self",))
-            .select_related("payment__currency", "payment__invoice", "payment__proforma")
-            .get(
+        submission = lock_one_and_load(
+            RecurringPaymentSubmission.objects.select_related("payment__currency", "payment__invoice", "payment__proforma")
+            .filter(
                 id=submission_id,
                 state__in=[
                     RecurringPaymentSubmission.State.IN_FLIGHT,

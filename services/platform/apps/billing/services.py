@@ -41,6 +41,7 @@ from apps.billing.invoice_models import SEQUENCE_SCOPE_DEFAULT
 from apps.billing.models import Invoice, InvoiceLine
 from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
 from apps.common.financial_arithmetic import calculate_document_totals
+from apps.common.row_locks import lock_one_and_load
 from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 
@@ -340,11 +341,7 @@ class ProformaConversionService:
 
         try:
             # RC-1: Lock proforma to prevent concurrent conversion creating duplicate invoices
-            proforma = (
-                ProformaInvoice.objects.select_for_update(of=("self",))
-                .select_related("customer", "currency")
-                .get(id=proforma_id)
-            )
+            proforma = lock_one_and_load(ProformaInvoice.objects.select_related("customer", "currency").filter(id=proforma_id))
         except ProformaInvoice.DoesNotExist:
             return Err(f"Proforma not found: {proforma_id}")
 

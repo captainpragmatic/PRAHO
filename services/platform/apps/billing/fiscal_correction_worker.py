@@ -33,6 +33,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.audit.actor_context import bind_current_actor
+from apps.common.row_locks import lock_many_and_load
 from apps.common.types import Err
 from apps.common.utils import operator_local_date
 from apps.common.validators import log_security_event
@@ -641,12 +642,8 @@ def _claim_communication(correction_id: str) -> FiscalCorrection | None:
     """Claim the send in a short transaction of its own, committed before anything is sent."""
     with transaction.atomic():
         # `of=("self",)`: PostgreSQL refuses FOR UPDATE on the nullable side of the credit-note join.
-        locked = (
-            FiscalCorrection.objects.select_for_update(of=("self",))
-            .select_related("credit_note")
-            .filter(pk=correction_id)
-        )
-        correction = locked.first()
+        locked = lock_many_and_load(FiscalCorrection.objects.select_related("credit_note").filter(pk=correction_id))
+        correction = locked[0] if locked else None
         if correction is None or correction.credit_note is None:
             return None
         if not correction.claim_communication(now=timezone.now(), lease=COMMUNICATION_CLAIM_LEASE):

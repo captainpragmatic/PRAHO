@@ -12,6 +12,7 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.common.row_locks import lock_many_and_load, lock_one_and_load
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.common.validators import record_refusal_evidence
 
@@ -127,10 +128,9 @@ class PaymentSuccessService:
         try:
             with transaction.atomic():
                 try:
-                    payment = (
-                        Payment.objects.select_for_update(of=("self",))
-                        .select_related("currency", "invoice", "proforma")
-                        .get(gateway_txn_id=gateway_txn_id)
+                    payment = lock_one_and_load(
+                        Payment.objects.select_related("currency", "invoice", "proforma")
+                        .filter(gateway_txn_id=gateway_txn_id)
                     )
                 except Payment.DoesNotExist:
                     recovery = PaymentSuccessService.recover_unlinked_recurring_attempt(
@@ -216,7 +216,7 @@ class PaymentSuccessService:
                 purchase = None
             if purchase is None:
                 return Err("Gift-card funding attempt was not found")
-            payment = Payment.objects.select_for_update().select_related("currency").get(pk=purchase.funding_payment_id)
+            payment = lock_one_and_load(Payment.objects.select_related("currency").filter(pk=purchase.funding_payment_id))
             if (
                 payment.gateway_txn_id
                 or payment.status != "pending"
@@ -239,9 +239,8 @@ class PaymentSuccessService:
             return Err("Recurring gateway metadata must identify exactly one billing document")
 
         document_filter = Q(invoice_id=invoice_id) if invoice_id else Q(proforma_id=proforma_id)
-        candidates = list(
-            Payment.objects.select_for_update(of=("self",))
-            .select_related("currency", "invoice", "proforma")
+        candidates = lock_many_and_load(
+            Payment.objects.select_related("currency", "invoice", "proforma")
             .filter(
                 document_filter,
                 Q(gateway_txn_id__isnull=True) | Q(gateway_txn_id=""),
@@ -249,8 +248,8 @@ class PaymentSuccessService:
                 payment_method="stripe",
                 meta__source="recurring_billing",
             )
-            .order_by("id")[:2]
-        )
+            .order_by("id")
+        )[:2]
         if not candidates:
             return Err(f"Payment not found for gateway transaction {gateway_txn_id}")
         if len(candidates) != 1:
@@ -298,7 +297,7 @@ class PaymentSuccessService:
 
                     invoice = Invoice.objects.select_for_update().get(pk=invoice_id)
                     lock_document_context(invoice)
-                payment = Payment.objects.select_for_update(of=("self",)).select_related("invoice").get(id=payment_id)
+                payment = lock_one_and_load(Payment.objects.select_related("invoice").filter(id=payment_id))
                 if payment.status not in {"pending", "succeeded"}:
                     return Err(f"Payment state mismatch: payment {payment.id} is '{payment.status}'")
                 if payment.invoice_id is None:
@@ -461,14 +460,6 @@ class PaymentSuccessService:
         subscriptions = {
             subscription.id: subscription
             for subscription in Subscription.objects.select_for_update(of=("self",))
-            .select_related(
-                "saved_payment_method",
-                "payment_authorization__payment_method",
-            )
-            .defer(
-                "saved_payment_method__bank_details",
-                "payment_authorization__payment_method__bank_details",
-            )
             .filter(id__in=subscription_ids)
             .order_by("id")
         }

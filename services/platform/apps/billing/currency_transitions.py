@@ -15,6 +15,8 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.common.row_locks import lock_one_and_load
+
 from .currency_policy import SellingCurrencyPolicy, get_selling_currency_policy
 from .currency_transition_notice import notice_allows_preparation, render_notice, terms_fingerprint
 from .cycle_terms import (
@@ -157,11 +159,7 @@ def _prepare_locked_offer(
 def prepare_currency_offer(subscription_id: UUID | str) -> SubscriptionCurrencyTransition | None:
     """Serialize an exact future offer with catalog changes and renewal preparation."""
     policy = get_selling_currency_policy(lock=True)
-    subscription = (
-        Subscription.objects.select_for_update(of=("self",))
-        .select_related("customer", "product")
-        .get(pk=subscription_id)
-    )
+    subscription = lock_one_and_load(Subscription.objects.select_related("customer", "product").filter(pk=subscription_id))
     return _prepare_locked_offer(subscription, policy, subscription.current_period_end)
 
 

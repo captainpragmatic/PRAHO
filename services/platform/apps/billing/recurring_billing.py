@@ -13,6 +13,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
+from apps.common.row_locks import lock_many_and_load
 from apps.common.types import Err, Ok, Result
 from apps.common.utils import operator_local_date
 from apps.settings.services import SettingsService
@@ -405,10 +406,7 @@ class RecurringBillingOrchestrator:
                 # subscription, but not eager joined mandate/customer rows.
                 # Lock IDs first, then materialize fresh relations and recheck
                 # the same service eligibility in a new statement.
-                locked_subscription_ids = list(
-                    due_subscriptions.select_related(None).select_for_update(of=("self",)).values_list("pk", flat=True)
-                )
-                candidate_subscriptions = list(due_subscriptions.filter(pk__in=locked_subscription_ids))
+                candidate_subscriptions = lock_many_and_load(due_subscriptions)
                 result["subscriptions_checked"] = len(candidate_subscriptions)
 
                 groups: dict[tuple[object, ...], list[tuple[Subscription, BillingCycle, datetime]]] = {}
@@ -651,9 +649,8 @@ class RecurringBillingOrchestrator:
             try:
                 with transaction.atomic():
                     proforma = ProformaInvoice.objects.select_for_update(of=("self",)).get(id=proforma_id)
-                    cycles = list(
-                        BillingCycle.objects.select_for_update(of=("self",))
-                        .select_related("subscription__saved_payment_method")
+                    cycles = lock_many_and_load(
+                        BillingCycle.objects.select_related("subscription__saved_payment_method")
                         .defer("subscription__saved_payment_method__bank_details")
                         .filter(proforma=proforma)
                         .order_by("subscription_id", "id")

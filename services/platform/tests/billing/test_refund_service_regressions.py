@@ -183,9 +183,8 @@ class TestGetOrder(TestCase):
         r = RefundService._get_order(o.id)
         assert r.is_ok()
 
-    @patch("apps.billing.refund_service.Order.objects")
+    @patch("apps.billing.refund_service.lock_one_and_load", side_effect=RuntimeError("boom"))
     def test_order_generic_exception(self, mock_qs):
-        mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = RuntimeError("boom")
         r = RefundService._get_order(1)
         assert r.is_err()
         assert "database error" in r.unwrap_err()
@@ -204,9 +203,8 @@ class TestGetInvoice(TestCase):
         r = RefundService._get_invoice(inv.id)
         assert r.is_ok()
 
-    @patch("apps.billing.refund_service.Invoice.objects")
+    @patch("apps.billing.refund_service.lock_one_and_load", side_effect=RuntimeError("boom"))
     def test_invoice_generic_exception(self, mock_qs):
-        mock_qs.select_for_update.return_value.select_related.return_value.get.side_effect = RuntimeError("boom")
         r = RefundService._get_invoice(1)
         assert r.is_err()
         assert "database error" in r.unwrap_err()

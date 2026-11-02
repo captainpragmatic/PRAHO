@@ -25,6 +25,7 @@ from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
 from apps.audit.services import AuditService
 from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
+from apps.common.row_locks import lock_one_and_load
 from apps.common.tax_service import CustomerVATInfo, TaxService
 from apps.common.types import Err, Ok, Result
 from apps.customers.models import CustomerAddress, CustomerTaxProfile
@@ -65,10 +66,8 @@ class UsageInvoiceService:
         All usage aggregations must be rated.
         """
         try:
-            billing_cycle = (
-                BillingCycle.objects.select_for_update(of=("self",))
-                .select_related("subscription", "subscription__customer", "subscription__currency")
-                .get(id=billing_cycle_id)
+            billing_cycle = lock_one_and_load(
+                BillingCycle.objects.select_related("subscription", "subscription__currency").filter(id=billing_cycle_id)
             )
         except BillingCycle.DoesNotExist:
             return Err(f"Billing cycle not found: {billing_cycle_id}")
@@ -77,7 +76,6 @@ class UsageInvoiceService:
             return Err(f"Billing cycle not ready for invoicing: status is {billing_cycle.status}")
 
         subscription = billing_cycle.subscription
-        customer = subscription.customer
         from .cycle_terms import get_usage_cycle_currency  # noqa: PLC0415
 
         try:
@@ -126,6 +124,11 @@ class UsageInvoiceService:
         )
 
         with transaction.atomic():
+            # Keep Cycle -> Customer, after rating. Use the returned locked row
+            # for every fiscal/credit read, so a waited billing edit is visible.
+            from apps.customers.models import Customer  # noqa: PLC0415
+
+            customer = Customer.objects.select_for_update(of=("self",)).get(pk=subscription.customer_id)
             # The fixed period price was collected on the renewal proforma/invoice.
             # This second document contains post-paid usage only.
             gross_amount_cents = billing_cycle.usage_charge_cents
@@ -155,11 +158,6 @@ class UsageInvoiceService:
 
             # Total = subtotal + tax (must satisfy Invoice model validation)
             total_cents = net_amount_cents + tax_cents
-            # Different usage cycles may close concurrently for one customer.
-            # Serialize the available-credit check and debit on the customer row.
-            from apps.customers.models import Customer  # noqa: PLC0415
-
-            Customer.objects.select_for_update().get(pk=customer.pk)
             customer_credit = self._get_customer_credit_balance(customer, currency)
             credit_applied_cents = min(max(customer_credit, 0), total_cents)
             _notice_at, charge_at = usage_collection_schedule(billing_cycle.period_end)

@@ -26,6 +26,7 @@ from django.db.models import F, Q, Sum
 from django.utils import timezone
 
 from apps.audit.services import AuditService
+from apps.common.row_locks import lock_one_and_load
 from apps.common.types import Err, Ok, Result
 from apps.customers.models import Customer
 from apps.notifications.services import EmailService
@@ -302,10 +303,8 @@ class MeteringService:
     def _update_aggregation_sync(self, event: Any) -> None:
         """Apply one event exactly once to the cycle containing its timestamp."""
         with transaction.atomic():
-            locked_event = (
-                UsageEvent.objects.select_for_update(of=("self",))
-                .select_related("meter", "customer", "subscription", "service")
-                .get(pk=event.pk)
+            locked_event = lock_one_and_load(
+                UsageEvent.objects.select_related("meter", "customer", "subscription", "service").filter(pk=event.pk)
             )
             if locked_event.is_processed:
                 return
@@ -508,11 +507,7 @@ class AggregationService:
                 break
 
         with transaction.atomic():
-            billing_cycle = (
-                BillingCycle.objects.select_for_update(of=("self",))
-                .select_related("subscription")
-                .get(pk=billing_cycle.pk)
-            )
+            billing_cycle = lock_one_and_load(BillingCycle.objects.select_related("subscription").filter(pk=billing_cycle.pk))
             if billing_cycle.status not in ("active", "closing"):
                 return Err(f"Billing cycle cannot be closed: status is {billing_cycle.status}")
 
@@ -605,10 +600,9 @@ class RatingEngine:
         Calculate charges for a usage aggregation.
         """
         try:
-            aggregation = (
-                UsageAggregation.objects.select_for_update(of=("self",))
-                .select_related("meter", "subscription", "billing_cycle__subscription__currency")
-                .get(id=aggregation_id)
+            aggregation = lock_one_and_load(
+                UsageAggregation.objects.select_related("meter", "subscription", "billing_cycle__subscription__currency")
+                .filter(id=aggregation_id)
             )
         except UsageAggregation.DoesNotExist:
             return Err(f"Aggregation not found: {aggregation_id}")
