@@ -107,15 +107,14 @@ class ProformaConversionServiceTests(TestCase):
         result = ProformaConversionService.convert_to_invoice("999999")
         self.assertTrue(result.is_err())
 
-    @patch("apps.billing.proforma_models.ProformaInvoice.objects")
+    @patch("apps.billing.services.lock_one_and_load", side_effect=ProformaInvoice.DoesNotExist)
     def test_conversion_not_found(self, mock_objects):
-        mock_objects.select_related.return_value.get.side_effect = ProformaInvoice.DoesNotExist
-        self.assertTrue(ProformaConversionService.convert_to_invoice("x").is_err())
+        self.assertTrue(ProformaConversionService.convert_to_invoice("1").is_err())
 
-    @patch("apps.billing.models.ProformaInvoice")
+    @patch("apps.billing.services.lock_one_and_load")
     def test_conversion_wrong_status(self, mock_cls):
-        mock_cls.objects.select_related.return_value.get.return_value = MagicMock(status="converted", number="P-1")
-        self.assertTrue(ProformaConversionService.convert_to_invoice("x").is_err())
+        mock_cls.return_value = MagicMock(status="converted", number="P-1")
+        self.assertTrue(ProformaConversionService.convert_to_invoice("1").is_err())
 
 
 # ===============================================================================

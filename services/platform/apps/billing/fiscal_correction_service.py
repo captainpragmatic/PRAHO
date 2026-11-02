@@ -23,6 +23,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.row_locks import lock_one_and_load
+
 from .fiscal_correction_models import (
     REASON_NO_FISCAL_DOCUMENT,
     STATE_MANUAL_REQUIRED,
@@ -198,7 +200,7 @@ def record_provider_storno(correction_id: Any, record: ProviderStornoRecord) -> 
         if correction is None or correction.state != STATE_MANUAL_REQUIRED or correction.original_id is None:
             raise ValidationError({"__all__": _("This correction is no longer waiting for a provider document.")})
         original = (
-            Invoice.objects.select_for_update(of=("self",)).select_related("currency").get(pk=correction.original_id)
+            lock_one_and_load(Invoice.objects.select_related("currency").filter(pk=correction.original_id))
         )
 
         errors = _provider_storno_errors(correction, original, record, today=ro_local_date(timezone.now()))

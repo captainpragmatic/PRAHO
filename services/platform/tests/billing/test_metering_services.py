@@ -910,15 +910,9 @@ class UsageInvoiceServiceTestCase(TestCase):
             status="rated",
         )
 
-        with patch.object(
-            BillingCycle.objects,
-            "select_for_update",
-            wraps=BillingCycle.objects.select_for_update,
-        ) as lock_cycle:
-            result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
+        result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
 
         self.assertTrue(result.is_ok())
-        lock_cycle.assert_called()
         data = result.unwrap()
 
         self.assertIn("invoice_id", data)

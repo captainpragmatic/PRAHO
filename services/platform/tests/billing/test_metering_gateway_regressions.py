@@ -42,6 +42,7 @@ from apps.billing.metering_service import (
     _parse_decimal,
 )
 from apps.billing.models import Currency, Subscription, SubscriptionItem
+from apps.common.row_locks import lock_one_and_load
 from apps.common.types import Err, Ok
 from apps.customers.models import Customer
 from apps.products.models import Product
@@ -752,11 +753,7 @@ class TestAggregationService(TestCase):
         _agg = _make_aggregation(self.meter, self.customer, self.billing_cycle, self.subscription)
         with (
             patch.object(AggregationService, "process_pending_events", return_value=(0, 0)) as process_pending,
-            patch.object(
-                BillingCycle.objects,
-                "select_for_update",
-                wraps=BillingCycle.objects.select_for_update,
-            ) as lock_cycle,
+            patch("apps.billing.metering_service.lock_one_and_load", wraps=lock_one_and_load) as lock_cycle,
         ):
             result = self.svc.close_billing_cycle(str(self.billing_cycle.id))
         assert result.is_ok()

@@ -2019,7 +2019,7 @@ class RefundConvergenceHardeningTests(TestCase):
 
         self._make_payment(self._make_invoice(), transaction_id="pi_retryable_failure")
         with patch(
-            "apps.billing.refund_service.Payment.objects.select_for_update",
+            "apps.billing.refund_service.lock_one_and_load",
             side_effect=OperationalError("deadlock detected"),
         ):
             result = RefundConvergenceService.converge_gateway_refund(
@@ -2040,7 +2040,7 @@ class RefundConvergenceHardeningTests(TestCase):
 
         self._make_payment(self._make_invoice(), transaction_id="pi_unknown_failure")
         with patch(
-            "apps.billing.refund_service.Payment.objects.select_for_update",
+            "apps.billing.refund_service.lock_one_and_load",
             side_effect=RuntimeError("unexpected convergence failure"),
         ):
             result = RefundConvergenceService.converge_gateway_refund(

@@ -351,12 +351,16 @@ class RecurringPaymentAuthorizationService:
             if enabled:
                 if authorization is None:
                     return Err("An active recurring-payment authorization is required")
-                locked_authorization = (
-                    RecurringPaymentAuthorization.objects.select_for_update()
-                    .select_related("payment_method")
-                    .defer("payment_method__bank_details")
-                    .get(pk=authorization.pk)
+                # Match setup completion: Customer -> PaymentMethod -> Authorization
+                # -> Subscription. The preliminary FK is only a routing hint.
+                method_id = RecurringPaymentAuthorization.objects.values_list("payment_method_id", flat=True).get(
+                    pk=authorization.pk
                 )
+                method = CustomerPaymentMethod.objects.select_for_update(of=("self",)).defer("bank_details").get(pk=method_id)
+                locked_authorization = RecurringPaymentAuthorization.objects.select_for_update(of=("self",)).get(pk=authorization.pk)
+                if locked_authorization.payment_method_id != method.pk or method.customer_id != locked_customer.pk:
+                    return Err("Recurring-payment authorization payment method changed during enrollment")
+                locked_authorization.payment_method = method
 
             locked = Subscription.objects.select_for_update().get(pk=subscription.pk)
             if locked.customer_id != locked_customer.id:

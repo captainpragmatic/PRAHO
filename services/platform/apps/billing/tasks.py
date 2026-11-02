@@ -1818,7 +1818,6 @@ def _bind_replayed_recurring_intent(payment_id: int, intent_id: str, client_secr
     with transaction.atomic():
         payment = (
             Payment.objects.select_for_update(of=("self",))
-            .select_related("currency", "invoice", "proforma")
             .get(id=payment_id)
         )
         if payment.gateway_txn_id and payment.gateway_txn_id != intent_id:
