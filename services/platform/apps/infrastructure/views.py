@@ -511,7 +511,9 @@ def deployment_detail(request: HttpRequest, pk: int) -> HttpResponse:
         or (deployment.status == "destroying" and deployment.needs_reconciliation),
         "can_deploy": can_deploy_nodes(cast("User", request.user)),
         "can_manage": can_manage_deployments(cast("User", request.user)),
-        "is_in_progress": deployment.status in NodeDeployment.POLLING_STATUSES,
+        "is_in_progress": deployment.should_poll,
+        "is_running": deployment.status in NodeDeployment.POLLING_STATUSES,
+        "operation_queued": deployment.operation_queued,
         "fqdn": f"{deployment.hostname}.{deployment.dns_zone}" if deployment.dns_zone else deployment.hostname,
     }
 
@@ -971,7 +973,9 @@ def deployment_status_partial(request: HttpRequest, pk: int) -> HttpResponse:
         "stages": ["SSH Key", "Provision", "DNS", "Ansible", "Validate", "Register"],
         "status_variant": _get_status_variant(deployment.status),
         "status_icon": _get_status_icon(deployment.status),
-        "is_in_progress": deployment.status in NodeDeployment.POLLING_STATUSES,
+        "is_in_progress": deployment.should_poll,
+        "is_running": deployment.status in NodeDeployment.POLLING_STATUSES,
+        "operation_queued": deployment.operation_queued,
     }
 
     return render(request, "infrastructure/partials/deployment_status.html", context)

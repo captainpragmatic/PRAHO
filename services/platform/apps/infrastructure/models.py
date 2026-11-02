@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.core.exceptions import ValidationError
@@ -22,6 +23,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.utils.translation import pgettext_lazy
 
 if TYPE_CHECKING:
     from django.utils.functional import _StrPromise
@@ -309,14 +311,15 @@ class NodeDeployment(models.Model):
         ("destroyed", _("Destroyed")),
     ]
 
+    # Noun labels under their own context: the same English words are imperative buttons elsewhere.
     OPERATION_KIND_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
-        ("deploy", _("Deploy")),
-        ("retry", _("Retry")),
-        ("destroy", _("Destroy")),
-        ("teardown", _("Teardown")),
-        ("registration", _("Registration resume")),
-        ("reconcile", _("Reconcile")),
-        ("redeploy", _("Re-deploy")),
+        ("deploy", pgettext_lazy("operation kind", "Deploy")),
+        ("retry", pgettext_lazy("operation kind", "Retry")),
+        ("destroy", pgettext_lazy("operation kind", "Destroy")),
+        ("teardown", pgettext_lazy("operation kind", "Teardown")),
+        ("registration", pgettext_lazy("operation kind", "Registration resume")),
+        ("reconcile", pgettext_lazy("operation kind", "Reconcile")),
+        ("redeploy", pgettext_lazy("operation kind", "Re-deploy")),
     ]
 
     SERVER_CREATE_STATE_CHOICES: ClassVar[list[tuple[str, str | _StrPromise]]] = [
@@ -712,6 +715,24 @@ class NodeDeployment(models.Model):
             "configuring_backups",
             "validating",
             "registering",
+        )
+
+    QUEUED_POLL_WINDOW: ClassVar[timedelta] = timedelta(minutes=15)
+    """Limit polling for terminal reservations that no worker claimed."""
+
+    @property
+    def operation_queued(self) -> bool:
+        """Unclaimed reservations have a timestamp; claiming an operation clears it."""
+        return self.operation_reserved_at is not None
+
+    @property
+    def should_poll(self) -> bool:
+        """Poll running operations and recent reservations without polling stranded rows forever."""
+        reserved_at = self.operation_reserved_at
+        return self.status in self.POLLING_STATUSES or (
+            self.operation_queued
+            and reserved_at is not None
+            and reserved_at >= timezone.now() - self.QUEUED_POLL_WINDOW
         )
 
     @property

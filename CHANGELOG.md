@@ -34,6 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Node deploys get past their first playbook on native hosts.** The Platform and worker units hide `/home` (`ProtectHome=yes`), and Ansible's SSH control-path directory defaults to `~/.ansible/cp` whatever `ANSIBLE_HOME` says, so every playbook failed before reaching the node. The directory now lives under `ANSIBLE_HOME`. A failed SSH transition also records Ansible's own error line instead of only a generic message.
+- **The deployment page follows a queued operation.** After Re-deploy, Retry or Destroy, the page keeps refreshing and shows "Queued: <operation>" until the worker starts it (for at most 15 minutes), instead of showing the old status until a manual reload.
+- **A failed deploy no longer keeps a deleted server's id and addresses.** When cleanup deletes the server it just created, the deployment's server id and IP addresses are cleared with it, as teardown already did.
+- **Romanian: node deployment is "instalare".** Deployment terms read Instalare/Reinstalare instead of Implementare, operation names are nouns (Reîncercare, Distrugere) while buttons keep their imperative, and three mistranslated entries now have correct translations.
 - Failed hosting creation retries now honor cancellation and customer suspension, including changes made after a retry was queued. Uncertain earlier creates are checked on their recorded node without recreating them or changing credentials. A resource created after its hosting intent was revoked is disabled through a recorded recovery job; an uncertain disable keeps its account hold until staff verify the exact disabled owner and confirm outstanding commands have stopped (#827).
 - Recording a provider storno now locks its original invoice without locking the shared currency. Unrelated customers' invoices can commit concurrently; correction and original-invoice serialization remain protected (#832).
 - Hosting fulfilment and staff completion now survive a concurrent plan change while waiting for a service lock, and use the current plan to choose automatic or manual delivery (#816).

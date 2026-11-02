@@ -4399,10 +4399,8 @@ msgid "Disabled"
 msgstr "Dezactivat"
 
 #: apps/common/system_status.py:203
-#, fuzzy
-#| msgid "Node deployment is disabled in settings."
 msgid "Stripe is disabled in integration settings."
-msgstr "Implementarea de noduri este dezactivată în setări."
+msgstr "Stripe este dezactivat în setările integrărilor."
 
 #: apps/common/system_status.py:212
 #, fuzzy
@@ -6645,16 +6643,12 @@ msgid "✅ Registrar updated successfully"
 msgstr "✅ Registrator actualizat cu succes"
 
 #: apps/infrastructure/deployment_preflight.py:38
-#, fuzzy
-#| msgid "Enable node drain"
 msgid "Enable node deployment"
-msgstr "Activați drenajul nodului"
+msgstr "Activați instalarea nodurilor"
 
 #: apps/infrastructure/deployment_preflight.py:39
-#, fuzzy
-#| msgid "Disable to prevent any new node deployments."
 msgid "An administrator has disabled new node deployments."
-msgstr "Dezactivați pentru a preveni orice implementare de noduri noi."
+msgstr "Un administrator a dezactivat instalarea de noduri noi."
 
 #: apps/infrastructure/deployment_preflight.py:49 apps/settings/catalog.py:2213
 msgid "DNS default zone"
@@ -6705,25 +6699,25 @@ msgstr ""
 #: apps/infrastructure/deployment_preflight.py:128
 #, python-format
 msgid "Node deployment requires a fully-qualified hostname; configure %(key)s before deploying."
-msgstr "Implementarea nodului necesită un nume de gazdă complet calificat; configurați %(key)s înainte de implementare."
+msgstr "Instalarea nodului necesită un nume de gazdă complet calificat; configurați %(key)s înainte de instalare."
 
 #: apps/infrastructure/deployment_preflight.py:133
 msgid "Node deployment DNS zone is invalid: surrounding whitespace is not allowed."
-msgstr "Zona DNS de implementare a nodului nu este validă: spațiile de la început și de la sfârșit nu sunt permise."
+msgstr "Zona DNS de instalare a nodului nu este validă: spațiile de la început și de la sfârșit nu sunt permise."
 
 #: apps/infrastructure/deployment_preflight.py:135
 msgid "Node deployment DNS zone is too long for the generated node hostname."
-msgstr "Zona DNS de implementare a nodului este prea lungă pentru numele de gazdă al nodului generat."
+msgstr "Zona DNS de instalare a nodului este prea lungă pentru numele de gazdă al nodului generat."
 
 #: apps/infrastructure/deployment_preflight.py:139
 #, python-format
 msgid "Node deployment DNS zone is invalid: %(error)s."
-msgstr "Zona DNS de implementare a nodului nu este validă: %(error)s."
+msgstr "Zona DNS de instalare a nodului nu este validă: %(error)s."
 
 #: apps/infrastructure/deployment_preflight.py:153
 #, python-format
 msgid "Node deployment fully-qualified hostname is invalid: %(error)s."
-msgstr "Numele de gazdă complet calificat al nodului de implementare nu este valid: %(error)s."
+msgstr "Numele de gazdă complet calificat al nodului de instalare nu este valid: %(error)s."
 
 #: apps/infrastructure/deployment_service.py:132
 msgid "Automatic node deployment currently supports Hetzner Ubuntu 26.04 only. Other provider image selectors require Ubuntu 24.04/26.04 verification before deployment or retry."
@@ -7106,7 +7100,7 @@ msgstr "Server Virtualmin"
 
 #: apps/infrastructure/models.py:459
 msgid "Maximum domains for this deployment. Default based on server size."
-msgstr "Numărul maxim de domenii pentru această implementare. Valoarea implicită depinde de dimensiunea serverului."
+msgstr "Numărul maxim de domenii pentru această instalare. Valoarea implicită depinde de dimensiunea serverului."
 
 #: apps/infrastructure/models.py:465
 msgid "Backup Enabled"
@@ -7130,7 +7124,7 @@ msgstr "Număr de reîncercări"
 
 #: apps/infrastructure/models.py:487
 msgid "Number of retry attempts for this deployment"
-msgstr "Numărul de reîncercări pentru această implementare"
+msgstr "Numărul de reîncercări pentru această instalare"
 
 #: apps/infrastructure/models.py:493
 msgid "Triggered by Failover"
@@ -7142,7 +7136,7 @@ msgstr "Nod sursă"
 
 #: apps/infrastructure/models.py:503
 msgid "Original node this deployment is replacing (failover scenario)"
-msgstr "Nodul original pe care această implementare o înlocuiește (scenariu de failover)"
+msgstr "Nodul original pe care această instalare o înlocuiește (scenariu de failover)"
 
 #: apps/infrastructure/models.py:512 templates/infrastructure/deployment_detail.html:208
 msgid "Initiated By"
@@ -7166,11 +7160,11 @@ msgstr "Distrus la"
 
 #: apps/infrastructure/models.py:529 apps/settings/catalog.py:138
 msgid "Node Deployment"
-msgstr "Implementare de nod"
+msgstr "Instalare de nod"
 
 #: apps/infrastructure/models.py:530 templates/infrastructure/deployment_list.html:5 templates/infrastructure/deployment_list.html:13
 msgid "Node Deployments"
-msgstr "Implementări de noduri"
+msgstr "Instalări de noduri"
 
 #: apps/infrastructure/models.py:725
 msgid "Debug"
@@ -7182,7 +7176,7 @@ msgstr "Informație"
 
 #: apps/infrastructure/models.py:735 apps/infrastructure/models.py:790 apps/infrastructure/models.py:857 apps/infrastructure/models.py:928 apps/infrastructure/models.py:1021 apps/infrastructure/models.py:1115 templates/infrastructure/deployment_detail.html:5
 msgid "Deployment"
-msgstr "Implementare"
+msgstr "Instalare"
 
 #: apps/infrastructure/models.py:742
 msgid "Level"
@@ -7218,11 +7212,11 @@ msgstr "Durată etapă"
 
 #: apps/infrastructure/models.py:771
 msgid "Node Deployment Log"
-msgstr "Jurnal de implementare de nod"
+msgstr "Jurnal de instalare de nod"
 
 #: apps/infrastructure/models.py:772
 msgid "Node Deployment Logs"
-msgstr "Jurnale de implementare de noduri"
+msgstr "Jurnale de instalare de noduri"
 
 #: apps/infrastructure/models.py:793
 msgid "Period Start"
@@ -7250,11 +7244,11 @@ msgstr "Cost de stocare"
 
 #: apps/infrastructure/models.py:828
 msgid "Node Deployment Cost Record"
-msgstr "Articol de cost de implementare de nod"
+msgstr "Articol de cost de instalare de nod"
 
 #: apps/infrastructure/models.py:829
 msgid "Node Deployment Cost Records"
-msgstr "Articole de cost de implementare de noduri"
+msgstr "Articole de cost de instalare de noduri"
 
 #: apps/infrastructure/models.py:844 apps/infrastructure/models.py:897 templates/infrastructure/deployment_detail.html:133
 msgid "Network"
@@ -7547,7 +7541,7 @@ msgstr ""
 
 #: apps/infrastructure/views.py:541
 msgid "Can only retry failed deployments."
-msgstr "Se pot reîncerca doar implementările eșuate."
+msgstr "Se pot reîncerca doar instalările eșuate."
 
 #: apps/infrastructure/views.py:634
 msgid "Can only upgrade running nodes."
@@ -14458,7 +14452,7 @@ msgstr "Nodurile vor fi create ca {hostname}.{zone}. Utilizați modelul infra.ex
 
 #: apps/settings/catalog.py:2227
 msgid "Disable to prevent any new node deployments."
-msgstr "Dezactivați pentru a preveni orice implementare de noduri noi."
+msgstr "Dezactivați pentru a preveni orice instalare de noduri noi."
 
 #: apps/settings/catalog.py:2235 apps/settings/catalog.py:2244 apps/settings/catalog.py:2253 apps/settings/catalog.py:2262
 msgid "Terraform state"
@@ -14878,7 +14872,7 @@ msgstr "URL portal client"
 
 #: apps/settings/catalog.py:2981
 msgid "Public base URL of the customer portal, e.g. https://portal.example.com. Used in customer-facing links such as password reset emails. Leave unset to use https:// and the deployment's PORTAL_DOMAIN."
-msgstr "URL de bază public al portalului client, de ex. https://portal.example.com. Utilizat în linkuri destinate clienților, cum ar fi emailurile de reinițializare a parolei. Lăsați-l necompletat pentru a folosi https:// și PORTAL_DOMAIN al implementării."
+msgstr "URL de bază public al portalului client, de ex. https://portal.example.com. Utilizat în linkuri destinate clienților, cum ar fi emailurile de reinițializare a parolei. Lăsați-l necompletat pentru a folosi https:// și PORTAL_DOMAIN al instalării."
 
 #: apps/settings/catalog.py:2992
 msgid "Staff access"
@@ -15175,7 +15169,7 @@ msgstr "  🗑️ Valoare implicită de fallback pentru deployment eliminată: %
 #: apps/settings/management/commands/setup_default_settings.py:282
 #, python-format
 msgid "  ✅ Retained deployment-fallback override: %(key)s"
-msgstr "  ✅ Suprascriere de rezervă a implementării păstrată: %(key)s"
+msgstr "  ✅ Suprascriere de rezervă a instalării păstrată: %(key)s"
 
 #: apps/settings/management/commands/setup_default_settings.py:289
 msgid "Create missing settings, reconcile metadata and apply registered one-time activations"
@@ -15734,7 +15728,7 @@ msgstr "Credențialele serverului sunt gestionate în seif pentru fiecare server
 
 #: apps/settings/views.py:514
 msgid "Values here are database settings with a deployment fallback: when a key has no row, the EFACTURA_* Django settings apply."
-msgstr "Valorile de aici sunt setări din baza de date cu o valoare de rezervă la implementare: când o cheie nu are nicio înregistrare, se aplică setările Django EFACTURA_*."
+msgstr "Valorile de aici sunt setări din baza de date cu o valoare de rezervă la instalare: când o cheie nu are nicio înregistrare, se aplică setările Django EFACTURA_*."
 
 #: apps/settings/views.py:554
 msgid "Virtualmin default"
@@ -15775,7 +15769,7 @@ msgstr "Nimic de salvat"
 
 #: apps/settings/views.py:792 templates/settings/partials/secret_row.html:19 templates/settings/partials/setting_row.html:20
 msgid "Inherited from deployment"
-msgstr "Moștenit din implementare"
+msgstr "Moștenit din instalare"
 
 #: apps/settings/views.py:792 templates/settings/partials/secret_row.html:19 templates/settings/partials/setting_row.html:20
 msgid "Explicit override"
@@ -21132,11 +21126,11 @@ msgstr "Nu sunt disponibile date de costuri"
 
 #: templates/infrastructure/cost_dashboard.html:120
 msgid "Top Deployments by Cost"
-msgstr "Principalele implementări după cost"
+msgstr "Principalele instalări după cost"
 
 #: templates/infrastructure/cost_dashboard.html:139
 msgid "No deployment cost data available"
-msgstr "Nu sunt disponibile date privind costurile implementării"
+msgstr "Nu sunt disponibile date privind costurile instalării"
 
 #: templates/infrastructure/cost_dashboard.html:148
 msgid "Cost Breakdown"
@@ -21192,19 +21186,19 @@ msgstr "Panou de control infrastructură"
 
 #: templates/infrastructure/dashboard.html:14
 msgid "Deploy and manage hosting nodes"
-msgstr "Implementați și gestionați noduri de găzduire"
+msgstr "Instalați și gestionați noduri de găzduire"
 
 #: templates/infrastructure/dashboard.html:20 templates/infrastructure/deployment_create.html:5 templates/infrastructure/deployment_list.html:17
 msgid "Deploy New Node"
-msgstr "Implementează nod nou"
+msgstr "Instalează nod nou"
 
 #: templates/infrastructure/dashboard.html:33
 msgid "Total Deployments"
-msgstr "Total implementări"
+msgstr "Total instalări"
 
 #: templates/infrastructure/dashboard.html:77
 msgid "Recent Deployments"
-msgstr "Implementări recente"
+msgstr "Instalări recente"
 
 #: templates/infrastructure/dashboard.html:79
 msgid "View All"
@@ -21212,11 +21206,11 @@ msgstr "Vezi toate"
 
 #: templates/infrastructure/dashboard.html:119
 msgid "No deployments yet"
-msgstr "Nicio implementare încă"
+msgstr "Nicio instalare încă"
 
 #: templates/infrastructure/dashboard.html:122 templates/infrastructure/deployment_list.html:154
 msgid "Deploy your first node"
-msgstr "Implementați primul dvs. nod"
+msgstr "Instalați primul dvs. nod"
 
 #: templates/infrastructure/dashboard.html:148
 msgid "nodes"
@@ -21240,11 +21234,11 @@ msgstr "Setări"
 
 #: templates/infrastructure/deployment_create.html:14
 msgid "Deploy New Hosting Node"
-msgstr "Implementează nod nou de găzduire"
+msgstr "Instalează nod nou de găzduire"
 
 #: templates/infrastructure/deployment_create.html:15
 msgid "Configure and deploy a new infrastructure node"
-msgstr "Configurați și implementați un nod nou de infrastructură"
+msgstr "Configurați și instalați un nod nou de infrastructură"
 
 #: templates/infrastructure/deployment_create.html:25
 msgid "1. Environment & Type"
@@ -21296,7 +21290,7 @@ msgstr "FQDN"
 
 #: templates/infrastructure/deployment_create.html:176
 msgid "Start Deployment"
-msgstr "Pornește implementarea"
+msgstr "Pornește instalarea"
 
 #: templates/infrastructure/deployment_destroy.html:5 templates/infrastructure/deployment_destroy.html:12 templates/infrastructure/deployment_destroy.html:81
 msgid "Destroy Node"
@@ -21400,7 +21394,7 @@ msgstr "Vizualizați serverul"
 
 #: templates/infrastructure/deployment_detail.html:197
 msgid "Deployed"
-msgstr "Implementat"
+msgstr "Instalat"
 
 #: templates/infrastructure/deployment_detail.html:223
 msgid "Backup Settings"
@@ -21416,7 +21410,7 @@ msgstr "Loguri recente"
 
 #: templates/infrastructure/deployment_list.html:14
 msgid "Manage deployed hosting nodes"
-msgstr "Gestionați nodurile de găzduire implementate"
+msgstr "Gestionați nodurile de găzduire instalate"
 
 #: templates/infrastructure/deployment_list.html:65
 msgid "Hostname, IP..."
@@ -21432,7 +21426,7 @@ msgstr "Furnizor / Regiune"
 
 #: templates/infrastructure/deployment_list.html:152
 msgid "No deployments found"
-msgstr "Nu s-au găsit implementări"
+msgstr "Nu s-au găsit instalări"
 
 #: templates/infrastructure/deployment_logs.html:4
 msgid "Logs"
@@ -21440,11 +21434,11 @@ msgstr "Loguri"
 
 #: templates/infrastructure/deployment_logs.html:12
 msgid "Deployment Logs"
-msgstr "Loguri de implementare"
+msgstr "Loguri de instalare"
 
 #: templates/infrastructure/deployment_logs.html:17
 msgid "Back to Deployment"
-msgstr "Înapoi la implementare"
+msgstr "Înapoi la instalare"
 
 #: templates/infrastructure/deployment_logs.html:24
 msgid "Full Log History"
@@ -21556,7 +21550,7 @@ msgstr "Detecția derivei"
 
 #: templates/infrastructure/drift/dashboard.html:13
 msgid "Monitor configuration drift across deployments"
-msgstr "Monitorizați deriva configurației între implementări"
+msgstr "Monitorizați deriva configurației între instalări"
 
 #: templates/infrastructure/drift/dashboard.html:16
 msgid "Pending Remediations"
@@ -21564,7 +21558,7 @@ msgstr "Remedieri în așteptare"
 
 #: templates/infrastructure/drift/dashboard.html:22
 msgid "Monitored Deployments"
-msgstr "Implementări monitorizate"
+msgstr "Instalări monitorizate"
 
 #: templates/infrastructure/drift/dashboard.html:26
 msgid "Unresolved Findings"
@@ -21576,7 +21570,7 @@ msgstr "Aprobări în așteptare"
 
 #: templates/infrastructure/drift/dashboard.html:37
 msgid "Deployment Drift Status"
-msgstr "Starea derivei implementărilor"
+msgstr "Starea derivei instalărilor"
 
 #: templates/infrastructure/drift/dashboard.html:54
 msgid "No drift"
@@ -21588,7 +21582,7 @@ msgstr "Scanați acum"
 
 #: templates/infrastructure/drift/dashboard.html:69
 msgid "No active deployments to monitor."
-msgstr "Nu există implementări active de monitorizat."
+msgstr "Nu există instalări active de monitorizat."
 
 #: templates/infrastructure/drift/deployment_detail.html:5
 msgid "Drift History"
@@ -21676,11 +21670,11 @@ msgstr "În curs..."
 
 #: templates/infrastructure/partials/deployment_status.html:22
 msgid "Deployment Progress"
-msgstr "Progresul implementării"
+msgstr "Progresul instalării"
 
 #: templates/infrastructure/partials/deployment_status.html:46
 msgid "Deployment failed. Check logs for details."
-msgstr "Implementarea a eșuat. Verificați logurile pentru detalii."
+msgstr "Instalarea a eșuat. Verificați logurile pentru detalii."
 
 #: templates/infrastructure/partials/region_row.html:30 templates/infrastructure/region_list.html:63
 msgid "Disable"
@@ -21724,7 +21718,7 @@ msgstr "Adăugați furnizor"
 
 #: templates/infrastructure/provider_list.html:49
 msgid "Deployments"
-msgstr "Implementări"
+msgstr "Instalări"
 
 #: templates/infrastructure/provider_list.html:57
 msgid "Sizes"
@@ -25096,7 +25090,7 @@ msgstr "Lista de acces administrativ pentru noduri"
 
 #: templates/settings/group.html:39
 msgid "Defaults here are appropriate for most deployments. Changes affect performance and reliability — adjust only with a clear reason."
-msgstr "Valorile implicite sunt potrivite pentru majoritatea implementărilor. Modificările afectează performanța și fiabilitatea — ajustați doar cu un motiv clar."
+msgstr "Valorile implicite sunt potrivite pentru majoritatea instalărilor. Modificările afectează performanța și fiabilitatea — ajustați doar cu un motiv clar."
 
 #: templates/settings/group.html:50
 msgid "Test connection"
@@ -25312,7 +25306,7 @@ msgstr "Salvați ca suprascriere"
 
 #: templates/settings/partials/setting_row.html:70
 msgid "Use deployment value"
-msgstr "Utilizați valoarea de implementare"
+msgstr "Utilizați valoarea de instalare"
 
 #: templates/settings/partials/setting_row.html:74
 msgid "Reset to default"
@@ -26582,6 +26576,46 @@ msgstr "Pagini utilizator"
 #: tests/common/pagination_assertions.py:21
 msgid "Go to next page"
 msgstr "Mergeți la pagina următoare"
+
+#: templates/infrastructure/partials/deployment_status.html:19
+#, python-format
+msgid "Queued: %(kind)s"
+msgstr "În așteptare: %(kind)s"
+
+#: apps/infrastructure/models.py:316
+msgctxt "operation kind"
+msgid "Deploy"
+msgstr "Instalare"
+
+#: apps/infrastructure/models.py:317
+msgctxt "operation kind"
+msgid "Retry"
+msgstr "Reîncercare"
+
+#: apps/infrastructure/models.py:318
+msgctxt "operation kind"
+msgid "Destroy"
+msgstr "Distrugere"
+
+#: apps/infrastructure/models.py:319
+msgctxt "operation kind"
+msgid "Teardown"
+msgstr "Dezafectare"
+
+#: apps/infrastructure/models.py:320
+msgctxt "operation kind"
+msgid "Registration resume"
+msgstr "Reluarea înregistrării"
+
+#: apps/infrastructure/models.py:321
+msgctxt "operation kind"
+msgid "Reconcile"
+msgstr "Reconciliere"
+
+#: apps/infrastructure/models.py:322
+msgctxt "operation kind"
+msgid "Re-deploy"
+msgstr "Reinstalare"
 
 #, python-brace-format
 #~ msgid "Nameserver update failed: {error}"
@@ -30278,7 +30312,7 @@ msgstr "Reconciliază rezultatul înregistrat"
 
 #: apps/infrastructure/node_maintenance_gate.py:140
 msgid "A deployment operation is active or requires reconciliation."
-msgstr "O operațiune de implementare este activă sau necesită reconciliere."
+msgstr "O operațiune de instalare este activă sau necesită reconciliere."
 
 #: apps/infrastructure/node_maintenance_gate.py:147
 msgid "A drift operation currently owns this server."
@@ -30320,7 +30354,7 @@ msgstr ""
 
 #: apps/infrastructure/node_maintenance_service.py:208
 msgid "Automatic maintenance requires a completed managed deployment."
-msgstr "Mentenanța automată necesită o implementare administrată finalizată."
+msgstr "Mentenanța automată necesită o instalare administrată finalizată."
 
 #: apps/infrastructure/node_maintenance_service.py:115
 msgid ""
@@ -30407,7 +30441,7 @@ msgid ""
 "Maintenance currently owns this deployment. Verify its outcome before "
 "another operation."
 msgstr ""
-"Mentenanța deține în prezent această implementare. Verificați rezultatul "
+"Mentenanța deține în prezent această instalare. Verificați rezultatul "
 "înaintea altei operațiuni."
 
 #: apps/infrastructure/node_maintenance_gate.py:88
@@ -30470,7 +30504,7 @@ msgstr "Execuția curentă nu mai corespunde acestei revizii a ferestrei."
 msgid ""
 "The deployment's server binding keeps changing; reload before retrying."
 msgstr ""
-"Asocierea implementării cu serverul se modifică în continuare; reîncărcați "
+"Asocierea instalării cu serverul se modifică în continuare; reîncărcați "
 "înainte de a reîncerca."
 
 #: apps/infrastructure/node_maintenance_policy.py:53
@@ -30522,7 +30556,7 @@ msgid ""
 "The recorded deployment no longer exists. Manual resource review is "
 "required."
 msgstr ""
-"Implementarea înregistrată nu mai există. Este necesară verificarea manuală "
+"Instalarea înregistrată nu mai există. Este necesară verificarea manuală "
 "a resursei."
 
 #: apps/infrastructure/node_maintenance_execution.py:709
