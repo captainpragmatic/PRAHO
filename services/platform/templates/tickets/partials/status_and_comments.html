@@ -126,11 +126,7 @@
                             <!-- File Upload -->
                             {% trans 'Attach files' as attach_files_label %}
                             {% input_field "attachments" input_type="file" html_id="file-input" multiple=True accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg" aria_label=attach_files_label container_class="hidden" css_class="hidden" %}
-                            {# tmpl-allow TMPL002: text-only ghost styling (no background or border) beside the reply form; every button variant renders a filled background #}
-                            <button type="button" id="attach-btn" class="inline-flex items-center px-3 py-1 text-sm text-slate-400 hover:text-slate-300" title="{% trans 'Attach file' %}">
-                                <span class="mr-1">{% icon "paperclip" size="sm" %}</span>
-                                {% trans 'Attach' %}
-                            </button>
+                            {% trans 'Attach' as attach_label %}{% trans 'Attach file' as attach_title %}{% button attach_label variant="ghost" size="sm" icon="paperclip" button_id="attach-btn" title=attach_title %}
 
                             <!-- File list display -->
                             <div id="file-list" class="hidden"></div>
@@ -169,15 +165,8 @@
 
                         <!-- Submit Button -->
                         <div class="flex flex-col-reverse sm:flex-row sm:justify-end items-stretch sm:items-center gap-2">
-                            {# tmpl-allow TMPL002: text-only ghost styling (no background or border) beside Send Reply; every button variant renders a filled background #}
-                            <button type="button" class="px-3 py-2 text-sm text-slate-400 hover:text-slate-300 text-center sm:text-left" data-action="reset-form" data-reset-target="#reply-form">
-                                {% trans 'Cancel' %}
-                            </button>
-                            {# tmpl-allow TMPL002: holds the #submit-spinner and #submit-text spans the reply JS toggles; the button tag renders one text and one icon #}
-                            <button type="submit" class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 focus:ring-offset-slate-800 disabled:opacity-50 disabled:cursor-not-allowed">
-                                <span id="submit-spinner" class="mr-2 hidden">{% icon "refresh" size="sm" %}</span>
-                                <span id="submit-text">{% trans 'Send Reply' %}</span>
-                            </button>
+                            {% trans 'Cancel' as cancel_reply_label %}{% button cancel_reply_label variant="ghost" size="sm" data_action="reset-form" attrs='data-reset-target="#reply-form"' %}
+                            {% trans 'Send Reply' as send_reply_label %}{% button send_reply_label type="submit" variant="primary" button_id="reply-submit" loading=True %}
                         </div>
                     </div>
 

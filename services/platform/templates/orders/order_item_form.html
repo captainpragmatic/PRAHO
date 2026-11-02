@@ -299,7 +299,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const formData = new FormData(this);
 
-            fetch(this.action, {
+            window.platformFetch(this.action, {
                 method: 'POST',
                 body: formData,
                 headers: {
@@ -333,6 +333,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             }).catch(error => {
+                if (error.csrfReload) return;  // platformFetch already said to reload
                 console.error('Form submission error:', error);
                 {% trans "Error submitting form. Please try again." as form_error_msg %}
                 alert('{{ form_error_msg|escapejs }}');

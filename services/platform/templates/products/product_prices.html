@@ -5,6 +5,7 @@
 {% block title %}{% trans "Pricing" %}: {{ product.name }} - PRAHO Platform{% endblock %}
 
 {% block content %}
+{% if not can_manage_catalog %}{% trans "Only administrators can change the product catalog." as catalog_lock %}{% endif %}
 <div class="px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
   <!-- Header -->
   <div class="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-4 mb-6">
@@ -26,7 +27,7 @@
       {% url 'products:product_detail' slug=product.slug as detail_url %}
       {% trans "← Back to Product" as bt1 %}{% button bt1 variant="secondary" href=detail_url %}
       {% url 'products:product_price_create' slug=product.slug as create_price_url %}
-      {% trans "Add Price" as bt2 %}{% button bt2 variant="primary" href=create_price_url %}
+      {% trans "Add Price" as bt2 %}{% button bt2 variant="primary" href=create_price_url disabled=catalog_lock title=catalog_lock %}
     </div>
   </div>
 
@@ -165,15 +166,15 @@
 
           <!-- Actions -->
           <div class="flex flex-col sm:flex-row justify-end gap-2 sm:gap-3 pt-4 border-t border-slate-600">
-            <a href="{% url 'products:product_price_edit' slug=product.slug price_id=price.id %}"
+            <a {% if catalog_lock %}aria-disabled="true"{% else %}href="{% url 'products:product_price_edit' slug=product.slug price_id=price.id %}"{% endif %}
                class="flex items-center justify-center px-3 py-2 bg-yellow-600 hover:bg-yellow-700 text-white text-sm rounded-lg transition-colors"
-               title="{% trans 'Edit Pricing' %}">
+               title="{% if catalog_lock %}{{ catalog_lock }}{% else %}{% trans 'Edit Pricing' %}{% endif %}">
               <span class="mr-1">{% icon "document" %}</span>
               {% trans 'Edit' %}
             </a>
-            <a href="{% url 'products:product_price_delete' slug=product.slug price_id=price.id %}"
+            <a {% if catalog_lock %}aria-disabled="true"{% else %}href="{% url 'products:product_price_delete' slug=product.slug price_id=price.id %}"{% endif %}
                class="flex items-center justify-center px-3 py-2 bg-red-600 hover:bg-red-700 text-white text-sm rounded-lg transition-colors"
-               title="{% trans 'Delete Pricing' %}">
+               title="{% if catalog_lock %}{{ catalog_lock }}{% else %}{% trans 'Delete Pricing' %}{% endif %}">
               <span class="mr-1">{% icon "x" %}</span>
               {% trans 'Delete' %}
             </a>
@@ -197,7 +198,7 @@
         {% trans 'Start by adding pricing options for this product. Multiple currencies and billing periods are supported.' %}
       </p>
       {% url 'products:product_price_create' slug=product.slug as create_price_url %}
-      {% trans "Add First Price" as bt6 %}{% button bt6 variant="primary" href=create_price_url %}
+      {% trans "Add First Price" as bt6 %}{% button bt6 variant="primary" href=create_price_url disabled=catalog_lock title=catalog_lock %}
     </div>
   </div>
   {% endif %}

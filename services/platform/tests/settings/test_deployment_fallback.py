@@ -160,7 +160,7 @@ class DeploymentFallbackTests(TestCase):
         source = Path(__file__).resolve().parents[2] / "static/js/alpine-components.js"
         script = """
 const fs = require("fs");
-global.window = {addEventListener: () => {}};
+global.window = {addEventListener: () => {}, platformFetch: (url, options) => fetch(url, options)};
 global.document = {
   addEventListener: (_, callback) => callback(),
   querySelector: () => ({value: "csrf"})

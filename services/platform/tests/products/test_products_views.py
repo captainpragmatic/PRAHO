@@ -12,6 +12,7 @@ from django.core.exceptions import PermissionDenied
 
 from apps.products.models import Product, ProductPrice
 from apps.billing.models import Currency
+from tests.helpers.csrf import body_csrf_token
 
 User = get_user_model()
 
@@ -195,6 +196,22 @@ class ProductViewCSRFProtectionTests(TestCase):
         for url in urls:
             response = self.client.post(url)
             self.assertEqual(response.status_code, 403, f"CSRF not enforced for: {url}")
+
+    def test_mobile_toggles_work_with_the_token_the_list_page_gives_htmx(self):
+        """The mobile-card toggles carry no header of their own; they rely on the page's <body> token."""
+        self.client.force_login(self.admin_user)
+        token = body_csrf_token(self.client.get(reverse("products:product_list")).content.decode())
+        self.assertTrue(self.product.is_active)
+
+        response = self.client.post(
+            reverse("products:product_toggle_active", kwargs={"slug": self.product.slug}),
+            HTTP_HX_REQUEST="true",
+            HTTP_X_CSRFTOKEN=token,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.product.refresh_from_db()
+        self.assertFalse(self.product.is_active)
 
     def test_price_create_csrf_protected(self):
         """🔒 Test that price creation is CSRF protected"""

@@ -28,7 +28,7 @@
     cancelEditItemOrModal: true,
     cancelExpandableEditAction: true,
     closeEventDetail: true,
-    closeModal: true,
+    closeGdprModal: true,
     confirmAccountDeleteAction: true,
     confirmDisable: true,
     confirmProtectionToggleAction: true,
@@ -237,4 +237,29 @@
     target.focus();
     target.click();
   }
+
+  // A plain form submitted by a {% button loading=True %} shows that button's spinner (.ui-btn.is-loading in
+  // input.css) until the next page loads. A form a script intercepted (preventDefault) is left to that script.
+  document.addEventListener("submit", function (event) {
+    var button = event.submitter;
+    if (!button || !button.matches(".ui-btn[data-loading]")) {
+      return;
+    }
+    // Decide after every submit listener ran: a confirm handler registered after this file may still cancel.
+    setTimeout(function () {
+      if (event.defaultPrevented) {
+        return;
+      }
+      button.classList.add("is-loading");
+      button.setAttribute("aria-busy", "true");
+    }, 0);
+  });
+
+  // Back/forward can restore the page from the cache with the spinner still showing.
+  window.addEventListener("pageshow", function () {
+    document.querySelectorAll(".ui-btn.is-loading[data-loading]").forEach(function (button) {
+      button.classList.remove("is-loading");
+      button.removeAttribute("aria-busy");
+    });
+  });
 })();

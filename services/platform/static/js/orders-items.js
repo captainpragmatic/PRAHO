@@ -279,19 +279,9 @@
   function deleteOrderItem(itemId) {
     if (!window.confirm(t("confirmDelete"))) { return; }
 
-    var csrfEl = document.querySelector("[name=csrfmiddlewaretoken]");
-    var metaEl = document.querySelector('meta[name="csrf-token"]');
-    var csrfToken = (csrfEl && csrfEl.value) || (metaEl && metaEl.getAttribute("content"));
-    if (!csrfToken) {
-      console.error("CSRF token not found");
-      window.alert(t("csrfError"));
-      return;
-    }
-
-    fetch(base() + "/items/" + itemId + "/delete/", {
+    window.platformFetch(base() + "/items/" + itemId + "/delete/", {
       method: "POST",
       headers: {
-        "X-CSRFToken": csrfToken,
         "X-Requested-With": "XMLHttpRequest",
         "Content-Type": "application/x-www-form-urlencoded",
       },
@@ -311,7 +301,7 @@
         }
       })
       .catch(function (error) {
-        if (leaving) { return; }
+        if (leaving || error.csrfReload) { return; }
         console.error("Error deleting item:", error);
         window.alert(t("errDelete"));
       });
@@ -381,9 +371,13 @@
       });
   }
 
+  // Each item change refreshes the summary; only the latest refresh may swap, so an older answer that arrives last
+  // can't overwrite a newer one.
+  var summaryGeneration = 0;
   function refreshFinancialSummary() {
     var financialSummary = document.getElementById("financial-summary");
     if (!financialSummary) { return; }
+    var generation = ++summaryGeneration;
     fetch(base() + "/", {
       method: "GET",
       headers: {
@@ -395,8 +389,11 @@
       .then(function (response) { return response.text(); })
       .then(function (html) {
         var doc = new DOMParser().parseFromString(html, "text/html");
+        if (generation !== summaryGeneration) { return; }
         var fresh = doc.getElementById("financial-summary");
-        if (fresh && financialSummary) { financialSummary.outerHTML = fresh.outerHTML; }
+        // Look it up again: an earlier refresh may have replaced the element captured before the fetch.
+        var current = document.getElementById("financial-summary");
+        if (fresh && current) { current.outerHTML = fresh.outerHTML; }
       })
       .catch(function (error) {
         if (leaving) { return; }
@@ -426,7 +423,7 @@
       (form.action.indexOf("/add/") !== -1 || form.action.indexOf("/edit/") !== -1)
     ) {
       e.preventDefault();
-      fetch(form.action, {
+      window.platformFetch(form.action, {
         method: "POST",
         body: new FormData(form),
         headers: { "HX-Request": "true", "X-Requested-With": "XMLHttpRequest" },
@@ -460,7 +457,7 @@
           }
         })
         .catch(function (error) {
-          if (leaving) { return; }
+          if (leaving || error.csrfReload) { return; }  // platformFetch already said to reload
           console.error("Form submission error:", error);
           window.alert(t("errSubmit"));
         });

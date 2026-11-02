@@ -61,20 +61,14 @@
       <span class="text-xs text-slate-500 whitespace-nowrap">{{ row.definition.unit }}</span>
       {% endif %}
       {% if row.definition.deployment_fallback %}
-      {# tmpl-allow TMPL002: @click Alpine binding; components accept no executable attributes (apps/ui/attributes.py) #}
-      <button type="button" @click="overrideField('{{ row.key }}')" class="text-sm text-blue-400 hover:text-blue-300">
-        {% trans "Save as override" %}
-      </button>
-      {# tmpl-allow TMPL002: @click Alpine binding; components accept no executable attributes (apps/ui/attributes.py) #}
-      <button type="button" @click="inheritField('{{ row.key }}')" class="text-sm text-blue-400 hover:text-blue-300">
-        {% trans "Use deployment value" %}
-      </button>
+      {% with key_attr='data-key="'|add:row.key|add:'"' %}
+      {% trans "Save as override" as override_label %}{% button override_label variant="link" size="sm" alpine_click="overrideField($el.dataset.key)" attrs=key_attr %}
+      {% trans "Use deployment value" as inherit_label %}{% button inherit_label variant="link" size="sm" alpine_click="inheritField($el.dataset.key)" attrs=key_attr %}
+      {% endwith %}
       {% else %}
-      {# tmpl-allow TMPL002: @click Alpine binding; components accept no executable attributes (apps/ui/attributes.py) #}
-      <button type="button" @click="resetField('{{ row.key }}')" title="{% trans 'Reset to default' %}" class="text-slate-500 hover:text-blue-400 transition-colors">↺</button>
+      {% with key_attr='data-key="'|add:row.key|add:'"' %}{% trans "Reset to default" as reset_label %}{% button reset_label variant="ghost" size="xs" icon="refresh" icon_only=True aria_label=reset_label title=reset_label alpine_click="resetField($el.dataset.key)" attrs=key_attr %}{% endwith %}
       {% endif %}
-      {# tmpl-allow TMPL002: icon-only history control (a clock icon named by its title); the button tag renders a variant-coloured padded button with a visible text label #}
-      <button type="button" title="{% trans 'History' %}" class="text-slate-500 hover:text-blue-400 transition-colors" hx-get="{% url 'settings:setting_history' row.key %}" hx-target="#history-drawer" hx-swap="innerHTML">{% icon "clock" size="sm" %}</button>
+      {% url 'settings:setting_history' row.key as history_url %}{% trans "History" as history_label %}{% button history_label variant="ghost" size="xs" icon="clock" icon_only=True aria_label=history_label title=history_label hx_get=history_url hx_target="#history-drawer" hx_swap="innerHTML" %}
     </div>
     {% if row.definition.default != '' %}
     <p class="mt-1 text-xs text-slate-500">{% trans "Default:" %} {{ row.definition.default|default_if_none:"—" }}</p>

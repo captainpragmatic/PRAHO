@@ -56,7 +56,8 @@
                     </div>
                     {% endif %}
 
-                    <form method="post" hx-post="{{ request.get_full_path }}" hx-target="#server-form-container" hx-swap="outerHTML">
+                    {# A native post: success redirects and a validation error re-renders, both as full pages. #}
+                    <form method="post">
                         {% csrf_token %}
                         <div id="server-form-container">
                             <div class="space-y-6">
@@ -248,10 +249,10 @@
                             <div class="mt-8 flex items-center justify-end space-x-3">
                                 {% trans "Cancel" as bt2 %}{% button bt2 href=cancel_url variant="secondary" %}
                                 {% if server %}
-                                    {% trans "Test Connection" as bt3 %}{% button bt3 type="button" variant="info" hx_post=test_connection_url hx_target="#connection-test-result" hx_include="form" %}
+                                    {% trans "Test Connection" as bt3 %}{% button bt3 type="button" variant="info" hx_post=test_connection_url hx_target="#connection-test-result" hx_swap="innerHTML" hx_include="form" %}
                                     {% trans "Update Server" as bt4 %}{% button bt4 type="submit" variant="primary" %}
                                 {% else %}
-                                    {% trans "Test Connection" as bt5 %}{% button bt5 type="button" variant="info" hx_post=test_connection_url hx_target="#connection-test-result" hx_include="form" %}
+                                    {% trans "Test Connection" as bt5 %}{% button bt5 type="button" variant="info" hx_post=test_connection_url hx_target="#connection-test-result" hx_swap="innerHTML" hx_include="form" %}
                                     {% trans "Add Server" as bt6 %}{% button bt6 type="submit" variant="primary" %}
                                 {% endif %}
                             </div>

@@ -27,9 +27,9 @@
               hx-swap="outerHTML">
             {% csrf_token %}
             {% if region.is_active %}
-            {% trans "Disable" as toggle_label %}{% button toggle_label type="submit" variant="warning" size="sm" %}
+            {% trans "Disable" as toggle_label %}{% if can_manage_regions %}{% button toggle_label type="submit" variant="warning" size="sm" %}{% else %}{% trans "Only region managers can enable or disable regions." as region_locked %}{% button toggle_label type="submit" variant="warning" size="sm" disabled=True title=region_locked %}{% endif %}
             {% else %}
-            {% trans "Enable" as toggle_label %}{% button toggle_label type="submit" variant="success" size="sm" %}
+            {% trans "Enable" as toggle_label %}{% if can_manage_regions %}{% button toggle_label type="submit" variant="success" size="sm" %}{% else %}{% trans "Only region managers can enable or disable regions." as region_locked %}{% button toggle_label type="submit" variant="success" size="sm" disabled=True title=region_locked %}{% endif %}
             {% endif %}
         </form>
     </td>

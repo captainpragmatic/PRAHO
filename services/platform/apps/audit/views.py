@@ -23,6 +23,7 @@ from django.db import transaction
 from django.db.models import F, Q, QuerySet
 from django.http import Http404, HttpRequest, HttpResponse, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from django.utils.translation import gettext as _
@@ -31,8 +32,7 @@ from django.views.decorators.http import require_POST
 
 from apps.common import audit_failures
 from apps.common.decorators import admin_required, staff_required_strict
-from apps.common.encryption import DecryptionError
-from apps.common.http import mark_download
+from apps.common.http import hx_redirect, mark_download
 from apps.common.pagination import pagination_query
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.types import Err, Ok, Result
@@ -137,59 +137,23 @@ def _generate_unless_ready(export_request: "DataExport") -> Result[str, str]:
 
 
 def _handle_immediate_download(request: HttpRequest, export_request: "DataExport", user: Any) -> HttpResponse | None:
-    """Handle immediate download for completed HTMX export requests"""
+    """Reload the dashboard once the export is ready; it lists the export with its Download link.
+
+    The file itself can't be the answer: htmx swaps it into the page (XHR ignores Content-Disposition), which
+    replaced the dashboard with raw JSON. Nor can HX-Redirect to the download: the browser saves the file but the
+    page stays as it was, modal open and spinner on. download_data_export serves the file, and counts and audits
+    the download there.
+    """
     if not request.headers.get("HX-Request"):
         return None
 
-    logger.info("🔍 [GDPR Export] HTMX request detected, offering immediate download")
     export_request.refresh_from_db()
-
     if export_request.status != "completed" or not export_request.file_path:
         return None
 
-    try:
-        file_content = read_export_file(export_request)
-
-        # Create HTTP response with file download
-        response = HttpResponse(file_content, content_type="application/json")
-        mark_download(response, f"gdpr-export-{export_request.id}.json")
-
-        # Counted in the database, and read back under the row lock the update holds, so overlapping
-        # downloads each count and each record their own number.
-        with transaction.atomic():
-            DataExport.objects.filter(pk=export_request.pk).update(download_count=F("download_count") + 1)
-            export_request.refresh_from_db(fields=["download_count"])
-
-        # Log audit event for download
-        compliance_request = ComplianceEventRequest(
-            compliance_type="gdpr_data_portability",
-            reference_id=f"data_export_download_{export_request.id}",
-            description="GDPR data export downloaded (immediate)",
-            user=user,
-            status="success",
-            evidence={
-                "export_id": str(export_request.id),
-                "file_size_bytes": len(file_content.encode("utf-8")),
-                "download_count": export_request.download_count,
-                "immediate_download": True,
-            },
-            metadata={
-                "ip_address": get_safe_client_ip(request),
-                "user_agent": request.META.get("HTTP_USER_AGENT", "Unknown"),
-            },
-        )
-        AuditService.log_compliance_event(compliance_request)
-
-        return response
-
-    except DecryptionError:
-        # Never served, and not "still processing": the file is not this export's ciphertext.
-        logger.error(f"🔥 [GDPR Export] Export file {export_request.id} could not be decrypted", exc_info=True)
-        messages.error(request, _("Failed to download export file. Please try again."))
-        return redirect("audit:gdpr_dashboard")
-    except Exception as e:
-        logger.error(f"🔥 [GDPR Export] Error reading export file: {e}")
-        return None
+    logger.info(f"✅ [GDPR Export] Export {export_request.id} ready for {user.email}")
+    messages.info(request, _("Your export is ready. Download it from Recent Data Exports below."))
+    return hx_redirect(reverse("audit:gdpr_dashboard"))
 
 
 @login_required

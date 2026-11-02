@@ -192,6 +192,7 @@ const environment = {value: "test", dataset: {key: "efactura.environment", kind:
 const company = {value: "ANAF supplier", dataset: {key: "efactura.company.name", kind: "text"}};
 global.window = {
   addEventListener: () => {},
+  platformFetch: (url, options) => fetch(url, options),
   location: {reload: () => {
     reloads++;
     environment.value = "test";

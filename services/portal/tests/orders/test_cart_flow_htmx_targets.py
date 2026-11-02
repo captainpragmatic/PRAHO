@@ -9,6 +9,8 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils.translation import override
 
+from tests.orders.cart_markup import cart_remove_buttons
+
 _CACHE_SETTINGS = {
     "SESSION_ENGINE": "django.contrib.sessions.backends.cache",
     "CACHES": {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
@@ -182,16 +184,12 @@ class TestCartFlowFixes(TestCase):
         template_path = partial_path if partial_path.exists() else orders_templates / "cart_review.html"
         template_source = template_path.read_text()
         quantity_selects = re.findall(r'<select id="qty-.*?</select>', template_source, flags=re.DOTALL)
-        remove_buttons = re.findall(
-            r'<button hx-post="{% url \'orders:remove_from_cart\' %}".*?</button>',
-            template_source,
-            flags=re.DOTALL,
-        )
+        remove_buttons = cart_remove_buttons()
 
         self.assertEqual(len(quantity_selects), 1)
         self.assertEqual(len(remove_buttons), 1)
         self.assertNotIn("hx-on::response-error", quantity_selects[0])
-        self.assertNotIn("hx-on::response-error", remove_buttons[0])
+        self.assertFalse([name for name in remove_buttons[0] if name.startswith("hx-on")])
 
     def test_base_wires_showtoast_htmx_event_once(self) -> None:
         portal_root = Path(__file__).resolve().parents[2]
@@ -203,21 +201,16 @@ class TestCartFlowFixes(TestCase):
     def test_remove_buttons_dispatch_cartupdated_only_after_success(self) -> None:
         portal_root = Path(__file__).resolve().parents[2]
         partials_path = portal_root / "templates" / "orders" / "partials"
-        template_paths = [partials_path / "cart_items.html", partials_path / "mini_cart_content.html"]
-        remove_button_sites = [
-            (template_path.name, line)
-            for template_path in template_paths
-            for line in template_path.read_text().splitlines()
+        mini_cart_sites = [
+            line
+            for line in (partials_path / "mini_cart_content.html").read_text().splitlines()
             if "remove_from_cart" in line and "hx-post" in line
         ]
-
-        self.assertEqual(len(remove_button_sites), 2)
-        self.assertEqual(
-            {template_name for template_name, _line in remove_button_sites},
-            {"cart_items.html", "mini_cart_content.html"},
-        )
-        for template_name, remove_button in remove_button_sites:
-            self.assertIn('data-htmx-after="cart-updated"', remove_button, template_name)
+        self.assertEqual(len(mini_cart_sites), 1)
+        self.assertIn('data-htmx-after="cart-updated"', mini_cart_sites[0])
+        cart_buttons = cart_remove_buttons()  # the cart page's Remove is the button component
+        self.assertEqual(len(cart_buttons), 1)
+        self.assertEqual(cart_buttons[0].get("data-htmx-after"), "cart-updated")
 
         csp_actions = (portal_root / "static" / "js" / "csp-actions.js").read_text()
         guarded_dispatch = (
@@ -236,16 +229,12 @@ class TestCartFlowFixes(TestCase):
         template_source = template_path.read_text()
 
         quantity_selects = re.findall(r'<select id="qty-.*?</select>', template_source, flags=re.DOTALL)
-        remove_buttons = re.findall(
-            r'<button hx-post="{% url \'orders:remove_from_cart\' %}".*?</button>',
-            template_source,
-            flags=re.DOTALL,
-        )
+        remove_buttons = cart_remove_buttons()
 
         self.assertEqual(len(quantity_selects), 1)
         self.assertEqual(quantity_selects[0].count('data-htmx-after="cart-updated"'), 0)
         self.assertEqual(len(remove_buttons), 1)
-        self.assertEqual(remove_buttons[0].count('data-htmx-after="cart-updated"'), 1)
+        self.assertEqual(remove_buttons[0].get("data-htmx-after"), "cart-updated")
 
     def test_dead_cart_event_wiring_removed(self) -> None:
         portal_root = Path(__file__).resolve().parents[2]

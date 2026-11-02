@@ -396,7 +396,11 @@
           {% endif %}
           {% url 'billing:proforma_send' proforma.pk as send_url %}
           {% with send_proforma_attrs='data-send-url="'|add:send_url|add:'"' %}
+            {% if user.can_manage_financial_data %}
             {% button send_proforma_label variant="info" type="button" icon="mail" class_="w-full" data_action="invoke" data_invoke="sendProformaAction" attrs=send_proforma_attrs %}
+            {% else %}
+            {% trans "Only billing staff can send proformas." as send_locked %}{% button send_proforma_label variant="info" type="button" icon="mail" class_="w-full" disabled=True title=send_locked %}
+            {% endif %}
           {% endwith %}
 
           {% if can_edit and proforma.status != "converted" %}
@@ -418,12 +422,9 @@ function sendProformaAction(el) {
 
 function sendProforma(sendUrl) {
     if (confirm('{% trans "Send this proforma to the customer via email?" %}')) {
-        fetch(sendUrl, {
+        window.platformFetch(sendUrl, {
             method: 'POST',
-            headers: {
-                'X-CSRFToken': document.querySelector('[name=csrfmiddlewaretoken]').value,
-                'Content-Type': 'application/json',
-            },
+            headers: {'Content-Type': 'application/json'},
         })
         .then(response => response.json())
         .then(data => {
@@ -435,6 +436,7 @@ function sendProforma(sendUrl) {
             }
         })
         .catch(error => {
+            if (error.csrfReload) { return; }  // platformFetch already said to reload
             {% trans "An error occurred. Please try again." as proforma_error_msg %}
             alert('{{ proforma_error_msg|escapejs }}');
         });

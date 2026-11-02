@@ -422,5 +422,7 @@ class StatusRefreshViewTests(SimpleTestCase):
             self._request(), system_status_refresh, (), {}
         )
         self.assertIsNotNone(response)
-        self.assertContains(response, "CSRF", status_code=403)
+        # Platform's CSRF failure view: a 403 that tells the page to reload (apps/common/csrf_failure.py).
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response["X-CSRF-Failure"], "reload")
         refresh.assert_not_called()

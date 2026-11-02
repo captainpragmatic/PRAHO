@@ -104,7 +104,14 @@ class AccountDetailConfirmationTests(SimpleTestCase):
             loaders=[
                 (
                     "django.template.loaders.locmem.Loader",
-                    {"base.html": ("{% block content %}{% endblock %}{% block extra_modals %}{% endblock %}")},
+                    # The modal comes from base.html, as on the real page (base.html includes it once).
+                    {
+                        "base.html": (
+                            "{% block content %}{% endblock %}"
+                            '{% include "components/dangerous_action_modal.html" %}'
+                            "{% block extra_modals %}{% endblock %}"
+                        )
+                    },
                 ),
                 "django.template.loaders.filesystem.Loader",
             ],
@@ -177,7 +184,9 @@ class AccountDetailConfirmationTests(SimpleTestCase):
                     page = Markup(self.render_account(protected=protected))
                     output = self.exercise(page, function)
                     self.assertEqual(output["initial"], self.confirmation(title, "hosting.example.com", 0))
-                    options: dict[str, object] = {"target": "body"}
+                    # The delete starts from its button, so the page's <body hx-headers> CSRF token goes with it.
+                    button = {"dataset": dataset(page.find("data-invoke", function + "Action"))}
+                    options: dict[str, object] = {"source": button, "target": "body"}
                     if protected:
                         options = {
                             "target": "#quick-actions-section",
@@ -239,7 +248,7 @@ class AccountDetailConfirmationTests(SimpleTestCase):
                             {
                                 "method": "DELETE",
                                 "url": reverse("provisioning:virtualmin_account_delete", args=[account.pk]),
-                                "options": {"target": "body"},
+                                "options": {"source": {"dataset": dataset(root)}, "target": "body"},
                             },
                             {
                                 "method": "POST",

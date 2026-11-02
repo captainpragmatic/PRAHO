@@ -43,25 +43,13 @@
     <p class="text-slate-400 text-xs">
       {% trans 'Last check' %}: {% localised_date status_snapshot.checked_at "datetime" %}
     </p>
-    {# tmpl-allow TMPL002: holds the #status-spinner htmx-indicator span its hx-indicator targets; the button tag renders one text and one icon #}
-    <button hx-post="{% url 'system_status_refresh' %}" hx-target="#system-status-widget" hx-swap="outerHTML" hx-disabled-elt="this" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-indicator="#status-spinner" class="text-xs text-slate-500 hover:text-blue-400 transition-colors">
-      <span id="status-spinner" class="htmx-indicator">
-        {% icon "loading" size="sm" css_class="animate-spin mr-1" %}
-      </span>
-      {% trans 'Refresh' %}
-    </button>
+    {% url 'system_status_refresh' as status_refresh_url %}{% trans 'Refresh' as status_refresh_label %}{% button status_refresh_label variant="link" size="xs" hx_post=status_refresh_url hx_target="#system-status-widget" hx_swap="outerHTML" hx_disabled_elt="this" %}
   </div>
 
   {% else %}
   <div class="text-center py-4">
     <p class="text-slate-400 text-sm mb-2">{% trans 'System status has not been checked yet.' %}</p>
-    {# tmpl-allow TMPL002: holds the #status-spinner-init htmx-indicator span its hx-indicator targets; the button tag renders one text and one icon #}
-    <button hx-post="{% url 'system_status_refresh' %}" hx-target="#system-status-widget" hx-swap="outerHTML" hx-disabled-elt="this" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-indicator="#status-spinner-init" class="text-xs text-blue-400 hover:text-blue-300 transition-colors">
-      <span id="status-spinner-init" class="htmx-indicator">
-        {% icon "loading" size="sm" css_class="animate-spin mr-1" %}
-      </span>
-      {% trans 'Check now' %}
-    </button>
+    {% url 'system_status_refresh' as status_check_url %}{% trans 'Check now' as status_check_label %}{% button status_check_label variant="link" size="xs" hx_post=status_check_url hx_target="#system-status-widget" hx_swap="outerHTML" hx_disabled_elt="this" %}
   </div>
   {% endif %}
 </div>

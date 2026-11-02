@@ -282,8 +282,12 @@ class Wp16SupportBillingTests(SimpleTestCase):
         self.assertEqual(elements.find("textarea", name="message").get("aria-label"), "Reply")
         self.assertEqual(elements.find("textarea", name="message")["id"], "input-message")
         self.assertEqual(elements.find("form", id="reply-form")["hx-target"], "#ticket-status-and-comments")
-        for tag, hook in (("svg", "submit-spinner"), ("span", "submit-text"), ("input", "file-input")):
-            elements.find(tag, id=hook)
+        # The submit is the button component: the reply script toggles .is-loading on it, which shows .btn-spinner.
+        submit = elements.find("button", id="reply-submit")
+        self.assertEqual(submit["type"], "submit")
+        self.assertIn("btn-label", source)
+        self.assertIn("btn-spinner", source)
+        elements.find("input", id="file-input")
 
     def test_error_notices_render_alerts_and_keep_recovery_links(self) -> None:
         for name in ("services/partials/dashboard_widget.html", "tickets/partials/dashboard_widget.html"):

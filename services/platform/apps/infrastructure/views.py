@@ -60,6 +60,7 @@ from .permissions import (
     can_deploy_nodes,
     can_destroy_nodes,
     can_manage_deployments,
+    can_manage_regions,
     require_deploy_permission,
     require_deployment_management,
     require_destroy_permission,
@@ -1382,6 +1383,8 @@ def region_list(request: HttpRequest) -> HttpResponse:
         "page_title": "Node Regions",
         "breadcrumb_items": breadcrumb_items,
         "providers_with_regions": providers_with_regions,
+        # region_toggle's own rule, so the toggle is never offered to someone it refuses.
+        "can_manage_regions": can_manage_regions(cast("User", request.user)),
     }
 
     return render(request, "infrastructure/region_list.html", context)
@@ -1423,7 +1426,9 @@ def region_toggle(request: HttpRequest, pk: int) -> HttpResponse:
 
     if request.headers.get("HX-Request"):
         # Return updated row for HTMX
-        return render(request, "infrastructure/partials/region_row.html", {"region": region})
+        return render(
+            request, "infrastructure/partials/region_row.html", {"region": region, "can_manage_regions": True}
+        )
 
     return redirect("infrastructure:region_list")
 
