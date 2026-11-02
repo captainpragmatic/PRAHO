@@ -2,7 +2,6 @@
 
 from threading import Event
 from unittest import skipUnless
-from unittest.mock import patch
 
 from django.core.cache import cache
 from django.db import connection, transaction
@@ -15,6 +14,7 @@ from tests.billing import test_metering_services as usage_fixtures
 from tests.common.postgres_locking import backend_pid, database_worker, wait_for_blocker
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 from tests.helpers.portal_session import BoundSessionMixin
+from tests.helpers.task_queue import quiet_task_queue
 
 
 @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL customer lock waits")
@@ -23,7 +23,7 @@ class UsageInvoiceCustomerLockTests(BoundSessionMixin, HMACTestMixin, Transactio
     def setUp(self) -> None:
         cache.clear()
         self.addCleanup(cache.clear)
-        self.enterContext(patch("django_q.tasks.async_task"))
+        quiet_task_queue(self)
         usage_fixtures.UsageInvoiceServiceTestCase.setUp(self)
         self.owner = User.objects.create_user(email="usage-owner@example.test")
         CustomerMembership.objects.create(customer=self.customer, user=self.owner, role="owner", is_primary=True)

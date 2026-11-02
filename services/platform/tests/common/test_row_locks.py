@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 from django.db import DatabaseError, connection, transaction
 from django.db.models import Count, OuterRef, Subquery
+from django.db.models.expressions import RawSQL
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 
@@ -79,10 +80,19 @@ class RowLockContractTests(_SubscriptionInvoicePaymentFixture, TestCase):
             base.filter(customer_id__in=Customer.objects.filter(pk=OuterRef("customer_id")).values("pk")),
             base.extra(where=["1=1"]), base.extra(tables=["customers_customer"]), base.extra(order_by=["pk"]),
             base.filter(customer_id__in=Customer.objects.select_for_update().values("pk")),
+            base.order_by(OuterRef("pk")),
+            base.order_by(Subquery(Customer.objects.filter(pk=OuterRef("customer_id")).values("pk")[:1])),
+            base.order_by(Subquery(Customer.objects.select_for_update().values("pk")[:1])),
+            base.order_by(RawSQL("1", [])),
         ]
         for queryset in shapes:
             with self.subTest(query=str(type(queryset))), self.assertNumQueries(0), self.assertRaises(ValueError):
                 lock_many_and_load(queryset)
+        with (
+            patch.object(Subscription._meta, "ordering", [RawSQL("1", [])]),
+            self.assertNumQueries(0), self.assertRaises(ValueError),
+        ):
+            lock_many_and_load(base)
         with self.assertRaises(ValueError):
             lock_many_and_load(base, nowait=True, skip_locked=True)
 

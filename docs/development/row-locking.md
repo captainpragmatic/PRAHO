@@ -50,8 +50,8 @@ while allowing compatible FK references; see [row-lock compatibility](https://ww
 ## Census and enforcement
 
 `make row-lock-census` scans all Platform `apps/`, excluding migrations.
-`make lint-row-locks` enforces the completed scope (billing in PR 1, all apps in
-PR 2). The shared AST scanner follows either method order, intervening calls,
+`make lint-row-locks` enforces all Platform apps (billing was enforced first in
+PR 1). It also runs as a dependency of `make lint`. The shared AST scanner follows either method order, intervening calls,
 queryset aliases, reassignment, branches, slices and queryset factories. Clearing
 joins and projections remove eager loading; prefetches are separate statements.
 Fixtures pin exact discoveries and include the final conditional provider-cleanup
@@ -100,26 +100,70 @@ in place. Mechanical normalization does not assert a newly reachable business ra
 | billing/tasks.py:_bind_replayed_recurring_intent | Gateway ID/meta only; replay/convergence | Payment -> Payment | Remove unused currency/document joins | recurring reconciliation tests |
 | billing/efactura/service.py:_lock_owned_claim | Finalize accepted ANAF response; submission claim | Fixed on master: Invoice -> Document | Preserve merged lock-order correction | efactura lock-order concurrency |
 
-## Remaining sites (PR 2)
+## Remaining-application site ledger (PR 2)
 
-Pending: order confirmation (two phases); domains currency notices, data-zone
-locks (two branches), zone import and revision claim, DNS guard, renewal claim,
-order fulfilment and post-grace TLD; hosting fulfilment; order service creation
-and payment-status handlers (two); cancellation/refund signals (two); promotion
-coupon and tender-refund legs (three); account-name certificates; hosted-domain
-DNS; bridge cleanup; provisioning reconciliation; ticket closure; conditional
-provider cleanup. Preserve intentional joined-row protection explicitly.
+All paths are relative to `services/platform/apps/`; test modules are relative to
+`services/platform/tests/`. Every mechanical row is also guarded by
+`common/test_row_lock_scanner.py:test_platform_has_no_combined_queries`.
+Those structural changes retain the existing business controls: they do not
+claim that bypassing those controls reproduces a public financial race.
 
-Already fixed on master and retained: hostname announcement, usage current-state
-and publication, account-sync reads, artifact-cleanup server lock order,
-hosting-fulfilment plan retarget handling, provisioning/cancellation ordering and
-nameserver domain-only scope. The remaining hosting fulfilment query still needs
-normalization. TLD and ServicePlan configuration protection must use explicit
-NO KEY UPDATE with through-COMMIT compatibility tests.
+| Historical/current location | Consumer and competing writer | Old -> new targets/order | Requirement and disposition | Proof/control modules |
+|---|---|---|---|---|
+| api/orders/views.py:confirm_order phase 1 | Tenant, PaymentIntent and payable proforma; order confirmation/cancellation and conversion | Order -> Order | Fresh document; same PI/tenant checks and confirmed replay | orders/test_confirm_order_lock_waits.py; test_confirm_order_pi_validation.py |
+| api/orders/views.py:confirm_order phase 3 | Invoice/proforma binding after gateway gap; payment convergence | Order -> Order | Fresh documents; document-change refusal and network gap retained | orders/test_confirm_order_lock_waits.py; test_confirm_order_concurrency.py |
+| domains/currency_terms.py:reconcile_domain_currency_notices | TLD price and recipient; catalog/customer updates | Domain -> Domain | Fresh notice inputs; retain frozen domain terms | domains/test_currency_terms_lifecycle.py |
+| domains/dns_zone_record_services.py:lock_data_zone account | Account fence only; account operations | Account NO KEY UPDATE -> same | Remove unused Service join; hostname boundary retained | domains/test_dns_zone_records.py; test_dns_zone_concurrency.py |
+| domains/dns_zone_record_services.py:lock_data_zone zone | Customer authority from zone; zone/data writers | Zone -> Zone | Remove unused Service join, preserve zone authority | domains/test_dns_zone_records.py |
+| domains/dns_zone_services.py:preview_zone_import | Service/customer binding; account retarget/retirement | Account NO KEY UPDATE -> same | Fresh service; unchanged enrollment validation | domains/test_dns_zone_import_service.py |
+| domains/dns_zone_services.py:_locked_zone | Optional account/service ownership; account/name writers | Account NO KEY UPDATE -> same | Fresh service, refresh and ownership checks retained | domains/test_dns_zone_import_service.py; test_dns_zone_concurrency.py |
+| domains/dns_zone_tasks.py:_guard | Revision and operation lease; revision activation/operation worker | Operation + Revision -> Operation -> Revision | Explicit stability protection through COMMIT; lease and revision checks retained | domains/test_dns_zone_tasks.py |
+| domains/operation_services.py:_claim_renewal | Registrar/TLD renewal rules; domain/registrar writers | Domain -> Domain | Fresh inputs; durable intent, preflight and refusal retained | domains/test_durable_operations.py |
+| domains/order_fulfilment.py:_lock_line | Line's order state; order status/line workers | Order -> Line retained | Fresh order after optional line claim; order binding preserved | domains/test_domain_staff_fulfilment.py |
+| domains/services.py:_expire_post_grace_domains | Grace period; TLD configuration editor | Domain + TLD -> Domain -> TLD NO KEY UPDATE | Stable configuration with compatible new Domain FK references | common/test_configuration_row_locks.py |
+| orders/hosting_fulfilment.py:_lock (line) | Order/status/customer; confirmation, cancellation | Order -> Customer -> Line -> Service retained | Fresh order; Service plan is read after its own existing root lock | orders/test_hosting_fulfilment.py; test_hosting_plan_lock_concurrency.py |
+| orders/services.py:create_pending_services | Product mapping; product/line writers | Line -> Line PK order | Batch fresh products; no per-line relationship reload | orders/test_orders_services.py; test_staff_line_fulfilment.py |
+| orders/services.py:update_service_status_on_payment (lines) | Product and new service bindings; service creation | Line -> Line PK order | Reload after creation; preserve business order and frozen item prices | orders/test_orders_services.py; test_order_payment_recovery_isolation.py |
+| orders/services.py:update_service_status_on_payment (services) | Currency and subscription enrollment; currency/service writers | Service PK order -> same | Fresh currencies; retain explicit shared Service batch locks | orders/test_orders_services.py; billing/test_subscription_invoice_payments.py |
+| orders/signals.py:_handle_order_cancellation | Separate Service locks; cancellation/refunds | Line -> Service retained | Drop dead join; retain non-null filter and Customer boundary | orders/test_orders_cancellation.py |
+| orders/signals.py:_handle_invoice_refunded | Separate Service locks; refunds/cancellation | Line -> Service retained | Drop dead join; retain non-null filter and subscription refusal | orders/test_orders_refund.py |
+| promotions/services.py:apply_coupon | Campaign, currency and eligibility; campaign retarget/catalog edits | Campaign -> Coupon retained | Fresh relations; reject retargeted campaign before spending budgets | promotions/test_services.py |
+| promotions/tender_refunds.py:_settle_leg | Command/leg projection; duplicate refund callbacks | Payment -> joined Leg/Command becomes Payment -> Command -> Leg | Preserve explicit Command protection and recheck invoice/payment binding | promotions/test_tender_refunds.py |
+| promotions/tender_refunds.py:_submit_leg | Durable command and retry intent; refund submissions | Payment -> Leg becomes Payment -> Command -> Leg | Stable instruction; network remains after durable claim | promotions/test_tender_refunds.py |
+| promotions/tender_refunds.py:converge_tender_refund | Payment currency and instruction facts; refund callbacks | Refund -> Refund | Fresh payment/currency; exact amount and currency matching retained | promotions/test_tender_refunds.py |
+| provisioning/account_name_certificates.py:_claim_attempt | Hostname retirement, attempt and budget; hostname retirement/certificate worker | Certificate + Hostname -> Certificate -> Hostname | Explicit hostname stability; budget and lease checks retained | provisioning/test_account_name_certificates.py; test_account_name_certificate_provenance.py |
+| provisioning/hosted_domain_dns_service.py:request_recheck | Service/customer authority and DNS snapshot; account/service writers | Account + Service -> Account -> Service | Explicit Service protection through COMMIT; scope checks precede mutation | provisioning/test_hosted_domain_dns_status.py |
+| provisioning/migration_bridge_cleanup.py:_claim | Cleanup lease, account and target binding; completed migration rerun | joined Bridge/Migration/Target -> Account -> both Servers PK order -> Migration -> Bridge | Completed hint gates admission; locked scope rechecked; mismatch rolls back hinted locks; unfinished hint takes Bridge only | provisioning/test_bridge_cleanup_lock_concurrency.py; test_migration_bridge_cleanup.py; test_component_bridge_cleanup.py |
+| provisioning/signals.py:_trigger_automatic_virtualmin_provisioning | Task admission and customer ownership; immediate subscription cancellation | Service + Customer -> Customer NO KEY UPDATE -> Service | Recheck ownership and hosting eligibility under lock; preserve deduplication and post-transaction dispatch | provisioning/test_reconciliation_cancellation_lock.py; test_provisioning_signals.py |
+| tickets/tasks.py:auto_close_inactive_tickets | Recipient/customer name; customer edits and service requests | Ticket -> Ticket | Fresh customer; unchanged request guard, notification after COMMIT | tickets/test_ticket_tasks.py |
+| infrastructure/cloud_destroy_execution.py:_guard | Provider ownership/type and token fingerprint; deployment/provider edits | Deployment -> Deployment | Conditional helper preserves unlocked read path; fresh provider before scope mutation | infrastructure/test_cloud_destroy_execution.py; test_cloud_destroy_service.py |
+
+The provider-cleanup site was introduced after the historical audit. The census
+of `176646ef` finds exactly 60 sites and the implementation base `04e1844b`
+contains 51 (24 billing and 27 other applications); all historical sites have a disposition in
+this document. Counts are evidence for these snapshots, not an allowance for
+future exceptions.
+
+## Previously fixed historical sites retained
+
+| Historical location | Current protection and rationale | Competing writer / proof |
+|---|---|---|
+| billing/efactura/service.py:_lock_owned_claim | Invoice -> Document; claim ownership checked after explicit locks | Submission claim; billing/efactura/test_lock_order_concurrency.py |
+| billing/recurring_billing.py:prepare_due_proformas | Prior lock/load split extracted into shared root-only helper, eligibility retained | Enrollment/opt-out; billing/test_renewal_subscription_lock_concurrency.py |
+| provisioning/account_hostname_hosting.py:announce_when_live | Hostname/account root locks and fresh related read already separated | Publication/terminal operations; provisioning/test_usage_postgres_concurrency.py |
+| provisioning/virtualmin_usage_service.py:current_state | Existing domain lock boundary then fresh related state | Usage publication/terminal writer; provisioning/test_usage_postgres_concurrency.py |
+| provisioning/virtualmin_usage_service.py:publish_snapshot | Account identity/terminal fence retained | Restore/delete/usage publishers; provisioning/test_usage_postgres_concurrency.py |
+| provisioning/virtualmin_views.py:virtualmin_accounts_sync | Root-only account lock followed by related loading | Account sync/terminal operations; provisioning/test_usage_postgres_concurrency.py |
+| provisioning/migration_artifact_cleanup.py:_claim | Removed unused node joins; no source/target acquisition inversion | Migration admission; provisioning/test_migration_artifact_cleanup.py and zero-site guard |
+| orders/hosting_fulfilment.py:_lock (Service) | Service root-only lock, then plan read from current FK; retained | Staff plan retarget; orders/test_hosting_plan_lock_concurrency.py |
+| provisioning/virtualmin_tasks.py:_validate_service_for_provisioning_secure | Existing Customer -> Service -> Plan split; PR 2 uses recurring Customer boundary and Plan NO KEY UPDATE | Cancellation and plan edit; common/test_configuration_row_locks.py; provisioning/test_provisioning_cancellation_lock_concurrency.py |
+| domains/nameserver_changes.py:_claim_resume | Existing Domain-only lock; shared Registrar configuration is not unintentionally locked | Unrelated registration; domains/test_nameserver_registrar_lock_concurrency.py |
 
 ## Verification record
 
-In progress. Scanner fixtures failed on the stub and passed after implementation;
+Delivery and command results are recorded in [PR 1 (#843)](https://github.com/captainpragmatic/PRAHO/pull/843)
+and [PR 2 (#844)](https://github.com/captainpragmatic/PRAHO/pull/844).
+Scanner fixtures failed on the stub and passed after implementation;
 the billing scope guard initially found the remaining combined sites. Shared
 helper contracts failed on the stub (including the no-SQL unsupported-shape gate).
 PostgreSQL workers assert READ COMMITTED and observe `pg_blocking_pids()` for the
@@ -136,3 +180,62 @@ order and preserve their original processing order on reload. A public collectio
 SQL test verifies both phases; the generic helper tests prove opposite output
 orders still acquire locks consistently. Scanner canaries also cover method
 argument materialization, negation, compound predicates and assertions.
+
+Regression proof:
+
+- PR 1's 633 focused PostgreSQL tests pass. The FK-retarget regression fails when
+  the outer base-row lock is replaced with a cleared-join locking query; the
+  public billing-edit regression fails again when the Customer lock is moved
+  after the fiscal reads (the invoice stores the pre-edit name and email).
+- PR 2's cleanup-versus-completed-rerun test produces PostgreSQL's actual
+  `deadlock detected` on the old admission. Both participants complete after the
+  lock-order correction. Same-bridge claims serialize; unfinished hints preserve
+  terminal precedence without node/account locks; changed hints release locks
+  even inside an outer atomic transaction.
+- The old shared TLD lock blocks an unrelated Domain's `COMMIT`; the old plan
+  lock blocks an unrelated customer's Service insert/commit. NO KEY UPDATE lets
+  both references commit while a real configuration UPDATE still waits until
+  the paused operation releases its lock.
+- Reconciliation observes cancellation's exact Customer-lock wait and no longer
+  dispatches a provisioning task from its pre-cancellation service snapshot.
+  The eventual provisioning worker's existing inactive-Service refusal remains.
+- Reverting the four PR 2 behavioral corrections in an isolated clone reproduces
+  blocked Service inserts, blocked Domain COMMIT, and actual PostgreSQL deadlocks
+  between completed-migration rerun/cleanup and cancellation/reconciliation.
+  Restoring the corrections makes all seven unchanged PostgreSQL controls pass.
+- The helper rejects a locking subquery before issuing SQL; this refusal fails
+  against the earlier helper. An ordinary uncorrelated membership subquery stays
+  supported with two statements. The complete helper and public billing-batch
+  controls pass together (19 tests).
+- Review controls preserve a terminal Bridge result after a later account move:
+  terminal status is checked immediately after locking Bridge, before live
+  cleanup ownership validation. The previous ordering returns `waiting` and
+  fails the unchanged replay regression again when restored in the proof clone.
+- Scanner review canaries cover conditional-expression tests, comprehension
+  predicates and augmented collection assignment. All 12 structural tests pass;
+  restoring the earlier scanner reproduces four failed discoveries. The latest
+  focused PostgreSQL review run passes 37 tests. New concurrency fixtures use
+  the broker-level `quiet_task_queue` helper to prevent lazy imports capturing a
+  global `async_task` mock.
+- Structural normalization uses the zero-site guard plus the existing business
+  regressions. Protected payment convergence is not advertised as a newly
+  reproduced public mandate race, and erasure proof uses actual rendered/stored
+  email rather than a stale model object in isolation.
+- The broad suite exposed legacy query spies in domain recovery/transfer tests
+  and a refund suspension mock chained through an unused join. The updated
+  observers still require Order -> Line -> DomainItem ordering and the exact
+  suspension-failure audit action; all 30 affected PostgreSQL controls pass.
+- Unsupported ordering expressions (including model defaults and nested locking
+  or correlated subqueries) are rejected before SQL. The regression observes a
+  root lock before refusal on the old helper and again with only the ordering
+  guards reverted. Helper and public cancellation controls pass together (24
+  PostgreSQL tests); the existing barrier observes the actual Customer NO KEY
+  UPDATE statement and the exact competing backend.
+- The unchanged 200-account publication budget passes in isolation. Broad
+  PostgreSQL verification runs separately from other full suites to avoid
+  measuring unrelated worker contention against its 30-second limit.
+- The legacy SmartBill burst test moved the saved schedule while real database
+  time also elapsed. Its controlled ten-second clock now verifies 25 committed
+  grants and retains the provider ceiling of 30; all 11 rate-gate controls pass.
+  The production rate limiter is unchanged. All 187 billing-signal controls pass
+  on a fresh database with their required numbering seeds.

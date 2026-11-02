@@ -920,8 +920,8 @@ else
 	@echo "✅ Auto-fix complete — review changes before committing."
 endif
 
-# Expand this scope to all apps after the second #805 audit PR.
-ROW_LOCK_SCOPE ?= billing
+# All Platform apps, excluding migrations; no permanent joined-lock exceptions.
+ROW_LOCK_SCOPE ?=
 .PHONY: lint-row-locks row-lock-census
 lint-row-locks:
 	@$(PYTHON_PLATFORM) -m apps.common.row_lock_scanner --scope "$(ROW_LOCK_SCOPE)"

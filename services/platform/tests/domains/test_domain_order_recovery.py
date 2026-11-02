@@ -13,6 +13,7 @@ from unittest.mock import Mock, patch
 from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
+from apps.common.row_locks import lock_many_and_load
 from apps.common.types import Err, Retriability
 from apps.domains.gateways import RegistrarAPIError, RegistrarErrorCode
 from apps.domains.models import Domain, DomainOrderItem, Registrar, TLDRegistrarAssignment
@@ -226,7 +227,7 @@ class OrderLockTests(DomainOrderLineFixture, TestCase):
                 locks = Mock()
                 with (
                     patch.object(Order.objects, "select_for_update", wraps=Order.objects.select_for_update) as order_lock,
-                    patch.object(OrderItem.objects, "select_for_update", wraps=OrderItem.objects.select_for_update) as line_lock,
+                    patch("apps.domains.order_fulfilment.lock_many_and_load", wraps=lock_many_and_load) as line_lock,
                     patch(ALERT),
                 ):
                     locks.attach_mock(order_lock, "order")

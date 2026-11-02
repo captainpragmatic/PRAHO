@@ -20,6 +20,7 @@ from django.utils.dateparse import parse_datetime
 
 from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.currency_transition_notice import terms_fingerprint
+from apps.common.row_locks import lock_one_and_load
 
 from .models import TLD, Domain, DomainCurrencyTransition, DomainOrderItem
 
@@ -486,7 +487,7 @@ def reconcile_domain_currency_notices() -> dict[str, int]:
             with transaction.atomic():
                 policy = get_selling_currency_policy(lock=True)
                 domain = (
-                    Domain.objects.select_for_update(of=("self",)).select_related("tld", "customer").get(pk=domain_id)
+                    lock_one_and_load(Domain.objects.select_related("tld", "customer").filter(pk=domain_id))
                 )
                 result["activated"] += int(apply_effective_domain_terms(domain))
                 offer = _prepare_notice(domain, policy)

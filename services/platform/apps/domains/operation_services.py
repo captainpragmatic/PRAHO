@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 from django.db import transaction
 from django.utils import timezone
 
+from apps.common.row_locks import lock_one_and_load
 from apps.common.transactions import is_outside_transaction
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
@@ -297,7 +298,7 @@ class DomainOperationService:
         from .services import DomainLifecycleService, TLDService  # noqa: PLC0415
 
         with transaction.atomic():
-            domain = Domain.objects.select_for_update(of=("self",)).select_related("tld", "registrar").get(pk=domain.pk)
+            domain = lock_one_and_load(Domain.objects.select_related("tld", "registrar").filter(pk=domain.pk))
             existing = DomainOperation.objects.filter(
                 domain=domain,
                 registrar=domain.registrar,

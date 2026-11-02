@@ -17,6 +17,7 @@ from apps.audit.actor_context import bind_current_actor
 from apps.billing.models import Currency
 from apps.common.localisation import normalize_country_code
 from apps.common.operator import operator_country
+from apps.common.row_locks import lock_many_and_load
 from apps.common.transactions import best_effort_atomic
 from apps.common.types import EmailAddress, Err, Ok, Result
 from apps.common.validators import log_security_event
@@ -1044,7 +1045,7 @@ class OrderServiceCreationService:
 
             logger.info(f"🔧 [ServiceCreation] Creating pending services for order {order.order_number}")
 
-            items = order.items.select_for_update(of=("self",)).select_related("product")
+            items = lock_many_and_load(order.items.select_related("product"))
             for item in _service_lines(items):
                 # Skip if service already exists for this item
                 if item.service_id:
@@ -1214,8 +1215,8 @@ class OrderServiceCreationService:
 
                 updated_services = []
 
-                items_query = order.items.select_for_update(of=("self",)).select_related("product")
-                items = _service_lines(items_query)
+                items_query = order.items.select_related("product")
+                items = _service_lines(lock_many_and_load(items_query))
                 if any(item.service_id is None for item in items):
                     creation_result = OrderServiceCreationService.create_pending_services(order)
                     if creation_result.is_err():
@@ -1224,7 +1225,7 @@ class OrderServiceCreationService:
                         )
                     # QuerySet evaluation above cached the pre-creation rows. Clone it so
                     # the newly linked services are read back under the same row locks.
-                    items = _service_lines(items_query.all())
+                    items = _service_lines(lock_many_and_load(items_query.all()))
 
                 # #294: lock every service in ONE statement ordered by pk. Locking per item
                 # in iteration order can deadlock against paths that lock the same rows in
@@ -1232,10 +1233,9 @@ class OrderServiceCreationService:
                 service_pks = sorted({item.service_id for item in items if item.service_id is not None})
                 locked_services = {
                     service.pk: service
-                    for service in Service.objects.select_for_update(of=("self",))
-                    .select_related("currency")
-                    .filter(pk__in=service_pks)
-                    .order_by("pk")
+                    for service in lock_many_and_load(
+                        Service.objects.select_related("currency").filter(pk__in=service_pks).order_by("pk")
+                    )
                 }
 
                 for item in items:

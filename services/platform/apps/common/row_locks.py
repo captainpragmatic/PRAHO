@@ -21,12 +21,18 @@ def _unsupported_expression(expression: object) -> bool:
             bool(expression.get_external_cols())
             or expression.select_for_update
             or bool(expression.extra or expression.extra_tables or expression.extra_order_by)
+            or _unsupported_ordering(expression)
             or _unsupported_expression(expression.where)
             or any(_unsupported_expression(value) for value in expression.annotations.values())
         )
     if isinstance(expression, BaseExpression):
         return any(_unsupported_expression(child) for child in expression.get_source_expressions())
     return False
+
+
+def _unsupported_ordering(query: Query) -> bool:
+    ordering = query.order_by or (tuple(query.get_meta().ordering or ()) if query.default_ordering else ())
+    return any(_unsupported_expression(value) for value in ordering)
 
 
 def lock_many_and_load[ModelT: Model](
@@ -42,7 +48,8 @@ def lock_many_and_load[ModelT: Model](
     if (
         query.select_for_update or query.is_sliced or not query.default_cols
         or query.distinct or query.annotations or query.group_by or query.combinator
-        or query.extra or query.extra_tables or query.extra_order_by or _unsupported_expression(query.where)
+        or query.extra or query.extra_tables or query.extra_order_by
+        or _unsupported_expression(query.where) or _unsupported_ordering(query)
     ):
         raise ValueError("Row lock helpers require an unlocked, unsliced, unprojected model queryset without aggregation")
     if nowait and skip_locked:

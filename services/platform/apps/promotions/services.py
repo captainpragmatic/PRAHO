@@ -15,6 +15,8 @@ from django.db import models, transaction
 from django.db.models import F
 from django.utils import timezone
 
+from apps.common.row_locks import lock_one_and_load
+
 from .models import (
     Coupon,
     CouponRedemption,
@@ -678,10 +680,8 @@ class CouponService:
         # "FOR UPDATE cannot be applied to the nullable side of an outer join" because
         # campaign/currency/assigned_customer are all nullable FKs (LEFT OUTER JOINs).
         try:
-            locked_coupon = (
-                Coupon.objects.select_for_update(of=("self",))
-                .select_related("campaign", "currency", "assigned_customer")
-                .get(code=normalized_code)
+            locked_coupon = lock_one_and_load(
+                Coupon.objects.select_related("campaign", "currency", "assigned_customer").filter(code=normalized_code)
             )
         except Coupon.DoesNotExist:
             return ApplyResult(success=False, error_message="Coupon not found")

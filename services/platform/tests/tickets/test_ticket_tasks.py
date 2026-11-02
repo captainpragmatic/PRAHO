@@ -146,13 +146,13 @@ class AutoCloseInactiveTicketsTests(TestCase):
         """A reply/update racing the candidate query must keep the ticket open."""
         now = timezone.now()
         ticket = self._waiting_ticket("Racing update", updated_at=now - timedelta(hours=25))
-        original_select_for_update = Ticket.objects.select_for_update
+        from apps.common.row_locks import lock_one_and_load  # noqa: PLC0415  # Observe the real shared query boundary.
 
         def refresh_candidate_before_lock(*args, **kwargs):
             Ticket.objects.filter(pk=ticket.pk).update(updated_at=now)
-            return original_select_for_update(*args, **kwargs)
+            return lock_one_and_load(*args, **kwargs)
 
-        with patch.object(Ticket.objects, "select_for_update", side_effect=refresh_candidate_before_lock):
+        with patch("apps.tickets.tasks.lock_one_and_load", side_effect=refresh_candidate_before_lock):
             result = auto_close_inactive_tickets(now=now)
 
         ticket.refresh_from_db()

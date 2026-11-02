@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Complete the Platform row-lock audit (#805): load related rows after locking, retain explicit configuration and ownership protection, and enforce zero combined eager-loading/locking queries. Bridge cleanup uses migration admission's lock order; shared TLD and ServicePlan locks allow unrelated references to commit, and reconciliation rechecks cancellation before queueing provisioning.
 - Preserve legacy node cost history when redeploying a reconciled unknown-create deployment or recording its first resize (#838). Historical hours retain their old rate; teardown closes the captured resize window without late results reopening it. Fresh and never-created deployments acquire no fabricated historical charges.
 
 - Billing row locks load related data in a fresh statement after waiting on PostgreSQL (#805). Usage invoices use the locked customer's current fiscal identity before calculating tax; renewal eligibility, frozen amounts and existing collection consent controls are retained.

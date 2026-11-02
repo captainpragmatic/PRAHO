@@ -822,6 +822,18 @@ def _log_audit_event(service: Service, audit_data: dict[str, Any]) -> None:
         logger.warning(f"⚠️ [AutoProvisioning] Audit logging failed (non-critical): {audit_error}")
 
 
+def _lock_automatic_provisioning_service(service: Service) -> Service:
+    """Use cancellation's Customer -> Service boundary and recheck the routing hint."""
+    from apps.billing.recurring_locking import lock_recurring_collection_customer  # noqa: PLC0415
+
+    customer = lock_recurring_collection_customer(service.customer_id)
+    current = Service.objects.select_for_update(of=("self",)).get(pk=service.pk)
+    if current.customer_id != customer.pk:
+        raise ValueError("Service customer changed during provisioning admission")
+    current.customer = customer
+    return current
+
+
 def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
     """
     Trigger automatic VirtualMin account creation when service becomes active.
@@ -855,10 +867,10 @@ def _trigger_automatic_virtualmin_provisioning(service: Service) -> None:
         # Step 2: RACE CONDITION FIX - Use atomic transaction with select_for_update
         with transaction.atomic():
             # Lock the service row to prevent concurrent provisioning attempts
-            locked_service = Service.objects.select_for_update().select_related("customer").get(id=service.id)
+            locked_service = _lock_automatic_provisioning_service(service)
 
             # Perform all validation checks within transaction
-            if _check_existing_virtualmin_account(locked_service):
+            if not _validate_service_for_provisioning(locked_service) or _check_existing_virtualmin_account(locked_service):
                 return
 
             primary_domain = _get_and_validate_primary_domain(locked_service)

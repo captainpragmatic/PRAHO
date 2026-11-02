@@ -13,6 +13,7 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
+from apps.common.row_locks import lock_many_and_load, lock_one_and_load
 from apps.common.types import Err, Ok, Result
 from apps.infrastructure.dns_probes import MAX_RECORDS as MAX_PROBE_RECORDS
 from apps.infrastructure.dns_zone_gateway import ZoneBinding, ZoneRecordSpec, ZoneRecordType, validate_record_spec
@@ -359,11 +360,7 @@ def preview_zone_import(
     if len(raw) > MAX_UPLOAD_BYTES:
         return Err("upload_limit")
     with transaction.atomic():
-        account = (
-            VirtualminAccount.objects.select_for_update(of=("self",), no_key=True)
-            .select_related("service")
-            .get(pk=account.pk)
-        )
+        account = lock_one_and_load(VirtualminAccount.objects.select_related("service").filter(pk=account.pk), no_key=True)
         prepared = _preview_binding(account, actor)
         if prepared.is_err():
             return Err(prepared.unwrap_err())
@@ -449,12 +446,8 @@ def _locked_zone(zone: HostedZone, actor: User | None) -> tuple[HostedZone, Virt
 
     if zone.account_id is None:
         return None
-    account = (
-        VirtualminAccount.objects.select_for_update(of=("self",), no_key=True)
-        .select_related("service")
-        .filter(pk=zone.account_id)
-        .first()
-    )
+    accounts = lock_many_and_load(VirtualminAccount.objects.select_related("service").filter(pk=zone.account_id), no_key=True)
+    account = accounts[0] if accounts else None
     if account is None or not _actor_allowed(account.service.customer_id, actor):
         return None
     hostname = _name_for_account(account)
