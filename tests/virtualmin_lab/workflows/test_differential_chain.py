@@ -42,6 +42,7 @@ def test_base_differential_and_pair_restore(bench: Bench, account: VirtualminAcc
     data.write("keep.txt", "keep")
     data.write("change.txt", "v0")
     data.write("delete-me.txt", "gone soon")
+    lab.quiet("modify-domain", {"domain": DOMAIN, "desc": "base config at backup"})
     bench.clear_queue()
     admitted = management.take_base_backup(account, initiated_by="workflow")
     assert admitted.is_ok(), admitted
@@ -60,6 +61,7 @@ def test_base_differential_and_pair_restore(bench: Bench, account: VirtualminAcc
     data.write("change.txt", "v1")
     data.write("added.txt", "added")
     data.remove("delete-me.txt")
+    lab.quiet("modify-domain", {"domain": DOMAIN, "desc": "differential config at backup"})
     bench.clear_queue()
     admitted = management.take_differential_backup(account, initiated_by="workflow")
     assert admitted.is_ok(), admitted
@@ -70,9 +72,11 @@ def test_base_differential_and_pair_restore(bench: Bench, account: VirtualminAcc
     diff.refresh_from_db()
     assert diff.status == "completed", (diff.status, diff.status_message)
     extended = fresh()
-    assert (extended.chain_base_id, extended.chain_epoch, extended.chain_base_fingerprint) == (base.pk, epoch, pinned), (
-        "a differential extends the chain and leaves the base and its snapshot where they were"
-    )
+    assert (extended.chain_base_id, extended.chain_epoch, extended.chain_base_fingerprint) == (
+        base.pk,
+        epoch,
+        pinned,
+    ), "a differential extends the chain and leaves the base and its snapshot where they were"
     service = VirtualminBackupService(account.server)
     differential_manifest = service.read_manifest(diff.result["backup_id"]).unwrap()
     assert differential_manifest["chain_role"] == "differential"
@@ -82,6 +86,7 @@ def test_base_differential_and_pair_restore(bench: Bench, account: VirtualminAcc
     # Damage, then restore the pair. It takes the domain offline behind a write barrier (proved in check 4d).
     data.write("change.txt", "damaged")
     data.remove("added.txt")
+    lab.quiet("modify-domain", {"domain": DOMAIN, "desc": "config after both backups"})
     bench.clear_queue()
     admitted = management.create_pair_restore_job(
         extended, base.result["backup_id"], diff.result["backup_id"], force_restore=True, initiated_by="workflow"
@@ -103,6 +108,7 @@ def test_base_differential_and_pair_restore(bench: Bench, account: VirtualminAcc
     assert data.read("added.txt") == "added"
     assert data.read("keep.txt") == "keep"
     assert data.read("delete-me.txt") == "gone soon"
+    assert lab.domain_values(DOMAIN)["description"] == ["differential config at backup"]
     # The reconcile queued when the pair ended is the only writer of the enabled state (ADR-0051).
     assert "reconcile_virtualmin_service_state" in [run.name for run in runs]
     assert listing_enabled(lab.domain_values(DOMAIN)) is True

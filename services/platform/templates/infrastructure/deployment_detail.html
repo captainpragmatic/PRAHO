@@ -238,6 +238,17 @@
             </div>
         </div>
 
+        {% if destroy_plan %}
+        <section id="provider-cleanup" class="bg-slate-800 rounded-lg border border-slate-700 mt-6 p-6" {% if is_in_progress %}hx-get="{% url 'infrastructure:deployment_detail' deployment.id %}" hx-trigger="every 10s" hx-select="#provider-cleanup" hx-swap="outerHTML"{% endif %}>
+            <h2 class="text-lg font-semibold text-white mb-4">{% trans "Provider resource cleanup" %}</h2>
+            <p class="text-slate-300 mb-4">{% trans "Deletion is reported only after provider absence is confirmed. Retained storage and IPs may continue to incur charges." %}</p>
+            <div class="overflow-x-auto"><table class="w-full text-sm text-slate-300">
+                <thead><tr><th class="text-left p-2">{% trans "Resource" %}</th><th class="text-left p-2">{% trans "Outcome" %}</th><th class="text-left p-2">{% trans "Details" %}</th></tr></thead>
+                <tbody>{% for outcome in cloud_cleanup_outcomes %}<tr class="border-t border-slate-700"><td class="p-2 font-mono">{{ outcome.kind }}:{{ outcome.resource_id }}</td><td class="p-2">{{ outcome.get_state_display }}</td><td class="p-2">{{ outcome.detail }}{% if outcome.durable_snapshot_id %} {% trans "Durable snapshot" %}: {{ outcome.durable_snapshot_id }}{% endif %}</td></tr>{% empty %}<tr><td colspan="3" class="p-2">{% trans "The resource plan is recorded; cleanup has not begun." %}</td></tr>{% endfor %}</tbody>
+            </table></div>
+        </section>
+        {% endif %}
+
         <!-- Deployment Logs -->
         <div class="bg-slate-800 rounded-lg border border-slate-700 mt-6">
             <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center">

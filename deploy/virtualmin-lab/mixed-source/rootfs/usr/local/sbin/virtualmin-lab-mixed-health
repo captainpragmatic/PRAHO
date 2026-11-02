@@ -1,0 +1,8 @@
+#!/bin/bash
+set -euo pipefail
+
+/usr/local/sbin/virtualmin-lab-health
+test -f /var/lib/virtualmin-lab/mixed-configured
+for service in named postfix dovecot; do
+  systemctl is-active --quiet "${service}.service" || exit 1
+done

@@ -9,7 +9,7 @@
 # falsely done) and put the node back after each test.
 #
 # Whatever happens, the lab is restored when this script ends (a trap): every lab container unpaused and
-# reconnected to the compose network, Webmin running, the nodes healthy, and the certificate pins checked. A node
+# uplinks restored without readdressing, Webmin running, the nodes healthy, and the certificate pins checked. A node
 # restart regenerates a node's TLS identity and invalidates the pin, so a mismatch re-runs the bootstrap and
 # `lab.sh apply-credentials`.
 #
@@ -28,7 +28,8 @@ PLATFORM="${REPO_ROOT}/services/platform"
 SUITE="${REPO_ROOT}/tests/virtualmin_lab"
 LAB="${REPO_ROOT}/deploy/virtualmin-lab/lab.sh"
 NODES="vmlab-a vmlab-b"
-NETWORK="virtualmin-lab_default"
+# The single uplink of each native bridge node; keep its Docker endpoint intact.
+UPLINK="eth0"
 WAIT_SECONDS=180
 
 die() { echo "🔥 [Virtualmin faults] $*" >&2; exit 1; }
@@ -63,7 +64,7 @@ restore_lab() {
   local node
   for node in ${NODES}; do
     docker unpause "${node}" >/dev/null 2>&1 || true
-    docker network connect "${NETWORK}" "${node}" >/dev/null 2>&1 || true
+    docker exec "${node}" ip link set dev "${UPLINK}" up >/dev/null 2>&1 || true
     docker exec "${node}" systemctl start webmin >/dev/null 2>&1 || true
   done
   wait_healthy || { echo "⚠️ [Virtualmin faults] a node is not healthy after the restore" >&2; return 1; }

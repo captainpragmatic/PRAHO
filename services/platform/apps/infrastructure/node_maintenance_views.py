@@ -15,6 +15,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.common.decorators import staff_required
 from apps.common.localisation_services import get_request_localisation
+from apps.infrastructure.node_maintenance_audience import live_service_ids_for_node
 from apps.infrastructure.node_maintenance_execution import reconcile_direct_execution
 from apps.infrastructure.node_maintenance_forms import (
     NodeMaintenancePolicyForm,
@@ -88,11 +89,20 @@ def direct_maintenance_context(
 
 def node_maintenance_context(node: VirtualminServer, request: HttpRequest) -> dict[str, object]:
     """Tracked ownership preview only: no native inspection or remote mutation."""
+    from apps.provisioning.component_migration_models import SourceServiceObligation  # noqa: PLC0415
+    from apps.provisioning.service_models import Service  # noqa: PLC0415
     from apps.provisioning.virtualmin_models import VirtualminAccount  # noqa: PLC0415  # Cross-app ownership seam.
 
     actor = cast("User", request.user)
     can_change = _can_change(actor)
     accounts = VirtualminAccount.objects.filter(server=node)
+    retained = SourceServiceObligation.objects.filter(source_server=node, release__isnull=True)
+    service_labels = {
+        "mail": _("Mail"),
+        "dns": _("DNS"),
+        "mysql": _("Databases"),
+        "authentication": _("Authentication"),
+    }
     policy = NodeMaintenancePolicy.objects.filter(node=node).first()
     windows = list(
         NodeMaintenanceWindow.objects.filter(node_uuid=node.pk)
@@ -138,8 +148,20 @@ def node_maintenance_context(node: VirtualminServer, request: HttpRequest) -> di
         "maintenance_policy": policy,
         "maintenance_rows": rows,
         "maintenance_account_count": accounts.count(),
-        "maintenance_customer_count": accounts.values("service__customer_id").distinct().count(),
+        "maintenance_customer_count": Service.objects.filter(pk__in=live_service_ids_for_node(node.pk))
+        .values("customer_id")
+        .distinct()
+        .count(),
         "maintenance_accounts": list(accounts.select_related("service__customer").order_by("domain")[:25]),
+        "maintenance_retained_count": retained.count(),
+        "maintenance_retained": [
+            {
+                "domain": duty.domain,
+                "customer": duty.migration.account.service.customer,
+                "services": [service_labels[name] for name in duty.retained_services],
+            }
+            for duty in retained.select_related("migration__account__service__customer").order_by("domain")[:25]
+        ],
         "maintenance_can_change": can_change,
         "maintenance_can_edit_policy": can_change and not applicable,
         "maintenance_can_schedule": can_change and policy is not None and not applicable,

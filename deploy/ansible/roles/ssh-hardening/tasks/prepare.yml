@@ -1,4 +1,22 @@
 ---
+- name: Create the restricted operator tunnel identity on Virtualmin nodes
+  ansible.builtin.user:
+    name: praho-webmin-tunnel
+    system: true
+    create_home: true
+    shell: /usr/sbin/nologin
+  when: ssh_webmin_tunnel_enabled | default(false)
+
+- name: Enroll only approved operator keys for the Webmin tunnel
+  ansible.posix.authorized_key:
+    user: praho-webmin-tunnel
+    key: "{{ ssh_operator_public_keys | join('\n') }}"
+    key_options: 'restrict,port-forwarding,permitopen="127.0.0.1:10000"'
+    exclusive: true
+    manage_dir: true
+    state: present
+  when: ssh_webmin_tunnel_enabled | default(false)
+
 - name: Install approved operator public keys additively
   ansible.posix.authorized_key:
     user: root

@@ -3,8 +3,9 @@
   {% translate "Server maintenance" as section_heading %}<h2 id="node-maintenance-heading" class="text-xl font-semibold text-white">{{ section_heading|force_escape }}</h2>
   <div class="text-sm text-slate-300 space-y-1">
     {% translate "Tracked hosting accounts:" as accounts_label %}<p>{{ accounts_label|force_escape }} {{ maintenance_account_count }}</p>
+    {% translate "Retained source responsibilities:" as retained_label %}<p>{{ retained_label|force_escape }} {{ maintenance_retained_count }}</p>
     {% translate "Affected customers:" as customers_label %}<p>{{ customers_label|force_escape }} {{ maintenance_customer_count }}</p>
-    {% translate "Sub-servers and account names belong to their parent hosting account; they do not multiply customer notices. This preview covers PRAHO-tracked accounts and performs no native inspection." as scope_note %}<p>{{ scope_note|force_escape }}</p>
+    {% translate "Sub-servers and retained source responsibilities do not multiply customer notices. This preview covers tracked hosting accounts and unreleased source services; it performs no native inspection." as scope_note %}<p>{{ scope_note|force_escape }}</p>
   </div>
   {% if maintenance_policy %}
     {% translate "Permitted scheduling timezone:" as scheduling_zone_label %}<p class="text-sm text-slate-300">{{ scheduling_zone_label|force_escape }} {{ maintenance_policy.timezone }} · {% translate "Policy revision" as revision_label %}{{ revision_label|force_escape }} {{ maintenance_policy.revision }}</p>
@@ -17,6 +18,17 @@
     {% endif %}
   {% else %}
     {% translate "An operator must configure permitted intervals before ordinary maintenance can be scheduled." as unconfigured %}<p class="text-sm text-slate-300">{{ unconfigured|force_escape }}</p>
+  {% endif %}
+  {% if maintenance_full_controls and maintenance_retained %}
+    <details class="text-sm text-slate-300">
+      {% translate "Preview retained source services" as retained_preview %}<summary class="cursor-pointer">{{ retained_preview|force_escape }}</summary>
+      <ul class="mt-2 space-y-1">
+        {% for duty in maintenance_retained %}
+          <li class="break-words">{{ duty.domain }} · {{ duty.customer.get_display_name }} · {{ duty.services|join:", " }}</li>
+        {% endfor %}
+      </ul>
+      {% translate "Up to 25 responsibilities are listed; affected customers also include current account placement. Retained services do not mean that the website is still on this node." as retained_limit %}<p class="mt-2 text-xs text-slate-400">{{ retained_limit|force_escape }}</p>
+    </details>
   {% endif %}
   <div class="flex flex-wrap gap-3">
     {% url 'infrastructure:maintenance_policy' maintenance_node.pk as policy_url %}

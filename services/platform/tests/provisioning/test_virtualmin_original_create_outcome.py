@@ -14,6 +14,7 @@ from django_q.signing import SignedPackage
 
 from apps.common.types import Retriability
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from apps.provisioning.virtualmin_node_capability import destination_refusal
 from apps.provisioning.virtualmin_service import VirtualminProvisioningService
 from apps.provisioning.virtualmin_tasks import process_failed_virtualmin_jobs, provision_virtualmin_account
 from tests.provisioning import test_virtualmin_create_retry_policy as fixtures
@@ -225,6 +226,7 @@ class OriginalCreateOutcomeTests(fixtures.CreateRetryFixture):
         self.account.save()
         account_id = self.account.pk
         target = VirtualminServer.objects.create(
+            legacy_security_admission=True,
             name="Replacement retry node",
             hostname="replacement-retry-node.example.com",
             api_username="api",
@@ -235,6 +237,7 @@ class OriginalCreateOutcomeTests(fixtures.CreateRetryFixture):
         )
         target.set_api_password("replacement-node-fixture-password")
         target.save()
+        self.assertIsNone(destination_refusal(target))
         source_gateway = self.gateway
         source_gateway.fail_first_create = False
         target_gateway = type(self.gateway)()
@@ -334,6 +337,7 @@ class OriginalCreateOutcomeTests(fixtures.CreateRetryFixture):
 
     def _replacement_node(self, hostname: str) -> VirtualminServer:
         target = VirtualminServer.objects.create(
+            legacy_security_admission=True,
             name=hostname,
             hostname=hostname,
             api_username="api",
@@ -344,6 +348,7 @@ class OriginalCreateOutcomeTests(fixtures.CreateRetryFixture):
         )
         target.set_api_password("replacement-fixture-password")
         target.save()
+        self.assertIsNone(destination_refusal(target))
         return target
 
     def test_accepted_unknown_reprovision_is_adopted_on_target_once_despite_duplicate_delivery(self) -> None:

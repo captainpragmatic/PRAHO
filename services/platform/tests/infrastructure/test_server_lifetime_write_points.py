@@ -12,26 +12,32 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Retriability
-from apps.infrastructure.ansible_service import AnsibleResult
-from apps.infrastructure.cloud_gateway import ServerCreateResult
+from apps.infrastructure.cloud_gateway import ServerCreateResult, SSHKeyResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog, NodeServerLifetime, NodeSize
-from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service, _ok_dns_gateway
-from tests.infrastructure.test_node_teardown import Harness, cloud_gateway
+from tests.helpers.teardown_provider import attach_teardown_provider
+from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
+from tests.infrastructure.test_node_teardown import TOKEN, Harness, cloud_gateway, dns_gateway
 
 
 def _gateway(create: Any) -> MagicMock:
     gateway = MagicMock()
-    gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+    gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
     gateway.create_firewall.return_value = Ok("fw-1")
     gateway.create_server.return_value = create
     gateway.delete_server.return_value = Ok(True)
     gateway.delete_firewall.return_value = Ok(True)
     gateway.delete_ssh_key.return_value = Ok(True)
+    gateway.delete_ssh_key_by_id.return_value = Ok(True)
     return gateway
 
 
 def _deploy(deployment: NodeDeployment, gateway: MagicMock, *, dns_fails: bool = True) -> Any:
+    created = gateway.create_server.return_value
+    if created.is_ok():
+        attach_teardown_provider(
+            gateway, deployment, server_id=created.unwrap().server_id, ssh_key_ids=("key-1",)
+        )
     service = _make_service()
     service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
     # Stop right after provisioning: the DNS step fails, which is not under test here.
@@ -117,92 +123,76 @@ class DeployWritePointTests(TestCase):
 
 
 class CompensationServerFieldsTests(TestCase):
-    def setUp(self) -> None:
-        self.deployment = _create_deployment("pending")
-        self.gateway = _gateway(
-            Ok(ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="2001:db8::1"))
-        )
-        self.service = _make_service()
-        self.service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
-        self.service._ansible.get_playbook_order.return_value = ["common_base.yml"]
-        self.service._resolve_dns_config = MagicMock(return_value=Ok(("dns-token", "zone")))
-        self.service._store_api_credential = MagicMock(return_value=Ok(True))
+    """Cleanup that proves the new server gone clears the row's server id and addresses with it."""
 
-    def _run_pipeline(self) -> None:
+    def _deploy_with_addresses(self, gateway: MagicMock) -> NodeDeployment:
+        deployment = _create_deployment("pending")
+        planted: list[tuple[str, str | None, str | None]] = []
+
+        def dns_after_provision(*_args: Any, **_kwargs: Any) -> Any:
+            row = NodeDeployment.objects.get(pk=deployment.pk)
+            planted.append((row.external_node_id, row.ipv4_address, row.ipv6_address))
+            return Err("dns stops the pipeline here")
+
+        attach_teardown_provider(gateway, deployment, server_id="srv-1", ssh_key_ids=("key-1",))
+        service = _make_service()
+        service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
+        service._configure_dns = MagicMock(side_effect=dns_after_provision)
+        service._resolve_dns_config = MagicMock(return_value=Ok(("dns-token", "zone")))
         with (
             patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
-            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
-            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=self.gateway),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
         ):
-            result = self.service.deploy_node(self.deployment, credentials={"api_token": "test-token"})
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
         self.assertTrue(result.is_err(), result)
-        self.assertIn("Ansible common_base.yml failed", result.unwrap_err())
+        # The provisioned row held the server before cleanup ran.
+        self.assertEqual(planted, [("srv-1", "1.2.3.4", "2001:db8::1")])
+        deployment.refresh_from_db()
+        return deployment
 
-    def test_successful_compensation_clears_server_fields_and_closes_lifetime(self) -> None:
-        def fail_ansible(**_kwargs: object) -> Ok[AnsibleResult]:
-            self.deployment.refresh_from_db()
-            self.assertEqual(self.deployment.external_node_id, "srv-1")
-            self.assertEqual(self.deployment.ipv4_address, "1.2.3.4")
-            self.assertEqual(self.deployment.ipv6_address, "2001:db8::1")
-            self.assertIsNotNone(self.deployment.operation_token)
-            self.assertEqual(_lifetimes(self.deployment), [("srv-1", True, False)])
-            return Ok(AnsibleResult(False, "common_base.yml", "", "fixture failure", 2))
+    @staticmethod
+    def _created() -> Any:
+        return Ok(ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="2001:db8::1"))
 
-        self.service._ansible.run_playbook.side_effect = fail_ansible
+    def test_cleanup_that_deletes_the_server_clears_its_id_and_addresses(self) -> None:
+        deployment = self._deploy_with_addresses(_gateway(self._created()))
 
-        self._run_pipeline()
+        self.assertEqual(deployment.status, "failed")
+        self.assertEqual((deployment.external_node_id, deployment.ipv4_address, deployment.ipv6_address), ("", None, None))
+        self.assertEqual(_lifetimes(deployment), [("srv-1", False, False)])
 
-        self.deployment.refresh_from_db()
-        self.assertEqual(self.deployment.status, "failed")
-        self.assertEqual(self.deployment.external_node_id, "")
-        self.assertIsNone(self.deployment.ipv4_address)
-        self.assertIsNone(self.deployment.ipv6_address)
-        lifetime = NodeServerLifetime.objects.get(deployment=self.deployment, server_id="srv-1")
-        self.assertIsNotNone(lifetime.ended_at)
+    def test_cleanup_whose_server_delete_fails_keeps_its_id_and_addresses(self) -> None:
+        gateway = _gateway(self._created())
+        gateway.delete_server.return_value = Err("provider refused deletion")
 
-    def test_failed_compensation_keeps_server_fields_and_open_lifetime(self) -> None:
-        def fail_ansible(**_kwargs: object) -> Ok[AnsibleResult]:
-            self.deployment.refresh_from_db()
-            self.assertEqual(self.deployment.external_node_id, "srv-1")
-            self.assertEqual(self.deployment.ipv4_address, "1.2.3.4")
-            self.assertEqual(self.deployment.ipv6_address, "2001:db8::1")
-            self.assertIsNotNone(self.deployment.operation_token)
-            self.assertEqual(_lifetimes(self.deployment), [("srv-1", True, False)])
-            return Ok(AnsibleResult(False, "common_base.yml", "", "fixture failure", 2))
+        deployment = self._deploy_with_addresses(gateway)
 
-        self.gateway.delete_server.return_value = Err("provider refused deletion")
-        self.service._ansible.run_playbook.side_effect = fail_ansible
+        self.assertEqual(deployment.status, "failed")
+        self.assertEqual(
+            (deployment.external_node_id, deployment.ipv4_address, deployment.ipv6_address),
+            ("srv-1", "1.2.3.4", "2001:db8::1"),
+        )
+        self.assertEqual(_lifetimes(deployment), [("srv-1", True, False)])
 
-        self._run_pipeline()
-
-        self.deployment.refresh_from_db()
-        self.assertEqual(self.deployment.status, "failed")
-        self.assertEqual(self.deployment.external_node_id, "srv-1")
-        self.assertEqual(self.deployment.ipv4_address, "1.2.3.4")
-        self.assertEqual(self.deployment.ipv6_address, "2001:db8::1")
-        lifetime = NodeServerLifetime.objects.get(deployment=self.deployment, server_id="srv-1")
-        self.assertIsNone(lifetime.ended_at)
-
-    def test_destroy_cleaned_failed_row_still_searches_provider(self) -> None:
+    def test_destroying_a_cleaned_failed_row_still_deletes_its_labelled_server(self) -> None:
         deployment = _create_deployment("failed")
         NodeDeployment.objects.filter(pk=deployment.pk).update(
-            server_create_state="created",
-            provider_token_fingerprint=provider_token_fingerprint("test-token"),
+            server_create_state="created", provider_token_fingerprint=provider_token_fingerprint(TOKEN)
         )
         deployment.refresh_from_db()
-        self.assertEqual(deployment.status, "failed")
-        self.assertEqual(deployment.external_node_id, "")
-        self.assertIsNone(deployment.ipv4_address)
-        self.assertIsNone(deployment.ipv6_address)
-        self.assertEqual(deployment.server_create_state, "created")
-        self.assertEqual(deployment.provider_token_fingerprint, provider_token_fingerprint("test-token"))
+        self.assertEqual((deployment.external_node_id, deployment.server_create_state), ("", "created"))
         gateway = cloud_gateway()
+        attach_teardown_provider(gateway, deployment, server_id="srv-left")
 
-        with patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=gateway):
-            result = self.service.destroy_node(deployment, credentials={"api_token": "test-token"})
+        with (
+            patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=gateway),
+            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=dns_gateway()),
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value="dns-tok"),
+        ):
+            result = _make_service().destroy_node(deployment, credentials={"api_token": TOKEN})
 
         self.assertTrue(result.is_ok(), result)
-        gateway.find_servers_by_label.assert_called_with(f"praho-deployment={deployment.correlation_id}")
+        gateway.delete_server.assert_called_once_with("srv-left")
         deployment.refresh_from_db()
         self.assertEqual(deployment.status, "destroyed")
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Callable
+from time import perf_counter
 from typing import Any
 
 import pytest
@@ -31,6 +32,7 @@ from tests.virtualmin_lab.faults.harness import (
     Chaos,
     backup_objects,
     count_attempts,
+    docker,
     exclusion_holds,
     resolve_as_operator,
 )
@@ -154,3 +156,20 @@ def test_webmin_stopped_during_a_restore(bench: Bench, chaos: Chaos) -> None:
 
 def test_network_cut_during_a_restore(bench: Bench, chaos: Chaos) -> None:
     _restore_under_fault(bench, chaos, "wffaultd.example.com", lambda: chaos.disconnect("vm-a"))
+
+
+def test_network_cut_preserves_the_node_endpoint_and_recovers_the_api(bench: Bench, chaos: Chaos) -> None:
+    container = bench.node("vm-a").container
+    gateway = bench.lab("vm-a").gateway
+    before = docker("inspect", "--format", "{{json .NetworkSettings.Networks}}", container)
+    assert gateway.call("info", timeout_seconds=5).is_ok()
+    try:
+        chaos.disconnect("vm-a")
+        # The fault must not replace the endpoint/IP/MAC behind published ports.
+        assert docker("inspect", "--format", "{{json .NetworkSettings.Networks}}", container) == before
+        unavailable = gateway.call("info", timeout_seconds=1, deadline=perf_counter() + 3)
+        assert unavailable.is_err(), "The network fault left the authenticated API reachable"
+    finally:
+        chaos.connect("vm-a")
+        chaos.wait_api("vm-a")
+    assert docker("inspect", "--format", "{{json .NetworkSettings.Networks}}", container) == before

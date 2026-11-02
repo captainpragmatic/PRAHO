@@ -18,7 +18,7 @@ from tests.provisioning.test_virtualmin_migration_bridge import BridgeCase
 
 
 class FrontendRetentionTests(BridgeCase):
-    def due(self):
+    def due(self, *, hostname=True):
         self.staff.is_staff = True
         self.staff.save(update_fields=["is_staff"])
         bridge, migration = self._bridge()
@@ -28,7 +28,8 @@ class FrontendRetentionTests(BridgeCase):
         self.target.save(update_fields=["ipv4_address"])
         self.account.server = self.target
         self.account.save(update_fields=["server"])
-        AccountHostname.objects.create(account=self.account, target_server=self.target, label="a1b2c3d4", zone="accounts.example.net")
+        if hostname:
+            AccountHostname.objects.create(account=self.account, target_server=self.target, label="a1b2c3d4", zone="accounts.example.net")
         VirtualminMigration.objects.filter(pk=migration.pk).update(status="completed", cutover_committed_at=timezone.now())  # fsm-bypass: committed fixture
         self.source_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
         bridge.activate()
@@ -100,6 +101,64 @@ class FrontendRetentionTests(BridgeCase):
         self.assertTrue(accepted.is_ok(), accepted)
         bridge.refresh_from_db()
         self.assertEqual(bridge.evidence["routing_attestation"]["actor"], str(self.staff.pk))
+
+    def test_imported_proxy_origin_accepts_reviewed_absence_of_a_platform_hostname(self):
+        bridge, migration = self.due(hostname=False)
+        frozen = "a1b2c3d4.accounts.example.net"
+        VirtualminMigration.objects.filter(pk=migration.pk).update(
+            contract="imported_web",
+            pre_migration_snapshot={
+                "component_account_name": "",
+                "component_network": {
+                    "source_ipv4": self.server.ipv4_address, "target_ipv4": self.target.ipv4_address,
+                    "source_ipv6": self.server.ipv6_address or "", "target_ipv6": self.target.ipv6_address or "",
+                },
+            },
+        )
+        bridge.refresh_from_db()
+        fields = {
+            "note": "Verified the retained website proxy origin", "target_id": str(self.target.pk),
+            "ipv4": self.target.ipv4_address, "ipv6": self.target.ipv6_address or "",
+        }
+        self.assertTrue(routing.attest_proxy_origin(bridge, self.staff, fields).is_ok())
+        migration.refresh_from_db()
+        for expected in (frozen, None):
+            with self.subTest(expected=expected):
+                snapshot = {**migration.pre_migration_snapshot, "component_account_name": expected}
+                VirtualminMigration.objects.filter(pk=migration.pk).update(pre_migration_snapshot=snapshot)
+                bridge.refresh_from_db()
+                self.assertTrue(routing.attest_proxy_origin(bridge, self.staff, fields).is_err())
+        VirtualminMigration.objects.filter(pk=migration.pk).update(contract="legacy")
+        bridge.refresh_from_db()
+        self.assertTrue(routing.attest_proxy_origin(bridge, self.staff, fields).is_err())
+
+    def test_imported_proxy_statement_preserves_reviewed_hostname_and_network_identity(self):
+        bridge, migration = self.due()
+        snapshot = {
+            "component_account_name": AccountHostname.objects.get(account=self.account).fqdn,
+            "component_network": {
+                "source_ipv4": self.server.ipv4_address, "target_ipv4": self.target.ipv4_address,
+                "source_ipv6": self.server.ipv6_address or "", "target_ipv6": self.target.ipv6_address or "",
+            },
+        }
+        VirtualminMigration.objects.filter(pk=migration.pk).update(contract="imported_web", pre_migration_snapshot=snapshot)
+        bridge.refresh_from_db()
+        fields = {
+            "note": "Verified the retained website proxy origin", "target_id": str(self.target.pk),
+            "ipv4": self.target.ipv4_address, "ipv6": self.target.ipv6_address or "",
+        }
+        self.assertTrue(routing.attest_proxy_origin(bridge, self.staff, fields).is_ok())
+        VirtualminMigration.objects.filter(pk=migration.pk).update(
+            pre_migration_snapshot={**snapshot, "component_account_name": ""}
+        )
+        bridge.refresh_from_db()
+        self.assertTrue(routing.attest_proxy_origin(bridge, self.staff, fields).is_err())
+        VirtualminMigration.objects.filter(pk=migration.pk).update(pre_migration_snapshot=snapshot)
+        self.target.ipv4_address = "95.217.0.21"
+        self.target.save(update_fields=["ipv4_address"])
+        fields["ipv4"] = self.target.ipv4_address
+        bridge.refresh_from_db()
+        self.assertTrue(routing.attest_proxy_origin(bridge, self.staff, fields).is_err())
 
     def test_a_staff_proxy_statement_is_bound_to_current_target_and_audited(self):
         bridge, migration = self.due()

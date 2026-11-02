@@ -69,7 +69,9 @@ virtualmin_tasks.py       # Async operations
 - Encrypted API credentials in database
 - SSL certificate verification with optional pinning
 - Rate limiting per server (100 calls/hour)
-- Dedicated ACL user (not master admin)
+- Dedicated Virtualmin master API user, restricted to its module and reviewed source networks (ADR-0060).
+- Explicit operator inspection, source acknowledgment or reviewed conversion, with immutable evidence and decisions.
+- Durable hardening execution exclusion; verification requires live policy evidence and real API authentication.
 
 ### Error Handling
 - Structured error taxonomy
@@ -411,9 +413,9 @@ result = dr.rebuild_server_from_praho(server)  # recreates accounts from PRAHO d
 - `create-domain` on 8.x:
   - the built-in template is "Default Settings" (`DEFAULT_VIRTUALMIN_TEMPLATE`);
     there is no template "Default";
-  - nothing is enabled without a feature flag, so PRAHO sends
-    `default-features` (the node playbook pins the default-on set to unix,
-    dir, web, ssl, logrotate, mysql and webmin);
+  - PRAHO explicitly selects `unix`, `dir`, `web`, `ssl`, `logrotate` and
+    `mysql`; account creation and compatible restores do not inherit the
+    source or node template's default mail, DNS, FTP or customer Webmin features;
   - there is no `--comment`: the recovery seed goes in `--desc`, which refuses
     ":", so the seed is `PRAHO=<uuid>|CID=<id>|STATUS=<status>`
     (`parse_recovery_seed()` still reads the old ":" form).

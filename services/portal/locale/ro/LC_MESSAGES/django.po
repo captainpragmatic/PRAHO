@@ -8326,3 +8326,12 @@ msgstr "Lucrările au durat mai mult decât s-a estimat."
 #. Customer maintenance windows (#780).
 msgid "Maintenance information is temporarily unavailable. Please check again shortly."
 msgstr "Informațiile despre mentenanță sunt temporar indisponibile. Te rugăm să revii în scurt timp."
+# Retained-source maintenance can affect mail/DNS independently of website placement.
+msgid "A restart of a server supporting your hosting services"
+msgstr "Repornirea unui server care susține serviciile dumneavoastră de găzduire"
+
+msgid "Updates to a server supporting your hosting services"
+msgstr "Actualizări pe un server care susține serviciile dumneavoastră de găzduire"
+
+msgid "Emergency work on a server supporting your hosting services"
+msgstr "Lucrări urgente pe un server care susține serviciile dumneavoastră de găzduire"

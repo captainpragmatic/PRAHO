@@ -203,12 +203,23 @@ def test_key_paths_are_preserved_without_activating_disabled_keys(keys: list[str
     assert ("authorized_keys2" in rendered) == (".ssh/authorized_keys2" in keys)
 
 
+def test_canonical_sftp_runs_through_the_account_login_shell() -> None:
+    environment = Environment(autoescape=False)  # noqa: S701 -- OpenSSH configuration, not HTML.
+    template = environment.from_string((PREFLIGHT.parent.parent / "templates/sshd_config.j2").read_text())
+    rendered = template.render(ssh_phase_ports=[9876], ssh_authorized_keys_files=[".ssh/authorized_keys"])
+    # Internal SFTP bypasses the disabled login shell used by Virtualmin's migration barrier.
+    assert "Subsystem sftp /usr/lib/openssh/sftp-server\n" in rendered
+
+
 @pytest.mark.parametrize(
     "override,options",
     [
         ({}, "SSHD_OPTS = -oPasswordAuthentication=yes\n"),
         ({"FragmentPath": "/etc/systemd/system/ssh.service"}, "SSHD_OPTS=\n"),
-        ({"ExecStart": "{ path=/usr/sbin/sshd ; argv[]=/usr/sbin/sshd -D -f /custom/config ; ignore_errors=no ; }"}, "SSHD_OPTS=\n"),
+        (
+            {"ExecStart": "{ path=/usr/sbin/sshd ; argv[]=/usr/sbin/sshd -D -f /custom/config ; ignore_errors=no ; }"},
+            "SSHD_OPTS=\n",
+        ),
         ({"Environment": "SSHD_OPTS=-f /custom/config"}, "SSHD_OPTS=\n"),
         ({"EnvironmentFiles": "/etc/custom-ssh (ignore_errors=yes)"}, "SSHD_OPTS=\n"),
     ],
@@ -216,8 +227,11 @@ def test_key_paths_are_preserved_without_activating_disabled_keys(keys: list[str
 def test_service_startup_cannot_override_verified_config(override: dict[str, str], options: str) -> None:
     validator = load_helper("check_config")
     properties = {
-        "FragmentPath": "/usr/lib/systemd/system/ssh.service", "KillMode": "process",
-        "DropInPaths": "", "Environment": "", "EnvironmentFiles": "/etc/default/ssh (ignore_errors=yes)",
+        "FragmentPath": "/usr/lib/systemd/system/ssh.service",
+        "KillMode": "process",
+        "DropInPaths": "",
+        "Environment": "",
+        "EnvironmentFiles": "/etc/default/ssh (ignore_errors=yes)",
         "ExecStart": "{ path=/usr/sbin/sshd ; argv[]=/usr/sbin/sshd -D $SSHD_OPTS ; ignore_errors=no ; }",
     }
     validator.validate_startup(properties, 'SSHD_OPTS = ""\n')
@@ -226,19 +240,21 @@ def test_service_startup_cannot_override_verified_config(override: dict[str, str
 
 
 def test_stale_sources_are_the_ssh_rules_the_allowlist_no_longer_names() -> None:
-    added = "\n".join([
-        "Added user rules (see 'ufw status' for running firewall):",
-        "ufw allow 80/tcp",
-        "ufw allow 9876/tcp",
-        "ufw allow from 192.0.2.10 to any port 9876 proto tcp",
-        "ufw allow from 198.51.100.0/24 to any port 9876 proto tcp",
-        "ufw allow from 2001:db8::/64 to any port 9876 proto tcp",
-        "ufw allow from 203.0.113.9 to any port 9876 proto tcp",
-        "ufw allow from 203.0.113.9 to any port 22 proto tcp",
-        "ufw allow from 203.0.113.20 to any port 9876 proto tcp comment 'old office'",
-        "ufw allow from 203.0.113.21 to any port 9876",
-        "ufw allow from any to any port 9876 proto tcp",
-    ])
+    added = "\n".join(
+        [
+            "Added user rules (see 'ufw status' for running firewall):",
+            "ufw allow 80/tcp",
+            "ufw allow 9876/tcp",
+            "ufw allow from 192.0.2.10 to any port 9876 proto tcp",
+            "ufw allow from 198.51.100.0/24 to any port 9876 proto tcp",
+            "ufw allow from 2001:db8::/64 to any port 9876 proto tcp",
+            "ufw allow from 203.0.113.9 to any port 9876 proto tcp",
+            "ufw allow from 203.0.113.9 to any port 22 proto tcp",
+            "ufw allow from 203.0.113.20 to any port 9876 proto tcp comment 'old office'",
+            "ufw allow from 203.0.113.21 to any port 9876",
+            "ufw allow from any to any port 9876 proto tcp",
+        ]
+    )
     allowed = ["192.0.2.10/32", "2001:db8::/64"]
     assert load_helper("stale_sources").stale_sources(added, 9876, allowed) == [
         {"source": "198.51.100.0/24", "proto": "tcp"},

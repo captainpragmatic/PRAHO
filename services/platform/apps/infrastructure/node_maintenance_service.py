@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from apps.audit.services import AuditContext, AuditEventData, AuditService
+from apps.infrastructure.node_maintenance_audience import live_service_ids_for_node
 from apps.infrastructure.node_maintenance_delivery import publish_window_notices
 from apps.infrastructure.node_maintenance_gate import competing_operation_refusal
 from apps.infrastructure.node_maintenance_models import (
@@ -46,9 +47,7 @@ def audit_window(window: NodeMaintenanceWindow, actor: User | None, action: str,
 
 
 def capture_audience(window: NodeMaintenanceWindow, provenance: str) -> None:
-    from apps.provisioning.virtualmin_models import VirtualminAccount  # noqa: PLC0415
-
-    for service_id in VirtualminAccount.objects.filter(server_id=window.node_id).values_list("service_id", flat=True):
+    for service_id in live_service_ids_for_node(window.node_id):
         record, created = NodeMaintenanceAudience.objects.get_or_create(
             window=window,
             service_id_snapshot=service_id,

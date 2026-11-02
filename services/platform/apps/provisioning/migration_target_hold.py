@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from .virtualmin_gateway import listing_attribute
 from .virtualmin_pair_restore import run_pair_step
+from .virtualmin_restore_policy import prepare_restore_params
 from .virtualmin_service import create_domain_params, generate_virtualmin_parameter_secret
 
 if TYPE_CHECKING:
@@ -76,6 +77,7 @@ def held_pair_variables(migration: VirtualminMigration) -> dict[str, Any]:
         "chain_domain": migration.account.domain,
         "chain_domain_id": migration.barrier_state["target_domain_id"],
         "chain_token": str(migration.pk),
+        "pair_web_only": migration.target_server.security_state == "verified_web",
     }
 
 
@@ -155,6 +157,15 @@ def restore_held_target(
 ) -> None:
     """Create an empty disabled domain, restore under maintenance, and prove Unix stays locked."""
     archives = _checked_archives(migration, archives)
+    for archive in archives:
+        prepare_restore_params(
+            migration.account,
+            migration.target_server,
+            service.spool / archive["archive_name"],
+            {},
+            source="/var/lib/praho-transfer/" + archive["archive_name"],
+            force=False,
+        )
     service._move(
         migration,
         token,

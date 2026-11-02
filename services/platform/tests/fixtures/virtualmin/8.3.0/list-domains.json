@@ -33,7 +33,7 @@
                 "/var/log/virtualmin/contract.praho.test_access_log"
               ],
               "allowed_features": [
-                "unix dir web ssl logrotate mysql virtualmin-awstats"
+                "unix dir web ssl logrotate mysql"
               ],
               "allowed_mysql_hosts": [
                 "<ip> localhost"
@@ -63,7 +63,7 @@
                 "contract@vm-b.praho.test"
               ],
               "created_by": [
-                "root"
+                "praho-api"
               ],
               "created_on": [
                 "<timestamp>"
@@ -102,7 +102,7 @@
                 "/var/fcgiwrap/<id>.sock/socket"
               ],
               "features": [
-                "unix dir web ssl logrotate mysql webmin"
+                "unix dir web ssl logrotate mysql"
               ],
               "file": [
                 "/etc/webmin/virtual-server/domains/<id>"
@@ -198,7 +198,7 @@
                 "<id>"
               ],
               "plugins": [
-                "virtualmin-awstats"
+                ""
               ],
               "port_for_mysql": [
                 "3306"
@@ -360,7 +360,7 @@
                 "/var/log/virtualmin/contract.praho.test_access_log"
               ],
               "allowed_features": [
-                "unix dir web ssl logrotate mysql virtualmin-awstats"
+                "unix dir web ssl logrotate mysql"
               ],
               "allowed_mysql_hosts": [
                 "<ip> localhost"
@@ -390,7 +390,7 @@
                 "contract@vm-b.praho.test"
               ],
               "created_by": [
-                "root"
+                "praho-api"
               ],
               "created_on": [
                 "<timestamp>"
@@ -429,7 +429,7 @@
                 "/var/fcgiwrap/<id>.sock/socket"
               ],
               "features": [
-                "unix dir web ssl logrotate mysql webmin"
+                "unix dir web ssl logrotate mysql"
               ],
               "file": [
                 "/etc/webmin/virtual-server/domains/<id>"
@@ -525,7 +525,7 @@
                 "<id>"
               ],
               "plugins": [
-                "virtualmin-awstats"
+                ""
               ],
               "port_for_mysql": [
                 "3306"

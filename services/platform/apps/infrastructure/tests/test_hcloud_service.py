@@ -67,6 +67,8 @@ class TestCreateServer(TestCase):
         """Successful server creation returns Ok with ServerCreateResult."""
         svc, client = _make_service()
         server = _make_mock_server()
+        server.public_net.primary_ipv4.id = 701
+        server.public_net.primary_ipv6.id = 702
         action = mock.Mock()
 
         response = mock.Mock()
@@ -90,6 +92,7 @@ class TestCreateServer(TestCase):
         self.assertEqual(data.ipv4_address, "1.2.3.4")
         self.assertEqual(data.ipv6_address, "2a01:4f8:c17:1234::1")
         self.assertEqual(data.root_password, "secret123")
+        self.assertEqual(data.created_resources, (("primary_ip", "701"), ("primary_ip", "702")))
         action.wait_until_finished.assert_called_once()
 
     def test_create_server_error(self):

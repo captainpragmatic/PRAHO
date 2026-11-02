@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from hcloud import Client
+from hcloud._exceptions import APIException
 from hcloud.firewalls.domain import Firewall
 from hcloud.firewalls.domain import FirewallRule as HcloudFirewallRule
 from hcloud.images.domain import Image
@@ -36,6 +37,7 @@ from apps.infrastructure.cloud_gateway import (
     normalize_server_status,
     register_cloud_gateway,
 )
+from apps.infrastructure.cloud_resource_inventory import CloudResourceClient, ResourceResponse
 from apps.infrastructure.panel_cert_probes import public_address
 
 logger = logging.getLogger(__name__)
@@ -45,21 +47,13 @@ HCLOUD_ACTION_MAX_RETRIES = 300
 
 
 def _is_hcloud_not_found(exc: Exception) -> bool:
-    """hcloud's get_by_id raises APIException(code='not_found') for a missing
-    resource — it never returns None — so the `if not obj` guards on the delete
-    paths are dead and an already-deleted resource surfaces as an exception.
-    Treat that as 'already gone' so deletes stay idempotent (and destroy_node
-    can converge instead of wedging on a server the cleanup task already removed).
-    Duck-typed on `.code` to avoid coupling to the SDK's exception import path,
-    with a message fallback ONLY when no structured code exists. When the SDK
-    gives a `.code`, trust it exclusively: a non-404 code (e.g. 'forbidden')
-    whose message happens to contain 'not found' must NOT be swallowed as a
-    successful delete, or an auth/permission failure would silently leave a
-    billable server/firewall/snapshot orphaned while cleanup reports success."""
-    code = getattr(exc, "code", None)
-    if code is not None:
-        return bool(code == "not_found")
-    return "not found" in str(exc).lower()
+    """Only the native provider error code proves absence, never exception text.
+
+    hcloud get_by_id raises APIException(code='not_found') for a missing resource.
+    Transport and permission failures can mention the same words without proving
+    anything about the resource, so they must remain errors.
+    """
+    return bool(getattr(exc, "code", None) == "not_found")
 
 
 # API error codes that do not prove the request was refused before it took effect.
@@ -99,6 +93,25 @@ class HcloudService(CloudProviderGateway):
             # ClientBase. Keep this isolated and covered by a real-SDK transport test.
             # Ordinary deployment clients retain the SDK's default retry policy.
             self.client._client._retry_max_retries = max_retries
+
+    def resource_client(self) -> CloudResourceClient:
+        return CloudResourceClient("hetzner", self._resource_request)
+
+    def _resource_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, object] | None = None,
+        body: dict[str, object] | None = None,
+    ) -> ResourceResponse:
+        try:
+            payload = self.client.request(method, path, params=params, json=body)
+            return ResourceResponse(200, payload)
+        except APIException as error:
+            if error.code == "not_found":
+                return ResourceResponse(404, None)
+            raise
 
     # =========================================================================
     # CloudProviderGateway implementation (unified interface)
@@ -159,6 +172,8 @@ class HcloudService(CloudProviderGateway):
 
             ipv4, ipv6 = self._extract_ips(server)
 
+            primary_ips = (server.public_net.primary_ipv4, server.public_net.primary_ipv6) if server.public_net else ()
+
             logger.info(f"✅ [Hcloud] Server created: {req.name} (id={server.id}, ip={ipv4})")
 
             # Return gateway type if called via gateway interface, else backward-compat type
@@ -168,6 +183,11 @@ class HcloudService(CloudProviderGateway):
                     ipv4_address=ipv4,
                     ipv6_address=ipv6,
                     root_password=response.root_password or "",
+                    created_resources=tuple(
+                        ("primary_ip", str(primary.id))
+                        for primary in primary_ips
+                        if primary is not None and type(primary.id) is int and primary.id > 0
+                    ),
                 )
             )
 
@@ -218,7 +238,7 @@ class HcloudService(CloudProviderGateway):
             return Ok(self._server_to_gateway_info(server))
 
         except Exception as e:
-            # A missing server is Ok(None), not an error (code-based, message fallback).
+            # Only the provider's structured not_found response proves absence.
             if _is_hcloud_not_found(e):
                 return Ok(None)
             return Err(f"Failed to get server {server_id}: {e}")
@@ -628,17 +648,20 @@ class HcloudService(CloudProviderGateway):
             return Err(f"List snapshots failed: {e}")
 
     def delete_snapshot(self, snapshot_id: str) -> Result[bool, str]:
-        """Delete a snapshot by ID."""
+        """Delete the exact snapshot and require authoritative provider absence."""
         try:
-            image = self.client.images.get_by_id(int(snapshot_id))
-            if not image:
-                return Ok(True)  # Already gone
+            sid = int(snapshot_id)
+            image = self.client.images.get_by_id(sid)
+            if not isinstance(image, Image) or type(image.id) is not int or image.id != sid:
+                return Err(f"Malformed response for snapshot {snapshot_id}; deletion was not attempted")
             self.client.images.delete(image)
-            logger.info(f"✅ [Hcloud] Snapshot deleted: {snapshot_id}")
-            return Ok(True)
+            # A delete receipt is not proof: only the exact native not_found on
+            # this ID permits callers to mark the persisted snapshot as deleted.
+            self.client.images.get_by_id(sid)
+            return Err(f"Snapshot deletion unconfirmed: provider still returned image {snapshot_id}")
         except Exception as e:
             if _is_hcloud_not_found(e):
-                logger.info(f"✅ [Hcloud] Snapshot {snapshot_id} already gone — treating delete as success")
+                logger.info(f"✅ [Hcloud] Snapshot absence confirmed: {snapshot_id}")
                 return Ok(True)
             logger.error(f"🔥 [Hcloud] Snapshot deletion failed: {e}")
             return Err(f"Snapshot deletion failed: {e}")

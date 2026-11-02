@@ -27,6 +27,7 @@ from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_backup_service import RestoreConfig
 from apps.provisioning.virtualmin_gateway import VirtualminAPIError
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from apps.provisioning.virtualmin_node_capability import destination_refusal
 from apps.provisioning.virtualmin_service import (
     VirtualminAccountCreationData,
     VirtualminBackupManagementService,
@@ -148,6 +149,7 @@ class CreateRetryFixture(TransactionTestCase):
             status="active",
         )
         self.server = VirtualminServer.objects.create(
+            legacy_security_admission=True,
             name="Retry node",
             hostname="retry-node.example.com",
             api_username="api",
@@ -158,6 +160,7 @@ class CreateRetryFixture(TransactionTestCase):
         )
         self.server.set_api_password("fixture-password")
         self.server.save()
+        self.assertIsNone(destination_refusal(self.server))
         self.product = Product.objects.create(
             slug="retry-hosting",
             name="Retry Hosting",

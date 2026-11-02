@@ -24,7 +24,7 @@ from apps.settings.services import SettingsService
 
 from .spool import release_spool_reservation
 from .virtualmin_migration_models import VirtualminMigration
-from .virtualmin_models import VirtualminServer
+from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 logger = logging.getLogger(__name__)
 TASK = "apps.provisioning.migration_artifact_cleanup.cleanup_migration_artifacts"
@@ -42,7 +42,10 @@ class ArtifactLeaseLostError(ValueError):
 
 def _eligible() -> QuerySet[VirtualminMigration]:
     return (
-        VirtualminMigration.objects.filter(status__in=TERMINAL).exclude(contract="recovery").exclude(reason="recovery")
+        VirtualminMigration.objects.filter(status__in=TERMINAL)
+        .exclude(contract="recovery")
+        .exclude(contract="imported_web", status="completed")
+        .exclude(reason="recovery")
     )
 
 
@@ -74,17 +77,29 @@ def schedule_artifact_cleanup(migration_id: UUID | str) -> bool:
     return True
 
 
-def _claim(migration_id: str, token: UUID) -> tuple[VirtualminMigration | None, str]:
+def _claim(migration_id: str, token: UUID) -> tuple[VirtualminMigration | None, str]:  # noqa: PLR0911  # Distinct scope, maintenance, due-time and lease admission refusals.
     with transaction.atomic():
-        migration = (
+        scope = (
             _eligible()
-            .select_for_update()
-            .select_related("source_server", "target_server")
             .filter(pk=UUID(migration_id))
+            .values_list("account_id", "source_server_id", "target_server_id")
             .first()
         )
+        if scope is None:
+            return None, "excluded"
+        VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=scope[0])
+        nodes = list(VirtualminServer.objects.select_for_update(of=("self",)).filter(pk__in=scope[1:]).order_by("pk"))
+        migration = _eligible().select_for_update(of=("self",)).filter(pk=UUID(migration_id)).first()
         if migration is None:
             return None, "excluded"
+        if (migration.account_id, migration.source_server_id, migration.target_server_id) != scope:
+            return None, "waiting"
+        from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared node admission
+            maintenance_refusal,  # Shared node admission
+        )
+
+        if any(maintenance_refusal(node.pk) for node in nodes):
+            return None, "waiting"
         progress = _progress(migration)
         if progress.get("done"):
             return None, "cleaned"
@@ -208,7 +223,12 @@ def cleanup_migration_artifacts(migration_id: str) -> dict[str, str]:
         archive = f"migration_{migration.pk}.tar.gz"
         if migration.archive_name != archive:
             raise ValueError("The archive name does not belong to this migration UUID")
-        failures = _clean_locations(migration, token, archive)
+        if migration.contract == VirtualminMigration.Contract.IMPORTED_WEB:
+            from .component_artifact_cleanup import cleanup_component_artifacts  # noqa: PLC0415
+
+            failures = cleanup_component_artifacts(migration, token, archive)
+        else:
+            failures = _clean_locations(migration, token, archive)
         if failures:
             raise ValueError("; ".join(failures))
         _checkpoint(migration, token, {"done": True, "last_error": "", "next_run": None})

@@ -11,6 +11,7 @@ them and re-bootstraps if it ever happens).
 
 from __future__ import annotations
 
+import json
 import logging
 import subprocess
 import threading
@@ -32,7 +33,8 @@ from tests.virtualmin_lab.workflows.harness import Bench
 
 logger = logging.getLogger(__name__)
 
-NETWORK = "virtualmin-lab_default"
+# Keep Docker's endpoint/address stable while interrupting the native node's traffic.
+UPLINK = "eth0"
 API_WAIT_SECONDS = 120
 TRIGGER_WAIT_SECONDS = 180
 # How long settle waits for a command a fault left running to finish by itself before ending it.
@@ -153,10 +155,16 @@ class Chaos:
         docker("unpause", self.bench.node(key).container, check=False)
 
     def disconnect(self, key: str) -> None:
-        docker("network", "disconnect", NETWORK, self.bench.node(key).container)
+        container = self.bench.node(key).container
+        networks = json.loads(docker("inspect", "--format", "{{json .NetworkSettings.Networks}}", container))
+        links = json.loads(docker("exec", container, "ip", "-j", "link", "show"))
+        assert set(networks) == {"bridge"}, "The network fault requires the lab's sole Docker bridge"
+        active = {link["ifname"] for link in links if "UP" in link["flags"]}
+        assert active == {"lo", UPLINK}, "The lab's sole active uplink is not eth0"
+        docker("exec", container, "ip", "link", "set", "dev", UPLINK, "down")
 
     def connect(self, key: str) -> None:
-        docker("network", "connect", NETWORK, self.bench.node(key).container, check=False)
+        docker("exec", self.bench.node(key).container, "ip", "link", "set", "dev", UPLINK, "up", check=False)
 
     # ---------------------------------------------------------------- timing
 

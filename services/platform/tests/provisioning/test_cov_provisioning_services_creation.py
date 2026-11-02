@@ -71,7 +71,7 @@ class VirtualminCreationCoverageTests(VirtualminServiceCoverageCase):
                 "user": account.virtualmin_username,
                 "pass": "CoveragePass123!",
                 "template": "Default Settings",
-                "default-features": "",
+                "unix": "", "dir": "", "web": "", "ssl": "", "logrotate": "", "mysql": "",
                 "json": "1",
             },
         )

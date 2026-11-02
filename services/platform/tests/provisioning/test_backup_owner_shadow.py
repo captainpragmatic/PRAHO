@@ -28,6 +28,7 @@ class OwnerShadowBackupDispatchTests(SimpleTestCase):
 
     def test_full_and_config_dispatch_capture_real_source_identity_before_backup(self):
         for method in ("_execute_full_backup", "_execute_config_backup"):
+            self.metadata.pop("virtualmin_domain_id", None)
             events = []
             self.service._call_checked.side_effect = lambda *a, events=events: events.append("backup") or Ok({})
             with (
@@ -43,6 +44,7 @@ class OwnerShadowBackupDispatchTests(SimpleTestCase):
             self.assertEqual(capture.call_args.kwargs["domain_id"], "123")
             self.assertEqual(capture.call_args.kwargs["archive_name"], self.metadata["archive_name"])
             self.assertEqual(self.metadata["owner_shadow_version"], 1)
+            self.assertEqual(self.metadata["virtualmin_domain_id"], "123")
 
     def test_capture_refusal_or_lost_lease_never_dispatches_backup(self):
         with (
@@ -55,6 +57,7 @@ class OwnerShadowBackupDispatchTests(SimpleTestCase):
             result = self.service._execute_full_backup(self.account, "backup-id", self.metadata, self.config)
         self.assertTrue(result.is_err())
         self.service._call_checked.assert_not_called()
+        self.assertNotIn("virtualmin_domain_id", self.metadata)
         self.service._owns_execution.side_effect = [True, True, False]
         with (
             patch("apps.provisioning.migration_target_hold.capture_backup_owner_shadow"),

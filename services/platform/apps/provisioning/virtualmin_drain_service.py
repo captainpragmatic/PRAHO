@@ -75,6 +75,8 @@ class NodeDrainService:
             cls._timeout()
             with transaction.atomic():
                 server = VirtualminServer.objects.select_for_update().get(pk=server.pk)
+                if server.security_operation:
+                    raise ValueError("Resolve node hardening before starting a drain")
                 if server.status != "active" or server.is_draining:
                     raise ValueError("Server must be active and not already draining")
                 if reason not in NodeDrain.Reason.values:
@@ -180,10 +182,14 @@ class NodeDrainService:
         return Ok(drain)
 
     @classmethod
-    def finalize_drain(cls, drain: NodeDrain, *, confirmed_by: User | None) -> Result[NodeDrain, str]:
+    def finalize_drain(cls, drain: NodeDrain, *, confirmed_by: User | None) -> Result[NodeDrain, str]:  # noqa: PLR0911 -- each retained responsibility refuses independently
+        from .component_migration_models import retained_source_refusal  # noqa: PLC0415
+
         with transaction.atomic():
             drain = NodeDrain.objects.select_for_update().get(pk=drain.pk)
             server = VirtualminServer.objects.select_for_update().get(pk=drain.server_id)
+            if refusal := retained_source_refusal(server.pk):
+                return Err(refusal)
             if drain.status != "completed":
                 return Err("Only a completed drain can be finalized")
             if drain.routing_confirmed:
@@ -203,9 +209,10 @@ class NodeDrainService:
         return Ok(drain)
 
     @classmethod
-    def finalize_managed_drain(cls, drain_id: UUID) -> Result[NodeDrain, str]:
+    def finalize_managed_drain(cls, drain_id: UUID) -> Result[NodeDrain, str]:  # noqa: PLR0911 -- refuse before DNS withdrawal
         """System confirmation only when every managed cutover and its cleanup are complete."""
         from .account_hostname_service import withdraw_drained_node  # noqa: PLC0415
+        from .component_migration_models import retained_source_refusal  # noqa: PLC0415
 
         with transaction.atomic():
             drain = NodeDrain.objects.select_for_update().get(pk=drain_id)
@@ -214,6 +221,8 @@ class NodeDrainService:
                 return Ok(drain)
             if drain.status != "completed":
                 return Err("The drain is not complete")
+            if refusal := retained_source_refusal(server.pk):
+                return Err(refusal)
             if drain.migrations.exclude(contract="cutover", status="completed").exists():
                 return Err("Legacy routing still requires manual confirmation")
             if MigrationBridge.objects.filter(source_server=server).exclude(status="torn_down").exists():

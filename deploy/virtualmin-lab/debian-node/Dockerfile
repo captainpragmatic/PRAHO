@@ -43,7 +43,7 @@ RUN chmod 0755 /usr/local/sbin/lab-node-* \
  && systemctl enable lab-node-identity.service lab-node-credentials.service ssh.service \
  && systemctl mask getty@tty1.service console-getty.service systemd-firstboot.service
 
-EXPOSE 22
+EXPOSE 9876
 STOPSIGNAL SIGRTMIN+3
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=24 \
   CMD ["/bin/systemctl", "is-active", "--quiet", "ssh.service"]

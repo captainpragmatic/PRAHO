@@ -62,6 +62,7 @@ class VirtualminQATestBase(TestCase):
             status="active",
         )
         self.server = VirtualminServer.objects.create(
+            legacy_security_admission=True,
             name="qa-node", hostname="qa-node.example.com", api_username="qa-api", status="active"
         )
         self.server.set_api_password("QA-Server-Password123!")

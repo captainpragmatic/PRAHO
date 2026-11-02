@@ -4,6 +4,7 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from unittest.mock import patch
 
+import paramiko
 from django.db import close_old_connections, connection, connections, transaction
 from django.test import TransactionTestCase, override_settings
 
@@ -13,8 +14,10 @@ from apps.infrastructure.models import NodeDeployment
 from apps.infrastructure.node_maintenance_execution import reconcile_direct_execution
 from apps.infrastructure.node_maintenance_models import NodeMaintenanceExecution
 from apps.infrastructure.provider_config import ProviderCommandResult
+from apps.provisioning.virtualmin_security import connection_identity
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment
 from tests.infrastructure.test_node_maintenance_admission import MaintenanceAdmissionFixture
+from tests.provisioning.test_node_security_policy import ADMIN_NETWORKS, OPERATOR_KEY, node_policy_evidence
 
 SQLParams = Sequence[object] | Mapping[str, object] | None
 Execute = Callable[[str, SQLParams, bool, Mapping[str, object]], object]
@@ -26,10 +29,28 @@ class NodeMaintenanceActivationTests(MaintenanceAdmissionFixture, TransactionTes
         super().setUp()
         self.node.status = "disabled"
         self.node.is_draining = True
-        self.node.save(update_fields=["status", "is_draining"])
+        self.node.api_username = "praho-api"
+        self.node.save(update_fields=["status", "is_draining", "api_username"])
         self.deployment = _create_deployment("stopped", external_node_id="owned-activation-fixture")
+        host_key = paramiko.ECDSAKey.generate()
+        self.deployment.ssh_host_keys = f"{host_key.get_name()} {host_key.get_base64()}"
         self.deployment.virtualmin_server = self.node
-        self.deployment.save(update_fields=["virtualmin_server"])
+        self.deployment.save(update_fields=["virtualmin_server", "ssh_host_keys"])
+        evidence = node_policy_evidence()
+        # Substitute native observations, retaining real policy qualification and
+        # its fresh identity binding under the activation transaction.
+        self.enterContext(
+            patch("apps.provisioning.virtualmin_security_tasks.collect_inspection", return_value=evidence)
+        )
+        self.enterContext(
+            patch("apps.infrastructure.ansible_service.node_admin_allowed_cidrs", return_value=ADMIN_NETWORKS)
+        )
+        self.enterContext(
+            patch(
+                "apps.infrastructure.ansible_service.AnsibleService.operator_public_keys", return_value=(OPERATOR_KEY,)
+            )
+        )
+        evidence["identity"] = connection_identity(self.node)
 
     def test_a_current_start_still_activates_a_healthy_node_and_clears_its_idle_drain_flag(self) -> None:
         with (

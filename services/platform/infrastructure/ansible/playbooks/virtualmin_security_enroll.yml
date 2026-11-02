@@ -1,0 +1,43 @@
+---
+- name: Enroll the reviewed dedicated API identity before restricting interactive access
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Require explicit reviewed enrollment inputs
+      ansible.builtin.assert:
+        that:
+          - security_hardening_approved | default(false) | bool
+          - praho_api_user != 'root'
+          - praho_api_password | length >= 16
+          - node_admin_allowed_cidrs | length > 0
+      no_log: true
+
+    - name: Install native API enrollment helper
+      ansible.builtin.copy:
+        src: files/praho-webmin-api-user.pl
+        dest: /usr/local/sbin/praho-webmin-api-user
+        mode: '0700'
+
+    - name: Enroll the durable dedicated API credential
+      ansible.builtin.command:
+        argv: "{{ ['/usr/bin/perl', '/usr/local/sbin/praho-webmin-api-user', praho_api_user] + node_admin_allowed_cidrs }}"
+        stdin: "{{ praho_api_password }}"
+      no_log: true
+
+    - name: Read the panel TLS certificate through the enrolled SSH connection
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - >-
+            import hashlib,socket,ssl;
+            connection=ssl._create_unverified_context().wrap_socket(socket.create_connection(('127.0.0.1',10000),timeout=10),server_hostname='localhost');
+            print('PRAHO_PANEL_CERT='+hashlib.sha256(connection.getpeercert(binary_form=True)).hexdigest());
+            connection.close()
+      changed_when: false
+      register: panel_certificate
+
+    - name: Return only the authenticated public certificate fingerprint
+      ansible.builtin.debug:
+        msg: "{{ panel_certificate.stdout }}"

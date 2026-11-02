@@ -44,7 +44,11 @@ class VirtualminServicesSettingsEffectsTests(TestCase):
             status="active",
         )
         self.server = VirtualminServer.objects.create(
-            name="hosted-settings", hostname="hosted-node.example.test", api_username="praho-api", status="active"
+            name="hosted-settings",
+            hostname="hosted-node.example.test",
+            api_username="praho-api",
+            status="active",
+            legacy_security_admission=True,
         )
         self.server.set_api_password("server-fixture-password")
         self.server.save()

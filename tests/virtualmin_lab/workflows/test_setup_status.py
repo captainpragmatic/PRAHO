@@ -21,8 +21,11 @@ from apps.provisioning.management.commands._virtualmin_lab import lab_transport
 from apps.provisioning.virtualmin_backup_service import backup_storage_client
 from apps.provisioning.virtualmin_gateway import VirtualminGateway
 from apps.provisioning.virtualmin_models import VirtualminServer
+from apps.provisioning.virtualmin_node_capability import destination_refusal
+from apps.provisioning.virtualmin_security import acknowledge_source, record_inspection
+from apps.provisioning.virtualmin_security_tasks import collect_inspection
 from apps.settings.services import SettingsService
-from tests.virtualmin_lab.contract.harness import assert_accepted
+from apps.users.models import User
 from tests.virtualmin_lab.workflows.harness import Bench, DomainData
 
 
@@ -33,7 +36,9 @@ def test_live_info_retains_numeric_cpu_memory_and_disk(bench: Bench) -> None:
     assert resources.cpu_percent is not None
     assert resources.memory_percent is not None
     assert resources.disk_percent is not None
-    assert all(0 <= metric <= 100 for metric in (resources.cpu_percent, resources.memory_percent, resources.disk_percent))
+    assert all(
+        0 <= metric <= 100 for metric in (resources.cpu_percent, resources.memory_percent, resources.disk_percent)
+    )
     assert resources.details()["measurement_time_known"] is False
 
 
@@ -66,11 +71,18 @@ def test_platform_pair_is_verified_through_real_minio_multipart(bench: Bench) ->
         race_key = f"{prefix}/conditional-race"
         multipart = client.create_multipart_upload(Bucket=bucket, Key=race_key, ServerSideEncryption="AES256")
         try:
-            part = client.upload_part(Bucket=bucket, Key=race_key, UploadId=multipart["UploadId"], PartNumber=1, Body=b"loser")
+            part = client.upload_part(
+                Bucket=bucket, Key=race_key, UploadId=multipart["UploadId"], PartNumber=1, Body=b"loser"
+            )
             client.put_object(Bucket=bucket, Key=race_key, Body=b"winner", ServerSideEncryption="AES256")
             with pytest.raises(ClientError) as conflict:
-                client.complete_multipart_upload(Bucket=bucket, Key=race_key, UploadId=multipart["UploadId"],
-                                                 MultipartUpload={"Parts": [{"PartNumber": 1, "ETag": part["ETag"]}]}, IfNoneMatch="*")
+                client.complete_multipart_upload(
+                    Bucket=bucket,
+                    Key=race_key,
+                    UploadId=multipart["UploadId"],
+                    MultipartUpload={"Parts": [{"PartNumber": 1, "ETag": part["ETag"]}]},
+                    IfNoneMatch="*",
+                )
             assert conflict.value.response["Error"]["Code"] == "PreconditionFailed"
             winner = client.get_object(Bucket=bucket, Key=race_key)["Body"]
             try:
@@ -91,10 +103,20 @@ def test_imported_server_backup_restore_without_deployment_row(bench: Bench) -> 
         data = DomainData(lab, account)
         data.seed("imported-backup-proof")
         before = data.snapshot()
-        private_key = get_ssh_key_manager().get_private_key_file(original.node_deployment, reason="Imported backup lab proof").unwrap()
-        imported = VirtualminServer(name="Imported lab server", hostname="localhost", api_port=bench.node("vm-a").api_port,
-                                   api_username=original.api_username, ssh_port=bench.node("vm-a").ssh_port,
-                                   ssl_verify=False, ssl_cert_fingerprint=original.ssl_cert_fingerprint)
+        private_key = (
+            get_ssh_key_manager()
+            .get_private_key_file(original.node_deployment, reason="Imported backup lab proof")
+            .unwrap()
+        )
+        imported = VirtualminServer(
+            name="Imported lab server",
+            hostname="localhost",
+            api_port=bench.node("vm-a").api_port,
+            api_username=original.api_username,
+            ssh_port=bench.node("vm-a").ssh_port,
+            ssl_verify=False,
+            ssl_cert_fingerprint=original.ssl_cert_fingerprint,
+        )
         imported.set_api_password(original.get_api_password())
         imported.save()
         assert getattr(imported, "node_deployment", None) is None
@@ -109,13 +131,37 @@ def test_imported_server_backup_restore_without_deployment_row(bench: Bench) -> 
                     trust.add(f"[localhost]:{imported.ssh_port}", algorithm, key)
                 known_hosts = Path(directory) / "known_hosts"
                 trust.save(str(known_hosts))
-                local_node = replace(bench.node("vm-a"), server_hostname="localhost", deployment_hostname="imported-local")
+                local_node = replace(
+                    bench.node("vm-a"), server_hostname="localhost", deployment_hostname="imported-local"
+                )
                 local_state = replace(bench.state, nodes=(*bench.state.nodes, local_node), known_hosts=str(known_hosts))
-                with override_settings(SETTINGS_MODULE="config.settings.lab"), lab_transport(local_state), override_settings(VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH=str(private_key)):
+                with (
+                    override_settings(
+                        SETTINGS_MODULE="config.settings.lab",
+                        VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH=str(private_key),
+                    ),
+                    lab_transport(local_state),
+                ):
+                    # An imported source is not automatically a verified destination.
+                    # Exercise its supported recovery path without hardening the shared node.
+                    assert destination_refusal(imported) is not None
+                    evidence = collect_inspection(imported)
+                    review = record_inspection(imported, evidence)
+                    acknowledge_source(
+                        review,
+                        evidence,
+                        User.objects.get(email="lab-staff@praho.test"),
+                        "Retain this imported lab source's services and test same-domain backup recovery.",
+                    )
+                    imported.refresh_from_db()
+                    assert imported.security_state == "acknowledged_source_only"
+                    assert destination_refusal(imported) is not None
                     backup = bench.backup(account)
                     assert backup.status == "completed", backup.status_message
-                    assert_accepted(lab.quiet("delete-domain", {"domain": account.domain}))
-                    restored = bench.restore(account, backup.result["backup_id"])
+                    data.write("data/marker.txt", "damaged imported source")
+                    data.sql(f"DELETE FROM {data.TABLE} WHERE id = 2")  # noqa: S608 -- fixed fixture table
+                    assert data.snapshot() != before
+                    restored = bench.restore(account, backup.result["backup_id"], force=True)
                     assert restored.status == "completed", restored.status_message
                     assert data.snapshot() == before
         finally:

@@ -61,6 +61,7 @@ class QueuedVirtualminProvisioningTestBase(TestCase):
         )
         self.server = VirtualminServer.objects.create(
             name="queued-node",
+            legacy_security_admission=True,
             hostname="queued-node.example.com",
             api_username="queued-api",
             status="active",
@@ -157,6 +158,7 @@ class QueuedVirtualminServiceIdTests(QueuedVirtualminProvisioningTestBase):
         # A stronger placement candidate must not replace the explicitly requested UUID server.
         VirtualminServer.objects.create(
             name="fallback-node",
+            legacy_security_admission=True,
             hostname="fallback-node.example.com",
             api_username="fallback-api",
             status="active",

@@ -32,10 +32,13 @@ from apps.infrastructure.cloud_gateway import (
     normalize_server_status,
     register_cloud_gateway,
 )
+from apps.infrastructure.cloud_resource_inventory import CloudResourceClient, ResourceResponse
 
 logger = logging.getLogger(__name__)
 
 HTTP_NOT_FOUND = 404
+HTTP_OK = 200
+HTTP_NO_CONTENT = 204
 IPV4_VERSION = 4
 VULTR_API_BASE = "https://api.vultr.com/v2"
 VULTR_POLL_INTERVAL = 5
@@ -83,6 +86,25 @@ class VultrService(CloudProviderGateway):
         response = safe_request(method, url, policy=VULTR_POLICY, headers=headers, **kwargs)
         response.raise_for_status()
         return response
+
+    def resource_client(self) -> CloudResourceClient:
+        return CloudResourceClient("vultr", self._resource_request)
+
+    def _resource_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, object] | None = None,
+        body: dict[str, object] | None = None,
+    ) -> ResourceResponse:
+        try:
+            response = self._request(method, path, params=params, json=body)
+            return ResourceResponse(response.status_code, response.json() if response.content else None)
+        except requests.HTTPError as error:
+            if error.response is not None and error.response.status_code == HTTP_NOT_FOUND:
+                return ResourceResponse(HTTP_NOT_FOUND, None)
+            raise
 
     def _wait_for_active(self, instance_id: str) -> Result[dict[str, Any], str]:
         """Poll instance until status is 'active' or timeout."""
@@ -193,12 +215,12 @@ class VultrService(CloudProviderGateway):
             return Err(f"Instance creation failed: {e}")
 
     def delete_server(self, server_id: str) -> Result[bool, str]:
-        """Delete an instance by ID. Returns Ok(True) if already gone (404)."""
+        """Delete an instance and confirm absence, including an already-gone exact HTTP 404."""
         logger.info(f"🗑️ [Vultr] Deleting instance: {server_id}")
         try:
-            self._request("DELETE", f"/instances/{server_id}")
-            logger.info(f"✅ [Vultr] Instance deleted: {server_id}")
-            return Ok(True)
+            response = self._request("DELETE", f"/instances/{server_id}")
+            if response.status_code != HTTP_NO_CONTENT:
+                raise ValueError(f"Instance deletion returned unexpected HTTP status {response.status_code}")
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == HTTP_NOT_FOUND:
                 logger.info(f"✅ [Vultr] Instance already gone: {server_id}")
@@ -209,13 +231,34 @@ class VultrService(CloudProviderGateway):
             logger.error(f"🔥 [Vultr] Instance deletion failed: {e}")
             return Err(f"Instance deletion failed: {e}")
 
+        poll_timeout = _get_vultr_poll_timeout()
+        deadline = time.monotonic() + poll_timeout
+        while time.monotonic() < deadline:
+            result = self.get_server(server_id)
+            if result.is_err():
+                return Err(f"Instance deletion unconfirmed: {result.unwrap_err()}")
+            if result.unwrap() is None:
+                logger.info(f"✅ [Vultr] Instance deleted: {server_id}")
+                return Ok(True)
+            time.sleep(VULTR_POLL_INTERVAL)
+        return Err(f"Instance {server_id} deletion was not confirmed within {poll_timeout}s")
+
     def get_server(self, server_id: str) -> Result[ServerInfo | None, str]:
         """Get instance info by ID."""
         try:
             resp = self._request("GET", f"/instances/{server_id}")
-            data: dict[str, Any] = resp.json().get("instance", {})
-            if not data:
-                return Ok(None)
+            payload = resp.json()
+            if resp.status_code != HTTP_OK or not isinstance(payload, dict):
+                return Err(f"Malformed response for instance {server_id}")
+            data = payload.get("instance")
+            if (
+                not isinstance(data, dict)
+                or not isinstance(data.get("id"), str)
+                or data["id"] != server_id
+                or not isinstance(data.get("status"), str)
+                or not data["status"]
+            ):
+                return Err(f"Malformed response for instance {server_id}")
 
             tags = data.get("tags", [])
             labels: dict[str, str] = {}

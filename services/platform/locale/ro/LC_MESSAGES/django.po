@@ -27017,8 +27017,8 @@ msgstr "Reinstalare"
 #~ msgid "Dashboard PragmaticHost"
 #~ msgstr "Panou de Control PragmaticHost"
 
-#~ msgid "DNS"
-#~ msgstr "DNS"
+msgid "DNS"
+msgstr "DNS"
 
 #~ msgid "Manage DNS"
 #~ msgstr "Gestionați DNS"
@@ -30641,3 +30641,42 @@ msgid ""
 msgstr ""
 "Ferestrele de mentenanță nu acceptă securizarea automată. Utilizați fluxul "
 "separat, revizuit, pentru securizare; actualizările panoului rămân manuale."
+# Retained source hosting dependencies in maintenance previews.
+msgid "Retained source responsibilities:"
+msgstr "Responsabilități păstrate pe serverul sursă:"
+
+msgid "Preview retained source services"
+msgstr "Previzualizați serviciile păstrate pe serverul sursă"
+
+msgid "Sub-servers and retained source responsibilities do not multiply customer notices. This preview covers tracked hosting accounts and unreleased source services; it performs no native inspection."
+msgstr "Sub-serverele și responsabilitățile păstrate pe sursă nu multiplică notificările clienților. Această previzualizare include conturile de găzduire urmărite și serviciile sursă încă păstrate; nu efectuează o inspecție nativă."
+
+msgid "Up to 25 responsibilities are listed; affected customers also include current account placement. Retained services do not mean that the website is still on this node."
+msgstr "Sunt afișate cel mult 25 de responsabilități; clienții afectați includ și conturile găzduite în prezent pe acest server. Serviciile păstrate nu înseamnă că site-ul se află încă pe acest nod."
+
+msgid "Mail"
+msgstr "Poștă electronică"
+
+msgid "Authentication"
+msgstr "Autentificare"
+
+msgid "A migration, retained bridge or recovery operation owns this server."
+msgstr "O migrare, o punte păstrată sau o operațiune de recuperare deține acest server."
+
+msgid "A component cleanup worker owns this server; wait for its recorded release."
+msgstr "Un proces de curățare a componentelor deține acest server; așteptați eliberarea înregistrată a controlului."
+
+msgid "A completed component migration still needs verified native retirement on this server."
+msgstr "O migrare de componente finalizată necesită încă retragerea nativă verificată pe acest server."
+
+msgid "A terminal component migration still has unresolved native holds on this server."
+msgstr "O migrare de componente încheiată are încă restricții native nerezolvate pe acest server."
+
+msgid "The original create no longer owns its recovery claim."
+msgstr "Crearea inițială nu mai deține rezervarea pentru recuperare."
+
+msgid "Resolve the node's hardening attempt before recovering its original create."
+msgstr "Rezolvați operațiunea de securizare a nodului înainte de a recupera crearea inițială."
+
+msgid "The original create node identity changed. Verify its recorded target and outcome before retrying."
+msgstr "Identitatea nodului pentru crearea inițială s-a schimbat. Verificați destinația înregistrată și rezultatul înainte de a reîncerca."

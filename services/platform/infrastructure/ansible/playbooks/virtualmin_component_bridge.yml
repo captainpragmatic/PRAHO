@@ -1,0 +1,69 @@
+---
+# Component activation, cron and source retention belong to the component coordinator.
+- name: Operate the admitted component migration bridge
+  hosts: all
+  gather_facts: false
+  become: false
+  tasks:
+    - name: Validate the narrow single-host bridge operation
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - component_bridge_action in ['prepare', 'origin_install', 'origin_verify', 'install', 'verify', 'remove', 'origin_remove']
+          - component_bridge_operation is mapping
+          - component_bridge_operation.operation_id == bridge_id
+          - bridge_id is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+
+    - name: Execute using temporary root-private bridge helpers
+      block:
+        - name: Allocate this bridge operation's helper directory
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: praho-component-bridge-
+          register: component_bridge_directory
+
+        - name: Install only the shared bindings and bridge helper
+          ansible.builtin.copy:
+            src: "files/{{ item }}"
+            dest: "{{ component_bridge_directory.path }}/{{ item }}"
+            owner: root
+            group: root
+            mode: '0700'
+          loop:
+            - praho-apache-bindings.py
+            - praho-bridge.py
+
+        - name: Run the exact component bridge action
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - "{{ component_bridge_directory.path }}/praho-bridge.py"
+          environment:
+            PRAHO_BRIDGE_ID: "{{ bridge_id }}"
+            PRAHO_BRIDGE_ACTION: "{{ component_bridge_action }}"
+            PRAHO_BRIDGE_DOMAIN: "{{ bridge_domain }}"
+            PRAHO_ACCOUNT_NAME: "{{ bridge_account_name }}"
+            PRAHO_BRIDGE_TARGET: "{{ bridge_target_ipv4 }}"
+            PRAHO_BRIDGE_SOURCE: "{{ bridge_source_ipv4 }}"
+            PRAHO_BRIDGE_MANIFEST: "{{ bridge_manifest | default({}) | to_json }}"
+            PRAHO_BRIDGE_ORIGIN_CERTIFICATE: "{{ bridge_origin_certificate | default('') }}"
+            PRAHO_BRIDGE_CERT_MIN_SECONDS: "{{ bridge_certificate_min_seconds }}"
+          register: component_bridge_step
+          changed_when: component_bridge_action not in ['verify', 'origin_verify']
+
+        - name: Require exactly one public bridge receipt
+          vars:
+            component_bridge_results: "{{ component_bridge_step.stdout_lines | select('match', '^BRIDGE_RESULT=[A-Za-z0-9+/=]+$') | list }}"
+          ansible.builtin.assert:
+            that:
+              - component_bridge_results | length == 1
+
+        - name: Return only the public bridge receipt
+          ansible.builtin.debug:
+            msg: "{{ component_bridge_step.stdout_lines | select('match', '^BRIDGE_RESULT=[A-Za-z0-9+/=]+$') | first }}"
+      always:
+        - name: Remove only this operation's helper directory
+          ansible.builtin.file:
+            path: "{{ component_bridge_directory.path }}"
+            state: absent
+          when: component_bridge_directory.path is defined

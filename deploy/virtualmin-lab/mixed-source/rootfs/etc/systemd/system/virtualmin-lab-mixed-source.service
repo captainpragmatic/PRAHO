@@ -1,0 +1,14 @@
+[Unit]
+Description=Configure the opt-in imported source's native mail and DNS services
+Requires=virtualmin-lab-firstboot.service
+After=virtualmin-lab-firstboot.service
+ConditionPathExists=!/var/lib/virtualmin-lab/mixed-configured
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=900
+ExecStart=/usr/local/sbin/virtualmin-lab-mixed-source
+
+[Install]
+WantedBy=multi-user.target

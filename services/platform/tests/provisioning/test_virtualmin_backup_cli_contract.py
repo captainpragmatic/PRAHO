@@ -39,11 +39,11 @@ _BACKUP_BARE = frozenset(
      "no-differential", "purge-debug", "no-sign", "sign", "multiline", "kill-running", "wait-running"}
 )  # fmt: skip
 _RESTORE_VALUED = frozenset(
-    {"source", "feature", "domain", "except-feature", "option", "mysql-stop-time", "virtualmin", "only-features",
+    {"source", "feature", "domain", "except-feature", "option", "mysql-stop-time", "virtualmin",
      "ip", "ip6", "key", "reuser"}
 )  # fmt: skip
 _RESTORE_BARE = frozenset(
-    {"all-features", "all-domains", "test", "reuid", "no-reuid", "no-reuser", "fix", "mailfiles",
+    {"all-features", "all-domains", "only-features", "test", "reuid", "no-reuid", "no-reuser", "fix", "mailfiles",
      "mysql-replay-binlogs", "as-owner", "all-virtualmin", "only-missing", "only-existing", "delete-existing",
      "default-ip", "shared-ip", "allocate-ip", "original-ip", "no-ip", "default-ip6", "shared-ip6", "allocate-ip6",
      "original-ip6", "no-ip6", "skip-warnings", "continue-on-error", "replication", "multiline"}

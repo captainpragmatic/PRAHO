@@ -22,6 +22,7 @@ MAX_TEMPLATE_NAME_LENGTH = 50
 # Virtualmin 8.x names its built-in server template "Default Settings" (ID 0);
 # there is no template called "Default" (create-domain: "Unknown template name").
 DEFAULT_VIRTUALMIN_TEMPLATE = "Default Settings"
+WEB_ONLY_VIRTUALMIN_FEATURES = ("unix", "dir", "web", "ssl", "logrotate", "mysql")
 MAX_PARAMETER_VALUE_LENGTH = 1000
 # Parameters that carry a domain name. Virtualmin turns each parameter into a command-line option,
 # so a domain value starting with "-" would be read as another option.

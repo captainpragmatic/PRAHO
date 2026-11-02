@@ -7,7 +7,13 @@ Each fact is read from source, never by running the lab.
 
 from __future__ import annotations
 
+import ast
+import importlib.util
+import os
 import re
+import shlex
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -43,7 +49,10 @@ def test_default_targets_never_touch_the_lab(target: str) -> None:
 
 
 def test_plain_make_dev_is_unchanged_and_the_lab_variant_is_opt_in() -> None:
-    assert "ifeq ($(VIRTUALMIN_LAB),1)\ndev: virtualmin-lab-ensure\n\t@$(MAKE) dev-platform-lab\nelse\ndev:\n\t@$(MAKE) dev-all\nendif" in MAKEFILE
+    assert (
+        "ifeq ($(VIRTUALMIN_LAB),1)\ndev: virtualmin-lab-ensure\n\t@$(MAKE) dev-platform-lab\nelse\ndev:\n\t@$(MAKE) dev-all\nendif"
+        in MAKEFILE
+    )
 
 
 def test_the_full_target_runs_every_leg_the_task_names() -> None:
@@ -51,6 +60,67 @@ def test_the_full_target_runs_every_leg_the_task_names() -> None:
 
     for leg in ("test-virtualmin-lab", "test-virtualmin-node-deploy", "test-virtualmin-faults", "test-virtualmin-e2e"):
         assert re.search(rf"\b{leg}\b", body), leg
+
+
+def test_queue_lab_target_runs_components_serially_after_existing_suites(tmp_path: Path) -> None:
+    calls = tmp_path / "calls"
+    stub = tmp_path / "record-step"
+    stub.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$LAB_RECIPE_TRACE"\n')
+    stub.chmod(0o700)
+    result = subprocess.run(  # noqa: S603 -- actual make recipe with every external action replaced by a recorder.
+        [
+            shutil.which("make") or "make",
+            "--no-print-directory",
+            "test-virtualmin-lab",
+            "MAKE=" + shlex.quote(str(stub)) + " recursive",
+            "PYTHON_PLATFORM_LAB_MANAGE=" + shlex.quote(str(stub)) + " manage",
+        ],
+        cwd=REPO,
+        env={**os.environ, "LAB_RECIPE_TRACE": str(calls)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert calls.read_text().splitlines() == [
+        "manage virtualmin_lab_roundtrip",
+        "recursive --no-print-directory test-virtualmin-contract",
+        "recursive --no-print-directory test-virtualmin-workflows",
+        "manage virtualmin_lab_checks",
+        "recursive --no-print-directory test-virtualmin-components",
+    ]
+    assert recipe("test-virtualmin-components").splitlines()[0].strip() == "virtualmin-lab-component-source-up"
+    assert PR_WORKFLOW["jobs"]["pull-request"]["timeout-minutes"] == 120
+
+
+def test_native_sql_contract_transfers_all_database_export_import_dependencies(tmp_path: Path) -> None:
+    contract = REPO / "tests/virtualmin_lab/contract/test_component_database_fence.py"
+    tree = ast.parse(contract.read_text())
+    copied = next(
+        ast.literal_eval(row.value)
+        for row in tree.body
+        if isinstance(row, ast.Assign)
+        and any(isinstance(name, ast.Name) and name.id == "HELPERS" for name in row.targets)
+    )
+    helpers = REPO / "services/platform/infrastructure/ansible/playbooks/files"
+    for filename in copied:
+        shutil.copyfile(helpers / filename, tmp_path / filename)
+    spec = importlib.util.spec_from_file_location(
+        "isolated_contract_export", tmp_path / "praho-component-database-export.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert callable(module.capacity.OutputBudget)
+
+
+def test_queue_and_full_lab_failure_diagnostics_include_imported_component_source() -> None:
+    for workflow, job in ((PR_WORKFLOW, "pull-request"), (WORKFLOW, "nightly-full")):
+        diagnostics = next(
+            step["run"] for step in workflow["jobs"][job]["steps"] if step.get("name") == "Lab diagnostics"
+        )
+        assert "vmlab-component-source" in diagnostics
 
 
 def test_the_drift_target_builds_unpinned_and_records_nothing() -> None:
@@ -62,6 +132,45 @@ def test_the_drift_target_builds_unpinned_and_records_nothing() -> None:
 
 def on_block() -> dict[str, Any]:
     return WORKFLOW[True] if True in WORKFLOW else WORKFLOW["on"]  # YAML 1.1 reads the key `on` as True
+
+
+def test_component_diagnostics_require_an_explicit_manual_dispatch_and_have_a_distinct_job() -> None:
+    suite = on_block()["workflow_dispatch"]["inputs"]["suite"]
+    assert suite["options"] == ["full", "drift", "components"]
+    assert suite["default"] == "full"
+    job = WORKFLOW["jobs"]["components-diagnostic"]
+    assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.suite == 'components'"
+    assert "needs" not in job, "Diagnostics must not depend on a scheduled/full proof job"
+    assert job["runs-on"] == "ubuntu-24.04"
+    assert 1 <= job["timeout-minutes"] <= 90
+    assert "components-diagnostic" not in WORKFLOW["jobs"]["notify-scheduled-failure"]["needs"]
+    assert "inputs.suite == 'full'" in WORKFLOW["jobs"]["nightly-full"]["if"]
+    assert "components" not in WORKFLOW["jobs"]["nightly-full"]["if"]
+
+
+def test_component_diagnostics_use_only_the_component_boundary_with_unconditional_evidence_and_cleanup() -> None:
+    steps = WORKFLOW["jobs"]["components-diagnostic"]["steps"]
+    checkout = next(step for step in steps if step.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["fetch-depth"] == 0
+    setup = [step for step in steps if step.get("uses") == "./.github/actions/virtualmin-lab-setup"]
+    assert len(setup) == 1
+    assert setup[0].get("with", {}).get("browser", "false") == "false"
+    commands = [step for step in steps if "run" in step and step["run"].startswith("make ")]
+    assert [shlex.split(step["run"]) for step in commands] == [
+        ["make", "virtualmin-lab-up"],
+        ["make", "test-virtualmin-components"],
+        ["make", "virtualmin-lab-down"],
+    ], "A diagnostic run must not substitute full/queue/release evidence or run unrelated lab legs"
+    assert commands[-1]["if"] == "always()"
+    upload = [step for step in steps if step.get("uses", "").startswith("actions/upload-artifact@")]
+    assert len(upload) == 1
+    assert upload[0]["if"] == "always()"
+    assert upload[0]["with"]["path"] == "output/virtualmin-lab/components/"
+    assert upload[0]["with"]["name"] == "virtualmin-components-diagnostics"
+    assert steps.index(upload[0]) < steps.index(commands[-1])
+    diagnostics = next(step for step in steps if step.get("name") == "Lab diagnostics")
+    assert diagnostics["if"] == "failure()"
+    assert "vmlab-component-source" in diagnostics["run"]
 
 
 def test_the_queue_runs_the_lab_when_a_change_can_break_it() -> None:

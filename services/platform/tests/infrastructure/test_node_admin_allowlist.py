@@ -58,7 +58,7 @@ class AllowlistReachesThePlaybooksTests(TestCase):
     def _deployment() -> Any:
         return SimpleNamespace(
             id=1, hostname="prd-sha-het-de-fsn1-001", dns_zone=None, fqdn="", ssh_port=9876,
-            panel_type=SimpleNamespace(panel_type="virtualmin"),
+            panel_type=SimpleNamespace(panel_type="virtualmin"), virtualmin_server_id=None,
         )
 
     def test_every_playbook_gets_the_entries_as_networks(self) -> None:

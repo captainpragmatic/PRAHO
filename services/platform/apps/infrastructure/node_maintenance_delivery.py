@@ -13,7 +13,11 @@ from django.utils import timezone
 from apps.common.localisation import format_localised_date, resolve_display
 from apps.common.localisation_services import get_localisation_defaults, user_localisation_preferences
 from apps.customers.services import get_customer_locale
-from apps.infrastructure.node_maintenance_audience import is_unstarted_not_run, not_run_service_ids
+from apps.infrastructure.node_maintenance_audience import (
+    is_unstarted_not_run,
+    live_service_ids_for_node,
+    not_run_service_ids,
+)
 from apps.infrastructure.node_maintenance_models import (
     NodeMaintenanceAudience,
     NodeMaintenanceDelivery,
@@ -38,7 +42,6 @@ def _preference_allows(customer: Customer) -> bool:
 
 def _current_audience(window: NodeMaintenanceWindow, event: str) -> dict[int, list[int]]:
     from apps.provisioning.service_models import Service  # noqa: PLC0415
-    from apps.provisioning.virtualmin_models import VirtualminAccount  # noqa: PLC0415
 
     service_ids = (
         (
@@ -47,7 +50,7 @@ def _current_audience(window: NodeMaintenanceWindow, event: str) -> dict[int, li
             else window.audience.filter(provenance="execution").values_list("service_id_snapshot", flat=True)
         )
         if event == "completed"
-        else VirtualminAccount.objects.filter(server_id=window.node_id).values_list("service_id", flat=True)
+        else live_service_ids_for_node(window.node_id)
     )
     result: dict[int, list[int]] = {}
     for service_id, customer_id in (
@@ -297,7 +300,6 @@ def _unlinked_dispatch_allowed(log_id: UUID, claim_token: UUID | None) -> bool:
 
 def _service_scope_refusal(window: NodeMaintenanceWindow, intent: NodeMaintenanceDelivery) -> str | None:
     from apps.provisioning.service_models import Service  # noqa: PLC0415
-    from apps.provisioning.virtualmin_models import VirtualminAccount  # noqa: PLC0415
 
     selected_ids = intent.selected_service_ids
     owned_ids = set(
@@ -308,11 +310,7 @@ def _service_scope_refusal(window: NodeMaintenanceWindow, intent: NodeMaintenanc
     if owned_ids != set(selected_ids) or (not selected_ids and intent.public_snapshot.get("withdrawal") is not True):
         return "maintenance_service_ownership_changed"
     if intent.kind == "scheduled" and window.kind != "emergency":
-        placed_ids = set(
-            VirtualminAccount.objects.filter(server_id=window.node_id, service_id__in=selected_ids).values_list(
-                "service_id", flat=True
-            )
-        )
+        placed_ids = live_service_ids_for_node(window.node_id) & set(selected_ids)
         if placed_ids != set(selected_ids):
             return "maintenance_service_placement_changed"
     return None

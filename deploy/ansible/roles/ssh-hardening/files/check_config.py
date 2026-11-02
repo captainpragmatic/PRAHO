@@ -31,6 +31,7 @@ SUPPORTED = frozenset(
         "acceptenv",
         "x11forwarding",
         "allowtcpforwarding",
+        "allowstreamlocalforwarding",
         "allowagentforwarding",
         "clientaliveinterval",
         "clientalivecountmax",
@@ -52,7 +53,17 @@ SUPPORTED = frozenset(
 
 def validate(config: Path, *, snippets: Path | None = None) -> None:
     """Read only. A single conventional include is allowed, with no nested includes."""
-    for raw in config.read_text().splitlines():
+    managed_tunnel = """# BEGIN PRAHO WEBMIN TUNNEL
+Match User praho-webmin-tunnel
+    AllowTcpForwarding local
+    PermitOpen 127.0.0.1:10000
+    PermitTTY no
+    ForceCommand /bin/false
+    GatewayPorts no
+Match all
+# END PRAHO WEBMIN TUNNEL"""
+    source = config.read_text().replace(managed_tunnel, "")
+    for raw in source.splitlines():
         words = shlex.split(raw, comments=True)
         if not words:
             continue

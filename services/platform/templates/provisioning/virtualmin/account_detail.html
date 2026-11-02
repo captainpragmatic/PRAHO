@@ -7,6 +7,7 @@
 {% block content %}
 <div class="space-y-6">
   <a href="{{ migrate_url }}" class="text-blue-400">{% trans "Migrate account" %}</a>
+  {% url 'provisioning:component_migration' account.pk as component_url %}{% trans "Move selected website; retain source mail and DNS" as component_label %}{% button component_label href=component_url variant="secondary" size="sm" %}
   {% include "provisioning/virtualmin/migration_status.html" %}
   {% include "provisioning/virtualmin/partials/hosted_dns_status.html" %}
     <!-- =============================================================================== -->

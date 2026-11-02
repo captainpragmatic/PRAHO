@@ -26,7 +26,6 @@ from .virtualmin_backup_service import (
     CHAIN_ROLE_STANDALONE,
     REMOTE_ARCHIVE_DIR,
     differential_flags,
-    restore_domain_params,
 )
 from .virtualmin_chain import invalidate_chain
 from .virtualmin_domain_state import DOMAIN_STATE_PROGRAMS, domain_state_params
@@ -49,6 +48,7 @@ from .virtualmin_migration_models import (
     account_has_active_operation,
 )
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from .virtualmin_node_capability import destination_refusal
 
 if TYPE_CHECKING:
     from apps.infrastructure.ansible_service import AnsibleService as AnsibleRunner
@@ -294,6 +294,7 @@ class VirtualminMigrationService:
             if hasattr(server, "node_deployment")
             and server.node_deployment is not None
             and server.can_host_domain()
+            and destination_refusal(server) is None
             and server.current_domains + VirtualminMigration.active_reservations(server) < server.max_domains
         ]
         return order_placement_candidates(candidates, preferred_region)
@@ -403,7 +404,9 @@ class VirtualminMigrationService:
                 drain_id = migration.drain_id
                 transaction.on_commit(lambda: _wake_drain(drain_id), robust=True)
 
-    def _local_preflight(self, account: VirtualminAccount, target: VirtualminServer) -> None:
+    def _local_preflight(
+        self, account: VirtualminAccount, target: VirtualminServer, *, component_scope: bool = False
+    ) -> None:
         from .managed_dns_service import assert_move_ready  # noqa: PLC0415  # Customer zone integration
 
         if not self.enabled:
@@ -424,14 +427,31 @@ class VirtualminMigrationService:
         if account.domains not in ([], [account.domain]):
             raise ValueError("Migration requires exactly one domain: the account's own domain")
         for server in (account.server, target):
-            if server.status != "active":
-                raise ValueError("Both migration servers must be active")
-            if not (hasattr(server, "node_deployment") and server.node_deployment is not None):
-                raise ValueError(f"Server {server.name}: manual registration has no managed node_deployment")
+            self._transport_preflight(server, component_scope=component_scope)
         self._admission_preflight(target)
+
+    @staticmethod
+    def _transport_preflight(server: VirtualminServer, *, component_scope: bool) -> None:
+        if server.security_operation:
+            raise ValueError("Resolve node hardening before migration")
+        if server.status != "active":
+            raise ValueError("Both migration servers must be active")
+        if component_scope:
+            from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
+
+            readiness = server_transport_ready(server)
+            deployment = getattr(server, "node_deployment", None)
+            if readiness.is_err():
+                raise ValueError(readiness.unwrap_err())
+            if deployment is not None and not deployment.ssh_host_keys:
+                raise ValueError("Component migration requires previously enrolled SSH host trust")
+        elif not (hasattr(server, "node_deployment") and server.node_deployment is not None):
+            raise ValueError(f"Server {server.name}: manual registration has no managed node_deployment")
 
     def _admission_preflight(self, target: VirtualminServer) -> None:
         """Target-capacity and operator-configuration admission checks."""
+        if refusal := destination_refusal(target):
+            raise ValueError(refusal)
         if not target.can_host_domain():
             raise ValueError("Target is unhealthy or full")
         # Tags are hard filters everywhere — an explicit target must not
@@ -973,6 +993,8 @@ class VirtualminMigrationService:
         self._move(migration, token, "pushing" if fetching else "restoring", **fields)
 
     def _restore(self, migration: VirtualminMigration, token: UUID) -> None:
+        if refusal := destination_refusal(migration.target_server):
+            raise ValueError(refusal)
         if migration.contract == VirtualminMigration.Contract.CUTOVER:
             from .migration_target_hold import restore_held_target  # noqa: PLC0415
 
@@ -983,15 +1005,23 @@ class VirtualminMigrationService:
                 [{"archive_name": migration.archive_name, "checksum_sha256": migration.archive_sha256}],
             )
             return
+        from .virtualmin_restore_policy import prepare_restore_params  # noqa: PLC0415 -- shared archive capability gate
+
+        params = prepare_restore_params(
+            migration.account,
+            migration.target_server,
+            self.spool / migration.archive_name,
+            {},
+            source=f"{REMOTE_ARCHIVE_DIR}/{migration.archive_name}",
+            force=False,
+        )
         self._move(migration, token, "restoring", restore_issued=True)
         try:
             self._command(
                 migration,
                 migration.target_server,
                 "restore-domain",
-                **restore_domain_params(
-                    domain=migration.account.domain, source=f"{REMOTE_ARCHIVE_DIR}/{migration.archive_name}"
-                ),
+                **params,
             )
         except DefiniteMigrationFailureError as error:
             self._abort(migration, token, error, target_delete_allowed=True)
@@ -1132,6 +1162,8 @@ class VirtualminMigrationService:
             )
 
     def _activate(self, migration: VirtualminMigration, token: UUID) -> None:
+        if refusal := destination_refusal(migration.target_server):
+            raise ValueError(refusal)
         if migration.contract == VirtualminMigration.Contract.CUTOVER:
             if migration.cutover_committed_at is None:
                 raise ValueError("The ownership commit must precede target activation")
@@ -1327,6 +1359,8 @@ class VirtualminMigrationService:
 
     def _prepare_completion(self, migration: VirtualminMigration, token: UUID) -> None:
         """An operation may finish its private staging cleanup before releasing account exclusion."""
+        if refusal := destination_refusal(migration.target_server):
+            raise ValueError(refusal)
 
     def _legacy_name(self, migration: VirtualminMigration, account: VirtualminAccount) -> AccountHostname | None:
         if account.server_id not in {migration.source_server_id, migration.target_server_id}:
@@ -1383,6 +1417,20 @@ class VirtualminMigrationService:
         )
 
     def execute(self, migration: VirtualminMigration, lease_token: UUID) -> Result[VirtualminMigration, str]:
+        if (
+            migration.contract == VirtualminMigration.Contract.IMPORTED_WEB
+            and migration.component_approval_id is not None
+            and migration.component_source_obligation_id is not None
+            and type(self) is VirtualminMigrationService
+        ):
+            from .component_migration_worker import ComponentMigrationWorker  # noqa: PLC0415 -- contract dispatch
+
+            return ComponentMigrationWorker().execute(migration, lease_token)
+        return self._execute_whole_domain(migration, lease_token)
+
+    def _execute_whole_domain(
+        self, migration: VirtualminMigration, lease_token: UUID
+    ) -> Result[VirtualminMigration, str]:
         handlers = {
             "pending": self._begin,
             "lowering_ttl": self._lower_ttl,
@@ -1398,6 +1446,19 @@ class VirtualminMigrationService:
             "compensating": self._compensate,
         }
         try:
+            if migration.contract not in {
+                "",  # Existing migrations created before explicit contracts.
+                VirtualminMigration.Contract.LEGACY,
+                VirtualminMigration.Contract.CUTOVER,
+                VirtualminMigration.Contract.RECOVERY,
+            }:
+                self._finish(
+                    migration,
+                    lease_token,
+                    "needs_review",
+                    "This contract cannot use the whole-domain migration worker",
+                )
+                return Ok(migration)
             if migration.resume_after is not None:
                 self._move(migration, lease_token, migration.status, resume_after=None)
             while migration.status in handlers and not migration.parked_phase:
@@ -1458,10 +1519,8 @@ class VirtualminMigrationService:
             ).get(pk=migration_id)
         except VirtualminMigration.DoesNotExist:
             return Err("migration not found")
-        if migration.contract == VirtualminMigration.Contract.RECOVERY and type(self) is VirtualminMigrationService:
-            from .virtualmin_recovery_service import VirtualminRecoveryService  # noqa: PLC0415
-
-            return VirtualminRecoveryService().run(migration_id)
+        if type(self) is VirtualminMigrationService and (worker := self._specialized_worker(migration.contract)):
+            return worker.run(migration_id)
         token = uuid4()
         with transaction.atomic():
             VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=migration.account_id)
@@ -1519,11 +1578,35 @@ class VirtualminMigrationService:
                 worker_lease_expires_at=None,
             )
 
+    @staticmethod
+    def _specialized_worker(contract: str) -> VirtualminMigrationService | None:
+        if contract == VirtualminMigration.Contract.IMPORTED_WEB:
+            from .component_migration_worker import ComponentMigrationWorker  # noqa: PLC0415 -- contract dispatch
+
+            return ComponentMigrationWorker()
+        if contract == VirtualminMigration.Contract.RECOVERY:
+            from .virtualmin_recovery_service import VirtualminRecoveryService  # noqa: PLC0415 -- contract dispatch
+
+            return VirtualminRecoveryService()
+        return None
+
 
 def resolve_migration(
     migration: VirtualminMigration, *, resolved_by: User | None, note: str, source_fenced: str = ""
 ) -> Result[VirtualminMigration, str]:
     """Retry target recovery after commit, compensate before commit, or resolve a legacy operation."""
+    if migration.contract == VirtualminMigration.Contract.IMPORTED_WEB:
+        from .component_migration_worker import resolve_component_migration  # noqa: PLC0415 -- contract resolution
+
+        if source_fenced.strip():
+            return Err("Component migration cannot replace retained source receipts with a fencing statement")
+        return resolve_component_migration(migration, actor=resolved_by, note=note)
+    return _resolve_whole_domain_migration(migration, resolved_by=resolved_by, note=note, source_fenced=source_fenced)
+
+
+def _resolve_whole_domain_migration(
+    migration: VirtualminMigration, *, resolved_by: User | None, note: str, source_fenced: str
+) -> Result[VirtualminMigration, str]:
     service = VirtualminMigrationService()
     invalid_fencing = bool(source_fenced.strip()) and (
         migration.contract != VirtualminMigration.Contract.CUTOVER

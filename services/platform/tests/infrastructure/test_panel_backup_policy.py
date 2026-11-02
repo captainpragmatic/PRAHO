@@ -13,7 +13,7 @@ class PanelBackupPolicyTests(SimpleTestCase):
         for panel in ("virtualmin", "blesta"):
             deployment = SimpleNamespace(
                 id=1, hostname="fixture", dns_zone=None, fqdn="fixture.hosting.test", ssh_port=9876,
-                panel_type=SimpleNamespace(panel_type=panel),
+                panel_type=SimpleNamespace(panel_type=panel), virtualmin_server_id=None,
             )
             for storage in ("platform", "local", "s3"):
                 for enabled in (True, False):

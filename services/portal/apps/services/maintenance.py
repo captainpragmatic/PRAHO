@@ -124,9 +124,9 @@ def maintenance_presentation(summary: MaintenanceSummary, policy: DisplayLocalis
     """Only safe public receipt fields enter the shared attention partial."""
     windows = []
     kinds = {
-        "reboot": _("A restart of the server your site runs on"),
-        "panel_update": _("Updates to the server your site runs on"),
-        "emergency": _("Emergency work on the server your site runs on"),
+        "reboot": _("A restart of a server supporting your hosting services"),
+        "panel_update": _("Updates to a server supporting your hosting services"),
+        "emergency": _("Emergency work on a server supporting your hosting services"),
     }
     for window in summary["windows"]:
         impact = _("Brief unavailability may occur.")

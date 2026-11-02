@@ -27,6 +27,7 @@ from apps.provisioning.virtualmin_gateway import (
     VirtualminTransientError,
 )
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from apps.provisioning.virtualmin_node_capability import destination_refusal
 from apps.provisioning.virtualmin_service import (
     VirtualminAccountCreationData,
     VirtualminProvisioningService,
@@ -133,6 +134,7 @@ class ServiceTestServerConnectionRetriabilityTests(TestCase):
             status="active",
         )
         server = VirtualminServer.objects.create(
+            legacy_security_admission=True,
             name="Retry node",
             hostname="retry-node.example.com",
             api_username="api",
@@ -143,6 +145,7 @@ class ServiceTestServerConnectionRetriabilityTests(TestCase):
         )
         server.set_api_password("retry-fixture-password")
         server.save()
+        self.assertIsNone(destination_refusal(server))
         creation_data = VirtualminAccountCreationData(
             service=hosting,
             domain="retry.example.com",
@@ -184,7 +187,12 @@ class ServiceTestServerConnectionRetriabilityTests(TestCase):
             price=Decimal("10.00"),
             status="active",
         )
-        server = VirtualminServer.objects.create(name="Retry node", hostname="retry-node.example.com", status="active")
+        # An existing unmanaged legacy node is explicitly admitted by the real
+        # policy; the connectivity failure must not bypass destination checks.
+        server = VirtualminServer.objects.create(
+            name="Retry node", hostname="retry-node.example.com", status="active", legacy_security_admission=True
+        )
+        self.assertIsNone(destination_refusal(server))
         service = VirtualminProvisioningService(server)
         creation_data = VirtualminAccountCreationData(
             service=hosting,

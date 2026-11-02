@@ -8267,3 +8267,45 @@ msgid ""
 msgstr ""
 "Automatic hardening is not supported by maintenance windows. Use the "
 "separate reviewed hardening workflow; panel updates remain manual."
+# Retained source hosting dependencies in maintenance previews.
+msgid "Retained source responsibilities:"
+msgstr "Retained source responsibilities:"
+
+msgid "Preview retained source services"
+msgstr "Preview retained source services"
+
+msgid "Sub-servers and retained source responsibilities do not multiply customer notices. This preview covers tracked hosting accounts and unreleased source services; it performs no native inspection."
+msgstr "Sub-servers and retained source responsibilities do not multiply customer notices. This preview covers tracked hosting accounts and unreleased source services; it performs no native inspection."
+
+msgid "Up to 25 responsibilities are listed; affected customers also include current account placement. Retained services do not mean that the website is still on this node."
+msgstr "Up to 25 responsibilities are listed; affected customers also include current account placement. Retained services do not mean that the website is still on this node."
+
+msgid "Mail"
+msgstr "Mail"
+
+msgid "DNS"
+msgstr "DNS"
+
+msgid "Authentication"
+msgstr "Authentication"
+
+msgid "A migration, retained bridge or recovery operation owns this server."
+msgstr "A migration, retained bridge or recovery operation owns this server."
+
+msgid "A component cleanup worker owns this server; wait for its recorded release."
+msgstr "A component cleanup worker owns this server; wait for its recorded release."
+
+msgid "A completed component migration still needs verified native retirement on this server."
+msgstr "A completed component migration still needs verified native retirement on this server."
+
+msgid "A terminal component migration still has unresolved native holds on this server."
+msgstr "A terminal component migration still has unresolved native holds on this server."
+
+msgid "The original create no longer owns its recovery claim."
+msgstr "The original create no longer owns its recovery claim."
+
+msgid "Resolve the node's hardening attempt before recovering its original create."
+msgstr "Resolve the node's hardening attempt before recovering its original create."
+
+msgid "The original create node identity changed. Verify its recorded target and outcome before retrying."
+msgstr "The original create node identity changed. Verify its recorded target and outcome before retrying."

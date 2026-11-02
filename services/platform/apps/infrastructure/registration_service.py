@@ -12,7 +12,7 @@ import contextlib
 import logging
 from typing import TYPE_CHECKING
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db import DatabaseError, InterfaceError, transaction
 from django.db.models import ProtectedError
 
@@ -53,6 +53,43 @@ class NodeRegistrationService:
     Creates VirtualminServer records that integrate with the existing
     provisioning system.
     """
+
+    def verify_provisioned_api(self, deployment: NodeDeployment) -> Result[bool, str]:
+        """Prove the durable dedicated credential and SSH-pinned TLS before restricting root."""
+        from apps.common.credential_vault import get_credential_vault  # noqa: PLC0415 -- service boundary
+        from apps.provisioning.virtualmin_gateway import (  # noqa: PLC0415 -- avoids app cycle
+            VirtualminConfig,
+            VirtualminGateway,
+            get_virtualmin_config,
+        )
+
+        stored = get_credential_vault().get_credential(
+            service_type="virtualmin",
+            service_identifier=deployment.fqdn,
+            reason="Verify durable API identity before Webmin lockdown",
+        )
+        if stored.is_err():
+            return Err("Durable API identity is unavailable; root access has not been restricted")
+        username, password, _ = stored.unwrap()
+        if not username or username == "root" or not password:
+            return Err("A dedicated non-root API identity must be enrolled before lockdown")
+        fingerprint = self._trusted_certificate_fingerprint(deployment)
+        if fingerprint.is_err():
+            return Err("The panel certificate could not be pinned over the enrolled SSH connection")
+        config = VirtualminConfig.from_credentials(
+            hostname=deployment.fqdn,
+            username=username,
+            password=password,
+            port=10000,
+            use_ssl=True,
+            verify_ssl=False,
+            cert_fingerprint=fingerprint.unwrap(),
+            timeout=get_virtualmin_config()["timeout"],
+        )
+        result = VirtualminGateway(config).test_connection()
+        if result.is_err() or result.unwrap().get("healthy") is not True:
+            return Err("The durable dedicated API credential did not authenticate; root access has not been restricted")
+        return Ok(True)
 
     @staticmethod
     def _registration_validation_error(deployment: NodeDeployment) -> str | None:
@@ -274,7 +311,7 @@ class NodeRegistrationService:
             f"({probe.get('error') or probe.get('trust_error') or 'probe failed'}); refusing under the strict policy"
         )
 
-    def verify_and_activate(self, server: VirtualminServer) -> Result[VirtualminServer, str]:  # noqa: PLR0911  # Guarded credential-verification workflow: one early Err per gate (vault-miss/empty-cred/handshake/not-healthy/CAS)
+    def verify_and_activate(self, server: VirtualminServer) -> Result[VirtualminServer, str]:  # noqa: C901, PLR0911  # Guarded credential, native policy and activation workflow.
         """
         #347 GAP 2: confirm the API credential provisioned on the node actually
         authenticates, then transition the server disabled -> active so placement
@@ -338,6 +375,27 @@ class NodeRegistrationService:
             if health.unwrap().get("healthy") is not True:
                 return Err(f"Server {server.hostname} did not report healthy, leaving disabled: {health.unwrap()}")
 
+            policy_evidence = None
+            policy_cidrs: list[str] = []
+            if getattr(server, "node_deployment", None) is not None:
+                from apps.infrastructure.ansible_service import (  # noqa: PLC0415 -- native policy boundary
+                    node_admin_allowed_cidrs,
+                )
+                from apps.provisioning.virtualmin_node_capability import (  # noqa: PLC0415 -- app boundary
+                    record_generated_policy,
+                )
+                from apps.provisioning.virtualmin_security_tasks import (  # noqa: PLC0415 -- read-only qualification boundary
+                    collect_inspection,
+                )
+
+                if vault_username != server.api_username or vault_username == "root":
+                    return Err("Generated node needs its durable dedicated API identity before activation")
+                try:
+                    policy_evidence = collect_inspection(server)
+                    policy_cidrs = node_admin_allowed_cidrs()
+                except (ValidationError, ValueError) as error:
+                    return Err(f"Node web-only policy is not verified, leaving disabled: {error}")
+
             # #436 (flag-gated, default off): under the strict policy, activation
             # additionally requires an AFFIRMATIVE CA-trust verdict on the panel
             # certificate. Indeterminate probes refuse too (fail-closed under an
@@ -362,7 +420,13 @@ class NodeRegistrationService:
                 current_native_server_write_guard,
             )
 
-            with current_native_server_write_guard(server.pk):
+            with current_native_server_write_guard(server.pk), transaction.atomic():
+                locked_server = VMServer.objects.select_for_update().get(pk=server.pk)
+                if policy_evidence is not None:
+                    # Rebind the evidence under the SAME lock as activation. Remote
+                    # inspection and CA probes must not leave a credential/endpoint
+                    # change window between proof and admission.
+                    record_generated_policy(locked_server, policy_evidence, policy_cidrs)
                 updated = VMServer.objects.filter(pk=server.pk, status="disabled").update(
                     status="active", updated_at=timezone.now()
                 )
@@ -421,10 +485,16 @@ class NodeRegistrationService:
                 locked_deployment_gate,
                 teardown_maintenance_refusal,
             )
+            from apps.provisioning.component_migration_models import retained_source_refusal  # noqa: PLC0415
+            from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
 
             with locked_deployment_gate(deployment.pk) as current:
                 if current is None or current.virtualmin_server_id != server.pk:
                     return Err("The deployment's server binding changed; reload before unregistering it")
+                deployment = current
+                server = VirtualminServer.objects.get(pk=current.virtualmin_server_id)
+                if refusal := retained_source_refusal(server.pk):
+                    return Err(refusal)
                 if refusal := teardown_maintenance_refusal(server.pk):
                     return Err(refusal)
                 # Remove credentials from vault

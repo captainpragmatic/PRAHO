@@ -67,6 +67,7 @@ class WorkerDeathAfterRemoteCreateTests(TransactionTestCase):
         )
         self.server = VirtualminServer.objects.create(
             name="crash-node",
+            legacy_security_admission=True,
             hostname="crash-node.example.com",
             api_username="crash-api",
             status="active",

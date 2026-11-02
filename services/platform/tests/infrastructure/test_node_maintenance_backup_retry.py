@@ -9,6 +9,7 @@ from django.urls import reverse
 
 from apps.provisioning.virtualmin_backup_service import RestoreConfig
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
+from apps.provisioning.virtualmin_node_capability import destination_refusal
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService, VirtualminProvisioningService
 from apps.provisioning.virtualmin_tasks import run_virtualmin_backup, run_virtualmin_restore
 from tests.infrastructure.test_node_maintenance_admission import MaintenanceAdmissionFixture
@@ -31,6 +32,12 @@ class NodeMaintenanceBackupRetryTests(MaintenanceAdmissionFixture, TestCase):
         self._assert_failed_job_stays_terminal(job, run_virtualmin_backup)
 
     def test_failed_restore_redelivery_and_staff_retry_cannot_revive_it_during_maintenance(self) -> None:
+        # This existing unmanaged node uses the explicit legacy admission policy;
+        # no generated-node verification is asserted by the retry fixture.
+        self.assertIsNone(getattr(self.node, "node_deployment", None))
+        self.node.legacy_security_admission = True
+        self.node.save(update_fields=["legacy_security_admission"])
+        self.assertIsNone(destination_refusal(self.node))
         admitted = VirtualminBackupManagementService(self.node).create_restore_job(
             self.account, RestoreConfig(backup_id="missing-fixture-backup", restore_email=False)
         )

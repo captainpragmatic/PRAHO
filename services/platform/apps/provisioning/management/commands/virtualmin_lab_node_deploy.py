@@ -20,13 +20,17 @@ Refuses to run unless DJANGO_SETTINGS_MODULE=config.settings.lab and DEBUG.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import secrets
+import select
 import shutil
 import ssl
 import string
 import subprocess
 from argparse import ArgumentParser
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -53,7 +57,22 @@ logger = logging.getLogger(__name__)
 API_USER = "praho-api"
 PLAYBOOK_TIMEOUT = 3600
 FACT_CACHE = Path("/tmp/ansible_facts_cache")  # noqa: S108  # nosec B108 - Ansible's own fact cache (ansible.cfg), keyed by inventory hostname
-SSH_PORT = 22
+SSH_PORT = 9876
+PANEL_DENIAL_PROBE = """import json,select,socket,sys,time
+attempts=0
+started=time.monotonic()
+print('PRAHO_DENIED_PROBE_READY',flush=True)
+while not select.select([sys.stdin],[],[],0)[0]:
+    attempts+=1
+    try:
+        with socket.create_connection((sys.argv[1],10000),timeout=0.4):
+            print(json.dumps({'attempts':attempts,'exposed':True,'seconds':round(time.monotonic()-started,3)}),flush=True)
+            sys.exit(1)
+    except OSError:
+        pass
+    time.sleep(0.1)
+print(json.dumps({'attempts':attempts,'exposed':False}),flush=True)
+"""
 HTTP_PORT = 80
 WEBMIN_PORT = 10000
 IP_LOCK_FIELD = 4  # miniserv.users: name:password:pass-expiry:module-list:ip-allow-list:...
@@ -205,16 +224,19 @@ class Command(BaseCommand):
 
         deployment = NodeDeployment.objects.get(hostname=DEPLOY_NODE.deployment_hostname)
         password = "".join(secrets.choice(string.ascii_letters + string.digits + "!@#$%^&*") for _ in range(24))
-        with lab_transport(with_deploy_node(state)):
+        with self._denied_panel_probe(), lab_transport(with_deploy_node(state)):
+            self._run_playbook(deployment, "virtualmin_firewall.yml", None)
             self._run_playbook(
                 deployment, "virtualmin.yml", {"praho_api_user": API_USER, "praho_api_password": password}
             )
-            self._run_playbook(deployment, "virtualmin_harden.yml", None)
+            server = self._register(deployment, password)
+            self._prove_durable_api(server)
+            approved = {"security_hardening_approved": True, "praho_api_user": API_USER}
+            self._run_playbook(deployment, "virtualmin_harden.yml", approved)
             self._check_web_root_links()
             # Someone disables the guard by hand; the next hardening run must put it back in force.
             node_exec(DEPLOY_NODE.container, "sh", "-c", "a2disconf -q praho-home-symlinks && systemctl reload apache2")
-            self._run_playbook(deployment, "virtualmin_harden.yml", None)
-            server = self._register(deployment, password)
+            self._run_playbook(deployment, "virtualmin_harden.yml", approved)
             activated = NodeRegistrationService().verify_and_activate(server)
             if activated.is_err():
                 raise CommandError(f"The node's API credential did not activate it: {activated.unwrap_err()}")
@@ -222,6 +244,79 @@ class Command(BaseCommand):
         self._check_controls()
         self._check_web_root_links()
         self.stdout.write(self.style.SUCCESS(f"Node deploy OK: {server.hostname} is active"))
+
+    @contextmanager
+    def _denied_panel_probe(self) -> Iterator[None]:
+        """Keep a real unapproved peer probing from before installation through authenticated activation."""
+        refuse_unless_lab_settings()
+        target = container_address(DEPLOY_NODE.container)
+        completed = False
+        with subprocess.Popen(  # Fixed disposable lab endpoints; no credentials or shell expansion.
+            ["docker", "exec", "-i", "vmlab-a", "python3", "-u", "-c", PANEL_DENIAL_PROBE, target],  # noqa: S607
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ) as process:
+            try:
+                if (
+                    process.stdout is None
+                    or not select.select([process.stdout], [], [], 10)[0]
+                    or process.stdout.readline().strip() != "PRAHO_DENIED_PROBE_READY"
+                ):
+                    raise CommandError("The denied-peer probe did not start")
+                yield
+                completed = True
+            finally:
+                try:
+                    output, _error = process.communicate(input="stop\n", timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate(timeout=5)
+                    if completed:
+                        raise CommandError("The denied-peer probe did not stop") from None
+                else:
+                    if completed:
+                        verdict = json.loads(output)
+                        self._ok(
+                            "denied peer cannot reach Webmin throughout install and activation",
+                            process.returncode == 0
+                            and verdict.get("exposed") is False
+                            and type(verdict.get("attempts")) is int
+                            and verdict["attempts"] > 0,
+                            {"return_code": process.returncode, "probe": verdict},
+                        )
+
+    def _prove_durable_api(self, server: Any) -> None:
+        from apps.common.credential_vault import (  # noqa: PLC0415 -- exact enrolled fixture credential
+            get_credential_vault,
+        )
+        from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway  # noqa: PLC0415
+
+        stored = get_credential_vault().get_credential(
+            service_type="virtualmin",
+            service_identifier=server.hostname,
+            reason="Prove lab API before root restriction",
+        )
+        if stored.is_err():
+            raise CommandError("The generated lab node has no durable API identity")
+        username, password, _ = stored.unwrap()
+        if username != API_USER or not password:
+            raise CommandError("The generated lab node needs its dedicated API identity")
+        config = VirtualminConfig.from_credentials(
+            hostname=server.hostname,
+            username=username,
+            password=password,
+            port=server.api_port,
+            use_ssl=True,
+            verify_ssl=False,
+            cert_fingerprint=server.ssl_cert_fingerprint,
+        )
+        health = VirtualminGateway(config).test_connection()
+        self._ok(
+            "durable API authenticates before root restrictions",
+            health.is_ok() and health.unwrap().get("healthy") is True,
+        )
 
     def _check_web_root_links(self) -> None:
         """virtualmin_harden.yml: a web root can link only to what its customer owns (not another home, not /etc)."""
@@ -258,7 +353,7 @@ class Command(BaseCommand):
     def _register(self, deployment: Any, password: str) -> Any:
         """What NodeRegistrationService.register_node records, with the lab's published API port.
 
-        register_node itself reads the certificate over SSH port 22 and records API port 10000, neither of
+        register_node itself records API port 10000; the lab must use its published NAT port. The transport
         which a published container offers; the row and the vault entry it writes are the same.
         """
         from apps.common.credential_vault import CredentialData, get_credential_vault  # noqa: PLC0415
