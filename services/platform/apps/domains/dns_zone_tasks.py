@@ -90,7 +90,8 @@ def _guard(identifier: UUID, token: UUID) -> Iterator[tuple[HostedZoneOperation,
             if account is not None:
                 account.refresh_from_db()
             zone = HostedZone.objects.select_for_update().get(pk=original.zone_id)
-        operation = HostedZoneOperation.objects.select_for_update().select_related("revision").get(pk=identifier)
+        operation = HostedZoneOperation.objects.select_for_update(of=("self",)).get(pk=identifier)
+        operation.revision = HostedZoneImportRevision.objects.select_for_update(of=("self",)).get(pk=operation.revision_id)
         if operation.lease_token != token or operation.lease_until is None or operation.lease_until <= timezone.now():
             raise ZoneLeaseLostError("DNS operation lost its lease")
         if operation.revision.number != zone.current_revision:

@@ -29,7 +29,6 @@ def lock_data_zone(zone: HostedZone, actor: User | None, *, readonly: bool = Fal
 
     account = (
         VirtualminAccount.objects.select_for_update(of=("self",), no_key=True)
-        .select_related("service")
         .filter(pk=zone.account_id)
         .first()
         if zone.account_id
@@ -39,7 +38,7 @@ def lock_data_zone(zone: HostedZone, actor: User | None, *, readonly: bool = Fal
         lock_for_publication(zone.account_hostname_id)
     if account is not None:
         account.refresh_from_db()
-    current = HostedZone.objects.select_for_update(of=("self",)).select_related("service").get(pk=zone.pk)
+    current = HostedZone.objects.select_for_update(of=("self",)).get(pk=zone.pk)
     if not service._actor_allowed(current.customer_id, actor, readonly=readonly):
         return None
     return current

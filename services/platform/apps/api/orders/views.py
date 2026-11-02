@@ -41,6 +41,7 @@ from apps.common.performance.rate_limiting import (
     PortalHMACBurstThrottle,
     PortalHMACRateThrottle,
 )
+from apps.common.row_locks import lock_one_and_load
 from apps.common.types import CurrencyCode, Err, Ok, Result
 from apps.customers.models import Customer
 from apps.orders.checkout_consents import ORDERING_UNAVAILABLE, accepted_checkout_consents, checkout_requirements
@@ -1278,11 +1279,10 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
         with transaction.atomic():
             # Get order with row-level lock to prevent double-confirmation.
             # of=("self",) locks only the Order row, not related tables.
-            order = (
-                Order.objects.select_for_update(of=("self",))
-                .select_related("proforma")
+            order = lock_one_and_load(
+                Order.objects.select_related("proforma")
                 .prefetch_related("items")
-                .get(id=order_id, customer_id=customer.id)
+                .filter(id=order_id, customer_id=customer.id)
             )
 
             # Verify PaymentIntent belongs to this order (prevent cross-binding)
@@ -1487,11 +1487,10 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
         # A concurrent request may have confirmed the order between phases 1 and 3;
         # the re-check ensures we never double-confirm.
         with transaction.atomic():
-            order = (
-                Order.objects.select_for_update(of=("self",))
-                .select_related("proforma", "invoice")
+            order = lock_one_and_load(
+                Order.objects.select_related("proforma", "invoice")
                 .prefetch_related("items")
-                .get(id=order_id, customer_id=customer.id)
+                .filter(id=order_id, customer_id=customer.id)
             )
 
             # CODEX-8 fix: Idempotent for already-confirmed orders (Phase 3 re-check).

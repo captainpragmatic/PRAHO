@@ -21,6 +21,7 @@ from apps.billing.invoice_models import InvoiceSequence
 from apps.billing.models import Currency, Invoice, Payment
 from apps.billing.proforma_models import ProformaSequence
 from apps.billing.proforma_service import ProformaService
+from apps.common.row_locks import lock_one_and_load
 from apps.customers.models import Customer
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
@@ -63,6 +64,7 @@ class TestC2ConfirmOrderIdempotency(TestCase):
         )
         ProformaSequence.objects.get_or_create(scope="default")
         InvoiceSequence.objects.get_or_create(scope="default")
+        InvoiceSequence.objects.get_or_create(scope="subscription", defaults={"prefix": "SUB"})
         self.factory = APIRequestFactory()
 
     def _create_order_with_proforma(self) -> tuple[Order, object]:
@@ -206,7 +208,7 @@ class TestC2ConfirmOrderIdempotency(TestCase):
         order_lock_counts: list[int] = []
 
         with (
-            patch.object(Order.objects, "select_for_update", wraps=Order.objects.select_for_update) as order_lock,
+            patch("apps.api.orders.views.lock_one_and_load", wraps=lock_one_and_load) as order_lock,
             patch(
                 "apps.billing.gateways.base.PaymentGatewayFactory.create_gateway",
                 return_value=mock_gateway,
