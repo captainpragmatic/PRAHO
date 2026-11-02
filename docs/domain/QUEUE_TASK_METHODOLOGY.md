@@ -152,6 +152,14 @@ Do not replace either convention with a generic enqueue recipe.
 
 ## Concurrency and Idempotency
 
+[Node maintenance](../deployment/NODE_MAINTENANCE.md) publishes the exact window revision,
+resource identity and execution token atomically with its ORM task. The leaf records issued intent
+before native I/O and checks the business result, rather than Django-Q's task-success flag.
+Only proved-unissued claims can expire; provider acknowledgment or an uncertain command retains its hold.
+Maintenance notices link one durable intent to the existing encrypted EmailLog. Configuration retries
+reuse that pending intent; provider retries reuse the same log, claim and attempt budget, with preference,
+recipient, revision and current ownership checked at every final dispatch boundary.
+
 Use durable domain state, conditional updates or row locks, unique operation identities,
 and provider idempotency keys where the integration supports them. A worker can be redelivered
 or die after the external action succeeds. Retrying must recover the same operation.

@@ -16,17 +16,17 @@ import requests
 from django.test import TestCase
 from django.utils import timezone
 
-from apps.billing.models import Currency
+from apps.billing.currency_models import Currency
 from apps.common.types import Err, Retriability
 from apps.customers.models import Customer
-from apps.provisioning.models import Service, ServicePlan
+from apps.provisioning.service_models import Service, ServicePlan
 from apps.provisioning.virtualmin_gateway import (
     VirtualminAPIError,
     VirtualminConfig,
     VirtualminGateway,
     VirtualminTransientError,
 )
-from apps.provisioning.virtualmin_models import VirtualminServer
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_service import (
     VirtualminAccountCreationData,
     VirtualminProvisioningService,
@@ -166,6 +166,47 @@ class ServiceTestServerConnectionRetriabilityTests(TestCase):
         assert isinstance(result, Err)
         self.assertEqual(result.unwrap_err(), "connect timeout")
         self.assertEqual(result.retriability, Retriability.RETRIABLE)
+        account = VirtualminAccount.objects.get(service=hosting)
+        self.assertEqual(account.status, "error")
+        self.assertEqual(VirtualminProvisioningJob.objects.get(account=account).status, "failed")
+
+    def test_failed_preflight_preserves_inner_retriability(self) -> None:
+        customer = Customer.objects.create(name="Retry customer")
+        currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+        plan = ServicePlan.objects.create(name="Retry plan", price_monthly=Decimal("10.00"))
+        hosting = Service.objects.create(
+            customer=customer,
+            service_plan=plan,
+            currency=currency,
+            service_name="Retry hosting",
+            domain="retry.example.com",
+            username="retryuser",
+            price=Decimal("10.00"),
+            status="active",
+        )
+        server = VirtualminServer.objects.create(name="Retry node", hostname="retry-node.example.com", status="active")
+        service = VirtualminProvisioningService(server)
+        creation_data = VirtualminAccountCreationData(
+            service=hosting,
+            domain="retry.example.com",
+            username="retryuser",
+            password="StrongPassword123!",
+            server=server,
+        )
+        inner = Err("connect timeout", retriability=Retriability.RETRIABLE)
+
+        with patch.object(VirtualminGateway, "test_connection", return_value=inner) as connection:
+            result = service.create_virtualmin_account(creation_data)
+
+        assert isinstance(result, Err)
+        self.assertEqual(
+            result.unwrap_err(), "Pre-flight validation failed: Server health check failed: connect timeout"
+        )
+        self.assertEqual(result.retriability, Retriability.RETRIABLE)
+        connection.assert_called_once()
+        account = VirtualminAccount.objects.get(service=hosting)
+        self.assertEqual(account.status, "error")
+        self.assertEqual(VirtualminProvisioningJob.objects.get(account=account).status, "failed")
 
     def test_server_statistics_preserves_gateway_retriability(self) -> None:
         server = MagicMock()

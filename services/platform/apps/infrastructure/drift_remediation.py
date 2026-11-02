@@ -38,6 +38,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+class _DriftPublicationLostError(Exception):
+    """Roll back prepared ownership and announcements when the source CAS loses."""
+
+
 # TCP probe timeout for health checks
 _DEFAULT_HEALTH_CHECK_TIMEOUT = 10
 
@@ -143,7 +148,7 @@ AUTO_FIXABLE_FIELDS = frozenset({"server_type", "server_status"})
 class DriftRemediationService:
     """Handles the remediation workflow: approve, reject, schedule, execute, rollback."""
 
-    def approve_remediation(
+    def approve_remediation(  # noqa: PLR0911  # Separate approval, restart, binding, maintenance and CAS refusals.
         self,
         request_id: int,
         user: User,
@@ -174,7 +179,16 @@ class DriftRemediationService:
         # conditional update is the portable claim: a concurrent accept/reject
         # loses cleanly instead of double-transitioning.
         now = timezone.now()
-        with transaction.atomic():
+        from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server ownership
+            locked_deployment_gate,
+            maintenance_refusal,
+        )
+
+        with locked_deployment_gate(req.deployment_id) as deployment:
+            if deployment is None:
+                return Err("The deployment no longer exists")
+            if deployment.virtualmin_server_id and (refusal := maintenance_refusal(deployment.virtualmin_server_id)):
+                return Err(refusal)
             updated = DriftRemediationRequest.objects.filter(pk=request_id, status="pending_approval").update(
                 status="approved",
                 approved_by=user,
@@ -191,6 +205,7 @@ class DriftRemediationService:
                 request_id,
                 task_name=f"remediation_{request_id}",
                 timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
+                sync=False,
             )
 
         logger.info(f"✅ [DriftRemediation] Request {request_id} approved by {user.email}, execution queued")
@@ -263,14 +278,24 @@ class DriftRemediationService:
         # Conditional update: scheduling must never overwrite a row a worker
         # has already claimed in_progress (that would discard the running
         # execution's terminal write and re-execute the provider mutation).
-        updated = DriftRemediationRequest.objects.filter(
-            pk=request_id, status__in=("pending_approval", "approved")
-        ).update(
-            status="scheduled",
-            scheduled_for=scheduled_for,
-            approved_by=user,
-            approved_at=timezone.now(),
+        from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server ownership
+            locked_deployment_gate,
+            maintenance_refusal,
         )
+
+        with locked_deployment_gate(req.deployment_id) as deployment:
+            if deployment is None:
+                return Err("The deployment no longer exists")
+            if deployment.virtualmin_server_id and (refusal := maintenance_refusal(deployment.virtualmin_server_id)):
+                return Err(refusal)
+            updated = DriftRemediationRequest.objects.filter(
+                pk=request_id, status__in=("pending_approval", "approved")
+            ).update(
+                status="scheduled",
+                scheduled_for=scheduled_for,
+                approved_by=user,
+                approved_at=timezone.now(),
+            )
         if not updated:
             req.refresh_from_db()
             return Err(f"Cannot schedule request in status '{req.status}'")
@@ -364,11 +389,19 @@ class DriftRemediationService:
                 "or stop/decommission the deployment"
             )
 
-        with transaction.atomic():
-            # Lock order everywhere: deployment -> request. Validation happens
+        from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server ownership
+            locked_deployment_gate,
+            maintenance_refusal,
+        )
+
+        with locked_deployment_gate(req.deployment_id) as deployment:
+            # Lock order everywhere: server -> deployment -> request. Validation happens
             # AFTER locking so a concurrent approve/heal/reject cannot flip the
             # status between check and write.
-            deployment = NodeDeployment.objects.select_for_update().get(pk=req.deployment_id)
+            if deployment is None:
+                return Err("The deployment no longer exists")
+            if deployment.virtualmin_server_id and (refusal := maintenance_refusal(deployment.virtualmin_server_id)):
+                return Err(refusal)
             locked_req = DriftRemediationRequest.objects.select_for_update().get(pk=request_id)
 
             if locked_req.status != "pending_approval":
@@ -492,7 +525,7 @@ class DriftRemediationService:
 
         return Ok(True)
 
-    def execute_remediation(  # noqa: C901, PLR0911  # Multi-step workflow: each gate exits early
+    def execute_remediation(  # Multi-step workflow: each gate exits early
         self,
         request: DriftRemediationRequest,
     ) -> Result[bool, str]:
@@ -506,6 +539,15 @@ class DriftRemediationService:
         if claim_result.is_err():
             return claim_result
         request.refresh_from_db()
+
+        from apps.infrastructure.node_maintenance_execution import run_drift_execution  # noqa: PLC0415
+
+        return run_drift_execution(request, lambda: self._execute_claimed_remediation(request))
+
+    def _execute_claimed_remediation(  # noqa: PLR0911  # Snapshot, apply, verification and source-CAS failures settle independently.
+        self, request: DriftRemediationRequest
+    ) -> Result[bool, str]:
+        deployment = request.deployment
 
         preflight = self._preflight_execution(request)
         if preflight.is_err():
@@ -604,6 +646,10 @@ class DriftRemediationService:
 
         logger.info(f"✅ [DriftRemediation] Remediation completed for {deployment.hostname}")
 
+        from apps.infrastructure.node_maintenance_execution import drift_recovery_verified  # noqa: PLC0415
+
+        drift_recovery_verified(deployment)
+
         try:
             InfrastructureAuditService.log_drift_remediation_applied(
                 deployment, request, True, InfrastructureAuditContext()
@@ -613,7 +659,13 @@ class DriftRemediationService:
 
         return Ok(True)
 
-    def _claim_for_execution(
+    def _claim_for_execution(self, request: DriftRemediationRequest, deployment: NodeDeployment) -> Result[bool, str]:
+        try:
+            return self._claim_for_execution_under_gate(request, deployment)
+        except (_DriftPublicationLostError, ValidationError) as exc:
+            return Err(str(exc))
+
+    def _claim_for_execution_under_gate(  # noqa: PLR0911  # Each owner/report/fingerprint gate has its own refusal.
         self,
         request: DriftRemediationRequest,
         deployment: NodeDeployment,
@@ -629,8 +681,18 @@ class DriftRemediationService:
         now = timezone.now()
         stale_cutoff = now - timedelta(minutes=get_stale_after_minutes())
 
-        with transaction.atomic():
-            locked_deployment = NodeDeployment.objects.select_for_update().get(pk=deployment.pk)
+        from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server ownership
+            locked_deployment_gate,
+            maintenance_refusal,
+        )
+
+        with locked_deployment_gate(deployment.pk) as locked_deployment:
+            if locked_deployment is None:
+                return Err("The deployment no longer exists")
+            if locked_deployment.virtualmin_server_id and (
+                refusal := maintenance_refusal(locked_deployment.virtualmin_server_id)
+            ):
+                return Err(refusal)
 
             if locked_deployment.status != "completed":
                 reason = f"Deployment {deployment.hostname} left scan scope (status '{locked_deployment.status}')"
@@ -656,6 +718,17 @@ class DriftRemediationService:
                 )
                 return Err("Drift changed since approval — stale request not executed")
 
+            if request.action_type != "apply_desired" or details.get("field_name") not in AUTO_FIXABLE_FIELDS:
+                self._retire_approved(request, "failed", "No automated fix available; manual intervention required")
+                return Err(f"No automated fix available for field '{details.get('field_name', 'unknown')}'")
+            if request.requires_restart and not request.restart_approved:
+                self._retire_approved(request, "failed", "Remediation requires a server restart that was not approved")
+                return Err("Remediation requires a server restart that was not approved")
+
+            from apps.infrastructure.node_maintenance_execution import prepare_drift_execution  # noqa: PLC0415
+
+            prepare_drift_execution(request, locked_deployment, now)
+
             # Fresh in_progress sibling blocks; a stale one (crashed worker) is
             # reaped inline so a single stuck row can never block the
             # deployment forever.
@@ -674,14 +747,14 @@ class DriftRemediationService:
                         "Remediation stuck in progress — auto-recovered (worker crash suspected)",
                     )
             if blocking:
-                return Err("Another remediation is already in progress for this deployment")
+                raise _DriftPublicationLostError("Another remediation is already in progress for this deployment")
 
             claimed = DriftRemediationRequest.objects.filter(pk=request.pk, status="approved").update(
                 status="in_progress", started_at=now
             )
             if not claimed:
                 request.refresh_from_db()
-                return Err(f"Cannot execute remediation in status '{request.status}'")
+                raise _DriftPublicationLostError(f"Cannot execute remediation in status '{request.status}'")
 
         return Ok(True)
 
@@ -829,12 +902,18 @@ class DriftRemediationService:
         deployment = request.deployment
 
         if field_name == "server_type" and expected_value:
+            from apps.infrastructure.node_maintenance_execution import mark_node_operation_issued  # noqa: PLC0415
+
+            mark_node_operation_issued(deployment, "drift_resize")
             result = gateway.resize(deployment.external_node_id, expected_value)
             if result.is_err():
                 return Err(f"Resize failed: {result.unwrap_err()}")
             return Ok(True)
 
         if field_name == "server_status" and expected_value == "running":
+            from apps.infrastructure.node_maintenance_execution import mark_node_operation_issued  # noqa: PLC0415
+
+            mark_node_operation_issued(deployment, "drift_power_on")
             result = gateway.power_on(deployment.external_node_id)
             if result.is_err():
                 return Err(f"Power on failed: {result.unwrap_err()}")
@@ -1046,6 +1125,9 @@ class DriftRemediationService:
         if gateway is None:
             return Err("Cannot get cloud gateway for rollback")
 
+        from apps.infrastructure.node_maintenance_execution import mark_drift_rollback_issued  # noqa: PLC0415
+
+        mark_drift_rollback_issued(deployment)
         result = gateway.restore_snapshot(deployment.external_node_id, snapshot_id)
         if result.is_err():
             logger.error(f"🔥 [DriftRemediation] Rollback failed: {result.unwrap_err()}")

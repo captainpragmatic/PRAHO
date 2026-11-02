@@ -7611,3 +7611,659 @@ msgstr ""
 "Acknowledge the verified creation recovery history. The linked disable "
 "operation must be settled first; this acknowledgement does not change the "
 "service or issue a native command."
+#. Staff node maintenance review (#780).
+msgid "A notice does not authorize a restart. Review affected services and active operations before starting work."
+msgstr "A notice does not authorize a restart. Review affected services and active operations before starting work."
+
+#. Staff node maintenance review (#780).
+msgid "A provider acknowledgment is not proof of recovery. Verify remote commands have stopped and describe the readiness you actually checked. Uncertain or ongoing work must not be reported as completed."
+msgstr "A provider acknowledgment is not proof of recovery. Verify remote commands have stopped and describe the readiness you actually checked. Uncertain or ongoing work must not be reported as completed."
+
+#. Staff node maintenance review (#780).
+msgid "A provider restart interrupts availability; its notice must declare expected downtime."
+msgstr "A provider restart interrupts availability; its notice must declare expected downtime."
+
+#. Staff node maintenance review (#780).
+msgid "Actual outcome"
+msgstr "Actual outcome"
+
+#. Staff node maintenance review (#780).
+msgid "Affected customers:"
+msgstr "Affected customers:"
+
+#. Staff node maintenance review (#780).
+msgid "An applicable window already owns this server's maintenance schedule. Cancel or finish it before changing the policy or adding ordinary work."
+msgstr "An applicable window already owns this server's maintenance schedule. Cancel or finish it before changing the policy or adding ordinary work."
+
+#. Staff node maintenance review (#780).
+msgid "An operator must configure permitted intervals before ordinary maintenance can be scheduled."
+msgstr "An operator must configure permitted intervals before ordinary maintenance can be scheduled."
+
+#. Staff node maintenance review (#780).
+msgid "Cancel or finish the applicable window before changing its scheduling policy."
+msgstr "Cancel or finish the applicable window before changing its scheduling policy."
+
+#. Staff node maintenance review (#780).
+msgid "Cancel window"
+msgstr "Cancel window"
+
+#. Staff node maintenance review (#780).
+msgid "Choose a supported maintenance action."
+msgstr "Choose a supported maintenance action."
+
+#. Staff node maintenance review (#780).
+msgid "Choose an execution mode that matches the announced maintenance kind."
+msgstr "Choose an execution mode that matches the announced maintenance kind."
+
+#. Staff node maintenance review (#780).
+msgid "Configure permitted maintenance intervals"
+msgstr "Configure permitted maintenance intervals"
+
+#. Staff node maintenance review (#780).
+msgid "Customer impact note"
+msgstr "Customer impact note"
+
+#. Staff node maintenance review (#780).
+msgid "Decision reason"
+msgstr "Decision reason"
+
+#. Staff node maintenance review (#780).
+msgid "Downtime is expected"
+msgstr "Downtime is expected"
+
+#. Staff node maintenance review (#780).
+msgid "Expected unavailability (minutes)"
+msgstr "Expected unavailability (minutes)"
+
+#. Staff node maintenance review (#780).
+msgid "Friday"
+msgstr "Friday"
+
+#. Staff node maintenance review (#780).
+msgid "Hosting software updates"
+msgstr "Hosting software updates"
+
+#. Staff node maintenance review (#780).
+msgid "I confirm remote commands have stopped and the stated readiness has been checked."
+msgstr "I confirm remote commands have stopped and the stated readiness has been checked."
+
+#. Staff node maintenance review (#780).
+msgid "I have reviewed the maintenance impact and approve this decision."
+msgstr "I have reviewed the maintenance impact and approve this decision."
+
+#. Staff node maintenance review (#780).
+msgid "Latest-start deferral (minutes)"
+msgstr "Latest-start deferral (minutes)"
+
+#. Staff node maintenance review (#780).
+msgid "Monday"
+msgstr "Monday"
+
+#. Staff node maintenance review (#780).
+msgid "Move window"
+msgstr "Move window"
+
+#. Staff node maintenance review (#780).
+msgid "Only administrators and managers can change maintenance. Support has read-only access."
+msgstr "Only administrators and managers can change maintenance. Support has read-only access."
+
+#. Staff node maintenance review (#780).
+msgid "Operator managed"
+msgstr "Operator managed"
+
+#. Staff node maintenance review (#780).
+msgid "Outcome for affected customers"
+msgstr "Outcome for affected customers"
+
+#. Staff node maintenance review (#780).
+msgid "Permitted interval end"
+msgstr "Permitted interval end"
+
+#. Staff node maintenance review (#780).
+msgid "Permitted interval start"
+msgstr "Permitted interval start"
+
+#. Staff node maintenance review (#780).
+msgid "Permitted scheduling timezone"
+msgstr "Permitted scheduling timezone"
+
+#. Staff node maintenance review (#780).
+msgid "Permitted scheduling timezone:"
+msgstr "Permitted scheduling timezone:"
+
+#. Staff node maintenance review (#780).
+msgid "Permitted weekdays"
+msgstr "Permitted weekdays"
+
+#. Staff node maintenance review (#780).
+msgid "Planned end (policy timezone or explicit UTC offset)"
+msgstr "Planned end (policy timezone or explicit UTC offset)"
+
+#. Staff node maintenance review (#780).
+msgid "Planned start (policy timezone or explicit UTC offset)"
+msgstr "Planned start (policy timezone or explicit UTC offset)"
+
+#. Staff node maintenance review (#780).
+msgid "Policy revision"
+msgstr "Policy revision"
+
+#. Staff node maintenance review (#780).
+msgid "Preview tracked accounts"
+msgstr "Preview tracked accounts"
+
+#. Staff node maintenance review (#780).
+msgid "Provider restart"
+msgstr "Provider restart"
+
+#. Staff node maintenance review (#780).
+msgid "Record actual outcome"
+msgstr "Record actual outcome"
+
+#. Staff node maintenance review (#780).
+msgid "Replacement end (policy timezone or explicit UTC offset)"
+msgstr "Replacement end (policy timezone or explicit UTC offset)"
+
+#. Staff node maintenance review (#780).
+msgid "Replacement start (policy timezone or explicit UTC offset)"
+msgstr "Replacement start (policy timezone or explicit UTC offset)"
+
+#. Staff node maintenance review (#780).
+msgid "Restart"
+msgstr "Restart"
+
+#. Staff node maintenance review (#780).
+msgid "Review and confirm the maintenance impact before continuing."
+msgstr "Review and confirm the maintenance impact before continuing."
+
+#. Staff node maintenance review (#780).
+msgid "Review maintenance policy"
+msgstr "Review maintenance policy"
+
+#. Staff node maintenance review (#780).
+msgid "Saturday"
+msgstr "Saturday"
+
+#. Staff node maintenance review (#780).
+msgid "Schedule maintenance"
+msgstr "Schedule maintenance"
+
+#. Staff node maintenance review (#780).
+msgid "Scheduling records the expected impact; it does not start work. Notices are normally due 48 hours before maintenance, or immediately when scheduled later. Short windows without downtime are quiet. Customer maintenance preferences apply."
+msgstr "Scheduling records the expected impact; it does not start work. Notices are normally due 48 hours before maintenance, or immediately when scheduled later. Short windows without downtime are quiet. Customer maintenance preferences apply."
+
+#. Staff node maintenance review (#780).
+msgid "Security maintenance"
+msgstr "Security maintenance"
+
+#. Staff node maintenance review (#780).
+msgid "Server maintenance"
+msgstr "Server maintenance"
+
+#. Staff node maintenance review (#780).
+msgid "Start maintenance"
+msgstr "Start maintenance"
+
+#. Staff node maintenance review (#780).
+msgid "Sub-servers and account names belong to their parent hosting account; they do not multiply customer notices. This preview covers PRAHO-tracked accounts and performs no native inspection."
+msgstr "Sub-servers and account names belong to their parent hosting account; they do not multiply customer notices. This preview covers PRAHO-tracked accounts and performs no native inspection."
+
+#. Staff node maintenance review (#780).
+msgid "Sunday"
+msgstr "Sunday"
+
+#. Staff node maintenance review (#780).
+msgid "The server is no longer registered. Reload before changing its policy."
+msgstr "The server is no longer registered. Reload before changing its policy."
+
+#. Staff node maintenance review (#780).
+msgid "This maintenance policy changed. Reload and review the current revision."
+msgstr "This maintenance policy changed. Reload and review the current revision."
+
+#. Staff node maintenance review (#780).
+msgid "The scheduling policy changed. Reload the current policy and preview."
+msgstr "The scheduling policy changed. Reload the current policy and preview."
+
+#. Staff node maintenance review (#780).
+msgid "Thursday"
+msgstr "Thursday"
+
+#. Staff node maintenance review (#780).
+msgid "Tracked hosting accounts:"
+msgstr "Tracked hosting accounts:"
+
+#. Staff node maintenance review (#780).
+msgid "Tuesday"
+msgstr "Tuesday"
+
+#. Staff node maintenance review (#780).
+msgid "Up to 25 accounts are listed; the totals above include every tracked account."
+msgstr "Up to 25 accounts are listed; the totals above include every tracked account."
+
+#. Staff node maintenance review (#780).
+msgid "Updated customer impact note (optional)"
+msgstr "Updated customer impact note (optional)"
+
+#. Staff node maintenance review (#780).
+msgid "Use an IANA timezone, for example Europe/Bucharest. No fleet-wide default is assumed."
+msgstr "Use an IANA timezone, for example Europe/Bucharest. No fleet-wide default is assumed."
+
+#. Staff node maintenance review (#780).
+msgid "Wednesday"
+msgstr "Wednesday"
+
+#. Staff node maintenance review (#780).
+msgid "Set how late work may begin. Zero permits no late start; delayed work is recorded as not run."
+msgstr "Set how late work may begin. Zero permits no late start; delayed work is recorded as not run."
+
+#. Staff node maintenance review (#780).
+msgid "I reviewed affected services and active operations and approve starting this maintenance."
+msgstr "I reviewed affected services and active operations and approve starting this maintenance."
+
+#. Staff node maintenance review (#780).
+msgid "I reviewed the checked outcome and approve its customer-facing completion report."
+msgstr "I reviewed the checked outcome and approve its customer-facing completion report."
+
+#. Staff node maintenance review (#780).
+msgid "I understand the replacement schedule supersedes the earlier revision and creates correction notices for customers already notified, subject to their preferences."
+msgstr "I understand the replacement schedule supersedes the earlier revision and creates correction notices for customers already notified, subject to their preferences."
+
+#. Staff node maintenance review (#780).
+msgid "I understand cancellation withdraws unstarted work and creates correction notices for customers already notified, subject to their preferences."
+msgstr "I understand cancellation withdraws unstarted work and creates correction notices for customers already notified, subject to their preferences."
+
+#. Staff node maintenance review (#780).
+msgid "Maintenance kind"
+msgstr "Maintenance kind"
+
+#. Staff node maintenance review (#780).
+msgid "Execution mode"
+msgstr "Execution mode"
+
+#. Staff node maintenance review (#780).
+msgid "Review pending node operations"
+msgstr "Review pending node operations"
+
+#. Staff node maintenance review (#780).
+msgid "Verified outcome"
+msgstr "Verified outcome"
+
+#. Staff node maintenance review (#780).
+msgid "Failed outcome"
+msgstr "Failed outcome"
+
+#. Staff node maintenance review (#780).
+msgid "I confirm no commands for this recorded operation remain running."
+msgstr "I confirm no commands for this recorded operation remain running."
+
+#. Staff node maintenance review (#780).
+msgid "I checked the actual target against the recorded resource identity shown above."
+msgstr "I checked the actual target against the recorded resource identity shown above."
+
+#. Staff node maintenance review (#780).
+msgid "Not run (no command issued)"
+msgstr "Not run (no command issued)"
+
+#. Staff node maintenance review (#780).
+msgid "Power on"
+msgstr "Power on"
+
+#. Staff node maintenance review (#780).
+msgid "Power off"
+msgstr "Power off"
+
+#. Staff node maintenance review (#780).
+msgid "Resize node"
+msgstr "Resize node"
+
+#. Staff node maintenance review (#780).
+msgid "Not issued"
+msgstr "Not issued"
+
+#. Staff node maintenance review (#780).
+msgid "Command issued"
+msgstr "Command issued"
+
+#. Staff node maintenance review (#780).
+msgid "Awaiting outcome verification"
+msgstr "Awaiting outcome verification"
+
+#. Staff node maintenance review (#780).
+msgid "Uncertain result"
+msgstr "Uncertain result"
+
+#. Staff node maintenance review (#780).
+msgid "Confirm both independent operation checks."
+msgstr "Confirm both independent operation checks."
+
+#. Staff node maintenance review (#780).
+msgid "A command acknowledgment does not prove its expected outcome. Check the exact recorded target and confirm that commands stopped before releasing this operation hold. Recording failure does not undo a command. Do not repeat the action to resolve an uncertain result."
+msgstr "A command acknowledgment does not prove its expected outcome. Check the exact recorded target and confirm that commands stopped before releasing this operation hold. Recording failure does not undo a command. Do not repeat the action to resolve an uncertain result."
+
+#. Staff node maintenance review (#780).
+msgid "Recorded provider resource"
+msgstr "Recorded provider resource"
+
+#. Staff node maintenance review (#780).
+msgid "Recorded hosting node"
+msgstr "Recorded hosting node"
+
+#. Staff node maintenance review (#780).
+msgid "Not linked to a hosting node"
+msgstr "Not linked to a hosting node"
+
+#. Staff node maintenance review (#780).
+msgid "Recorded SSH endpoint"
+msgstr "Recorded SSH endpoint"
+
+#. Staff node maintenance review (#780).
+msgid "Reconcile recorded outcome"
+msgstr "Reconcile recorded outcome"
+
+#: apps/infrastructure/node_maintenance_gate.py:140
+msgid "A deployment operation is active or requires reconciliation."
+msgstr "A deployment operation is active or requires reconciliation."
+
+#: apps/infrastructure/node_maintenance_gate.py:147
+msgid "A drift operation currently owns this server."
+msgstr "A drift operation currently owns this server."
+
+#: apps/infrastructure/node_maintenance_gate.py:123
+msgid ""
+"A hosting-account operation is pending, running, or requires reconciliation."
+msgstr ""
+"A hosting-account operation is pending, running, or requires reconciliation."
+
+#: apps/infrastructure/node_maintenance_gate.py:129
+msgid "A migration or recovery operation owns this server."
+msgstr "A migration or recovery operation owns this server."
+
+#: apps/infrastructure/node_maintenance_service.py:33
+msgid "An active administrator or manager must approve maintenance changes."
+msgstr "An active administrator or manager must approve maintenance changes."
+
+#: apps/infrastructure/node_maintenance_service.py:112
+msgid "An automated restart must declare its expected interruption."
+msgstr "An automated restart must declare its expected interruption."
+
+#: apps/infrastructure/node_maintenance_execution.py:98
+msgid "An emergency cannot preempt already claimed or current maintenance."
+msgstr "An emergency cannot preempt already claimed or current maintenance."
+
+#: apps/infrastructure/node_maintenance_execution.py:698
+msgid "An unissued claim can only be closed as not run."
+msgstr "An unissued claim can only be closed as not run."
+
+#: apps/infrastructure/node_maintenance_service.py:208
+msgid "Automatic maintenance requires a completed managed deployment."
+msgstr "Automatic maintenance requires a completed managed deployment."
+
+#: apps/infrastructure/node_maintenance_service.py:115
+msgid ""
+"Automatic work needs at least one minute of explicitly approved latest-start"
+" deferral."
+msgstr ""
+"Automatic work needs at least one minute of explicitly approved latest-start"
+" deferral."
+
+#: apps/infrastructure/node_maintenance_gate.py:110
+msgid ""
+"Cancel the scheduled maintenance window and its announcements before "
+"removing this server."
+msgstr ""
+"Cancel the scheduled maintenance window and its announcements before "
+"removing this server."
+
+#: apps/infrastructure/node_maintenance_service.py:110
+msgid "Choose a supported ordinary window and execution mode."
+msgstr "Choose a supported ordinary window and execution mode."
+
+#: apps/infrastructure/node_maintenance_models.py:61
+msgid "Choose a valid IANA timezone."
+msgstr "Choose a valid IANA timezone."
+
+#: apps/infrastructure/node_maintenance_execution.py:73
+msgid "Choose a valid operator timezone for this emergency."
+msgstr "Choose a valid operator timezone for this emergency."
+
+#: apps/infrastructure/node_maintenance_models.py:69
+msgid "Choose distinct weekdays from Monday through Sunday."
+msgstr "Choose distinct weekdays from Monday through Sunday."
+
+#: apps/infrastructure/node_maintenance_service.py:167
+msgid ""
+"Confirm commands have stopped and record the actual maintenance outcome."
+msgstr ""
+"Confirm commands have stopped and record the actual maintenance outcome."
+
+#: apps/infrastructure/node_maintenance_execution.py:682
+msgid ""
+"Confirm the recorded target identity and that all commands stopped, then "
+"record the outcome."
+msgstr ""
+"Confirm the recorded target identity and that all commands stopped, then "
+"record the outcome."
+
+#: apps/infrastructure/node_maintenance_service.py:169
+msgid "Describe the actual outcome for affected customers."
+msgstr "Describe the actual outcome for affected customers."
+
+#: apps/infrastructure/node_maintenance_service.py:118
+msgid "Describe the expected customer impact."
+msgstr "Describe the expected customer impact."
+
+#: apps/infrastructure/node_maintenance_models.py:41
+msgid "Emergency maintenance"
+msgstr "Emergency maintenance"
+
+#: apps/infrastructure/node_maintenance_execution.py:118
+msgid ""
+"Emergency maintenance is needed on the server your site runs on. We are "
+"checking its recovery."
+msgstr ""
+"Emergency maintenance is needed on the server your site runs on. We are "
+"checking its recovery."
+
+#: apps/infrastructure/node_maintenance_policy.py:19
+msgid "Enter a valid date and time."
+msgstr "Enter a valid date and time."
+
+#: apps/infrastructure/node_maintenance_execution.py:69
+msgid "Give an emergency reason and a bounded duration of 1 to 1440 minutes."
+msgstr "Give an emergency reason and a bounded duration of 1 to 1440 minutes."
+
+#: apps/infrastructure/node_maintenance_models.py:73
+msgid "Latest-start deferral must be between 0 and 1440 minutes."
+msgstr "Latest-start deferral must be between 0 and 1440 minutes."
+
+#: apps/infrastructure/node_maintenance_gate.py:100
+msgid ""
+"Maintenance currently owns this deployment. Verify its outcome before "
+"another operation."
+msgstr ""
+"Maintenance currently owns this deployment. Verify its outcome before "
+"another operation."
+
+#: apps/infrastructure/node_maintenance_gate.py:88
+msgid ""
+"Maintenance currently owns this server. Wait for its verified completion."
+msgstr ""
+"Maintenance currently owns this server. Wait for its verified completion."
+
+#: apps/infrastructure/node_maintenance_gate.py:93
+msgid "Maintenance is in progress on this server."
+msgstr "Maintenance is in progress on this server."
+
+#: apps/infrastructure/node_maintenance_policy.py:41
+msgid "Maintenance must end after it starts."
+msgstr "Maintenance must end after it starts."
+
+#: apps/infrastructure/node_maintenance_policy.py:38
+msgid "Maintenance times must include a timezone."
+msgstr "Maintenance times must include a timezone."
+
+#: apps/infrastructure/node_maintenance_service.py:237
+msgid "No claimed execution owns this window."
+msgstr "No claimed execution owns this window."
+
+#: apps/infrastructure/node_maintenance_service.py:276
+msgid "Only an unclaimed scheduled window can be moved or cancelled."
+msgstr "Only an unclaimed scheduled window can be moved or cancelled."
+
+#: apps/infrastructure/node_maintenance_service.py:281
+msgid "Provide the complete replacement interval and configured policy."
+msgstr "Provide the complete replacement interval and configured policy."
+
+#: apps/infrastructure/node_maintenance_service.py:265
+msgid "Record why this maintenance change is necessary."
+msgstr "Record why this maintenance change is necessary."
+
+#: apps/infrastructure/node_maintenance_service.py:195
+msgid "Start only an unclaimed window within its permitted latest-start time."
+msgstr ""
+"Start only an unclaimed window within its permitted latest-start time."
+
+#: apps/infrastructure/node_maintenance_models.py:32
+msgid "Taking longer than planned"
+msgstr "Taking longer than planned"
+
+#: apps/infrastructure/node_maintenance_execution.py:611
+msgid "The approved maintenance tasks finished successfully."
+msgstr "The approved maintenance tasks finished successfully."
+
+#: apps/infrastructure/node_maintenance_service.py:179
+msgid "The current execution no longer matches this window revision."
+msgstr "The current execution no longer matches this window revision."
+
+#: apps/infrastructure/node_maintenance_gate.py:57
+msgid ""
+"The deployment's server binding keeps changing; reload before retrying."
+msgstr ""
+"The deployment's server binding keeps changing; reload before retrying."
+
+#: apps/infrastructure/node_maintenance_policy.py:53
+msgid ""
+"The entire window must fit one of this server's permitted maintenance "
+"intervals."
+msgstr ""
+"The entire window must fit one of this server's permitted maintenance "
+"intervals."
+
+#: apps/infrastructure/node_maintenance_service.py:171
+msgid ""
+"The maintenance execution is missing. Reconcile it before recording an "
+"outcome."
+msgstr ""
+"The maintenance execution is missing. Reconcile it before recording an "
+"outcome."
+
+#: apps/infrastructure/node_maintenance_service.py:159
+msgid "The maintenance server binding changed. Reload before continuing."
+msgstr "The maintenance server binding changed. Reload before continuing."
+
+#: apps/infrastructure/node_maintenance_service.py:152
+msgid "The original server is no longer registered."
+msgstr "The original server is no longer registered."
+
+#: apps/infrastructure/node_maintenance_models.py:71
+msgid "The permitted interval must have a nonzero duration."
+msgstr "The permitted interval must have a nonzero duration."
+
+#: apps/infrastructure/node_maintenance_execution.py:599
+msgid "The planned work did not run. An operator will review the next steps."
+msgstr "The planned work did not run. An operator will review the next steps."
+
+#: apps/infrastructure/node_maintenance_execution.py:609
+msgid ""
+"The provider reports the server running and its management connection "
+"responds."
+msgstr ""
+"The provider reports the server running and its management connection "
+"responds."
+
+#: apps/infrastructure/node_maintenance_execution.py:689
+msgid ""
+"The recorded deployment no longer exists. Manual resource review is "
+"required."
+msgstr ""
+"The recorded deployment no longer exists. Manual resource review is "
+"required."
+
+#: apps/infrastructure/node_maintenance_execution.py:709
+msgid ""
+"The recorded resource binding changed. Do not release this hold without "
+"manual review."
+msgstr ""
+"The recorded resource binding changed. Do not release this hold without "
+"manual review."
+
+
+#: apps/infrastructure/node_maintenance_execution.py:696
+msgid "This execution changed. Reload and review its current phase."
+msgstr "This execution changed. Reload and review its current phase."
+
+#: apps/infrastructure/node_maintenance_policy.py:28
+msgid ""
+"This local time does not exist because the clocks change. Choose another "
+"time."
+msgstr ""
+"This local time does not exist because the clocks change. Choose another "
+"time."
+
+#: apps/infrastructure/node_maintenance_policy.py:30
+msgid ""
+"This local time occurs twice. Include an explicit UTC offset to choose which"
+" one."
+msgstr ""
+"This local time occurs twice. Include an explicit UTC offset to choose which"
+" one."
+
+#: apps/infrastructure/node_maintenance_service.py:269
+msgid "This window changed. Reload and review the current revision."
+msgstr "This window changed. Reload and review the current revision."
+
+
+#: apps/infrastructure/node_maintenance_execution.py:686
+msgid ""
+"Use the linked maintenance window's outcome controls for this execution."
+msgstr ""
+"Use the linked maintenance window's outcome controls for this execution."
+
+#: apps/infrastructure/node_maintenance_gate.py:90
+msgid ""
+"A reviewed hardening operation owns this server. Reconcile its outcome "
+"before other work."
+msgstr ""
+"A reviewed hardening operation owns this server. Reconcile its outcome "
+"before other work."
+
+#: apps/infrastructure/node_maintenance_forms.py:59
+msgid ""
+"New policies suggest 15 minutes; review and save the permitted delay. Zero "
+"permits no late start; delayed work is recorded as not run."
+msgstr ""
+"New policies suggest 15 minutes; review and save the permitted delay. Zero "
+"permits no late start; delayed work is recorded as not run."
+
+#: apps/common/management/commands/setup_scheduled_tasks.py:164
+msgid ""
+"Node maintenance: dispatch, overdue windows and safe unissued-claim recovery"
+" every minute."
+msgstr ""
+"Node maintenance: dispatch, overdue windows and safe unissued-claim recovery"
+" every minute."
+
+#: apps/infrastructure/node_maintenance_service.py:193
+msgid ""
+"This automatic operation is unsupported. Choose a supported restart or a "
+"manual panel-update window."
+msgstr ""
+"This automatic operation is unsupported. Choose a supported restart or a "
+"manual panel-update window."
+
+#: apps/infrastructure/node_maintenance_service.py:108
+msgid ""
+"Automatic hardening is not supported by maintenance windows. Use the "
+"separate reviewed hardening workflow; panel updates remain manual."
+msgstr ""
+"Automatic hardening is not supported by maintenance windows. Use the "
+"separate reviewed hardening workflow; panel updates remain manual."

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Customer maintenance windows (#780): staff can schedule work in each node's permitted calendar, record manual outcomes and run supported managed adapters. Customers see current service-scoped notices and 24-hour outcomes in the Portal; Romanian/English emails announce, correct and report qualifying outcomes. Execution ownership and operator reconciliation fence concurrent operations, stale queued work and uncertain provider results. See [the operator runbook](docs/deployment/NODE_MAINTENANCE.md).
+
 - Measured hosting usage (#782): hourly owner-scoped file/database and web response-byte observations, source times, independent stale/unknown states, disk breakdown and history in the portal. Usage remains observational. `provisioning.usage_sync_enabled` is on by default: new nodes install the collector during deployment, and nodes deployed earlier need the usage playbook. Legacy usage writers and the Virtualmin billing collector are retired; see ADR-0068 for rollout and period semantics.
 
 - **Customer view (ADR-0065).** Administrators and support staff can open the customer portal as one member of an active customer, read-only, for at most 30 minutes, from "Sign in as customer" on the member card. Staff give a reason first; every view, page read and refusal is in the audit trail. The customer sees nothing. Turn it off with `CUSTOMER_VIEW_ENABLED=false` on both services.

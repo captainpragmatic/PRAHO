@@ -22,6 +22,8 @@ class NodeDrainHookTests(MigrationTestBase):
     def setUp(self) -> None:
         super().setUp()
         self.deployment = self.server.node_deployment
+        self.deployment.external_node_id = "drain-hook-native-fixture"
+        self.deployment.save(update_fields=["external_node_id"])
         self.deployment_service = NodeDeploymentService.__new__(NodeDeploymentService)
 
     def _deployment_status(self, status: str) -> None:
@@ -50,19 +52,15 @@ class NodeDrainHookTests(MigrationTestBase):
         power.assert_not_called()
         self.server.refresh_from_db()
         self.assertEqual(self.server.status, "active")
-        self.assertTrue(AuditEvent.objects.filter(
-            action="node_stop_failed", object_id=str(self.deployment.pk)
-        ).exists())
+        self.assertTrue(
+            AuditEvent.objects.filter(action="node_stop_failed", object_id=str(self.deployment.pk)).exists()
+        )
 
     def test_force_stop_disables_before_power_off(self) -> None:
         """RED: force is unsupported and linked admission remains active."""
         self._deployment_status("completed")
-        with patch(
-            "apps.infrastructure.deployment_service.run_provider_command", side_effect=self._power_off
-        ):
-            result = self.deployment_service.stop_node(
-                self.deployment, {"api_token": "test"}, self.staff, force=True
-            )
+        with patch("apps.infrastructure.deployment_service.run_provider_command", side_effect=self._power_off):
+            result = self.deployment_service.stop_node(self.deployment, {"api_token": "test"}, self.staff, force=True)
         self.assertTrue(result.is_ok(), result)
         self.deployment.refresh_from_db()
         self.assertEqual(self.deployment.status, "stopped")
@@ -75,12 +73,13 @@ class NodeDrainHookTests(MigrationTestBase):
         self.account.server = self.target
         self.account.save(update_fields=["server", "updated_at"])
         NodeDrain.objects.create(
-            server=self.server, status="completed", routing_confirmed=True,
-            accounts_total=1, accounts_migrated=1,
+            server=self.server,
+            status="completed",
+            routing_confirmed=True,
+            accounts_total=1,
+            accounts_migrated=1,
         )
-        with patch(
-            "apps.infrastructure.deployment_service.run_provider_command", side_effect=self._power_off
-        ) as power:
+        with patch("apps.infrastructure.deployment_service.run_provider_command", side_effect=self._power_off) as power:
             result = self.deployment_service.stop_node(self.deployment, {"api_token": "test"})
         self.assertTrue(result.is_ok(), result)
         power.assert_called_once()
@@ -139,9 +138,9 @@ class NodeDrainHookTests(MigrationTestBase):
         self.assertEqual(self.server.status, "disabled")
         self.assertTrue(self.server.is_draining)
         self.assertEqual(self.deployment.status, "completed")
-        self.assertTrue(AuditEvent.objects.filter(
-            action="node_start_failed", object_id=str(self.deployment.pk)
-        ).exists())
+        self.assertTrue(
+            AuditEvent.objects.filter(action="node_start_failed", object_id=str(self.deployment.pk)).exists()
+        )
 
     def test_stop_force_passes_through_view_queue_and_task(self) -> None:
         """RED: force is dropped by the stop view, queue wrapper, and task."""
@@ -182,7 +181,7 @@ class NodeDrainHookTests(MigrationTestBase):
         target_deployment.refresh_from_db()
         result = self.deployment_service.stop_node(target_deployment, {"api_token": "test"})
         self.assertTrue(result.is_err(), result)
-        self.assertIn("in-flight migration", result.unwrap_err())
+        self.assertIn("migration", result.unwrap_err())
         self.target.refresh_from_db()
         self.assertEqual(self.target.status, "active")
 

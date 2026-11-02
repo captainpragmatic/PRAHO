@@ -1420,6 +1420,11 @@ test-virtualmin-drift:
 	$(MAKE) --no-print-directory virtualmin-lab-up; \
 	RECORD=none $(MAKE) --no-print-directory test-virtualmin-contract
 
+.PHONY: test-virtualmin-maintenance-portal
+test-virtualmin-maintenance-portal:
+	@echo "🧪 [Maintenance lab] Real Platform/Portal HTTP, scoped worker and captured mail on owned fixture databases"
+	@VENV_DIR=$(VENV_DIR) bash tests/virtualmin_lab/run_maintenance_portal.sh $(E2E_ARGS)
+
 test-virtualmin-e2e:
 	@echo "🧪 [Virtualmin lab] Browser smoke tests: staff pages against the lab, then the nodes (needs make virtualmin-lab-up; separate from make test-e2e)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

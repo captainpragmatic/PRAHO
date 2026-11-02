@@ -15,7 +15,7 @@ from apps.common.types import Err, Ok, Result, Retriability
 
 from .virtualmin_create_retry_policy import create_retry_policy
 from .virtualmin_migration_models import account_has_active_operation
-from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
+from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 
 if TYPE_CHECKING:
     from .virtualmin_create_retry_policy import CreateRetryPolicy
@@ -167,12 +167,13 @@ def retire_closed_off_claim(job: VirtualminProvisioningJob, *, claim: OffClaim |
     return Ok(True)
 
 
-def queue_revoked_create_off(
+def queue_revoked_create_off(  # noqa: PLR0911  # Atomic identity, policy, maintenance and duplicate admission refusals.
     account_id: UUID, source_id: UUID, *, native_outcome: Literal["created", "adopted"]
 ) -> Result[str, str]:
     """Publish at most one normal nonce-claimed OFF job; never run native I/O here."""
     with transaction.atomic():
         account = VirtualminAccount.objects.select_for_update().get(pk=account_id)
+        VirtualminServer.objects.select_for_update(of=("self",)).get(pk=account.server_id)
         source = VirtualminProvisioningJob.objects.select_for_update().get(pk=source_id)
         existing = bound_receipt(source, account)
         if existing is not None and "off_job_id" in existing:
@@ -196,6 +197,23 @@ def queue_revoked_create_off(
         if not policy.revoked:
             source.mark_attention("Creation provenance needs review; no automatic OFF authority was granted")
             return Err("Unknown creation provenance is not automatic OFF authority")
+        from apps.infrastructure.node_maintenance_gate import maintenance_refusal  # noqa: PLC0415  # Shared admission
+
+        if refusal := maintenance_refusal(account.server_id):
+            source.mark_attention(
+                f"Created resource needs operator review; OFF was not issued: {refusal}",
+                {
+                    **source.result,
+                    "creation_review": {
+                        "domain": account.domain,
+                        "owner": account.virtualmin_username,
+                        "server_id": str(account.server_id),
+                        "native_outcome": native_outcome,
+                        "phase": "off_not_issued_maintenance",
+                    },
+                },
+            )
+            return Err(refusal)
         receipt: dict[str, object] = {
             "version": 1,
             "source_job_id": str(source.pk),

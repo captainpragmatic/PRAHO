@@ -24,6 +24,8 @@ _POST = frozenset({"POST"})
 _GET = frozenset({"GET", "HEAD"})
 
 READS: dict[str, frozenset[str]] = {
+    "api:maintenance_summary": _POST,
+    "api:service_maintenance": _POST,
     "api:localisation": _POST,
     "api:legal_document": _POST,
     "api:user_info": _GET,

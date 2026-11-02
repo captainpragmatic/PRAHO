@@ -12,44 +12,36 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from apps.common.types import Ok
+from apps.infrastructure.models import NodeDeployment
 from apps.infrastructure.registration_service import NodeRegistrationService
 from apps.provisioning.virtualmin_forms import VirtualminServerForm
+from apps.provisioning.virtualmin_models import VirtualminServer
+from tests.infrastructure.test_deployment_service_pipeline import _create_deployment
 
 
-def _deployment(ipv4: str, ipv6: str) -> MagicMock:
-    deployment = MagicMock()
-    deployment.status = "registering"
+def _deployment(ipv4: str, ipv6: str) -> NodeDeployment:
+    deployment = _create_deployment("completed")
     deployment.ipv4_address = ipv4
     deployment.ipv6_address = ipv6
-    deployment.virtualmin_server = None
-    deployment.hostname = "prd-sha-tst-de-tst1-001"
-    deployment.fqdn = "prd-sha-tst-de-tst1-001.example.com"
-    deployment.id = 1
-    deployment.node_size.max_domains = 50
-    deployment.node_size.max_bandwidth_gb = 1000
+    deployment.save(update_fields=["ipv4_address", "ipv6_address"])
     return deployment
 
 
-@patch("apps.provisioning.virtualmin_models.VirtualminServer")
 @patch("apps.infrastructure.validation_service.get_validation_service")
 class RegistrationAddressTests(TestCase):
-    def _register(self, validation: MagicMock, model: MagicMock, ipv4: str, ipv6: str) -> dict[str, object]:
+    def _register(self, validation: MagicMock, ipv4: str, ipv6: str) -> VirtualminServer:
         validation.return_value.get_webmin_certificate_fingerprint.return_value = Ok("ab" * 32)
-        model.objects.filter.return_value.exists.return_value = False
-        model.objects.create.return_value = MagicMock(id=7)
         result = NodeRegistrationService().register_node(_deployment(ipv4, ipv6))
         self.assertTrue(result.is_ok(), result.unwrap_err() if result.is_err() else "")
-        return dict(model.objects.create.call_args.kwargs)
+        return result.unwrap()
 
-    def test_public_addresses_are_stored_normalised(self, validation: MagicMock, model: MagicMock) -> None:
-        created = self._register(validation, model, "95.217.0.10", "2a01:04F8:0000::0001")
-        self.assertEqual((created["ipv4_address"], created["ipv6_address"]), ("95.217.0.10", "2a01:4f8::1"))
+    def test_public_addresses_are_stored_normalised(self, validation: MagicMock) -> None:
+        created = self._register(validation, "95.217.0.10", "2a01:04F8:0000::0001")
+        self.assertEqual((created.ipv4_address, created.ipv6_address), ("95.217.0.10", "2a01:4f8::1"))
 
-    def test_a_private_address_is_left_empty_and_registration_goes_on(
-        self, validation: MagicMock, model: MagicMock
-    ) -> None:
-        created = self._register(validation, model, "10.20.0.5", "")
-        self.assertEqual((created["ipv4_address"], created["ipv6_address"]), (None, None))
+    def test_a_private_address_is_left_empty_and_registration_goes_on(self, validation: MagicMock) -> None:
+        created = self._register(validation, "10.20.0.5", "")
+        self.assertEqual((created.ipv4_address, created.ipv6_address), (None, None))
 
 
 class ServerFormAddressTests(TestCase):

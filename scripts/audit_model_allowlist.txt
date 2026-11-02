@@ -110,6 +110,11 @@ infrastructure.DriftSnapshot             # cloud snapshot tracking (operational/
 infrastructure.NodeDeploymentCostRecord  # append-only cost records (operational data)
 infrastructure.NodeDeploymentLog         # IS the deployment audit trail (append-only log)
 infrastructure.NodeServerLifetime        # derived cost windows, written only by audited lifecycle operations
+infrastructure.NodeMaintenancePolicy     # explicit node_window_policy events carry operator and revision; generic signals would duplicate those decisions
+infrastructure.NodeMaintenanceWindow     # create/start/move/cancel/finish/overrun services emit semantic node_window_* events with actor, reason and revision
+infrastructure.NodeMaintenanceExecution  # durable operation-ownership journal; existing audited native lifecycle and explicit node_operation_reconciled record operator actions
+infrastructure.NodeMaintenanceAudience   # derived planned/executed/not-run service membership under an audited window; independent of notification eligibility
+infrastructure.NodeMaintenanceDelivery   # derived deduplicated notice intent; existing EmailLog owns transport audit and retry, without copying payloads into model-change events
 infrastructure.PanelType        # static panel type definitions (reference data, rarely changes)
 notifications.EmailCampaign     # campaign management (future: will get signals when campaign service is built)
 notifications.UnsubscribeToken  # short-lived HMAC token for email unsubscribe (no business state, rotated frequently)

@@ -138,8 +138,10 @@
                             hx-include="{% if is_receipt_off %}#job-resolution-note,#receipt-off-review{% else %}#job-resolution-note{% endif %}"
                             {% if is_receipt_off %}
                             hx-confirm="{% trans 'Confirm the commands have stopped and the exact resource identity was checked. Platform will read native ownership and disabled state, record your proof and release this operation if verified. Normal current service policy can resume hosting after release.' %}"
-                            {% elif is_creation_review %}
+                            {% elif is_creation_review and creation_review_off_id %}
                             hx-confirm="{% trans 'Acknowledge the verified creation recovery history. The linked disable operation must be settled first; this acknowledgement does not change the service or issue a native command.' %}"
+                            {% elif is_creation_review %}
+                            hx-confirm="{% trans 'This is a creation review. Acknowledging it records your review; it does not change the service or run a native command.' %}"
                             {% elif half_restore_safety_backup_id %}
                             hx-confirm="{% blocktrans with backup_id=half_restore_safety_backup_id %}The restore had already started, so the domain may be half-restored. Confirming releases the barrier but the domain stays disabled, and nothing enables it again until you re-enable it as it is or restore the safety backup {{ backup_id }}. Continue?{% endblocktrans %}"
                             {% else %}
