@@ -60,3 +60,16 @@ return final_cleanup.get(pk=pk)
 
     def test_queryset_factory_chains_are_discovered(self) -> None:
         self.assertEqual(lock_join_lines('_eligible().select_for_update().select_related("server").first()'), [1])
+
+    def test_method_argument_materialization_and_negated_truthiness(self) -> None:
+        cases = [
+            'rows.extend(M.objects.select_for_update().select_related("customer"))',
+            'if not M.objects.select_for_update().select_related("customer"):\n    pass',
+            'rows = M.objects.select_for_update().select_related("customer")\nif not rows:\n    pass\nrows = None',
+            'if M.objects.select_for_update().select_related("customer") and enabled:\n    pass',
+            'assert M.objects.select_for_update().select_related("customer")',
+            'all([M.objects.select_for_update().select_related("customer")])',
+        ]
+        for source in cases:
+            with self.subTest(source=source):
+                self.assertEqual(lock_join_lines(source), [1])

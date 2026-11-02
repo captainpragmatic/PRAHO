@@ -696,9 +696,8 @@ class RecurringBillingOrchestrator:
                     continue
 
                 with transaction.atomic():
-                    cycles = list(
-                        BillingCycle.objects.select_for_update(of=("self",))
-                        .filter(
+                    cycles = lock_many_and_load(
+                        BillingCycle.objects.filter(
                             proforma_id=proforma_id,
                             # NOT past_due: an early failure webhook may have already converged
                             # this attempt — overwriting its verdict back to "processing" hides
@@ -766,9 +765,8 @@ class RecurringBillingOrchestrator:
                 .filter(id__in=subscription_ids, status="active")
                 .order_by("id")
             }
-            cycles = list(
-                BillingCycle.objects.select_for_update(of=("self",))
-                .filter(
+            cycles = lock_many_and_load(
+                BillingCycle.objects.filter(
                     id__in=overdue_cycle_ids,
                     collection_status__in=["prepared", "past_due"],
                     subscription__status="active",

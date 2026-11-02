@@ -38,12 +38,20 @@ def lock_join_lines(source: str) -> list[int]:  # noqa: C901, PLR0915  # AST dis
             return expression(node.body, env) | expression(node.orelse, env)
         if isinstance(node, ast.Subscript):
             return expression(node.value, env)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            states = expression(node.operand, env)
+            record(states)
+            return states
+        if isinstance(node, ast.BoolOp):
+            states = frozenset().union(*(expression(value, env) for value in node.values))
+            record(states)
+            return states
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Attribute):
                 states = expression(node.func.value, env)
                 method = node.func.attr
                 for arg in [*node.args, *(kw.value for kw in node.keywords)]:
-                    expression(arg, env)
+                    record(expression(arg, env))
                 if method == "select_for_update":
                     return frozenset(replace(state, lock=node.lineno) for state in states)
                 if method == "select_related":
@@ -73,8 +81,7 @@ def lock_join_lines(source: str) -> list[int]:  # noqa: C901, PLR0915  # AST dis
                 expression(node.elt, local)
             return frozenset()
         if node is not None:
-            for child in ast.iter_child_nodes(node):
-                expression(child, env)
+            return frozenset().union(*(expression(child, env) for child in ast.iter_child_nodes(node)))
         return frozenset()
 
     def merge(*branches: _Environment) -> _Environment:
@@ -108,6 +115,8 @@ def lock_join_lines(source: str) -> list[int]:  # noqa: C901, PLR0915  # AST dis
                 env = block(node.finalbody, block(node.orelse, env))
             elif isinstance(node, (ast.Expr, ast.Return)):
                 record(expression(node.value, env))
+            elif isinstance(node, ast.Assert):
+                record(expression(node.test, env))
             else:
                 expression(node, env)
         return env

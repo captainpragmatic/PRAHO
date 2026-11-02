@@ -97,8 +97,8 @@ def converge_recurring_payment_failure(payment: Payment) -> int:
         .filter(id__in=BillingCycle.objects.filter(cycle_filter).values("subscription_id"))
         .order_by("id")
     )
-    cycles = list(
-        BillingCycle.objects.select_for_update(of=("self",)).filter(cycle_filter).order_by("subscription_id", "id")
+    cycles = lock_many_and_load(
+        BillingCycle.objects.filter(cycle_filter).order_by("subscription_id", "id")
     )
     if not cycles:
         return 0
@@ -443,14 +443,12 @@ class PaymentSuccessService:
         if invoice.status != "paid":
             return f"Invoice state mismatch: fully settled invoice {invoice.number} is '{invoice.status}'"
 
-        cycles = list(
-            BillingCycle.objects.select_for_update(of=("self",))
-            .filter(invoice_id=invoice.id)
+        cycles = lock_many_and_load(
+            BillingCycle.objects.filter(invoice_id=invoice.id)
             .order_by("subscription_id", "period_start", "id")
         )
-        usage_cycles = list(
-            BillingCycle.objects.select_for_update(of=("self",))
-            .filter(usage_invoice_id=invoice.id)
+        usage_cycles = lock_many_and_load(
+            BillingCycle.objects.filter(usage_invoice_id=invoice.id)
             .order_by("subscription_id", "period_start", "id")
         )
         if not cycles and not usage_cycles:
@@ -459,9 +457,12 @@ class PaymentSuccessService:
         subscription_ids = sorted({cycle.subscription_id for cycle in cycles}, key=str)
         subscriptions = {
             subscription.id: subscription
-            for subscription in Subscription.objects.select_for_update(of=("self",))
-            .filter(id__in=subscription_ids)
-            .order_by("id")
+            for subscription in lock_many_and_load(
+                Subscription.objects.select_related("saved_payment_method", "payment_authorization__payment_method")
+                .defer("saved_payment_method__bank_details", "payment_authorization__payment_method__bank_details")
+                .filter(id__in=subscription_ids)
+                .order_by("id")
+            )
         }
 
         service_ids = sorted(

@@ -74,14 +74,14 @@ in place. Mechanical normalization does not assert a newly reachable business ra
 | Original/current location | Consumer and competing writer | Old -> new targets/order | Requirement and disposition | Proof |
 |---|---|---|---|---|
 | billing/recurring_billing.py:prepare_due_proformas | Grouping, proforma buyer, mandate validation; auto-pay enrollment, billing edit, service opt-out | Subscription -> Subscription PK order | Already fixed lock/load split extracted; recheck all joined eligibility | renewal subscription concurrency; shared FK/eligibility tests |
-| billing/payment_convergence.py:_converge_invoice | Subscription schedule/save validation; auto-pay enrollment | Subscription -> Subscription | Remove unused mandate joins; public Customer/Subscription boundary already protects mandate changes | payment settlement and recurring collection concurrency |
+| billing/payment_convergence.py:_converge_invoice | Subscription save()/clean() validates mandate ownership; auto-pay enrollment | Subscription -> Subscription PK order | Fresh deferred batch load keeps indirect validation reads batched; public Customer/Subscription boundary already protects mandate changes | recurring lock batches; payment settlement and recurring collection concurrency |
 | billing/payment_convergence.py:converge_gateway_success | Gateway facts and document linkage; recurring reservation/convergence | Payment -> Payment | Fresh currency/document data; retain gateway-fact validation | subscription invoice payments; payment settlement |
 | billing/payment_convergence.py:recover_unlinked_recurring_attempt (gift) | Gift funding validation; gift convergence | Payment + Currency -> Payment | Remove shared Currency protection; gift path has its own public convergence boundary | gift funding tests; shared-reference lock test |
 | billing/payment_convergence.py:recover_unlinked_recurring_attempt (recurring) | Attempt ownership and facts; competing early gateway events | Payment -> Payment PK order | Fresh linkage; retain ambiguity refusal, loading full eligible batch before bounded check | subscription invoice payments |
 | billing/payment_convergence.py:converge_local_paid_document | Paid state; document settlement | Payment -> Payment | Existing Customer/document boundary retained | payment settlement |
 | billing/payment_service.py:_bind_retry_result_before_gateway | Retry document matching; retry/convergence workers | Retry -> Retry | Optional unique claim, fresh Payment; gateway I/O remains outside | subscription invoice payments |
 | billing/recurring_submission_service.py:record_recurring_submission_replay_started | Replay Stripe payload; reconciliation claim writer | Submission -> Submission | Fresh Payment/documents; lease/token/state predicate rechecked | recurring submission/reconciliation tests |
-| billing/recurring_billing.py:collect_due_proformas | Saved Stripe method; mandate revocation | Proforma -> Cycle -> Proforma -> Cycle PK order | Fresh method hint; PaymentService revalidates consent before durable claim | recurring collection concurrency |
+| billing/recurring_billing.py:collect_due_proformas | Saved Stripe method; mandate revocation | Proforma -> Cycle PK order in both phases | Fresh method hint; PaymentService revalidates consent before durable claim | recurring lock batches; recurring collection concurrency |
 | billing/recurring_authorization_service.py:set_subscription_auto_payment | Consent and method ownership; authorization completion/withdrawal | Customer -> joined Authorization/Method -> Subscription becomes Customer -> Method -> Authorization -> Subscription | Stability through COMMIT; preliminary FK hint rechecked | authorization tests; renewal/collection concurrency |
 | billing/usage_invoice_service.py:generate_invoice_from_cycle | Buyer, tax and credit; signed billing edit | Cycle -> Customer retained | Use returned locked Customer before identity/tax; rating stays before Customer | public billing edit/usage invoice wait regression |
 | billing/currency_transitions.py:prepare_currency_offer | Notice recipient, catalog offer; customer edit | Subscription -> Subscription | Fresh notice inputs, frozen terms retained | currency transition tests |
@@ -126,3 +126,13 @@ PostgreSQL workers assert READ COMMITTED and observe `pg_blocking_pids()` for th
 exact writer and intended table/statement before allowing COMMIT. Completion
 requires focused, gated and full-suite checks, lint/types, and revert proofs for
 new behavioral fixes. No migrations or isolation-level changes are included.
+
+Review follow-up: Subscription.save()/clean() consumes the saved method and
+authorization indirectly. Its public entitlement regression detects four
+standalone relationship reads for two subscriptions before the correction and
+one deferred joined batch afterward. Both collection phases, overlapping
+settlement/failure Cycle sets and overdue marking acquire Cycle locks in PK
+order and preserve their original processing order on reload. A public collection
+SQL test verifies both phases; the generic helper tests prove opposite output
+orders still acquire locks consistently. Scanner canaries also cover method
+argument materialization, negation, compound predicates and assertions.
