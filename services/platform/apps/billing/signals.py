@@ -1669,7 +1669,7 @@ def _invoice_email_context(invoice: Invoice) -> dict[str, object]:
     return {
         "invoice": invoice,
         "customer": invoice.customer,
-        "customer_name": invoice.customer.get_display_name(),
+        "customer_name": invoice.bill_to_name,
         "invoice_number": invoice.display_number,
         "invoice_date": timezone.localtime(invoice.issued_at or invoice.created_at).strftime("%Y-%m-%d"),
         "total_amount": str(invoice.total),
