@@ -273,7 +273,7 @@ def _handle_order_cancellation(order: Order, old_status: str) -> None:  # noqa: 
             service_details = []
             suspended_service_details = []
             for item in (
-                order.items.select_for_update(of=("self",)).select_related("service").filter(service__isnull=False)
+                order.items.select_for_update(of=("self",)).filter(service__isnull=False)
             ):
                 if item.service_id is None:
                     continue  # Narrowing: filter guarantees non-null but type annotation is Service | None
@@ -956,7 +956,7 @@ def _handle_invoice_refunded(sender: Any, invoice: Any, refund_type: str, **kwar
                 lock_recurring_collection_customer(order.customer_id)
 
                 items_with_services = (
-                    order.items.select_for_update(of=("self",)).filter(service__isnull=False).select_related("service")
+                    order.items.select_for_update(of=("self",)).filter(service__isnull=False)
                 )
 
                 for item in items_with_services:

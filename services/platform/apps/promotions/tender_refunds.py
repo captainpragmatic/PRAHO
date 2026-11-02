@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.billing.gateways.base import GATEWAY_PAYMENT_METHODS, PaymentGatewayFactory
+from apps.common.row_locks import lock_one_and_load
 
 from .audit import audit_ledger_transition
 from .gift_cards import _operation_key
@@ -25,12 +26,23 @@ from .pricing import allocate
 
 if TYPE_CHECKING:
     from apps.billing.invoice_models import Invoice
+    from apps.billing.payment_models import Payment
     from apps.billing.refund_models import Refund
     from apps.billing.refund_service import RefundData, RefundGatewayFacts, RefundResult
     from apps.common.types import Result
     from apps.users.models import User
 
 RESERVING = ("pending", "processing", "approved", "completed")
+
+
+def _lock_leg(snapshot: TenderRefundLeg, invoice: Invoice, payment: Payment) -> TenderRefundLeg:
+    """Document -> Payment -> Command -> Leg; hints cannot authorize a changed instruction."""
+    command = TenderRefundCommand.objects.select_for_update(of=("self",)).get(pk=snapshot.command_id)
+    leg = TenderRefundLeg.objects.select_for_update(of=("self",)).get(pk=snapshot.pk)
+    if leg.command_id != command.pk or command.invoice_id != invoice.pk or leg.payment_id != payment.pk:
+        raise ValidationError(_("The refund instruction changed; review before retrying."))
+    leg.command = command
+    return leg
 
 
 def _lock_document(invoice_id: int | None) -> Invoice:
@@ -193,7 +205,7 @@ def _settle_leg(leg_id: int, gateway_status: str, gateway_id: str = "") -> None:
     with transaction.atomic():
         invoice = _lock_document(snapshot.command.invoice_id)
         payment = Payment.objects.select_for_update().get(pk=snapshot.payment_id)
-        leg = TenderRefundLeg.objects.select_for_update().select_related("command").get(pk=leg_id)
+        leg = _lock_leg(snapshot, invoice, payment)
         if leg.refund_id is None:
             raise ValidationError(_("The refund has no durable payment instruction."))
         refund = Refund.objects.select_for_update().get(pk=leg.refund_id)
@@ -218,7 +230,7 @@ def _submit_leg(leg_id: int) -> None:
     with transaction.atomic(durable=True):
         invoice = _lock_document(snapshot.command.invoice_id)
         payment = Payment.objects.select_for_update().get(pk=snapshot.payment_id)
-        leg = TenderRefundLeg.objects.select_for_update(of=("self",)).select_related("command").get(pk=leg_id)
+        leg = _lock_leg(snapshot, invoice, payment)
         if leg.status == "completed":
             return
         refund = Refund.objects.select_for_update().get(pk=leg.refund_id) if leg.refund_id else None
@@ -391,7 +403,7 @@ def converge_tender_refund(facts: RefundGatewayFacts) -> Result[Refund | None, s
             if leg.refund_id is None:
                 raise ValidationError(_("The refund has no durable payment instruction."))
             refund = (
-                Refund.objects.select_for_update(of=("self",)).select_related("payment__currency").get(pk=leg.refund_id)
+                lock_one_and_load(Refund.objects.select_related("payment__currency").filter(pk=leg.refund_id))
             )
             if (
                 refund.amount_cents != facts["amount_cents"]

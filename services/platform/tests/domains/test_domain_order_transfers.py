@@ -88,7 +88,12 @@ class PaidTransferTests(TransferLineFixture, TransactionTestCase):
         locks: list[type[Model]] = []
 
         def observe(queryset: QuerySet[Model]) -> None:
-            if queryset.query.select_for_update and queryset.model in (Order, OrderItem, DomainOrderItem, Domain, DomainOperation):
+            # list() can ask for both iteration and length; only the first
+            # fetch of a clone can execute its locking statement.
+            if (
+                queryset._result_cache is None and queryset.query.select_for_update
+                and queryset.model in (Order, OrderItem, DomainOrderItem, Domain, DomainOperation)
+            ):
                 locks.append(queryset.model)
             original_fetch(queryset)
 

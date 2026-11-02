@@ -20,8 +20,8 @@ from apps.common.types import Err, Ok, Result
 from .account_hostname_config import bridge_window_hours
 from .account_hostname_models import AccountHostname
 from .virtualmin_gateway import listing_attribute
-from .virtualmin_migration_models import MigrationBridge
-from .virtualmin_models import VirtualminAccount
+from .virtualmin_migration_models import MigrationBridge, VirtualminMigration
+from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 logger = logging.getLogger(__name__)
 # Twelve bounded DNS probes, three SSH/playbook steps and TTL restoration can
@@ -129,15 +129,60 @@ def _guard(bridge_id: UUID, token: str) -> None:
         bridge.save(update_fields=["evidence", "updated_at"])
 
 
-def _claim(migration_id: str, token: str) -> tuple[MigrationBridge | None, str]:
+def _claim(migration_id: str, token: str) -> tuple[MigrationBridge | None, str]:  # noqa: PLR0911  # Explicit admission, terminal and lease outcomes.
+    identifier = UUID(migration_id)
+    hint = MigrationBridge.objects.values(
+        "migration__status",
+        "migration__account_id",
+        "migration__source_server_id",
+        "migration__target_server_id",
+        "source_server_id",
+        "target_server_id",
+    ).get(migration_id=identifier)
+    if hint["migration__status"] != "completed":
+        # Terminal bridge results win even for an unfinished migration. Do not
+        # take unrelated admission locks on this waiting-only path.
+        with transaction.atomic():
+            bridge = MigrationBridge.objects.select_for_update(of=("self",)).get(migration_id=identifier)
+            return None, bridge.status if bridge.status in {"torn_down", "failed"} else "waiting"
+
     with transaction.atomic():
-        bridge = (
-            MigrationBridge.objects.select_for_update()
-            .select_related("migration", "target_server")
-            .get(migration_id=UUID(migration_id))
+        # Match completed-migration rerun admission before touching Migration or
+        # Bridge. Every ID from the preliminary read is only a lock-routing hint.
+        account = VirtualminAccount.objects.select_for_update(of=("self",), no_key=True).get(
+            pk=hint["migration__account_id"]
         )
+        server_ids = {hint["migration__source_server_id"], hint["migration__target_server_id"]}
+        servers = {
+            server.pk: server
+            for server in VirtualminServer.objects.select_for_update(of=("self",))
+            .filter(pk__in=server_ids).order_by("pk")
+        }
+        migration = VirtualminMigration.objects.select_for_update(of=("self",)).get(pk=identifier)
+        bridge = MigrationBridge.objects.select_for_update(of=("self",)).get(migration_id=identifier)
+        # Completed cleanup remains replayable after a later account migration.
         if bridge.status in {"torn_down", "failed"}:
             return None, bridge.status
+        if (
+            len(server_ids) != len(servers) or hint["migration__source_server_id"] == hint["migration__target_server_id"]
+            or migration.account_id != account.pk
+            or migration.source_server_id != hint["migration__source_server_id"]
+            or migration.target_server_id != hint["migration__target_server_id"]
+            or bridge.source_server_id != migration.source_server_id
+            or bridge.target_server_id != migration.target_server_id
+            or bridge.source_server_id != hint["source_server_id"] or bridge.target_server_id != hint["target_server_id"]
+            or account.server_id != bridge.target_server_id
+        ):
+            # Roll back this savepoint too when the caller owns an outer atomic
+            # block, releasing all hinted locks before returning waiting.
+            transaction.set_rollback(True)
+            return None, "waiting"
+        migration.account = account
+        migration.source_server = servers[migration.source_server_id]
+        migration.target_server = servers[migration.target_server_id]
+        bridge.migration = migration
+        bridge.source_server = servers[bridge.source_server_id]
+        bridge.target_server = servers[bridge.target_server_id]
         if bridge.migration.status != "completed":
             return None, "waiting"
         expires = _date(bridge.evidence.get("expires_at"))

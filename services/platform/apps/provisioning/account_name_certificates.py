@@ -285,9 +285,8 @@ def _claim_attempt(  # noqa: PLR0911  # One exit per decision the row lock makes
     """Decide, under the row lock, whether to order; take the lease, and a budget slot when a new name needs one."""
     now = timezone.now()
     with transaction.atomic():
-        certificate = (
-            AccountNameCertificate.objects.select_for_update().select_related("hostname").get(pk=certificate_id)
-        )
+        certificate = AccountNameCertificate.objects.select_for_update(of=("self",)).get(pk=certificate_id)
+        certificate.hostname = AccountHostname.objects.select_for_update(of=("self",)).get(pk=certificate.hostname_id)
         if certificate.hostname.retired_at is not None:
             return IssuanceOutcome(IssuanceStatus.RETIRED, "The account name is retired.")
         if certificate.has_valid_material() and not (

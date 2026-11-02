@@ -5,6 +5,7 @@ from __future__ import annotations
 from django.db import transaction
 from django.utils import timezone
 
+from apps.common.row_locks import lock_one_and_load
 from apps.common.types import Err, Ok, Result
 
 from .cloud_destroy_models import CloudResourceCleanup, NodeDestroyPlan
@@ -38,9 +39,7 @@ class ResourceDestroyExecution:
 
     def _guard(self, *, lock: bool = False) -> NodeDeployment:
         rows = NodeDeployment.objects.select_related("provider")
-        if lock:
-            rows = rows.select_for_update(of=("self",))
-        current = rows.get(pk=self.deployment.pk)
+        current = lock_one_and_load(rows.filter(pk=self.deployment.pk)) if lock else rows.get(pk=self.deployment.pk)
         assert_resource_cleanup_owner(current, self.lease, provisioning_compensation=self.provisioning_compensation)
         if self.plan.deployment_id != current.pk or self.plan.deployment_correlation_id != current.correlation_id:
             raise OperationOwnershipLostError("The provider cleanup no longer owns this deployment")

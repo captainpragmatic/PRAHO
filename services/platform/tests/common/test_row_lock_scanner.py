@@ -9,6 +9,12 @@ from apps.common.row_lock_scanner import lock_join_lines
 
 class RowLockScannerTests(SimpleTestCase):
     maxDiff = None
+    def test_platform_has_no_combined_queries(self) -> None:
+        root = Path(__file__).resolve().parents[2] / "apps"
+        offenders = [f"{path.relative_to(root)}:{line}" for path in sorted(root.rglob("*.py"))
+                     if "migrations" not in path.parts for line in lock_join_lines(path.read_text())]
+        self.assertEqual(offenders, [])
+
     def test_billing_has_no_combined_queries(self) -> None:
         root = Path(__file__).resolve().parents[2] / "apps" / "billing"
         offenders = [f"{path.relative_to(root)}:{line}" for path in sorted(root.rglob("*.py"))
@@ -69,6 +75,29 @@ return final_cleanup.get(pk=pk)
             'if M.objects.select_for_update().select_related("customer") and enabled:\n    pass',
             'assert M.objects.select_for_update().select_related("customer")',
             'all([M.objects.select_for_update().select_related("customer")])',
+        ]
+        for source in cases:
+            with self.subTest(source=source):
+                self.assertEqual(lock_join_lines(source), [1])
+
+    def test_real_conditional_provider_cleanup_shape(self) -> None:
+        source = '''def _guard(self, lock=False):
+    rows = NodeDeployment.objects.select_related("provider")
+    if lock:
+        rows = rows.select_for_update(of=("self",))
+    current = rows.get(pk=self.deployment.pk)
+    return current
+'''
+        self.assertEqual(lock_join_lines(source), [4])
+
+    def test_conditional_expression_and_comprehension_conditions_are_discovered(self) -> None:
+        query = 'M.objects.select_for_update().select_related("customer")'
+        cases = [
+            f'answer = "yes" if {query} else "no"',
+            f'answer = "yes" if {query}.first() else "no"',
+            f'answer = [item for item in items if {query}]',
+            f'answer = [item for item in items if {query}.first()]',
+            f'rows += {query}',
         ]
         for source in cases:
             with self.subTest(source=source):

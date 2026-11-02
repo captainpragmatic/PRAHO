@@ -249,7 +249,10 @@ def request_recheck(account: VirtualminAccount, *, actor: User | None = None) ->
     """Mark bounded due work. Neither a manual request nor a cached read performs DNS or enqueues a fanout."""
     queued = False
     with transaction.atomic():
-        account = VirtualminAccount.objects.select_for_update().select_related("service").get(pk=account.pk)
+        from .models import Service  # noqa: PLC0415  # Explicit protection formerly supplied by the joined lock.
+
+        account = VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=account.pk)
+        account.service = Service.objects.select_for_update(of=("self",)).get(pk=account.service_id)
         snapshot = _snapshot(account)
         if not _actor_allowed(account, actor):
             return Err("Only an active owner or technical contact may recheck DNS")

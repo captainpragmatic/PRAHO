@@ -392,6 +392,7 @@ def provision_virtualmin_account(
 
 def _validate_service_for_provisioning_secure(service_id: str) -> dict[str, Any]:
     """Validate service exists and is ready for provisioning with atomic locking."""
+    from apps.billing.recurring_locking import lock_recurring_collection_customer  # noqa: PLC0415
     from apps.customers.models import Customer  # noqa: PLC0415  # Cross-app lock boundary.
 
     try:
@@ -400,12 +401,12 @@ def _validate_service_for_provisioning_secure(service_id: str) -> dict[str, Any]
         # The unlocked customer ID only routes the first lock; recheck it before
         # using that customer or caching any related objects on the locked row.
         customer_id = Service.objects.values_list("customer_id", flat=True).get(pk=service_id)
-        customer = Customer.objects.select_for_update(of=("self",)).get(pk=customer_id)
+        customer = lock_recurring_collection_customer(customer_id)
         service = Service.objects.select_for_update(of=("self",)).get(pk=service_id)
         if service.customer_id != customer.pk:
             return {"success": False, "error": "Service customer changed during provisioning"}
         service.customer = customer
-        service.service_plan = ServicePlan.objects.select_for_update(of=("self",)).get(pk=service.service_plan_id)
+        service.service_plan = ServicePlan.objects.select_for_update(of=("self",), no_key=True).get(pk=service.service_plan_id)
     except (Service.DoesNotExist, Customer.DoesNotExist):
         error_msg = f"Service {service_id} not found"
         logger.error(f"❌ [VirtualminTask] {error_msg}")

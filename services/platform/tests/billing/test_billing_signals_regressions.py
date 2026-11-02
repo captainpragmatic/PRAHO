@@ -2453,7 +2453,7 @@ class RefundServiceSuspensionAuditTrailTest(TestCase):
         # select_for_update chain: returns queryset mock that iterates over [mock_item]
         mock_items_qs = MagicMock()
         mock_items_qs.__iter__ = MagicMock(return_value=iter([mock_item]))
-        mock_order.items.select_for_update.return_value.filter.return_value.select_related.return_value = mock_items_qs
+        mock_order.items.select_for_update.return_value.filter.return_value = mock_items_qs
 
         captured_security_events: list[tuple] = []
 

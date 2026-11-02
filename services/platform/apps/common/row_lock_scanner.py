@@ -35,6 +35,7 @@ def lock_join_lines(source: str) -> list[int]:  # noqa: C901, PLR0915  # AST dis
         if isinstance(node, ast.Attribute):
             return expression(node.value, env)
         if isinstance(node, ast.IfExp):
+            record(expression(node.test, env))
             return expression(node.body, env) | expression(node.orelse, env)
         if isinstance(node, ast.Subscript):
             return expression(node.value, env)
@@ -73,7 +74,7 @@ def lock_join_lines(source: str) -> list[int]:  # noqa: C901, PLR0915  # AST dis
             for generator in node.generators:
                 record(expression(generator.iter, local))
                 for condition in generator.ifs:
-                    expression(condition, local)
+                    record(expression(condition, local))
             if isinstance(node, ast.DictComp):
                 expression(node.key, local)
                 expression(node.value, local)
@@ -99,6 +100,8 @@ def lock_join_lines(source: str) -> list[int]:  # noqa: C901, PLR0915  # AST dis
                 for target in targets:
                     if isinstance(target, ast.Name):
                         env[target.id] = states
+            elif isinstance(node, ast.AugAssign):
+                record(expression(node.value, env))
             elif isinstance(node, ast.If):
                 record(expression(node.test, env))
                 env = merge(block(node.body, env.copy()), block(node.orelse, env.copy()))
