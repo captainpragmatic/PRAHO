@@ -12,6 +12,7 @@ network call — so testing it requires real commits.
 from __future__ import annotations
 
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.db import transaction
 from django.test import TransactionTestCase
@@ -109,15 +110,19 @@ class RateGateTests(TransactionTestCase):
             SmartBillRateGate.acquire(TOKEN)
 
     def test_a_burst_of_grants_never_exceeds_the_provider_limit(self) -> None:
-        """Walk the schedule forward and count how many grants fit in ten seconds."""
+        """Count actual durable grants within ten controlled seconds."""
+        start = timezone.now()
+        SmartBillRateGate.objects.create(
+            token_fingerprint=SmartBillRateGate.fingerprint(TOKEN), next_allowed_at=start,
+        )
         granted = 0
-        for _ in range(60):
-            if SmartBillRateGate.acquire(TOKEN) is None:
-                granted += 1
-            gate = SmartBillRateGate.objects.get()
-            # Advance time by pulling the schedule back, simulating the clock moving.
-            gate.next_allowed_at -= SmartBillRateGate.INTERVAL / 2
-            gate.save(update_fields=["next_allowed_at"])
+        # Moving the saved schedule while real database time also advances can
+        # count grants from more than the intended window on a busy runner.
+        with patch("apps.billing.issuers.models.timezone.now") as clock:
+            for milliseconds in range(0, 10_000, 100):
+                clock.return_value = start + timedelta(milliseconds=milliseconds)
+                if SmartBillRateGate.acquire(TOKEN) is None:
+                    granted += 1
 
-        # 60 attempts at half-interval steps covers ~12s of simulated time.
+        self.assertEqual(granted, 25)  # The 400ms interval retains provider headroom.
         self.assertLessEqual(granted, 30, msg=f"{granted} grants would block the token")

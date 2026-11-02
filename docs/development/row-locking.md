@@ -225,3 +225,17 @@ Regression proof:
   and a refund suspension mock chained through an unused join. The updated
   observers still require Order -> Line -> DomainItem ordering and the exact
   suspension-failure audit action; all 30 affected PostgreSQL controls pass.
+- Unsupported ordering expressions (including model defaults and nested locking
+  or correlated subqueries) are rejected before SQL. The regression observes a
+  root lock before refusal on the old helper and again with only the ordering
+  guards reverted. Helper and public cancellation controls pass together (24
+  PostgreSQL tests); the existing barrier observes the actual Customer NO KEY
+  UPDATE statement and the exact competing backend.
+- The unchanged 200-account publication budget passes in isolation. Broad
+  PostgreSQL verification runs separately from other full suites to avoid
+  measuring unrelated worker contention against its 30-second limit.
+- The legacy SmartBill burst test moved the saved schedule while real database
+  time also elapsed. Its controlled ten-second clock now verifies 25 committed
+  grants and retains the provider ceiling of 30; all 11 rate-gate controls pass.
+  The production rate limiter is unchanged. All 187 billing-signal controls pass
+  on a fresh database with their required numbering seeds.

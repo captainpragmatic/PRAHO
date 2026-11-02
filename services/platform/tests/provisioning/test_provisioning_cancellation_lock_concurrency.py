@@ -200,7 +200,7 @@ class ProvisioningCancellationLockConcurrencyTests(TransactionTestCase):
         def provision() -> dict[str, object]:
             def observe(execute, sql, params, many, context):
                 result = execute(sql, params, many, context)
-                if "FOR UPDATE" in sql and customer_table in sql:
+                if "FOR NO KEY UPDATE" in sql and customer_table in sql:
                     locked.set()
                     self.assertTrue(release.wait(10), "Observer did not release the real provisioning lock")
                 return result
