@@ -1,29 +1,22 @@
 """Retriability must survive infrastructure orchestration boundaries."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from django.test import SimpleTestCase
+from django.test import TestCase
 
 from apps.common.types import Err, Retriability
 from apps.infrastructure.deployment_service import NodeDeploymentService
+from tests.infrastructure.test_deployment_service_pipeline import _create_deployment
 
 
-class NodeDeploymentRetriabilityTests(SimpleTestCase):
+class NodeDeploymentRetriabilityTests(TestCase):
     def test_stop_node_preserves_provider_retriability(self) -> None:
-        service = NodeDeploymentService.__new__(NodeDeploymentService)
-        deployment = MagicMock()
-        deployment.status = "completed"
-        deployment.hostname = "node.example.com"
-        deployment.provider.provider_type = "hetzner"
-        deployment.external_node_id = "node-1"
-        deployment.virtualmin_server_id = None
+        service = NodeDeploymentService()
+        deployment = _create_deployment("completed", external_node_id="retriability-native-fixture")
         provider_result = Err("provider rate limited", retriability=Retriability.RETRIABLE)
 
         with (
             patch("apps.infrastructure.deployment_service.run_provider_command", return_value=provider_result),
-            patch("apps.infrastructure.models.NodeDeploymentLog.objects.create"),
-            patch.object(NodeDeploymentService, "_mark_failed"),
-            patch("apps.infrastructure.deployment_service.InfrastructureAuditService"),
         ):
             result = service.stop_node(deployment, {"api_token": "token"})
 

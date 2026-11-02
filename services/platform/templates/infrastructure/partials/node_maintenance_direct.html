@@ -1,0 +1,39 @@
+{% load i18n ui_components localisation_tags %}
+{% if maintenance_direct_rows %}
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-6 my-6 space-y-4" aria-labelledby="direct-node-operations-heading">
+    {% translate "Review pending node operations" as review_heading %}<h2 id="direct-node-operations-heading" class="text-xl font-semibold text-white">{{ review_heading|force_escape }}</h2>
+    {% translate "A command acknowledgment does not prove its expected outcome. Check the exact recorded target and confirm that commands stopped before releasing this operation hold. Recording failure does not undo a command. Do not repeat the action to resolve an uncertain result." as review_consequences %}<p class="text-sm text-slate-300">{{ review_consequences|force_escape }}</p>
+    {% for row in maintenance_direct_rows %}
+      <article class="border-t border-slate-700 pt-4 space-y-3">
+        <h3 class="font-semibold text-white">{{ row.action_label }} · {{ row.phase_label }}</h3>
+        <dl class="text-sm text-slate-300 space-y-2">
+          <div>{% translate "Deployment" as deployment_label %}<dt class="font-medium">{{ deployment_label|force_escape }}</dt><dd class="break-words">{{ row.execution.deployment.hostname }} (#{{ row.execution.deployment_id }})</dd></div>
+          <div>{% translate "Recorded provider resource" as provider_label %}<dt class="font-medium">{{ provider_label|force_escape }}</dt><dd class="break-all">{{ row.execution.provider_resource_id|default:"—" }}</dd></div>
+          <div>{% translate "Recorded hosting node" as node_label %}<dt class="font-medium">{{ node_label|force_escape }}</dt><dd class="break-all">{% if row.execution.node_uuid %}{{ row.execution.node_uuid }}{% else %}{% translate "Not linked to a hosting node" as unbound_label %}{{ unbound_label|force_escape }}{% endif %}</dd></div>
+          <div>{% translate "Recorded SSH endpoint" as endpoint_label %}<dt class="font-medium">{{ endpoint_label|force_escape }}</dt><dd class="break-all">{{ row.recorded_address|default:"—" }}:{{ row.recorded_port|default:"—" }}</dd></div>
+          <div>{% translate "Created" as created_label %}<dt class="font-medium">{{ created_label|force_escape }}</dt><dd>{% localised_date row.execution.created_at "datetime" %} ({{ maintenance_viewer_zone }})</dd></div>
+          {% if row.execution.issued_at %}<div>{% translate "Issued" as issued_label %}<dt class="font-medium">{{ issued_label|force_escape }}</dt><dd>{% localised_date row.execution.issued_at "datetime" %} ({{ maintenance_viewer_zone }})</dd></div>{% endif %}
+        </dl>
+        {% if maintenance_can_reconcile %}
+          <details class="rounded-lg border border-slate-600 p-4">
+            {% translate "Reconcile recorded outcome" as reconcile_label %}<summary class="font-medium text-slate-200 cursor-pointer">{{ reconcile_label|force_escape }}</summary>
+            <form method="post" action="{% url 'infrastructure:maintenance_execution_reconcile' row.execution.pk %}" class="mt-4 space-y-4">
+              {% csrf_token %}
+              {{ row.form.expected_phase }}
+              {% for field in row.form.visible_fields %}
+                {% if field.field.widget.input_type == "checkbox" %}
+                  {% checkbox_field field.html_name checked=field.value label=field.label required=field.field.required html_id=field.id_for_label error=field.errors|join:", " %}
+                {% else %}
+                  {% form_field field %}
+                {% endif %}
+              {% endfor %}
+              {% button reconcile_label|force_escape type="submit" variant="secondary" %}
+            </form>
+          </details>
+        {% else %}
+          {% translate "Only administrators and managers can change maintenance. Support has read-only access." as readonly_label %}<p class="text-sm text-slate-400">{{ readonly_label|force_escape }}</p>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </section>
+{% endif %}

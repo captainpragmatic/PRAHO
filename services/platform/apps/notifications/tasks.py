@@ -13,6 +13,7 @@ Tasks:
 import logging
 from datetime import timedelta
 from typing import Any
+from uuid import UUID
 
 from django.db import models, transaction
 from django.db.models import Q
@@ -71,8 +72,9 @@ def send_email_task(email_log_id: str, *legacy_args: object, **legacy_kwargs: ob
         message, msg = rebuilt
 
         # Immediately before the provider call: the claim is still ours (a worker that lost it sends nothing).
-        if not renew_claim(email_log_id, token):
-            return {"success": False, "error": "Claim lost before sending", "retry_scheduled": False}
+        refusal = _pre_send_refusal(email_log_id, token)
+        if refusal is not None:
+            return refusal
         if msg.send(fail_silently=False) == 0:
             raise RuntimeError("Email provider accepted no recipients")
 
@@ -102,6 +104,19 @@ def send_email_task(email_log_id: str, *legacy_args: object, **legacy_kwargs: ob
             "retry_count": email_log.delivery_attempts,
             "max_retries_exceeded": bool((email_log.provider_response or {}).get("retry_exhausted")),
         }
+
+
+def _pre_send_refusal(email_log_id: str, token: UUID | None) -> dict[str, Any] | None:
+    """Keep token renewal and maintenance policy immediately before the provider boundary."""
+    if not renew_claim(email_log_id, token):
+        return {"success": False, "error": "Claim lost before sending", "retry_scheduled": False}
+    from apps.infrastructure.node_maintenance_delivery import (  # noqa: PLC0415  # Deferred feature policy.
+        maintenance_dispatch_allowed,
+    )
+
+    if not maintenance_dispatch_allowed(email_log_id, token):
+        return {"success": False, "error": "Maintenance delivery is no longer permitted", "retry_scheduled": False}
+    return None
 
 
 def _rebuild(

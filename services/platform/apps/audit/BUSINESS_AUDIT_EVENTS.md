@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-580 actions, in 9 categories.
+587 actions, in 9 categories.
 
 ## Account management
 
@@ -249,6 +249,13 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `node_drain_pending` | low | no | no | provisioning |
 | `node_drain_running` | low | no | no | provisioning |
 | `node_drain_started` | low | no | no | provisioning |
+| `node_operation_reconciled` | low | no | no | infrastructure |
+| `node_window_cancel` | low | no | no | infrastructure |
+| `node_window_created` | low | no | no | infrastructure |
+| `node_window_finish` | low | no | no | infrastructure |
+| `node_window_overran` | low | no | no | infrastructure |
+| `node_window_policy` | low | no | no | infrastructure |
+| `node_window_start` | low | no | no | infrastructure |
 | `notification_preference_created` | low | no | no | notifications |
 | `notification_preference_updated` | low | no | no | notifications |
 | `notification_settings_changed` | low | no | no | audit |

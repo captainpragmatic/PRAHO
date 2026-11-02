@@ -12,10 +12,13 @@ from django.http import HttpRequest, HttpResponse, HttpResponseForbidden
 from django.shortcuts import redirect, render
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
+from django.views.decorators.cache import never_cache
 from django.views.decorators.csrf import csrf_protect
 from django.views.decorators.http import require_http_methods
+from django.views.decorators.vary import vary_on_cookie
 
 from apps.common.decorators import _get_user_role_for_customer, _render_role_check_degraded
+from apps.common.localisation_services import get_request_localisation
 from apps.common.pagination import PaginatorData, pagination_query
 from apps.common.rate_limit_feedback import (
     build_maintenance_context,
@@ -27,6 +30,7 @@ from apps.common.rate_limit_feedback import (
     render_platform_unavailable,
 )
 
+from .maintenance import maintenance_presentation, maintenance_receipt
 from .services import PlatformAPIError, services_api
 
 logger = logging.getLogger(__name__)
@@ -336,6 +340,7 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
                 {"value": "30d", "label": _("Last 30 days")},
                 {"value": "90d", "label": _("Last 90 days")},
             ],
+            **_service_maintenance_context(request, customer_id, user_id, service_id),
         }
 
         logger.info(f"✅ [Services View] Loaded service {service_id} details for customer {customer_id}")
@@ -351,6 +356,48 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
         return redirect("services:list")
 
     return render(request, "services/service_detail.html", context)
+
+
+def _service_maintenance_context(
+    request: HttpRequest,
+    customer_id: int,
+    user_id: int,
+    service_id: int,
+) -> dict[str, object]:
+    try:
+        summary = maintenance_receipt(
+            {
+                "success": True,
+                "data": {"maintenance": services_api.get_service_maintenance(customer_id, user_id, service_id)},
+            },
+            service_id=service_id,
+        )
+    except PlatformAPIError:
+        logger.warning("⚠️ [Services View] Maintenance information is unavailable")
+        return {"service_maintenance_unavailable": True}
+    return maintenance_presentation(summary, get_request_localisation(request))
+
+
+@never_cache
+@vary_on_cookie
+@require_http_methods(["GET"])
+def service_maintenance(request: HttpRequest, service_id: int) -> HttpResponse:
+    """Refresh only the current customer's safe maintenance attention/outcome."""
+    customer_id, user_id = _get_session_identity(request)
+    if not customer_id or not user_id:
+        if request.headers.get("HX-Request") == "true":
+            return HttpResponse(
+                status=401, headers={"HX-Redirect": "/login/"}, content_type="text/plain; charset=utf-8"
+            )
+        return redirect("/login/")
+    return render(
+        request,
+        "services/partials/maintenance_attention.html",
+        {
+            "service_id": service_id,
+            **_service_maintenance_context(request, customer_id, user_id, service_id),
+        },
+    )
 
 
 def service_usage(request: HttpRequest, service_id: int) -> HttpResponse:

@@ -23,6 +23,8 @@ from django.utils.timezone import is_aware
 
 from apps.api_client.services import PlatformAPIClient, PlatformAPIError
 
+from .maintenance import MaintenanceSummary, maintenance_receipt
+
 logger = logging.getLogger(__name__)
 
 _DNS_COMPONENTS = frozenset({"apex", "www", "caa", "dnssec", "mx"})
@@ -239,6 +241,28 @@ class ServicesAPIClient(PlatformAPIClient):
     - View service status and usage
     - Service management (limited customer actions)
     """
+
+    def get_maintenance_summary(self, customer_id: int, user_id: int) -> MaintenanceSummary:
+        """Read the current customer's maintenance through the signed POST authority."""
+        response = self._make_request(
+            "POST",
+            "/maintenance/summary/",
+            user_id=user_id,
+            data={"customer_id": customer_id, "user_id": user_id},
+            idempotent=True,
+        )
+        return maintenance_receipt(response)
+
+    def get_service_maintenance(self, customer_id: int, user_id: int, service_id: int) -> MaintenanceSummary:
+        """Platform checks current membership and ownership for this service on every read."""
+        response = self._make_request(
+            "POST",
+            f"/maintenance/services/{service_id}/",
+            user_id=user_id,
+            data={"customer_id": customer_id, "user_id": user_id},
+            idempotent=True,
+        )
+        return maintenance_receipt(response, service_id=service_id)
 
     def get_customer_services(  # noqa: PLR0913 -- explicit filters preserve the existing client API
         self,

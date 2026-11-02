@@ -24,6 +24,7 @@
 
 from django.urls import include, path
 
+from . import maintenance
 from .billing import urls as billing_urls
 
 # Import domain-specific URL patterns
@@ -41,6 +42,8 @@ app_name = "api"
 # ===============================================================================
 
 urlpatterns = [
+    path("maintenance/summary/", maintenance.summary, name="maintenance_summary"),
+    path("maintenance/services/<int:service_id>/", maintenance.service, name="service_maintenance"),
     path("localisation/", localisation_defaults, name="localisation"),
     path("legal/document/", legal_document, name="legal_document"),
     # Users & Authentication APIs (for portal service)

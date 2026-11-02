@@ -6,6 +6,11 @@ see the last 48 hours of hourly averages/peaks, and request a refresh. Both the 
 on `praho-cluster`. Manual POST actions queue checks; GET requests do not contact providers.
 Green means that the specific check passed, not that every operation in that subsystem was tested.
 
+[Customer maintenance windows](NODE_MAINTENANCE.md) are separate from these health checks.
+Planned/active work appears in the customer's service attention banner and scoped 30-second polls;
+it does not declare the Platform unavailable or replace a failing health result. Provider reboot
+acceptance is not verified recovery, and an expired or uncertain command remains an operator review hold.
+
 `/settings/setup/` is separate. It derives required configuration from current records and
 links to canonical settings anchors. Missing configuration reopens an item; an outage does not.
 Branding and domain sales remain optional. The dashboard remains the login landing page.

@@ -36,6 +36,7 @@
 - [Deployment Guide](deployment/DEPLOYMENT.md) -- Full deployment instructions, Ansible playbooks, rollback procedures
 - [HTTPS Deployment Checklist](deployment/HTTPS_DEPLOYMENT_CHECKLIST.md) -- Verifying TLS, HSTS, security headers and cookies on both hostnames after a deploy
 - [Virtualmin Production Optimizations](deployment/VIRTUALMIN_PRODUCTION_OPTIMIZATIONS.md) -- Virtualmin tuning for production
+- [Customer maintenance windows](deployment/NODE_MAINTENANCE.md) -- permitted calendars, notices and execution reconciliation
 
 ## Security
 
