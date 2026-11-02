@@ -50,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Staging:** reconcile `-001`/`-002` with the command (check the Hetzner console first, then `--attest-no-resources --attest-never-created --evidence ...`) before re-deploying them.
 - **Leaving a customer view returns its tab to the customer's Platform page.** Leave customer view, logging out of the view, and a view that ends while its tab is open (Platform ends it, its time runs out, or the feature is switched off) now answer with a short page that takes the tab back to that customer on Platform, instead of the portal's login page, which staff never use. It navigates by script with a link as fallback: the portal's CSP `form-action 'self'` stops a browser following a redirect to Platform after a form post. A customer's own logout is unchanged (ADR-0065).
 
+- Account creation now waits for the configured provisioning timeout instead of the shorter general API timeout (#828).
+  An expired provisioning timeout still records an unknown outcome without replaying the creation.
+
+- Hosting provisioning no longer deadlocks with immediate subscription cancellation on PostgreSQL; it observes cancellation before validating the service and refuses a changed customer safely (#823).
+
 ### Security
 
 - **Email webhooks verify what they claim to.** The SendGrid webhook checked a keyed hash over SendGrid's public key, which anyone holding the key could produce. It now verifies SendGrid's ECDSA signature and refuses deliveries more than five minutes old. The Mailgun webhook applies each signed token once: the claim and the event commit together, a failure rolls both back so Mailgun redelivers, and a duplicate gets 200. Its freshness window covers Mailgun's eight-hour retries. It reads the legacy form the way Mailgun posts it, so a sender's custom variable cannot choose the recipient of a bounce or complaint. Form-encoded Mailgun events were silently dropped before and are now applied.
