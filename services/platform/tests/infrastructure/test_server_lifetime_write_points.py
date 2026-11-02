@@ -12,11 +12,12 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Retriability
+from apps.infrastructure.ansible_service import AnsibleResult
 from apps.infrastructure.cloud_gateway import ServerCreateResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog, NodeServerLifetime, NodeSize
-from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
-from tests.infrastructure.test_node_teardown import Harness
+from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service, _ok_dns_gateway
+from tests.infrastructure.test_node_teardown import Harness, cloud_gateway
 
 
 def _gateway(create: Any) -> MagicMock:
@@ -113,6 +114,97 @@ class DeployWritePointTests(TestCase):
         deployment = _create_deployment("pending")
         _deploy(deployment, _gateway(Ok(ServerCreateResult(server_id="srv-1", ipv4_address=""))))
         self.assertEqual(_lifetimes(deployment), [("srv-1", False, False)])
+
+
+class CompensationServerFieldsTests(TestCase):
+    def setUp(self) -> None:
+        self.deployment = _create_deployment("pending")
+        self.gateway = _gateway(
+            Ok(ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="2001:db8::1"))
+        )
+        self.service = _make_service()
+        self.service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
+        self.service._ansible.get_playbook_order.return_value = ["common_base.yml"]
+        self.service._resolve_dns_config = MagicMock(return_value=Ok(("dns-token", "zone")))
+        self.service._store_api_credential = MagicMock(return_value=Ok(True))
+
+    def _run_pipeline(self) -> None:
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=self.gateway),
+        ):
+            result = self.service.deploy_node(self.deployment, credentials={"api_token": "test-token"})
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("Ansible common_base.yml failed", result.unwrap_err())
+
+    def test_successful_compensation_clears_server_fields_and_closes_lifetime(self) -> None:
+        def fail_ansible(**_kwargs: object) -> Ok[AnsibleResult]:
+            self.deployment.refresh_from_db()
+            self.assertEqual(self.deployment.external_node_id, "srv-1")
+            self.assertEqual(self.deployment.ipv4_address, "1.2.3.4")
+            self.assertEqual(self.deployment.ipv6_address, "2001:db8::1")
+            self.assertIsNotNone(self.deployment.operation_token)
+            self.assertEqual(_lifetimes(self.deployment), [("srv-1", True, False)])
+            return Ok(AnsibleResult(False, "common_base.yml", "", "fixture failure", 2))
+
+        self.service._ansible.run_playbook.side_effect = fail_ansible
+
+        self._run_pipeline()
+
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.status, "failed")
+        self.assertEqual(self.deployment.external_node_id, "")
+        self.assertIsNone(self.deployment.ipv4_address)
+        self.assertIsNone(self.deployment.ipv6_address)
+        lifetime = NodeServerLifetime.objects.get(deployment=self.deployment, server_id="srv-1")
+        self.assertIsNotNone(lifetime.ended_at)
+
+    def test_failed_compensation_keeps_server_fields_and_open_lifetime(self) -> None:
+        def fail_ansible(**_kwargs: object) -> Ok[AnsibleResult]:
+            self.deployment.refresh_from_db()
+            self.assertEqual(self.deployment.external_node_id, "srv-1")
+            self.assertEqual(self.deployment.ipv4_address, "1.2.3.4")
+            self.assertEqual(self.deployment.ipv6_address, "2001:db8::1")
+            self.assertIsNotNone(self.deployment.operation_token)
+            self.assertEqual(_lifetimes(self.deployment), [("srv-1", True, False)])
+            return Ok(AnsibleResult(False, "common_base.yml", "", "fixture failure", 2))
+
+        self.gateway.delete_server.return_value = Err("provider refused deletion")
+        self.service._ansible.run_playbook.side_effect = fail_ansible
+
+        self._run_pipeline()
+
+        self.deployment.refresh_from_db()
+        self.assertEqual(self.deployment.status, "failed")
+        self.assertEqual(self.deployment.external_node_id, "srv-1")
+        self.assertEqual(self.deployment.ipv4_address, "1.2.3.4")
+        self.assertEqual(self.deployment.ipv6_address, "2001:db8::1")
+        lifetime = NodeServerLifetime.objects.get(deployment=self.deployment, server_id="srv-1")
+        self.assertIsNone(lifetime.ended_at)
+
+    def test_destroy_cleaned_failed_row_still_searches_provider(self) -> None:
+        deployment = _create_deployment("failed")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            server_create_state="created",
+            provider_token_fingerprint=provider_token_fingerprint("test-token"),
+        )
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "failed")
+        self.assertEqual(deployment.external_node_id, "")
+        self.assertIsNone(deployment.ipv4_address)
+        self.assertIsNone(deployment.ipv6_address)
+        self.assertEqual(deployment.server_create_state, "created")
+        self.assertEqual(deployment.provider_token_fingerprint, provider_token_fingerprint("test-token"))
+        gateway = cloud_gateway()
+
+        with patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=gateway):
+            result = self.service.destroy_node(deployment, credentials={"api_token": "test-token"})
+
+        self.assertTrue(result.is_ok(), result)
+        gateway.find_servers_by_label.assert_called_with(f"praho-deployment={deployment.correlation_id}")
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "destroyed")
 
 
 class TeardownWritePointTests(TestCase):

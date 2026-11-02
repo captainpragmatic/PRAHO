@@ -32,7 +32,7 @@ from apps.infrastructure.deployment_lifecycle import (
     provider_token_fingerprint,
     recorded_provider_resources,
 )
-from apps.infrastructure.server_lifetimes import close_server_lifetimes
+from apps.infrastructure.server_lifetimes import close_server_lifetimes, gone_server_fields
 
 if TYPE_CHECKING:
     from apps.infrastructure.cloud_gateway import CloudProviderGateway
@@ -294,7 +294,7 @@ class NodeTeardown:
         if servers.is_err():
             return servers
         # Every server is proved gone: its billable lifetimes end here.
-        close_server_lifetimes(self.lease, deployment, external_node_id="", ipv4_address=None, ipv6_address=None)
+        close_server_lifetimes(self.lease, deployment, **gone_server_fields())
         firewalls = self._delete_firewalls(gateway)
         if firewalls.is_err():
             return firewalls

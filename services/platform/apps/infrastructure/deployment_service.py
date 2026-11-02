@@ -76,6 +76,7 @@ from apps.infrastructure.server_lifetimes import (
     close_server_lifetimes,
     confirm_lifetime,
     discard_lifetime,
+    gone_server_fields,
     open_lifetime_id,
     open_pending_lifetime,
     save_legacy_window,
@@ -2323,7 +2324,9 @@ class NodeDeploymentService:
             try:
                 deleted = self._delete_created_resource(gateway, resource_type, resource_id, hostname)
                 if deleted and resource_type == "server" and lease is not None:
-                    close_server_lifetimes(lease, deployment, server_id=resource_id)
+                    # The row's own server is gone: its id and addresses go with it, as in teardown.
+                    gone = gone_server_fields() if resource_id == deployment.external_node_id else {}
+                    close_server_lifetimes(lease, deployment, server_id=resource_id, **gone)
             except OperationOwnershipLostError as lost:
                 # Another operation owns the row now: what is left is its to delete or keep.
                 logger.warning(f"⚠️ [Deployment:{hostname}] Cleanup stopped: {lost}")
