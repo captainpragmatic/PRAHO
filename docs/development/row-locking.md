@@ -161,7 +161,9 @@ future exceptions.
 
 ## Verification record
 
-In progress. Scanner fixtures failed on the stub and passed after implementation;
+Delivery and command results are recorded in [PR 1 (#843)](https://github.com/captainpragmatic/PRAHO/pull/843)
+and [PR 2 (#844)](https://github.com/captainpragmatic/PRAHO/pull/844).
+Scanner fixtures failed on the stub and passed after implementation;
 the billing scope guard initially found the remaining combined sites. Shared
 helper contracts failed on the stub (including the no-SQL unsupported-shape gate).
 PostgreSQL workers assert READ COMMITTED and observe `pg_blocking_pids()` for the
@@ -179,7 +181,7 @@ SQL test verifies both phases; the generic helper tests prove opposite output
 orders still acquire locks consistently. Scanner canaries also cover method
 argument materialization, negation, compound predicates and assertions.
 
-Observed proof so far:
+Regression proof:
 
 - PR 1's 633 focused PostgreSQL tests pass. The FK-retarget regression fails when
   the outer base-row lock is replaced with a cleared-join locking query; the
@@ -219,3 +221,7 @@ Observed proof so far:
   regressions. Protected payment convergence is not advertised as a newly
   reproduced public mandate race, and erasure proof uses actual rendered/stored
   email rather than a stale model object in isolation.
+- The broad suite exposed legacy query spies in domain recovery/transfer tests
+  and a refund suspension mock chained through an unused join. The updated
+  observers still require Order -> Line -> DomainItem ordering and the exact
+  suspension-failure audit action; all 30 affected PostgreSQL controls pass.
