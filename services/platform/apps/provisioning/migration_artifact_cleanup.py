@@ -24,7 +24,7 @@ from apps.settings.services import SettingsService
 
 from .spool import release_spool_reservation
 from .virtualmin_migration_models import VirtualminMigration
-from .virtualmin_models import VirtualminServer
+from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 logger = logging.getLogger(__name__)
 TASK = "apps.provisioning.migration_artifact_cleanup.cleanup_migration_artifacts"
@@ -77,17 +77,29 @@ def schedule_artifact_cleanup(migration_id: UUID | str) -> bool:
     return True
 
 
-def _claim(migration_id: str, token: UUID) -> tuple[VirtualminMigration | None, str]:
+def _claim(migration_id: str, token: UUID) -> tuple[VirtualminMigration | None, str]:  # noqa: PLR0911  # Distinct scope, maintenance, due-time and lease admission refusals.
     with transaction.atomic():
-        migration = (
+        scope = (
             _eligible()
-            .select_for_update()
-            .select_related("source_server", "target_server")
             .filter(pk=UUID(migration_id))
+            .values_list("account_id", "source_server_id", "target_server_id")
             .first()
         )
+        if scope is None:
+            return None, "excluded"
+        VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=scope[0])
+        nodes = list(VirtualminServer.objects.select_for_update(of=("self",)).filter(pk__in=scope[1:]).order_by("pk"))
+        migration = _eligible().select_for_update(of=("self",)).filter(pk=UUID(migration_id)).first()
         if migration is None:
             return None, "excluded"
+        if (migration.account_id, migration.source_server_id, migration.target_server_id) != scope:
+            return None, "waiting"
+        from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared node admission
+            maintenance_refusal,  # Shared node admission
+        )
+
+        if any(maintenance_refusal(node.pk) for node in nodes):
+            return None, "waiting"
         progress = _progress(migration)
         if progress.get("done"):
             return None, "cleaned"

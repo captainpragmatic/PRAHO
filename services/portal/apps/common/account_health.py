@@ -1,12 +1,12 @@
 """
 Account Health Banner — persistent, non-dismissible alerts for critical account conditions.
 
-Evaluates invoice, service, and ticket summaries to produce a single blended banner
+Evaluates invoice, service, ticket, and maintenance summaries to produce a single blended banner
 shown on every portal page until the customer resolves the underlying issue.
 
 Architecture:
 - Pure functions (evaluate_conditions, blend_banner) for testability
-- Session-cached summaries with TTL (same pattern as decorators.py membership caching)
+- Session-cached invoice/service/ticket summaries with TTL; maintenance refreshes every request
 - Context processor integration via get_account_health()
 """
 
@@ -15,14 +15,25 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any
+from datetime import datetime
+from typing import Any, cast
 
+from django.core.cache import cache
 from django.http import HttpRequest
+from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext as _
 from django.utils.translation import ngettext
 
 from apps.api_client.services import PlatformAPIError
 from apps.billing.services import InvoiceViewService
+from apps.common.localisation import DisplayLocalisation
+from apps.common.localisation_services import get_request_localisation
+from apps.services.maintenance import (
+    MaintenanceSummary,
+    maintenance_heading,
+    maintenance_period,
+    maintenance_receipt,
+)
 from apps.services.services import ServicesAPIClient, _empty_services_summary
 from apps.tickets.services import TicketsAPIClient, _empty_tickets_summary
 
@@ -56,10 +67,21 @@ class AccountHealthBanner:
     condition_count: int
 
 
+class _AccountHealthRequest(HttpRequest):
+    """Typed request-local presentation state, shared by the partial and context processor."""
+
+    maintenance_unavailable: bool
+    _account_health_identity: tuple[object, object]
+    _account_health_banner: AccountHealthBanner | None
+
+
 def evaluate_conditions(
     invoice_summary: dict[str, Any],
     services_summary: dict[str, Any],
     tickets_summary: dict[str, Any],
+    maintenance_summary: MaintenanceSummary | None = None,
+    *,
+    display: DisplayLocalisation | None = None,
 ) -> list[AccountCondition]:
     """Evaluate account summaries and return active conditions sorted by priority.
 
@@ -144,6 +166,33 @@ def evaluate_conditions(
                 % {"count": waiting},
                 cta_text=_("Reply"),
                 cta_url="/tickets/?status=waiting_on_customer",
+            )
+        )
+
+    if maintenance_summary and maintenance_summary["windows"]:
+        window = min(
+            maintenance_summary["windows"],
+            key=lambda item: (
+                {"overran": 0, "running": 1, "scheduled": 2}[item["status"]],
+                cast(datetime, parse_datetime(item["starts_at"])),
+                item["id"],
+            ),
+        )
+        heading = maintenance_heading(window)
+        if display is not None:
+            heading = _("%(heading)s: %(period)s.") % {
+                "heading": heading,
+                "period": maintenance_period(window, display),
+            }
+        conditions.append(
+            AccountCondition(
+                key="maintenance",
+                severity="warning" if window["status"] == "overran" else "info",
+                priority=3,
+                count=len(maintenance_summary["windows"]),
+                message=heading,
+                cta_text=_("Details"),
+                cta_url=f"/services/{window['service_ids'][0]}/#maintenance-attention",
             )
         )
 
@@ -284,13 +333,14 @@ def cached_account_health(session: Any, customer_id: object) -> dict[str, Any] |
     return cached
 
 
-def get_account_health(request: HttpRequest) -> AccountHealthBanner | None:
+def _build_account_health(request: HttpRequest) -> AccountHealthBanner | None:
     """Orchestrator: check session cache, fetch if stale, build banner.
 
     Follows the TTL-in-session pattern from decorators.py:
     - Stores raw summaries + fetch timestamp in session
     - Refreshes when TTL expires
     - Pure functions run every request (sub-ms on small dicts)
+    - Maintenance always refreshes independently; failed reads remain explicitly unknown
 
     Sources the active customer from ``request.customer_id`` (set by
     ``apps.users.middleware`` on every authenticated request). The legacy
@@ -320,5 +370,55 @@ def get_account_health(request: HttpRequest) -> AccountHealthBanner | None:
         if all_succeeded:
             remember_account_health(request.session, customer_id, invoice_summary, services_summary, tickets_summary)
 
-    conditions = evaluate_conditions(invoice_summary, services_summary, tickets_summary)
+    maintenance = _current_maintenance(request, int(customer_id), int(user_id))
+    conditions = evaluate_conditions(
+        invoice_summary,
+        services_summary,
+        tickets_summary,
+        maintenance,
+        display=get_request_localisation(request),
+    )
     return blend_banner(conditions)
+
+
+def _current_maintenance(request: HttpRequest, customer_id: int, user_id: int) -> MaintenanceSummary | None:
+    """Recheck every request; last known state is a labelled fallback, never a fresh empty answer."""
+    state = cast(_AccountHealthRequest, request)
+    state.maintenance_unavailable = False
+    cache_key = f"maintenance:last-known:{customer_id}:{user_id}"
+    try:
+        summary = maintenance_receipt(
+            {
+                "success": True,
+                "data": {"maintenance": ServicesAPIClient().get_maintenance_summary(customer_id, user_id)},
+            }
+        )
+    except PlatformAPIError as error:
+        state.maintenance_unavailable = True
+        logger.warning("⚠️ [AccountHealth] Maintenance summary is unavailable")
+        if error.status_code in {400, 401, 403, 404}:
+            cache.delete(cache_key)
+            return None
+        previous = cache.get(cache_key)
+        if previous is not None:
+            try:
+                return maintenance_receipt({"success": True, "data": {"maintenance": previous}})
+            except PlatformAPIError:
+                return None
+        return None
+    # A poll must not become a session writer: an older in-flight response could
+    # otherwise overwrite a concurrent company switch's whole session document.
+    cache.set(cache_key, summary, ACCOUNT_HEALTH_CACHE_TTL)
+    return summary
+
+
+def get_account_health(request: HttpRequest) -> AccountHealthBanner | None:
+    """Share one snapshot between the view and its context processor, never between polls."""
+    identity = (getattr(request, "customer_id", None), request.session.get("user_id"))
+    if getattr(request, "_account_health_identity", None) == identity:
+        return cast(AccountHealthBanner | None, getattr(request, "_account_health_banner", None))
+    banner = _build_account_health(request)
+    state = cast(_AccountHealthRequest, request)
+    state._account_health_identity = identity
+    state._account_health_banner = banner
+    return banner

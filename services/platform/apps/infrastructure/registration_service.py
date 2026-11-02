@@ -20,6 +20,7 @@ from apps.common.outbound_http import OutboundSecurityError, normalize_tls_cert_
 from apps.common.types import Err, Ok, Result
 
 if TYPE_CHECKING:
+    from apps.infrastructure.deployment_lifecycle import OperationLease
     from apps.infrastructure.models import NodeDeployment
     from apps.provisioning.virtualmin_models import VirtualminServer
     from apps.users.models import User
@@ -125,6 +126,8 @@ class NodeRegistrationService:
         admin_username: str = "root",
         admin_password: str | None = None,
         user: User | None = None,
+        *,
+        operation_lease: OperationLease | None = None,
     ) -> Result[VirtualminServer, str]:
         """
         Register a deployed node as a VirtualminServer.
@@ -143,6 +146,7 @@ class NodeRegistrationService:
             CredentialData,
             get_credential_vault,
         )
+        from apps.infrastructure.node_maintenance_gate import locked_deployment_gate  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import
             VirtualminServer,
         )
@@ -159,7 +163,14 @@ class NodeRegistrationService:
         ssl_cert_fingerprint = fingerprint_result.unwrap()
 
         try:
-            with transaction.atomic():
+            # The SSH pin probe above holds no database lock. Recheck its exact
+            # resource under the shared admission gate before publishing any row.
+            with locked_deployment_gate(deployment.pk) as current:
+                if refusal := self._registration_ownership_refusal(deployment, current, operation_lease):
+                    return Err(refusal)
+                assert current is not None
+                original = deployment
+                deployment = current
                 # Check if VirtualminServer already exists for this hostname
                 if VirtualminServer.objects.filter(hostname=deployment.fqdn).exists():
                     return Err(f"VirtualminServer with hostname '{deployment.fqdn}' already exists")
@@ -224,6 +235,7 @@ class NodeRegistrationService:
                 # Link deployment to server
                 deployment.virtualmin_server = server
                 deployment.save(update_fields=["virtualmin_server", "updated_at"])
+                original.virtualmin_server = server
 
                 logger.info(
                     f"📝 [Registration] Registered node {deployment.hostname} -> "
@@ -236,6 +248,45 @@ class NodeRegistrationService:
         except Exception as e:
             logger.error(f"🚨 [Registration] Failed to register node {deployment.hostname}: {e}")
             return Err(f"Registration failed: {e}")
+
+    @staticmethod
+    def _registration_ownership_refusal(  # noqa: PLR0911  # Each resource/owner gate names the actionable refusal.
+        probed: NodeDeployment, current: NodeDeployment | None, lease: OperationLease | None
+    ) -> str | None:
+        from apps.infrastructure.node_maintenance_gate import ACTIVE_EXECUTIONS  # noqa: PLC0415
+        from apps.infrastructure.node_maintenance_models import NodeMaintenanceExecution  # noqa: PLC0415
+
+        if current is None:
+            return "The deployment no longer exists"
+        if any(
+            getattr(current, field) != getattr(probed, field)
+            for field in (
+                "correlation_id",
+                "external_node_id",
+                "ipv4_address",
+                "ssh_port",
+                "hostname",
+                "virtualmin_server_id",
+            )
+        ):
+            return "The deployment resource changed during certificate verification; reload before registration"
+        if current.virtualmin_server_id or current.status not in {"completed", "registering"}:
+            return "The deployment is no longer available for registration"
+        if NodeMaintenanceExecution.objects.filter(deployment=current, phase__in=ACTIVE_EXECUTIONS).exists():
+            return "A native operation owns this deployment; verify its outcome before registration"
+        if current.operation_reserved_at is not None:
+            return "A queued deployment operation owns this deployment"
+        if lease is not None:
+            if (
+                lease.deployment_id != current.pk
+                or lease.token != current.operation_token
+                or lease.kind != current.operation_kind
+                or current.status != "registering"
+            ):
+                return "The registration operation no longer owns this deployment"
+        elif current.status == "registering" and current.operation_token is not None:
+            return "Registration requires the current deployment operation's lease"
+        return None
 
     def _panel_trust_refusal(self, server: VirtualminServer) -> str | None:
         """None = affirmatively trusted; otherwise the refusal reason (#436)."""
@@ -365,7 +416,11 @@ class NodeRegistrationService:
 
             # CAS: only a still-'disabled' server may be activated — never resurrect a
             # 'failed'/'maintenance' server, and never race a concurrent transition.
-            with transaction.atomic():
+            from apps.infrastructure.node_maintenance_execution import (  # noqa: PLC0415  # Native write authority is local to this result.
+                current_native_server_write_guard,
+            )
+
+            with current_native_server_write_guard(server.pk), transaction.atomic():
                 locked_server = VMServer.objects.select_for_update().get(pk=server.pk)
                 if policy_evidence is not None:
                     # Rebind the evidence under the SAME lock as activation. Remote
@@ -426,12 +481,21 @@ class NodeRegistrationService:
         logger.info(f"📝 [Registration] Unregistering node: {deployment.hostname}")
 
         try:
-            with transaction.atomic():
-                from apps.provisioning.component_migration_models import retained_source_refusal  # noqa: PLC0415
-                from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
+            from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Server before deployment
+                locked_deployment_gate,
+                teardown_maintenance_refusal,
+            )
+            from apps.provisioning.component_migration_models import retained_source_refusal  # noqa: PLC0415
+            from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
 
-                server = VirtualminServer.objects.select_for_update().get(pk=server.pk)
+            with locked_deployment_gate(deployment.pk) as current:
+                if current is None or current.virtualmin_server_id != server.pk:
+                    return Err("The deployment's server binding changed; reload before unregistering it")
+                deployment = current
+                server = VirtualminServer.objects.get(pk=current.virtualmin_server_id)
                 if refusal := retained_source_refusal(server.pk):
+                    return Err(refusal)
+                if refusal := teardown_maintenance_refusal(server.pk):
                     return Err(refusal)
                 # Remove credentials from vault
                 from apps.common.credential_vault import (  # Circular: cross-app  # noqa: PLC0415  # Deferred: avoids circular import

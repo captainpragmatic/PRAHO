@@ -124,6 +124,12 @@ def claim_hardening(
     if stored.server_id is None:
         raise ValidationError(_("The inspected node has been removed."))
     server = VirtualminServer.objects.select_for_update().get(pk=stored.server_id)
+    from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared Server mutex.
+        competing_operation_refusal,
+    )
+
+    if refusal := competing_operation_refusal(server.pk):
+        raise ValidationError(refusal)
     validate_decision(server, stored, evidence)
     # Read-only qualification precedes decisions, operation exclusion and enrollment.
     verify_network_ingress(cast("list[str]", evidence["firewall"]))

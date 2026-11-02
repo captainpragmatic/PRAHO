@@ -252,8 +252,14 @@ class VirtualminProvisioningService:
         exists: a closing node is never left holding an account, not even an error one.
         """
         locked = VirtualminServer.objects.select_for_update().get(pk=server.pk)
+        from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server admission
+            maintenance_refusal,
+        )
+
         if locked.security_operation:
             return Err("Target server has an unresolved hardening operation", retriability=Retriability.RETRIABLE)
+        if refusal := maintenance_refusal(locked.pk):
+            return Err(refusal, retriability=Retriability.RETRIABLE)
         if locked.is_draining:
             return Err("Target server is draining", retriability=Retriability.RETRIABLE)
         if locked.status != "active":
@@ -406,6 +412,18 @@ class VirtualminProvisioningService:
                 if admitted.is_err():
                     return Err(admitted.unwrap_err(), retriability=retriability_of(admitted))
                 # Rotate password — the pre-loss secret cannot be recovered.
+                VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=account.pk)
+                from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server admission
+                    maintenance_refusal,
+                )
+
+                for node in (
+                    VirtualminServer.objects.select_for_update(of=("self",))
+                    .filter(pk__in=(previous_server.pk, server.pk))
+                    .order_by("pk")
+                ):
+                    if refusal := maintenance_refusal(node.pk):
+                        return Err(refusal, retriability=Retriability.RETRIABLE)
                 account.set_password(self._generate_secure_password())  # nosemgrep: unvalidated-password
                 account.server = server  # staged: not in update_fields below
                 # fsm-bypass: CharField status
@@ -472,8 +490,12 @@ class VirtualminProvisioningService:
                 return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
             gateway = self._get_gateway(account.server)
 
-            # Mark job as started
-            job.mark_started()
+            # Recheck the queued domain job under the same server gate as a new window claim.
+            from apps.infrastructure.node_maintenance_gate import begin_account_job  # noqa: PLC0415  # Native admission
+
+            if refusal := begin_account_job(account, job):
+                job.mark_failed(refusal, retriability=Retriability.RETRIABLE)
+                return Err(refusal, retriability=Retriability.RETRIABLE)
             self._apply_default_quotas(account)
 
             # ===============================================================================
@@ -937,8 +959,11 @@ class VirtualminProvisioningService:
                 parameters=self._job_parameters({"domain": account.domain, "reason": reason}, soft_limit=True),
                 correlation_id=f"suspend_domain_{account.id}",
             )
-            job.save()
-            job.mark_started()
+            from apps.infrastructure.node_maintenance_gate import begin_account_job  # noqa: PLC0415  # Native admission
+
+            if refusal := begin_account_job(account, job):
+                _clear_idempotency_key(idempotency_key, operation="suspend", domain=account.domain)
+                return Err(refusal, retriability=Retriability.RETRIABLE)
 
             # Snapshot the lifecycle state before the remote mutation.
             previous_status = account.status
@@ -1076,8 +1101,11 @@ class VirtualminProvisioningService:
                 parameters=self._job_parameters({"domain": account.domain}, soft_limit=True),
                 correlation_id=f"unsuspend_domain_{account.id}",
             )
-            job.save()
-            job.mark_started()
+            from apps.infrastructure.node_maintenance_gate import begin_account_job  # noqa: PLC0415  # Native admission
+
+            if refusal := begin_account_job(account, job):
+                _clear_idempotency_key(idempotency_key, operation="unsuspend", domain=account.domain)
+                return Err(refusal, retriability=Retriability.RETRIABLE)
 
             # Snapshot the lifecycle state before the remote mutation.
             previous_status = account.status
@@ -1179,7 +1207,7 @@ class VirtualminProvisioningService:
             return Err(error_msg)
         return None
 
-    def delete_account(  # Complexity: multi-step business logic  # noqa: PLR0911, PLR0912, PLR0915  # Complexity: cohesive workflow
+    def delete_account(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Keep deletion admission and its durable job in one workflow.
         self, account: VirtualminAccount
     ) -> Result[bool, str]:  # Complexity: Virtualmin workflow  # Complexity: multi-step business logic
         """
@@ -1231,6 +1259,14 @@ class VirtualminProvisioningService:
             with transaction.atomic():
                 VirtualminAccount.objects.select_for_update().get(pk=account.pk)
                 account.refresh_from_db()  # decisions below use the locked, current row
+                VirtualminServer.objects.select_for_update(of=("self",)).get(pk=account.server_id)
+                from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Native admission
+                    maintenance_refusal,
+                )
+
+                if node_refusal := maintenance_refusal(account.server_id):
+                    _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
+                    return Err(node_refusal, retriability=Retriability.RETRIABLE)
                 admission_refusal: Result[bool, str] | None
                 if account_has_active_operation(account):
                     admission_refusal = Err(ACCOUNT_BUSY_REFUSAL)
@@ -1427,17 +1463,23 @@ class VirtualminProvisioningService:
         """
         with transaction.atomic():
             VirtualminAccount.objects.select_for_update().get(pk=account.pk)
+            VirtualminServer.objects.select_for_update(of=("self",)).get(pk=account.server_id)
+            from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Native admission
+                maintenance_refusal,
+            )
+
+            refusal = maintenance_refusal(account.server_id)
             busy = account_has_active_operation(account, ignore_job_id=job.pk)
             if not busy and job.operation == "delete_domain":
                 invalidate_chain(account)
-        if not busy:
+        if not busy and not refusal:
             return None
         logger.info("✅ [VirtualminService] Active operation blocks lifecycle retry: %s", account.pk)
-        message = ACCOUNT_BUSY_REFUSAL
+        message = refusal or ACCOUNT_BUSY_REFUSAL
         job.mark_failed(message, retriability=Retriability.RETRIABLE)
         return Err(message, retriability=Retriability.RETRIABLE)
 
-    def _execute_lifecycle_operation(  # Distinct guard exits: migration lock + per-operation outcomes  # noqa: PLR0911  # Complexity: cohesive workflow
+    def _execute_lifecycle_operation(  # noqa: C901, PLR0911, PLR0915  # Keep same-job retry, admission and native settlement together.
         self, account: VirtualminAccount, job: VirtualminProvisioningJob
     ) -> Result[bool, str]:
         """Run suspend/unsuspend/delete against the gateway reusing the SAME job."""
@@ -1486,7 +1528,11 @@ class VirtualminProvisioningService:
             job.mark_completed({"idempotent": f"account already {target_status}"})
             return Ok(True)
 
-        job.mark_started()
+        from apps.infrastructure.node_maintenance_gate import begin_account_job  # noqa: PLC0415  # Native admission
+
+        if refusal := begin_account_job(account, job):
+            job.mark_failed(refusal, retriability=Retriability.RETRIABLE)
+            return Err(refusal, retriability=Retriability.RETRIABLE)
         gateway = self._get_gateway(account.server)
         params = domain_state_params(account.domain) if program in DOMAIN_STATE_PROGRAMS else {"domain": account.domain}
         result = gateway.call(program, params, correlation_id=job.correlation_id)
@@ -1942,7 +1988,7 @@ class VirtualminBackupManagementService:
             return None
         return restore_destination_refusal(account, server, force=parameters.get("force_restore") is True)
 
-    def _admit_job(  # noqa: PLR0911, PLR0913  # Distinct admission refusals + execution-context seams
+    def _admit_job(  # noqa: C901, PLR0911, PLR0913  # Distinct account, node and execution-context admission refusals
         self,
         account: VirtualminAccount,
         *,
@@ -1991,10 +2037,15 @@ class VirtualminBackupManagementService:
             locked = VirtualminAccount.objects.select_for_update().get(pk=account.pk)
             if source_bound and locked.server_id != self.server.pk:
                 return Err("Account moved to another server since this request began; retry")
-            target_server = VirtualminServer.objects.select_for_update().get(
-                pk=locked.server_id if source_bound else self.server.pk
+            from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server admission
+                maintenance_refusal,
             )
+
+            node_id = locked.server_id if source_bound else self.server.pk
+            target_server = VirtualminServer.objects.select_for_update(of=("self",)).get(pk=node_id)
             if refusal := self._backup_server_refusal(locked, target_server, operation, parameters):
+                return Err(refusal)
+            if refusal := maintenance_refusal(node_id):
                 return Err(refusal)
             if account_has_active_operation(locked):
                 return Err(ACCOUNT_BUSY_REFUSAL)

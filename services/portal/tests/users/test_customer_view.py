@@ -197,6 +197,18 @@ class GateTests(TestCase):
         view.assert_called_once()
         self.assertEqual(response["Cache-Control"], "no-store")
 
+    def test_maintenance_refresh_reads_are_available_but_never_authorize_posts_or_other_customers(self) -> None:
+        for path in ("/dashboard/account-status/", "/services/12/maintenance/"):
+            with self.subTest(path=path):
+                response, _view = self.through(self.request("GET", path))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.content, b"page")
+                self.assertEqual(response["Cache-Control"], "no-store")
+                for method, target in (("POST", path), ("GET", path + "?customer_id=8")):
+                    refused, view = self.through(self.request(method, target))
+                    self.assertEqual(refused.status_code, 403)
+                    view.assert_not_called()
+
     def test_writes_are_refused_before_any_view_public_routes_included(self) -> None:
         for method, path in (
             ("POST", "/api/cookie-consent/"),

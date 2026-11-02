@@ -2,6 +2,12 @@
 
 For Platform database/media recovery, see [Restore a Platform backup](PLATFORM_RESTORE.md).
 
+For customer-visible node work, see [Customer maintenance windows](NODE_MAINTENANCE.md).
+Deploy compatible Platform/Portal code, apply the normal migrations and run the normal Django-Q workers;
+post-migration setup installs the one-minute maintenance schedule, and `setup_scheduled_tasks` repairs it.
+New calendars suggest 15 minutes of latest-start deferral for explicit operator review. Saved zero values
+and existing deadlines are preserved. Existing notification template edits survive default seeding.
+
 This guide covers all deployment scenarios for PRAHO, from native single-server setups to multi-server distributed deployments.
 
 ## Table of Contents

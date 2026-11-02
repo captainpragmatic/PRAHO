@@ -87,6 +87,11 @@ def _review_scope(
         .order_by("pk")
     }
     source, target = servers[stored.source_server_id], servers[stored.target_server_id]
+    from apps.infrastructure.node_maintenance_gate import maintenance_refusal  # noqa: PLC0415  # Shared node admission
+
+    for node in (source, target):
+        if refusal := maintenance_refusal(node.pk):
+            raise ValidationError(refusal)
     latest = ComponentMigrationReview.objects.filter(
         account=account, source_server=source, target_server=target
     ).first()

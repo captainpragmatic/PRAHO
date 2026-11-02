@@ -286,6 +286,7 @@ class TestApproveReject(DriftRemediationTestBase):
             self.remediation_request.pk,
             task_name=f"remediation_{self.remediation_request.pk}",
             timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
+            sync=False,
         )
 
     @patch("django_q.tasks.async_task", return_value="task-123")
@@ -1267,6 +1268,7 @@ class TestApplyScheduledRemediations(DriftRemediationTestBase):
             self.remediation_request.pk,
             task_name=f"remediation_{self.remediation_request.pk}",
             timeout=EXECUTION_TASK_TIMEOUT_SECONDS,
+            sync=False,
         )
         self.assertEqual(result, {"claimed": 1, "due": 1})
 

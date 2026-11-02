@@ -3040,3 +3040,79 @@ msgstr ""
 #: templates/users/register.html:286
 msgid "Sign in here"
 msgstr ""
+
+#. Customer maintenance windows (#780).
+msgid "Scheduled maintenance for your hosting"
+msgstr "Scheduled maintenance for your hosting"
+
+#. Customer maintenance windows (#780).
+msgid "Maintenance is in progress"
+msgstr "Maintenance is in progress"
+
+#. Customer maintenance windows (#780).
+msgid "Maintenance is taking longer than planned"
+msgstr "Maintenance is taking longer than planned"
+
+#. Customer maintenance windows (#780).
+msgid "Maintenance completed"
+msgstr "Maintenance completed"
+
+#. Customer maintenance windows (#780).
+msgid "Maintenance did not complete as planned"
+msgstr "Maintenance did not complete as planned"
+
+#. Customer maintenance windows (#780).
+#, python-format
+msgid "%(start)s - %(end)s (%(zone)s)"
+msgstr "%(start)s - %(end)s (%(zone)s)"
+
+#. Customer maintenance windows (#780).
+#, python-format
+msgid "%(heading)s: %(period)s."
+msgstr "%(heading)s: %(period)s."
+
+#. Customer maintenance windows (#780).
+msgid "A restart of the server your site runs on"
+msgstr "A restart of the server your site runs on"
+
+#. Customer maintenance windows (#780).
+msgid "Updates to the server your site runs on"
+msgstr "Updates to the server your site runs on"
+
+#. Customer maintenance windows (#780).
+msgid "Emergency work on the server your site runs on"
+msgstr "Emergency work on the server your site runs on"
+
+#. Customer maintenance windows (#780).
+msgid "Brief unavailability may occur."
+msgstr "Brief unavailability may occur."
+
+#. Customer maintenance windows (#780).
+msgid "No downtime is expected."
+msgstr "No downtime is expected."
+
+#. Customer maintenance windows (#780).
+#, python-format
+msgid "Expected unavailability: up to %(minutes)d minutes."
+msgstr "Expected unavailability: up to %(minutes)d minutes."
+
+#. Customer maintenance windows (#780).
+msgid "Confirmed by an operator."
+msgstr "Confirmed by an operator."
+
+#. Customer maintenance windows (#780).
+msgid "The work took longer than planned."
+msgstr "The work took longer than planned."
+
+#. Customer maintenance windows (#780).
+msgid "Maintenance information is temporarily unavailable. Please check again shortly."
+msgstr "Maintenance information is temporarily unavailable. Please check again shortly."
+# Retained-source maintenance can affect mail/DNS independently of website placement.
+msgid "A restart of a server supporting your hosting services"
+msgstr "A restart of a server supporting your hosting services"
+
+msgid "Updates to a server supporting your hosting services"
+msgstr "Updates to a server supporting your hosting services"
+
+msgid "Emergency work on a server supporting your hosting services"
+msgstr "Emergency work on a server supporting your hosting services"

@@ -99,7 +99,13 @@ def _fence_create_retries(jobs: list[tuple[Any, int]]) -> bool:
     return True
 
 
-def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> Result[None, str]:
+def close_node_admission(
+    virtualmin_server_id: Any,
+    *,
+    force: bool = False,
+    maintenance_token: uuid.UUID | None = None,
+    preserve_scheduled: bool = False,
+) -> Result[None, str]:
     """Under the server row lock admission takes: refuse while work lives there, else close the node.
 
     Every account that is not terminated still lives on the node, including one still provisioning,
@@ -116,9 +122,20 @@ def close_node_admission(virtualmin_server_id: Any, *, force: bool = False) -> R
     occupied_message = "Node has undrained accounts; drain it or explicitly force"
     with transaction.atomic():
         server = VirtualminServer.objects.select_for_update().get(pk=virtualmin_server_id)
-        if server.security_operation:
-            return Err("Node hardening is unresolved; reconcile its outcome before teardown")
-        if refusal := retained_source_refusal(server.pk):
+        refusal = (
+            "Node hardening is unresolved; reconcile its outcome before teardown"
+            if server.security_operation
+            else retained_source_refusal(server.pk)
+        )
+        if refusal:
+            return Err(refusal)
+        from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Window authority
+            teardown_maintenance_refusal,
+        )
+
+        if refusal := teardown_maintenance_refusal(
+            server.pk, execution_token=maintenance_token, preserve_scheduled=preserve_scheduled
+        ):
             return Err(refusal)
         evidence = [_never_reached_node(account) for account in server.accounts.exclude(status="terminated")]
         occupied = any(jobs is None for jobs in evidence)
@@ -171,9 +188,13 @@ def claim_teardown(  # noqa: PLR0913  # One argument per claim condition
     claim; the guard and the teardown's own provenance checks run as for any destroy.
     """
     from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: avoids circular import
+    from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Server before deployment
+        locked_deployment_gate,
+    )
 
-    with transaction.atomic():
-        row = NodeDeployment.objects.select_for_update().get(pk=deployment.pk)
+    with locked_deployment_gate(deployment.pk) as row:
+        if row is None:
+            return Err("The deployment no longer exists")
         resuming = credential_fingerprint is not None and row.status == "destroying" and row.needs_reconciliation
         if resuming:
             stored = row.provider_token_fingerprint

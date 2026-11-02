@@ -41,13 +41,15 @@ class GeneratedNodeActivationTests(TestCase):
                 before_commit()
 
         with (
+            # Import the inspection/apply dependencies before replacing the
+            # common factory; spawned workers may load them for the first time here.
+            patch("apps.provisioning.virtualmin_security_tasks.collect_inspection", return_value=self.evidence),
             patch("apps.common.credential_vault.get_credential_vault") as vault,
             patch("apps.provisioning.virtualmin_gateway.VirtualminGateway") as gateway,
             patch("apps.infrastructure.ansible_service.node_admin_allowed_cidrs", return_value=ADMIN_NETWORKS),
             patch(
                 "apps.infrastructure.ansible_service.AnsibleService.operator_public_keys", return_value=(OPERATOR_KEY,)
             ),
-            patch("apps.provisioning.virtualmin_security_tasks.collect_inspection", return_value=self.evidence),
             patch("apps.settings.services.SettingsService.get_boolean_setting", return_value=True),
             patch.object(NodeRegistrationService, "_panel_trust_refusal", trust_policy),
         ):
@@ -123,9 +125,9 @@ class TrustedPanelCertificateGateTests(TestCase):
             patch("apps.provisioning.virtualmin_gateway.VirtualminGateway") as gateway_cls,
             patch(
                 "apps.settings.services.SettingsService.get_boolean_setting",
-                side_effect=lambda key, default=False: flag
-                if key == "infrastructure.require_trusted_panel_certificate"
-                else default,
+                side_effect=lambda key, default=False: (
+                    flag if key == "infrastructure.require_trusted_panel_certificate" else default
+                ),
             ),
         ):
             vault.return_value.get_credential.return_value = Ok(("praho-api", "vault-pw", {}))

@@ -512,6 +512,13 @@ class VirtualminMigrationService:
                 }
                 account.server = servers[account.server_id]
                 target = servers[target_server.pk]
+                from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Both server gates
+                    maintenance_refusal,
+                )
+
+                for server_id in servers:
+                    if refusal := maintenance_refusal(server_id):
+                        raise ValueError(refusal)
                 self._local_preflight(account, target)
                 if reason not in VirtualminMigration.Reason.values:
                     raise ValueError("Invalid migration reason")
@@ -1503,7 +1510,9 @@ class VirtualminMigrationService:
         )
         schedule_migration_wake(migration.pk, deferral.until)
 
-    def run(self, migration_id: UUID) -> Result[MigrationResumeOutcome, str]:
+    def run(  # noqa: C901, PLR0911, PLR0912  # Keep admission, resume decisions and exact lease release in one ownership scope.
+        self, migration_id: UUID
+    ) -> Result[MigrationResumeOutcome, str]:
         try:
             migration = VirtualminMigration.objects.select_related(
                 "account", "source_server", "target_server", "initiated_by"
@@ -1513,7 +1522,23 @@ class VirtualminMigrationService:
         if type(self) is VirtualminMigrationService and (worker := self._specialized_worker(migration.contract)):
             return worker.run(migration_id)
         token = uuid4()
-        acquired = migration.acquire_lease(token, self.lease_ttl)
+        with transaction.atomic():
+            VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=migration.account_id)
+            server_ids = {migration.source_server_id, migration.target_server_id}
+            list(VirtualminServer.objects.select_for_update(of=("self",)).filter(pk__in=server_ids).order_by("pk"))
+            from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Queued execution gate
+                maintenance_refusal,
+            )
+
+            for server_id in server_ids:
+                if refusal := maintenance_refusal(server_id):
+                    return Err(refusal)
+            current_binding = VirtualminMigration.objects.values_list("source_server_id", "target_server_id").get(
+                pk=migration.pk
+            )
+            if current_binding != (migration.source_server_id, migration.target_server_id):
+                return Err("Migration server binding changed; review it before retrying")
+            acquired = migration.acquire_lease(token, self.lease_ttl)
         if not acquired:
             logger.info("✅ [VirtualminMigration] BUSY: migration=%s", migration_id)
             return Ok({"action": "busy", "migration_id": str(migration_id), "lease_acquired": False})

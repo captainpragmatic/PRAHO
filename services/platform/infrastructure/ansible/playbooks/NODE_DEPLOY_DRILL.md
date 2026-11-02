@@ -8,6 +8,10 @@ it before claiming production auto-deploy is customer-ready.
 
 ## Prerequisites
 
+- Follow [customer maintenance windows](../../../../../docs/deployment/NODE_MAINTENANCE.md)
+  before customer-visible work. Its isolated Platform/Portal HTTP acceptance uses local mail and a scoped
+  worker; it does not call providers, qualify this paid node-deploy drill, or turn reboot acknowledgment
+  into recovery proof. Imported/manual outcomes require explicit operator attestation.
 - For #782, install `virtualmin_usage.yml` on the isolated node, verify the root timer
   and HTTP/HTTPS logging, grow files and a database separately and run the hourly
   usage publisher. Check both account and Service byte projections plus the portal

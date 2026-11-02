@@ -571,6 +571,7 @@ class NodeDeployment(models.Model):
     # rotates it, so a worker resumed after recovery finds its token gone and writes nothing.
     operation_token = models.UUIDField(null=True, blank=True, editable=False)
     operation_kind = models.CharField(max_length=20, choices=OPERATION_KIND_CHOICES, blank=True, editable=False)
+    operation_reserved_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     # What the provider was last asked to do with this deployment's server. "unknown" means a create
     # call may have reached the provider without a confirmed answer, so the row may be billed.
@@ -1319,3 +1320,12 @@ class DriftSnapshot(models.Model):
 
     def __str__(self) -> str:
         return f"Snapshot({self.deployment.hostname}, {self.snapshot_type}, {self.status})"
+
+
+from .node_maintenance_models import (  # noqa: E402, F401  # Register and publicly export feature models after core models.
+    NodeMaintenanceAudience,
+    NodeMaintenanceDelivery,
+    NodeMaintenanceExecution,
+    NodeMaintenancePolicy,
+    NodeMaintenanceWindow,
+)

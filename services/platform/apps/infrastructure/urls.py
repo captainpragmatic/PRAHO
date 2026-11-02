@@ -6,11 +6,23 @@ URL routing for node deployment management interface.
 
 from django.urls import path
 
-from . import views
+from . import node_maintenance_views, views
 
 app_name = "infrastructure"
 
 urlpatterns = [
+    path("maintenance/servers/<uuid:node_id>/policy/", node_maintenance_views.policy_edit, name="maintenance_policy"),
+    path("maintenance/servers/<uuid:node_id>/create/", node_maintenance_views.window_create, name="maintenance_create"),
+    path(
+        "maintenance/windows/<uuid:window_id>/<str:action>/",
+        node_maintenance_views.window_action,
+        name="maintenance_action",
+    ),
+    path(
+        "maintenance/executions/<uuid:execution_id>/reconcile/",
+        node_maintenance_views.execution_reconcile,
+        name="maintenance_execution_reconcile",
+    ),
     # Dashboard
     path("", views.deployment_dashboard, name="dashboard"),
     # Node Deployments CRUD

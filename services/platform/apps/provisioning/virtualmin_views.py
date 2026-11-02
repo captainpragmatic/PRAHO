@@ -318,6 +318,11 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
         },
     }
 
+    from apps.infrastructure.node_maintenance_views import (  # noqa: PLC0415 -- read-only cross-app card avoids startup cycle
+        node_maintenance_context,  # Read-only status card.
+    )
+
+    context.update(node_maintenance_context(server, request))
     return render(request, "provisioning/virtualmin/server_detail.html", context)
 
 
@@ -1076,18 +1081,44 @@ def virtualmin_server_edit(request: HttpRequest, server_id: str) -> HttpResponse
     server = get_object_or_404(VirtualminServer, id=server_id)
 
     if request.method == "POST":
-        form = VirtualminServerForm(request.POST, instance=server)
-        if form.is_valid():
-            try:
-                server = form.save()
-            except (EncryptionError, DecryptionError) as error:
-                # A rename re-binds the stored API password to the new hostname; one that cannot be read
-                # is entered again rather than kept unreadable (a stale keyring says so in the log).
-                logger.warning("⚠️ [Virtualmin] Server %s: API password not re-bound: %s", server.pk, error)
-                form.add_error("api_password", _("The stored API password cannot be kept: enter it again."))
-            else:
-                messages.success(request, f"Server '{server.name}' updated successfully!")
-                return redirect("provisioning:virtualmin_server_detail", server_id=server.id)
+        from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415 -- shared server ownership boundary
+            maintenance_refusal,
+        )
+
+        with transaction.atomic():
+            server = get_object_or_404(VirtualminServer.objects.select_for_update(of=("self",)), id=server_id)
+            original_target = {
+                field: getattr(server, field)
+                for field in (
+                    "hostname",
+                    "ipv4_address",
+                    "ipv6_address",
+                    "api_port",
+                    "api_username",
+                    "use_ssl",
+                    "ssl_verify",
+                    "ssl_cert_fingerprint",
+                )
+            }
+            form = VirtualminServerForm(request.POST, instance=server)
+            if form.is_valid():
+                # ModelForm validation applies normalized values to its instance before save.
+                target_changed = any(getattr(server, field) != value for field, value in original_target.items())
+                target_changed = target_changed or bool(form.cleaned_data.get("api_password"))
+                refusal = maintenance_refusal(server.pk) if target_changed else None
+                if refusal:
+                    form.add_error(None, refusal)
+                else:
+                    try:
+                        server = form.save()
+                    except (EncryptionError, DecryptionError) as error:
+                        # A rename re-binds the stored API password to the new hostname; one that cannot be read
+                        # is entered again rather than kept unreadable (a stale keyring says so in the log).
+                        logger.warning("⚠️ [Virtualmin] Server %s: API password not re-bound: %s", server.pk, error)
+                        form.add_error("api_password", _("The stored API password cannot be kept: enter it again."))
+                    else:
+                        messages.success(request, f"Server '{server.name}' updated successfully!")
+                        return redirect("provisioning:virtualmin_server_detail", server_id=server.id)
     else:
         form = VirtualminServerForm(instance=server)
 

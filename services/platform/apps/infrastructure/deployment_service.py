@@ -55,6 +55,12 @@ from apps.infrastructure.deployment_lifecycle import (
 from apps.infrastructure.deployment_preflight import validate_deployment_fqdn
 from apps.infrastructure.dns_gateway import DnsRecordSpec, ExpectedDnsRecord, get_dns_gateway
 from apps.infrastructure.maintenance import resolve_maintenance_playbooks
+from apps.infrastructure.node_maintenance_execution import (
+    NodeOperationGuard,
+    current_stop_token,
+    mark_node_operation_issued,
+    native_write_guard,
+)
 from apps.infrastructure.node_teardown import (
     DESTROYABLE_STATES,
     claim_teardown,
@@ -966,6 +972,7 @@ class NodeDeploymentService:
                 admin_username=virtualmin_api_username,
                 admin_password=virtualmin_api_password,
                 user=user,
+                operation_lease=lease,
             )
 
             if registration_result.is_err():
@@ -1433,7 +1440,11 @@ class NodeDeploymentService:
                 username, password, _metadata = credential.unwrap()
                 owned_update(lease, deployment, registration_state="started")
                 registered = self._registration.register_node(
-                    deployment=deployment, admin_username=username, admin_password=password, user=user
+                    deployment=deployment,
+                    admin_username=username,
+                    admin_password=password,
+                    user=user,
+                    operation_lease=lease,
                 )
                 if registered.is_err():
                     message = f"Registration failed: {registered.unwrap_err()}"
@@ -1527,6 +1538,7 @@ class NodeDeploymentService:
             logger.warning(f"⚠️ [Upgrade:{deployment.hostname}] {message}")
             NodeDeploymentLog.objects.create(deployment=deployment, level="WARNING", message=message, phase="upgrading")
 
+    @NodeOperationGuard("resize")
     def upgrade_node_size(  # Complexity: deployment orchestration
         self,
         deployment: NodeDeployment,
@@ -1584,6 +1596,7 @@ class NodeDeploymentService:
 
             # Use provider-agnostic command execution
             provider_type = deployment.provider.provider_type
+            mark_node_operation_issued(deployment, "resize")
             result = run_provider_command(
                 provider_type=provider_type,
                 operation="resize",
@@ -1622,7 +1635,8 @@ class NodeDeploymentService:
                     logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
                 return Err(error_msg)
 
-            self._record_resize(deployment, old_size, new_size, lifetime_id, resized_server)
+            with native_write_guard(deployment):
+                self._record_resize(deployment, old_size, new_size, lifetime_id, resized_server)
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -1654,6 +1668,7 @@ class NodeDeploymentService:
                 logger.warning(f"[Upgrade:{deployment.hostname}] Failed to log audit: upgrade failed")
             return Err(f"Upgrade failed: {e}")
 
+    @NodeOperationGuard("security")
     def run_maintenance(  # Complexity: deployment orchestration  # noqa: C901, PLR0911  # Complexity: multi-step business logic
         self,
         deployment: NodeDeployment,
@@ -1709,6 +1724,7 @@ class NodeDeploymentService:
         results = []
         try:
             for playbook in playbooks:
+                mark_node_operation_issued(deployment, "security")
                 result = self._ansible.run_playbook(
                     deployment=deployment,
                     playbook=playbook,
@@ -1795,7 +1811,12 @@ class NodeDeploymentService:
         force: bool = False,
     ) -> Result[bool, str]:
         """Refuse stopping an undrained Virtualmin node; disable the linked server otherwise."""
-        closed = close_node_admission(deployment.virtualmin_server_id, force=force)
+        closed = close_node_admission(
+            deployment.virtualmin_server_id,
+            force=force,
+            maintenance_token=current_stop_token(deployment),
+            preserve_scheduled=True,
+        )
         if closed.is_err():
             error_msg = closed.unwrap_err().replace("explicitly force", "explicitly force stop")
             InfrastructureAuditService.log_node_stop_failed(deployment, error_msg, audit_ctx)
@@ -1803,6 +1824,7 @@ class NodeDeploymentService:
             return Err(error_msg)
         return Ok(True)
 
+    @NodeOperationGuard("stop")
     def stop_node(  # noqa: PLR0911
         self,
         deployment: NodeDeployment,
@@ -1847,6 +1869,7 @@ class NodeDeploymentService:
             if disable_result.is_err():
                 return disable_result
             provider_type = deployment.provider.provider_type
+            mark_node_operation_issued(deployment, "stop")
             result = run_provider_command(
                 provider_type=provider_type,
                 operation="power_off",
@@ -1871,7 +1894,8 @@ class NodeDeploymentService:
                     logger.warning(f"[Stop:{deployment.hostname}] Failed to log audit: stop failed")
                 return Err(error_msg)
 
-            deployment.transition_to("stopped")
+            with native_write_guard(deployment):
+                deployment.transition_to("stopped")
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -1897,6 +1921,7 @@ class NodeDeploymentService:
                 logger.warning(f"[Stop:{deployment.hostname}] Failed to log audit: stop failed")
             return Err(f"Stop failed: {e}")
 
+    @NodeOperationGuard("start")
     def start_node(
         self,
         deployment: NodeDeployment,
@@ -1927,6 +1952,7 @@ class NodeDeploymentService:
 
         try:
             provider_type = deployment.provider.provider_type
+            mark_node_operation_issued(deployment, "start")
             result = run_provider_command(
                 provider_type=provider_type,
                 operation="power_on",
@@ -1951,7 +1977,8 @@ class NodeDeploymentService:
                     logger.warning(f"[Start:{deployment.hostname}] Failed to log audit: start failed")
                 return Err(error_msg)
 
-            deployment.transition_to("completed")
+            with native_write_guard(deployment):
+                deployment.transition_to("completed")
 
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
@@ -1971,9 +1998,10 @@ class NodeDeploymentService:
                     # Clear the drain exclusion ONLY when no non-terminal drain
                     # owns it — a drain admitted between activation and this
                     # update must keep the server out of placement.
-                    VirtualminServer.objects.filter(pk=server.pk, status="active").exclude(
-                        drains__status__in=("pending", "running", "paused_needs_review")
-                    ).update(is_draining=False, updated_at=timezone.now())
+                    with native_write_guard(deployment):
+                        VirtualminServer.objects.filter(pk=server.pk, status="active").exclude(
+                            drains__status__in=("pending", "running", "paused_needs_review")
+                        ).update(is_draining=False, updated_at=timezone.now())
 
             # Audit: start completed
             try:
@@ -1992,6 +2020,7 @@ class NodeDeploymentService:
                 logger.warning(f"[Start:{deployment.hostname}] Failed to log audit: start failed")
             return Err(f"Start failed: {e}")
 
+    @NodeOperationGuard("reboot")
     def reboot_node(
         self,
         deployment: NodeDeployment,
@@ -2022,6 +2051,7 @@ class NodeDeploymentService:
 
         try:
             provider_type = deployment.provider.provider_type
+            mark_node_operation_issued(deployment, "reboot")
             result = run_provider_command(
                 provider_type=provider_type,
                 operation="reboot",

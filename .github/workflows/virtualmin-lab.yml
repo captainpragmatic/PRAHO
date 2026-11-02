@@ -118,6 +118,9 @@ jobs:
       - name: Full lab run (suites, node deploy, faults, browser tests)
         run: make test-virtualmin-lab-full
 
+      - name: Maintenance Portal acceptance (real HTTP, owned fixture databases and captured mail)
+        run: make test-virtualmin-maintenance-portal
+
       - name: Lab diagnostics
         if: failure()
         run: |
@@ -135,6 +138,7 @@ jobs:
           name: virtualmin-lab-evidence
           path: |
             output/playwright/virtualmin-lab/
+            output/playwright/maintenance-lab/
             output/virtualmin-lab/faults/
             output/virtualmin-lab/components/
             logs/virtualmin_e2e_server.log

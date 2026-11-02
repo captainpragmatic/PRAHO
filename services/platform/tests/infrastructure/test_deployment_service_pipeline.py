@@ -640,7 +640,7 @@ class TestStopNodeUsesStateMachine(TestCase):
 
     @patch("apps.infrastructure.deployment_service.run_provider_command")
     def test_stop_uses_transition_to(self, mock_run_cmd: MagicMock) -> None:
-        deployment = _create_deployment("completed")
+        deployment = _create_deployment("completed", external_node_id="state-machine-stop-fixture")
         service = _make_service()
 
         mock_run_cmd.return_value = Ok(MagicMock(success=True))
@@ -686,7 +686,7 @@ class TestStartNodeUsesStateMachine(TestCase):
 
     @patch("apps.infrastructure.deployment_service.run_provider_command")
     def test_start_uses_transition_to(self, mock_run_cmd: MagicMock) -> None:
-        deployment = _create_deployment("stopped")
+        deployment = _create_deployment("stopped", external_node_id="state-machine-start-fixture")
         service = _make_service()
 
         mock_run_cmd.return_value = Ok(MagicMock(success=True))
