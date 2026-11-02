@@ -7,7 +7,7 @@ from unittest import skipUnless
 from unittest.mock import patch
 
 from django.db import DatabaseError, connection, transaction
-from django.db.models import Count, OuterRef
+from django.db.models import Count, OuterRef, Subquery
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 
@@ -61,7 +61,14 @@ class RowLockContractTests(_SubscriptionInvoicePaymentFixture, TestCase):
         ):
             rows = lock_many_and_load(Subscription.objects.filter(pk=self.subscription.pk))
         self.assertEqual(rows[0].pk, self.subscription.pk)
-        writer.assert_called()
+        writer.assert_called_once()
+
+    def test_uncorrelated_membership_subquery_keeps_eligibility_and_two_statement_contract(self) -> None:
+        customers = Customer.objects.filter(pk=self.customer.pk).values("pk")
+        queryset = Subscription.objects.filter(customer_id__in=Subquery(customers)).select_related("customer")
+        with self.assertNumQueries(2):
+            rows = lock_many_and_load(queryset)
+            self.assertEqual([row.customer.pk for row in rows], [self.customer.pk])
 
     def test_refuses_unsupported_query_shapes_before_sql(self) -> None:
         base = Subscription.objects.all()
@@ -71,6 +78,7 @@ class RowLockContractTests(_SubscriptionInvoicePaymentFixture, TestCase):
             base.union(base), base.filter(pk=OuterRef("pk")), base.extra(select={"constant": "1"}),
             base.filter(customer_id__in=Customer.objects.filter(pk=OuterRef("customer_id")).values("pk")),
             base.extra(where=["1=1"]), base.extra(tables=["customers_customer"]), base.extra(order_by=["pk"]),
+            base.filter(customer_id__in=Customer.objects.select_for_update().values("pk")),
         ]
         for queryset in shapes:
             with self.subTest(query=str(type(queryset))), self.assertNumQueries(0), self.assertRaises(ValueError):

@@ -15,7 +15,15 @@ def _unsupported_expression(expression: object) -> bool:
     if isinstance(expression, WhereNode):
         return any(_unsupported_expression(child) for child in expression.children)
     if isinstance(expression, Query):
-        return bool(expression.external_aliases) or _unsupported_expression(expression.where)
+        # Django registers outer aliases during resolution, even when a
+        # subquery never references them. Check actual external columns.
+        return (
+            bool(expression.get_external_cols())
+            or expression.select_for_update
+            or bool(expression.extra or expression.extra_tables or expression.extra_order_by)
+            or _unsupported_expression(expression.where)
+            or any(_unsupported_expression(value) for value in expression.annotations.values())
+        )
     if isinstance(expression, BaseExpression):
         return any(_unsupported_expression(child) for child in expression.get_source_expressions())
     return False
