@@ -341,7 +341,7 @@ class NodeSecurityCreateRecoveryTests(TransactionTestCase):
         self.assert_original_create_remains_unresolved(before, outcome)
 
     def test_unreadable_original_trust_input_parks_unknown_create_without_native_io(self) -> None:
-        with TemporaryDirectory(prefix="praho-recovery-trust-", dir="/private/tmp") as directory:
+        with TemporaryDirectory(prefix="praho-recovery-trust-") as directory:
             trust = Path(directory) / "imported-identity"
             trust.write_text("Owned test-only transport fingerprint input\n")
             trust.chmod(0o600)
