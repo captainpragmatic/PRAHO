@@ -197,7 +197,9 @@ def record_provider_storno(correction_id: Any, record: ProviderStornoRecord) -> 
         correction = FiscalCorrection.objects.select_for_update().filter(pk=correction_id).first()
         if correction is None or correction.state != STATE_MANUAL_REQUIRED or correction.original_id is None:
             raise ValidationError({"__all__": _("This correction is no longer waiting for a provider document.")})
-        original = Invoice.objects.select_for_update().select_related("currency").get(pk=correction.original_id)
+        original = (
+            Invoice.objects.select_for_update(of=("self",)).select_related("currency").get(pk=correction.original_id)
+        )
 
         errors = _provider_storno_errors(correction, original, record, today=ro_local_date(timezone.now()))
         legal_number = f"{record.series}-{record.number}" if record.series else record.number
