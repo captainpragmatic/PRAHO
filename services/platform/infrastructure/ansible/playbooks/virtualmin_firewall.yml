@@ -1,0 +1,7 @@
+---
+- name: Establish the host firewall before installing the panel
+  hosts: all
+  become: true
+  gather_facts: false
+  roles:
+    - virtualmin-web-only

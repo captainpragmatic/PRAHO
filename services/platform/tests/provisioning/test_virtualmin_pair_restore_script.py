@@ -82,7 +82,7 @@ case $cmd in
     ;;
   restore-domain)
     printf '%s\n' "$*" >>"$state/restore_args"
-    if [[ " $* " == *" --feature ssl "* ]]; then
+    if [[ " $* " == *"/recovery-ssl-"* ]]; then
       echo ssl_restore >>"$state/calls"
       exit 0
     fi
@@ -294,10 +294,27 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertNotIn("barrier_down", [c.step for c in result.checkpoints])
         args = (self.state / "restore_args").read_text().splitlines()
         self.assertEqual(len(args), 4)
-        data = [call for call in args if "--all-features" in call]
+        data = [call for call in args if "/recovery-ssl-" not in call]
         self.assertEqual(len(data), 2)
-        self.assertTrue(all("--except-feature unix" in call and "--except-feature ssl" in call for call in data))
-        self.assertEqual(sum("--feature virtualmin --feature ssl" in call for call in args), 2)
+        self.assertTrue(all("--feature unix" not in call and "--feature ssl" not in call for call in data))
+        self.assertTrue(all("--all-features" not in call and "--only-features" in call for call in args))
+        self.assertTrue(all("--feature mysql" in call and "--feature web" in call for call in data))
+        self.assertEqual(sum("--feature ssl" in call for call in args), 2)
+        self.assertTrue(all("--feature virtualmin" not in call for call in args))
+
+    def test_ordinary_configuration_opt_in_restores_metadata_on_both_archives(self) -> None:
+        result = self.step(PRAHO_RESTORE_CONFIGURATION="1")
+        self.assertEqual(result.outcome, "ok")
+        args = (self.state / "restore_args").read_text().splitlines()
+        self.assertEqual(len(args), 2)
+        self.assertTrue(all("--feature virtualmin" in call for call in args))
+        self.assertTrue(all("--only-features" in call and "--all-features" not in call for call in args))
+
+    def test_recovery_refuses_configuration_opt_in_before_any_mutation(self) -> None:
+        result = self.run_script(PRAHO_RECOVERY="1", PRAHO_RESTORE_CONFIGURATION="1")
+        self.assertEqual(result.returncode, 64)
+        self.assertEqual(self.calls(), [])
+        self.assertFalse(self.maint.exists())
 
     def test_recovery_accepts_a_single_standalone_archive(self) -> None:
         result = self.step(PRAHO_RECOVERY="1", PRAHO_DIFF_ARCHIVE="", PRAHO_DIFF_SHA="")

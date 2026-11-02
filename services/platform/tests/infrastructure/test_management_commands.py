@@ -10,6 +10,7 @@ Covers all 5 management commands with focus on 4 audit findings:
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 from io import StringIO
 from typing import Any
@@ -622,8 +623,6 @@ class TestDriftScanCommand(TestCase):
 
     def test_json_output_format(self) -> None:
         """JSON output should contain structured fields."""
-        import json
-
         dep = _make_deployment()
         reports = [_make_drift_report()]
         stdout, _, _ = self._run_drift_scan(
@@ -712,7 +711,7 @@ class TestCleanupDeploymentsCommand(TestCase):
     def test_cloud_deletion_failure_does_not_mark_destroyed(self) -> None:
         """H15: If cloud deletion fails, deployment should NOT be marked destroyed."""
         deployment = self._stale_billed_row()
-        gateway = _teardown_gateway()
+        gateway = _teardown_gateway(deployment)
         gateway.delete_server.return_value = Err("API error: server not responding")
 
         self._run_with_gateway(gateway)
@@ -723,7 +722,7 @@ class TestCleanupDeploymentsCommand(TestCase):
     def test_successful_deletion_marks_destroyed(self) -> None:
         """Successful cloud deletion should mark deployment as destroyed."""
         deployment = self._stale_billed_row()
-        gateway = _teardown_gateway()
+        gateway = _teardown_gateway(deployment)
 
         self._run_with_gateway(gateway)
 

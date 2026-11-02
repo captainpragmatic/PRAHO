@@ -7,124 +7,160 @@
   gather_facts: true
 
   tasks:
-    - name: Install security packages
-      ansible.builtin.apt:
-        name:
-          - fail2ban
-          - ufw
-          - unattended-upgrades
-          - apt-listchanges
-          - logwatch
-          - libpam-pwquality
-        state: present
-        update_cache: yes
+    - name: Read the installed Webmin version for policy qualification
+      ansible.builtin.slurp:
+        src: /usr/share/webmin/version
+      register: policy_webmin_version
 
-    # Fail2ban configuration
-    - name: Configure fail2ban jail.local
-      ansible.builtin.template:
-        src: templates/jail.local.j2
-        dest: /etc/fail2ban/jail.local
-        mode: '0644'
-      notify: Restart fail2ban
+    - name: Read the installed Virtualmin version for policy qualification
+      ansible.builtin.slurp:
+        src: /usr/share/webmin/virtual-server/module.info
+      register: policy_virtualmin_version
 
-    - name: Enable fail2ban
-      ansible.builtin.service:
-        name: fail2ban
-        enabled: yes
-        state: started
-
-    # SSH policy and its connection handoff belong to the shared role.
-
-    # UFW firewall (backup to cloud firewall)
-    #
-    # SSH and Webmin (firewall_admin_tcp_ports) open only to the node admin
-    # allowlist (ADR-0060). The play fails closed: no allowlist, no firewall
-    # change at all, rather than opening them to everyone. It also refuses when
-    # the address this very connection comes from is not on the list, so a
-    # deploy can never lock Platform out, and it adds the allow rules before it
-    # removes the old any-source ones or sets the deny default.
-    - name: Refuse an empty node admin allowlist
+    - name: Require qualified native callbacks before conversion
       ansible.builtin.assert:
         that:
-          - node_admin_allowed_cidrs is defined
-          - node_admin_allowed_cidrs | length > 0
-        fail_msg: >-
-          infrastructure.node_admin_allowed_cidrs is empty; set Platform's egress
-          addresses and the admin networks before hardening a node.
+          - policy_webmin_version.content | b64decode | trim == '2.670'
+          - (policy_virtualmin_version.content | b64decode | regex_search('(?m)^version=8\\.3\\.0$')) is not none
+        fail_msg: "This native version needs policy qualification. Import and source acknowledgment remain available."
+    - name: Require an approved conversion or a newly generated node
+      ansible.builtin.assert:
+        that:
+          - praho_generated_node | default(false) | bool or security_hardening_approved | default(false) | bool
+          - praho_api_user is defined
+          - praho_api_user != 'root'
+        fail_msg: "Review the node and approve its exact conversion before hardening."
 
-    - name: Require this connection's source in the allowlist
+    - name: Converge the reviewed host firewall
+      ansible.builtin.include_role:
+        name: virtualmin-web-only
+
+    - name: Read installed packages and service units
+      ansible.builtin.package_facts:
+        manager: apt
+
+    - name: Purge unused authentication and file transfer packages
+      ansible.builtin.apt:
+        name: "{{ ansible_facts.packages.keys() | select('match', '^(fail2ban|usermin|proftpd.*)$') | list }}"
+        state: absent
+        purge: true
+      when: ansible_facts.packages.keys() | select('match', '^(fail2ban|usermin|proftpd.*)$') | list | length > 0
+
+    - name: Install system update and password policy tools
+      ansible.builtin.apt:
+        name: [unattended-upgrades, apt-listchanges, logwatch, libpam-pwquality, nftables]
+        state: present
+
+    - name: Read service units before disabling public ancillary services
+      ansible.builtin.service_facts:
+
+    - name: Stop and prevent restarting ancillary public services
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+        masked: true
+      loop: [dovecot.service, dovecot.socket, bind9.service, named.service, exim4.service, rpcbind.service, rpcbind.socket, avahi-daemon.service, avahi-daemon.socket, cups.service, cups.socket]
+      when: item in ansible_facts.services
+
+    - name: Discover Postfix configuration tooling
+      ansible.builtin.stat:
+        path: /usr/sbin/postconf
+      register: postfix_tool
+
+    - name: Read Postfix listening policy
       ansible.builtin.command:
-        argv: >-
-          {{ ['python3', '-c', allowlist_membership_check,
-              (ansible_env.SSH_CLIENT | default('')).split(' ') | first] + node_admin_allowed_cidrs }}
-      vars:
-        allowlist_membership_check: |
-          import ipaddress, sys
-          source, networks = sys.argv[1], sys.argv[2:]
-          address = ipaddress.ip_address(source)
-          if not any(address in ipaddress.ip_network(net) for net in networks):
-              sys.exit(f"this connection comes from {source}, outside {networks}; refusing to firewall it out")
+        argv: [postconf, -h, inet_interfaces]
+      register: postfix_interfaces
+      changed_when: false
+      when: postfix_tool.stat.exists
+
+    - name: Restrict the local application mailer to loopback
+      ansible.builtin.command:
+        argv: [postconf, -e, 'inet_interfaces = loopback-only']
+      when: postfix_tool.stat.exists and postfix_interfaces.stdout | trim != 'loopback-only'
+      notify: Restart postfix
+
+    - name: Find MariaDB server configuration
+      ansible.builtin.stat:
+        path: /etc/mysql/mariadb.conf.d/50-server.cnf
+      register: mariadb_configuration
+
+    - name: Restrict MariaDB to loopback
+      ansible.builtin.lineinfile:
+        path: /etc/mysql/mariadb.conf.d/50-server.cnf
+        regexp: '^\\s*bind-address\\s*='
+        line: 'bind-address = 127.0.0.1'
+        insertafter: '^\\[mysqld\\]'
+      when: mariadb_configuration.stat.exists
+      notify: Restart mariadb
+
+    - name: Find existing customer Webmin logins
+      ansible.builtin.command:
+        argv: [virtualmin, list-domains, --with-feature, webmin, --name-only]
+      register: customer_webmin_domains
       changed_when: false
 
-    - name: Allow SSH and Webmin from the node admin allowlist
-      community.general.ufw:
-        rule: allow
-        port: "{{ item.0 }}"
-        proto: tcp
-        from_ip: "{{ item.1 }}"
-      loop: "{{ firewall_admin_tcp_ports | product(node_admin_allowed_cidrs) | list }}"
-      notify: Enable ufw
+    - name: Disable existing customer Webmin features before global removal
+      ansible.builtin.command:
+        argv: [virtualmin, disable-feature, --domain, "{{ item }}", --webmin]
+      loop: "{{ customer_webmin_domains.stdout_lines }}"
 
-    # Earlier deploys opened these ports to everyone.
-    - name: Remove any-source SSH and Webmin rules
-      community.general.ufw:
-        rule: allow
-        port: "{{ item }}"
-        proto: tcp
-        delete: true
-      loop: "{{ firewall_admin_tcp_ports }}"
+    - name: Read enabled native features
+      ansible.builtin.command:
+        argv: [virtualmin, list-features, --json]
+      register: web_only_features
+      changed_when: false
 
-    - name: Configure UFW defaults
-      community.general.ufw:
-        default: deny
-        direction: incoming
-      notify: Enable ufw
+    - name: Enable required web-only features that are currently off
+      ansible.builtin.command:
+        argv: [virtualmin, set-global-feature, --enable-feature, "{{ item }}", --default-on, "{{ item }}"]
+      loop: "{{ ['unix', 'dir', 'web', 'ssl', 'logrotate', 'mysql'] | difference((web_only_features.stdout | from_json).data | selectattr('values.enabled.0', 'equalto', 'Yes') | map(attribute='name') | list) }}"
 
-    - name: Allow UFW outgoing by default
-      community.general.ufw:
-        default: allow
-        direction: outgoing
-      notify: Enable ufw
+    - name: Disable customer Webmin globally and in default selections
+      ansible.builtin.command:
+        argv: [virtualmin, set-global-feature, --disable-feature, webmin]
+      when: (web_only_features.stdout | from_json).data | selectattr('name', 'equalto', 'webmin') | selectattr('values.enabled.0', 'equalto', 'Yes') | list | length > 0
 
-    - name: Allow TCP ports through UFW
-      community.general.ufw:
-        rule: allow
-        port: "{{ item }}"
-        proto: tcp
-      loop: "{{ firewall_allowed_tcp_ports }}"
-      notify: Enable ufw
+    - name: Remove ancillary features from new-domain defaults without deleting existing service data
+      ansible.builtin.command:
+        argv: [virtualmin, set-global-feature, --default-off, "{{ item.name }}"]
+      loop: "{{ (web_only_features.stdout | from_json).data }}"
+      when:
+        - item.name not in ['unix', 'dir', 'web', 'ssl', 'logrotate', 'mysql', 'webmin']
+        - item['values']['default'][0] == 'Yes'
 
-    - name: Allow UDP ports through UFW
-      community.general.ufw:
-        rule: allow
-        port: "{{ item }}"
-        proto: udp
-      loop: "{{ firewall_allowed_udp_ports }}"
-      notify: Enable ufw
+    - name: Install native administrator policy helper
+      ansible.builtin.copy:
+        src: files/praho-webmin-web-only.pl
+        dest: /usr/local/sbin/praho-webmin-web-only
+        owner: root
+        group: root
+        mode: '0700'
 
-    - name: Allow FTP passive range through UFW
-      community.general.ufw:
-        rule: allow
-        port: "40000:40100"
-        proto: tcp
-      notify: Enable ufw
+    - name: Apply the approved principal and discovery policy
+      ansible.builtin.command:
+        argv: "{{ ['/usr/bin/perl', '/usr/local/sbin/praho-webmin-web-only', praho_api_user] + node_admin_allowed_cidrs }}"
+      register: webmin_policy
+      changed_when: "'PRAHO_WEBMIN_CHANGED=0' not in webmin_policy.stdout"
 
-    # A task, not only the handler: a handler fires only when a rule changed,
-    # so a firewall someone switched off with every rule already in place
-    # would otherwise stay off.
-    - name: Enable UFW
-      community.general.ufw:
-        state: enabled
+    - name: Inspect the live Webmin UDP discovery socket
+      ansible.builtin.command:
+        argv: [ss, -H, -uln, 'sport = :10000']
+      register: webmin_discovery_socket
+      changed_when: false
+
+    - name: Apply Webmin principal and listener changes to the running daemon
+      ansible.builtin.systemd_service:
+        name: webmin.service
+        state: restarted
+      when: webmin_policy.changed or webmin_discovery_socket.stdout | length > 0
+
+    - name: Require Webmin to answer after listener convergence
+      ansible.builtin.wait_for:
+        host: 127.0.0.1
+        port: 10000
+        timeout: 30
 
     # Automatic security updates
     - name: Configure unattended-upgrades
@@ -257,20 +293,24 @@
         group: root
         mode: '0644'
 
+    - name: Apply all service changes before recording policy completion
+      ansible.builtin.meta: flush_handlers
+
     - name: Create security hardening completion marker
       ansible.builtin.copy:
         content: |
           PRAHO_HARDENED=true
-          HARDENING_DATE={{ ansible_date_time.iso8601 }}
+          POLICY=virtualmin-web-only-v1
         dest: /etc/praho-security-hardening
         mode: '0644'
 
   handlers:
-    - name: Restart fail2ban
+    - name: Restart postfix
       ansible.builtin.service:
-        name: fail2ban
+        name: postfix
         state: restarted
 
-    - name: Enable ufw
-      community.general.ufw:
-        state: enabled
+    - name: Restart mariadb
+      ansible.builtin.service:
+        name: mariadb
+        state: restarted

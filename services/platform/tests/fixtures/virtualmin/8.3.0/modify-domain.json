@@ -47,7 +47,7 @@
     "success": {
       "body": {
         "command": "modify-domain",
-        "output": "Updating virtual server contract.praho.test ..\n\n    Modifying administration user ..\n    .. done\n\n    Updating Webmin user ..\n    .. done\n\n    Saving server details ..\n    .. done\n\n.. done\n\nUpdating Webmin user ..\n.. done\n\nRe-loading Webmin ..\n.. done\n\nAll done\n",
+        "output": "Updating virtual server contract.praho.test ..\n\n    Modifying administration user ..\n    .. done\n\n    Saving server details ..\n    .. done\n\n.. done\n\nAll done\n",
         "status": "success"
       },
       "body_format": "json",

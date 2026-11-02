@@ -24,11 +24,175 @@ from apps.audit.services import (
 from apps.audit.switches import audit_signals_disabled
 from apps.common.transactions import best_effort_atomic, swallow_application_errors
 
+from .component_migration_models import (
+    ComponentMigrationApproval,
+    ComponentMigrationReview,
+    SourceServiceObligation,
+    SourceServiceRelease,
+)
 from .hosted_zone_ownership import save_field_intent
 from .virtualmin_migration_models import MigrationBridge
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
+from .virtualmin_security_models import NodeSecurityDecision, NodeSecurityExecution, NodeSecurityReview
 
 logger = logging.getLogger(__name__)
+
+
+@receiver(post_save, sender=ComponentMigrationReview)
+def audit_component_inspection(
+    sender: type[ComponentMigrationReview], instance: ComponentMigrationReview, created: bool, **kwargs: Any
+) -> None:
+    if created and not audit_signals_disabled():
+        AuditService.log_event(
+            AuditEventData(
+                event_type="security_scan_detected",
+                severity="low",
+                content_object=instance,
+                description="Recorded native website component scope and retained service dependencies",
+                new_values={
+                    "account_id": str(instance.account_id),
+                    "digest": instance.digest,
+                    "authority_digest": instance.authority_digest,
+                    "policy_version": instance.policy_version,
+                },
+            ),
+            context=AuditContext(user=instance.actor, metadata={"source_app": "provisioning"}),
+        )
+
+
+@receiver(post_save, sender=ComponentMigrationApproval)
+def audit_component_approval(
+    sender: type[ComponentMigrationApproval], instance: ComponentMigrationApproval, created: bool, **kwargs: Any
+) -> None:
+    if created and not audit_signals_disabled():
+        AuditService.log_event(
+            AuditEventData(
+                event_type="configuration_changed",
+                content_object=instance,
+                description="Accepted website component impact and independent retained source backup responsibility",
+                new_values={"review_id": str(instance.review_id), "authority_digest": instance.review.authority_digest},
+            ),
+            context=AuditContext(user=instance.actor, metadata={"source_app": "provisioning"}),
+        )
+
+
+@receiver(post_save, sender=SourceServiceRelease)
+def audit_source_responsibility_release(
+    sender: type[SourceServiceRelease], instance: SourceServiceRelease, created: bool, **kwargs: Any
+) -> None:
+    if created and not audit_signals_disabled():
+        AuditService.log_event(
+            AuditEventData(
+                event_type="configuration_changed",
+                content_object=instance,
+                description="Resolved retained source services after native absence and independent backup handoff",
+                new_values={
+                    "obligation_id": str(instance.obligation_id),
+                    "native_absence_digest": instance.native_absence_digest,
+                    "source_identity": instance.source_identity,
+                },
+            ),
+            context=AuditContext(user=instance.actor, metadata={"source_app": "provisioning"}),
+        )
+
+
+@receiver(post_save, sender=SourceServiceObligation)
+def audit_retained_source_services(
+    sender: type[SourceServiceObligation], instance: SourceServiceObligation, created: bool, **kwargs: Any
+) -> None:
+    if created and not audit_signals_disabled():
+        AuditService.log_event(
+            AuditEventData(
+                event_type="configuration_changed",
+                content_object=instance,
+                description="Operator accepted independent backup responsibility for retained source services",
+                new_values={
+                    "source_server_id": str(instance.source_server_id),
+                    "source_domain_id": instance.source_domain_id,
+                    "migration_id": str(instance.migration_id),
+                    "retained_services": instance.retained_services,
+                },
+            ),
+            context=AuditContext(user=instance.backup_responsible, metadata={"source_app": "provisioning"}),
+        )
+
+
+@receiver(post_save, sender=NodeSecurityReview)
+def audit_node_security_review(
+    sender: type[NodeSecurityReview], instance: NodeSecurityReview, created: bool, **kwargs: Any
+) -> None:
+    """Audit only the evidence reference, never copy a remote payload into audit storage."""
+    if created and not audit_signals_disabled():
+        AuditService.log_event(
+            AuditEventData(
+                event_type="security_scan_detected",
+                severity="low",  # Recording evidence is not a detected incident.
+                content_object=instance,
+                description="Node security inspection recorded",
+                new_values={
+                    "server_id": str(instance.server_id),
+                    "digest": instance.digest,
+                    "policy_version": instance.policy_version,
+                },
+            ),
+            context=AuditContext(actor_type="system", metadata={"source_app": "provisioning"}),
+        )
+
+
+@receiver(post_save, sender=NodeSecurityDecision)
+def audit_node_security_decision(
+    sender: type[NodeSecurityDecision], instance: NodeSecurityDecision, created: bool, **kwargs: Any
+) -> None:
+    """A source acknowledgment is an operator action, never a verification result."""
+    if created and not audit_signals_disabled():
+        AuditService.log_event(
+            AuditEventData(
+                event_type="configuration_changed",
+                content_object=instance,
+                description="Operator recorded a node security decision",
+                new_values={"review_id": str(instance.review_id), "action": instance.action},
+            ),
+            context=AuditContext(user=instance.actor, metadata={"source_app": "provisioning"}),
+        )
+
+
+@receiver(pre_save, sender=NodeSecurityExecution)
+def remember_security_execution_status(
+    sender: type[NodeSecurityExecution], instance: NodeSecurityExecution, **kwargs: Any
+) -> None:
+    instance.__dict__["_previous_security_status"] = (
+        sender.objects.filter(pk=instance.pk).values_list("status", flat=True).first()
+        if not instance._state.adding
+        else None
+    )
+
+
+@receiver(post_save, sender=NodeSecurityExecution)
+def audit_security_execution(
+    sender: type[NodeSecurityExecution], instance: NodeSecurityExecution, created: bool, **kwargs: Any
+) -> None:
+    if audit_signals_disabled() or (
+        not created and instance.__dict__.get("_previous_security_status") == instance.status
+    ):
+        return
+    verified_review = instance.verification
+    AuditService.log_event(
+        AuditEventData(
+            event_type="configuration_changed",
+            content_object=instance,
+            description="Node hardening execution state changed",
+            new_values={
+                "server_id": str(instance.server_uuid),
+                "status": instance.status,
+                "decision_id": str(instance.decision_id),
+                "verification_id": str(instance.verification_id),
+            },
+        ),
+        context=AuditContext(
+            user=verified_review.decision.actor if verified_review is not None else instance.decision.actor,
+            metadata={"source_app": "provisioning"},
+        ),
+    )
 
 
 # ===============================================================================

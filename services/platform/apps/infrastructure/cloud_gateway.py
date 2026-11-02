@@ -14,11 +14,14 @@ import logging
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from apps.common.types import Err, Ok, Result
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from apps.infrastructure.cloud_resource_inventory import CloudResourceClient
 
 
 # =============================================================================
@@ -50,6 +53,8 @@ class ServerCreateResult:
     # True when the provider already held a server for this deployment (found by its label) and the
     # create returned it instead of making a new one.
     adopted: bool = False
+    # Exact IDs the create response proves were created with this server (e.g. Hetzner primary IPs).
+    created_resources: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass
@@ -256,6 +261,10 @@ class CloudProviderGateway(ABC):
     def firewall_exists(self, firewall_id: str) -> Result[bool, str]:
         """Whether a firewall with this ID still exists."""
         return Err(f"{type(self).__name__} cannot look up firewalls by ID")
+
+    def resource_client(self) -> CloudResourceClient:
+        """Typed complete inventory and exact-ID resource operations; unsupported providers refuse."""
+        raise ValueError(f"{type(self).__name__} cannot inventory dependent resources")
 
 
 # =============================================================================

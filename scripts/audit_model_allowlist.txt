@@ -107,6 +107,10 @@ infrastructure.DriftCheck                # IS the drift scan audit trail (append
 infrastructure.DriftRemediationRequest   # operational remediation workflow (resolution captured in DriftReport)
 infrastructure.DriftReport               # child of DriftCheck (individual findings, audited via parent scan)
 infrastructure.DriftSnapshot             # cloud snapshot tracking (operational/derived artifact, append-only)
+infrastructure.CloudResourceOwnership    # immutable provenance; record_resource_ownership audits each new exact resource identity
+infrastructure.CloudResourceRetention    # immutable keep protection; protect_retained_resource audits registration against its approved plan
+infrastructure.NodeDestroyPlan          # immutable operator choices; _store_destroy_plan audits the actor, exact inventory digest and retention policy
+infrastructure.CloudResourceCleanup     # derived provider observations; immutable destroy decisions and audited node lifecycle retain authority, execution independently rechecks live absence
 infrastructure.NodeDeploymentCostRecord  # append-only cost records (operational data)
 infrastructure.NodeDeploymentLog         # IS the deployment audit trail (append-only log)
 infrastructure.NodeServerLifetime        # derived cost windows, written only by audited lifecycle operations

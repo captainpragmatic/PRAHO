@@ -151,10 +151,11 @@ def teardown_maintenance_refusal(
 
 def competing_operation_refusal(node_id: UUID, *, owned_drift_request_id: int | None = None) -> str | None:
     """Inventory actual durable owners, including incoming work on an empty target."""
-    from apps.provisioning.virtualmin_migration_models import VirtualminMigration  # noqa: PLC0415
+    from apps.provisioning.component_maintenance_ownership import terminal_component_refusal  # noqa: PLC0415
+    from apps.provisioning.virtualmin_migration_models import MigrationBridge, VirtualminMigration  # noqa: PLC0415
     from apps.provisioning.virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415
 
-    refusal = maintenance_refusal(node_id)
+    refusal = maintenance_refusal(node_id) or terminal_component_refusal(node_id)
     if refusal:
         return refusal
     if VirtualminProvisioningJob.objects.filter(server_id=node_id, status__in=ACTIVE_ACCOUNT_JOBS).exists():
@@ -163,8 +164,11 @@ def competing_operation_refusal(node_id: UUID, *, owned_drift_request_id: int | 
         VirtualminMigration.objects.filter(Q(source_server_id=node_id) | Q(target_server_id=node_id))
         .exclude(status__in=TERMINAL_MIGRATIONS)
         .exists()
+        or MigrationBridge.objects.filter(Q(source_server_id=node_id) | Q(target_server_id=node_id))
+        .exclude(status="torn_down")
+        .exists()
     ):
-        return str(_("A migration or recovery operation owns this server."))
+        return str(_("A migration, retained bridge or recovery operation owns this server."))
     from apps.infrastructure.models import (  # noqa: PLC0415  # Model registration
         DriftRemediationRequest,
         NodeDeployment,

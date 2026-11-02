@@ -30,6 +30,11 @@
       - ssh_rollback_seconds | int >= 60
     fail_msg: "SSH hardening needs supported Ubuntu, root key access, approved public keys and pinned controller known_hosts."
 
+- name: Require the external SFTP server before changing SSH policy
+  ansible.builtin.command:
+    argv: [/usr/bin/test, -x, /usr/lib/openssh/sftp-server]
+  changed_when: false
+
 - name: Validate public key lines
   ansible.builtin.assert:
     that:

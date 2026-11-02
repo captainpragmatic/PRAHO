@@ -155,12 +155,16 @@ class TeardownProofTests(TestCase):
         self.assertTrue(h.destroy().is_ok())
         self.assertEqual(h.row().resources_proved_absent_for, h.deployment.correlation_id)
 
-    def test_a_teardown_without_a_recorded_token_proves_nothing(self) -> None:
+    def test_a_teardown_without_a_recorded_token_refuses_and_proves_nothing(self) -> None:
         h = TeardownHarness(fingerprint="")
-        self.assertTrue(h.destroy().is_ok())
+        self.assertTrue(h.destroy().is_err())
         row_after = h.row()
-        self.assertEqual(row_after.status, "destroyed")
+        self.assertEqual(row_after.status, "destroying")
+        self.assertEqual(row_after.external_node_id, "srv-1")
+        self.assertTrue(row_after.needs_reconciliation)
         self.assertIsNone(row_after.resources_proved_absent_for)
+        h.cloud.delete_server.assert_not_called()
+        h.service._registration.unregister_node.assert_not_called()
 
 
 class AttestationCostTests(TestCase):

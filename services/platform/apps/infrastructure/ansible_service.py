@@ -20,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -28,7 +29,10 @@ from django.conf import settings
 
 from apps.common.ssh import PUBLIC_KEY_FIELDS, parse_ssh_host_keys
 from apps.common.types import Err, Ok, Result, Retriability
-from apps.infrastructure.imported_backup_transport import imported_identity, transport_allows
+from apps.infrastructure.imported_backup_transport import ImportedIdentity, transport_allows
+from apps.infrastructure.imported_backup_transport import (
+    imported_identity as imported_identity,  # noqa: PLC0414 -- explicit export for the lab's production transport seam
+)
 from apps.infrastructure.ssh_key_manager import get_ssh_key_manager
 from apps.infrastructure.ssh_transport import (
     TARGET_SSH_PORT,
@@ -141,6 +145,11 @@ class AnsibleService:
             "virtualmin_backup.yml",
             "virtualmin_usage.yml",
             "virtualmin_usage_read.yml",
+            "virtualmin_security_read.yml",
+            "virtualmin_component.yml",
+            "virtualmin_component_bridge.yml",
+            "virtualmin_security_enroll.yml",
+            "virtualmin_firewall.yml",
             "blesta.yml",
             "virtualmin_migrate_fetch.yml",
             "virtualmin_migrate_push.yml",
@@ -247,6 +256,7 @@ class AnsibleService:
         timeout_seconds: int | None = None,
         *,
         operator_public_keys: tuple[str, ...] | None = None,
+        _verified_connection_port: int | None = None,
     ) -> Result[AnsibleResult, str]:
         """
         Run a single Ansible playbook.
@@ -268,6 +278,18 @@ class AnsibleService:
 
         if playbook not in self.ALLOWED_PLAYBOOKS:
             return Err(f"Playbook not allowed: {playbook}")
+        if playbook not in {"virtualmin_usage_read.yml", "virtualmin_security_read.yml"}:
+            from apps.infrastructure.models import NodeDeployment as NodeRow  # noqa: PLC0415 -- runtime model boundary
+            from apps.provisioning.virtualmin_security_execution import (  # noqa: PLC0415 -- app boundary avoids import cycle
+                transport_mutation_allowed,
+            )
+
+            if (
+                isinstance(deployment, NodeRow)
+                and (registered_server := deployment.virtualmin_server) is not None
+                and not transport_mutation_allowed(registered_server)
+            ):
+                return Err("Node hardening is unresolved; remote mutation is fenced")
         if any(key.startswith(("ansible_", "ssh_")) for key in (extra_vars or {})):
             return Err("Connection and SSH policy variables are owned by the verified node transport")
 
@@ -276,9 +298,14 @@ class AnsibleService:
             return Err(f"Playbook not allowed: {playbook}")
         if not playbook_path.exists():
             return Err(f"Playbook not found: {playbook_path}")
-        usage_read = playbook == "virtualmin_usage_read.yml"
-        if usage_read and not deployment.ssh_host_keys:
-            return Err("Usage export requires enrolled SSH host trust; bootstrap is not a read operation")
+        enrolled_transport = transport_allows(playbook, extra_vars) or playbook in {
+            "virtualmin_usage_read.yml",
+            "virtualmin_security_read.yml",
+            "virtualmin_security_enroll.yml",
+        }
+        firewall_bootstrap = playbook == "virtualmin_firewall.yml"
+        if enrolled_transport and not deployment.ssh_host_keys:
+            return Err("Archive and inspection transport requires enrolled SSH host trust; refusing SSH bootstrap")
 
         # Get SSH key
         key_result = self._ssh_manager.get_private_key_file(
@@ -299,8 +326,23 @@ class AnsibleService:
                     return Err(ssh_wait.unwrap_err())
             known_hosts_file = trusted_node_known_hosts(deployment, self._scan_host_key)
             connection_port = (
-                deployment.ssh_port if usage_read else recover_connection_port(deployment, key_file, known_hosts_file)
+                (_verified_connection_port or deployment.ssh_port)
+                if enrolled_transport or firewall_bootstrap
+                else recover_connection_port(deployment, key_file, known_hosts_file)
             )
+            if (
+                playbook == "common_base.yml"
+                and not getattr(deployment, "virtualmin_server_id", None)
+                and getattr(getattr(deployment, "panel_type", None), "panel_type", None) == "virtualmin"
+            ):
+                firewall = self.run_playbook(
+                    deployment,
+                    "virtualmin_firewall.yml",
+                    operator_public_keys=operator_public_keys,
+                    _verified_connection_port=connection_port,
+                )
+                if firewall.is_err() or not firewall.unwrap().success:
+                    return Err("Early node firewall did not converge and prove administrative access")
             if playbook != "ssh-hardening.yml" and (
                 playbook in self.SSH_POLICY_ENTRYPOINTS or connection_port != deployment.ssh_port
             ):
@@ -310,7 +352,7 @@ class AnsibleService:
                 connection_port = deployment.ssh_port
             ssh_wait = (
                 self._wait_for_ssh(deployment.ipv4_address, port=connection_port, timeout=min(effective_timeout, 10))
-                if usage_read
+                if enrolled_transport
                 else self._wait_for_ssh(deployment.ipv4_address, port=connection_port)
             )
             if ssh_wait.is_err():
@@ -320,12 +362,26 @@ class AnsibleService:
             inventory_file = self._generate_inventory(deployment, connection_port=connection_port)
 
             # Build extra vars
+            from apps.provisioning.virtualmin_security_execution import (  # noqa: PLC0415 -- owned recursive scope avoids import cycle
+                frozen_transport_policy,
+            )
+
+            reviewed_policy = frozen_transport_policy()
             vars_dict = self._build_vars(deployment, extra_vars)
+            if playbook in {"ssh-hardening.yml", "virtualmin_firewall.yml", "virtualmin_harden.yml"}:
+                vars_dict.update(
+                    {
+                        "ssh_probe_known_hosts_file": str(known_hosts_file),
+                        "ssh_probe_identity_file": str(key_file),
+                    }
+                )
             if playbook == "ssh-hardening.yml":
                 vars_dict.update(
                     {
                         "ssh_target_port": TARGET_SSH_PORT,
-                        "ssh_operator_public_keys": list(
+                        "ssh_operator_public_keys": reviewed_policy["ssh_operator_public_keys"]
+                        if reviewed_policy is not None
+                        else list(
                             self.operator_public_keys() if operator_public_keys is None else operator_public_keys
                         ),
                         "ssh_allowed_cidrs": node_admin_allowed_cidrs(),
@@ -333,6 +389,8 @@ class AnsibleService:
                         "ssh_probe_identity_file": str(key_file),
                     }
                 )
+            if reviewed_policy is not None:
+                vars_dict.update(reviewed_policy)
             # Pass vars via a 0600 temp file (`-e @file`), never `-e <json>` on the
             # command line: extra_vars can carry secrets (the Virtualmin API
             # password, #347) that would otherwise leak into the process list.
@@ -448,19 +506,164 @@ class AnsibleService:
             stats=stats,
         )
 
+    @staticmethod
+    def _server_playbook_authority(  # noqa: PLR0911 -- independent enrolled hardening, component and archive authorities
+        server: VirtualminServer, playbook: str, extra_vars: dict[str, Any] | None, token: str | None
+    ) -> Result[bool, str]:
+        """Return whether this is an owned hardening mutation, or refuse before transport setup."""
+        from apps.provisioning.virtualmin_models import VirtualminServer as ServerRow  # noqa: PLC0415 -- app cycle
+        from apps.provisioning.virtualmin_security_execution import owns_hardening  # noqa: PLC0415 -- app boundary
+
+        if playbook in {
+            "virtualmin_security_enroll.yml",
+            "ssh-hardening.yml",
+            "virtualmin_firewall.yml",
+            "virtualmin_harden.yml",
+        }:
+            if not token or not owns_hardening(server, token):
+                return Err(
+                    "A running operator-approved hardening execution is required",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
+            return Ok(True)
+        if not transport_allows(playbook, extra_vars):
+            return Err("Playbook not allowed for archive transport", retriability=Retriability.NOT_RETRIABLE)
+        if playbook == "virtualmin_component_bridge.yml" and isinstance(server, ServerRow):
+            from apps.provisioning.component_bridge_transport import (  # noqa: PLC0415 -- app boundary
+                bridge_operation_refusal,
+            )
+
+            if refusal := bridge_operation_refusal(server, extra_vars):
+                return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
+        if (
+            playbook == "virtualmin_component.yml"
+            and (extra_vars or {}).get("component_action") != "inspect"
+            and isinstance(server, ServerRow)
+        ):
+            from apps.provisioning.component_migration_transport import (  # noqa: PLC0415 -- app boundary
+                source_operation_refusal,
+            )
+            from apps.provisioning.component_target_transport import (  # noqa: PLC0415 -- app boundary
+                target_operation_refusal,
+            )
+
+            component_action = (extra_vars or {}).get("component_action", "")
+            component_guard: Callable[[ServerRow, dict[str, Any] | None], str | None]
+            if component_action == "source_retire" or (
+                component_action == "target_retire_artifacts"
+                and ((extra_vars or {}).get("component_operation") or {}).get("cleanup_bridge_id")
+            ):
+                from apps.provisioning.component_bridge_cleanup import (  # noqa: PLC0415 -- retained source lifecycle
+                    source_retirement_refusal,
+                    target_artifact_retirement_refusal,
+                )
+
+                component_guard = (
+                    source_retirement_refusal
+                    if component_action == "source_retire"
+                    else target_artifact_retirement_refusal
+                )
+            else:
+                component_guard = (
+                    target_operation_refusal if component_action.startswith("target_") else source_operation_refusal
+                )
+            if refusal := component_guard(server, extra_vars):
+                return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
+        if (
+            playbook not in {"virtualmin_usage_read.yml", "virtualmin_security_read.yml"}
+            and isinstance(server, ServerRow)
+            and not server._state.adding
+            and ServerRow.objects.filter(pk=server.pk, security_operation__isnull=False).exists()
+        ):
+            return Err(
+                "Node hardening is unresolved; remote mutation is fenced", retriability=Retriability.NOT_RETRIABLE
+            )
+        return Ok(False)
+
+    @staticmethod
+    def _persist_imported_ssh_port(server: VirtualminServer, token: str | None) -> bool:
+        from django.db import transaction  # noqa: PLC0415 -- state-write boundary
+
+        with transaction.atomic():
+            locked = type(server).objects.select_for_update().get(pk=server.pk)
+            if str(locked.security_operation) != token:
+                return False
+            locked.ssh_port = TARGET_SSH_PORT
+            locked.save(update_fields=["ssh_port", "updated_at"])
+            server.ssh_port = TARGET_SSH_PORT
+            return True
+
+    def _imported_security_variables(self, trust: Path, key: Path, policy: dict[str, object]) -> dict[str, Any]:
+        return {
+            "security_hardening_approved": True,
+            "ssh_target_port": TARGET_SSH_PORT,
+            "ssh_webmin_tunnel_enabled": True,
+            "ssh_probe_known_hosts_file": str(trust),
+            "ssh_probe_identity_file": str(key),
+            **policy,
+        }
+
+    def _write_imported_inputs(
+        self,
+        identity: ImportedIdentity,
+        trust: Path,
+        variables: Path,
+        extra_vars: dict[str, Any] | None,
+        policy: dict[str, object] | None,
+    ) -> None:
+        trusted_lines = list(identity.trusted_keys)
+        vars_dict = dict(extra_vars or {})
+        if policy is not None:
+            trusted_lines += [identity.host + " " + line.split(" ", 1)[1] for line in identity.trusted_keys]
+            vars_dict.update(self._imported_security_variables(trust, identity.key, policy or {}))
+        trust.write_text("\n".join(trusted_lines) + "\n")
+        variables.write_text(json.dumps(vars_dict))
+
+    def _run_managed_server_playbook(
+        self,
+        deployment: NodeDeployment,
+        playbook: str,
+        extra_vars: dict[str, Any] | None,
+        timeout_seconds: int | None,
+        authority: tuple[str, dict[str, object]] | None,
+    ) -> Result[AnsibleResult, str]:
+        if authority is not None:
+            from apps.provisioning.virtualmin_security_execution import (  # noqa: PLC0415 -- recursive managed preflight avoids app cycle
+                hardening_transport_scope,
+            )
+
+            with hardening_transport_scope(*authority):
+                return self.run_playbook(deployment, playbook, extra_vars, timeout_seconds=timeout_seconds)
+        return self.run_playbook(deployment, playbook, extra_vars, timeout_seconds=timeout_seconds)
+
     def run_server_playbook(  # noqa: PLR0911  # Separate definite refusals from uncertain remote outcomes.
         self,
         server: VirtualminServer,
         playbook: str,
         extra_vars: dict[str, Any] | None = None,
         timeout_seconds: int | None = None,
+        *,
+        security_execution: str | None = None,
     ) -> Result[AnsibleResult, str]:
         """Use managed enrollment or a narrowly scoped imported root identity, never a fallback."""
-        if not transport_allows(playbook, extra_vars):
-            return Err("Playbook not allowed for archive transport", retriability=Retriability.NOT_RETRIABLE)
+        authority = self._server_playbook_authority(server, playbook, extra_vars, security_execution)
+        if authority.is_err():
+            return Err(authority.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
+        security_mutation = authority.unwrap()
+        from apps.provisioning.virtualmin_security_execution import (  # noqa: PLC0415 -- app boundary avoids import cycle
+            reviewed_transport_policy,
+        )
+
+        policy = reviewed_transport_policy(server, str(security_execution)) if security_mutation else None
         deployment = getattr(server, "node_deployment", None)
         if deployment is not None:
-            return self.run_playbook(deployment, playbook, extra_vars, timeout_seconds=timeout_seconds)
+            return self._run_managed_server_playbook(
+                deployment,
+                playbook,
+                extra_vars,
+                timeout_seconds,
+                (str(security_execution), policy) if policy is not None else None,
+            )
         if any(key.startswith(("ansible_", "ssh_")) for key in (extra_vars or {})):
             return Err("Connection variables belong to the verified transport", retriability=Retriability.NOT_RETRIABLE)
         timeout = self.timeout if timeout_seconds is None else timeout_seconds
@@ -493,8 +696,7 @@ class AnsibleService:
                     }
                 )
             )
-            trust.write_text("\n".join(identity.trusted_keys) + "\n")
-            variables.write_text(json.dumps(extra_vars or {}))
+            self._write_imported_inputs(identity, trust, variables, extra_vars, policy)
             for artifact in (inventory, trust, variables):
                 artifact.chmod(0o600)
             environment = self._build_ansible_env(known_hosts_file=trust)
@@ -509,18 +711,32 @@ class AnsibleService:
             environment["ANSIBLE_SSH_EXTRA_ARGS"] = ""
             environment["ANSIBLE_SCP_EXTRA_ARGS"] = ""
             environment["ANSIBLE_SFTP_EXTRA_ARGS"] = ""
+            if security_mutation:
+                environment["ANSIBLE_SSH_COMMON_ARGS"] += f" -o HostKeyAlias={identity.host}"
             command = [
                 self._ansible_path,
                 "-i",
                 str(inventory),
                 "--private-key",
                 str(identity.key),
+            ]
+            group_vars_all = ANSIBLE_BASE_PATH / "group_vars" / "all.yml"
+            if security_mutation and group_vars_all.is_file():
+                command += ["-e", f"@{group_vars_all}"]
+            command += [
                 "-e",
                 f"@{variables}",
                 str(PLAYBOOKS_PATH / playbook),
             ]
             try:
                 result = self._execute_process(command, environment, timeout)
+                if (
+                    security_mutation
+                    and playbook == "ssh-hardening.yml"
+                    and result.returncode == 0
+                    and not self._persist_imported_ssh_port(server, security_execution)
+                ):
+                    return Err("Hardening operation ownership changed after SSH verification")
                 return Ok(self._process_result(playbook, result, self._parse_stats(result.stdout)))
             except subprocess.TimeoutExpired:
                 return Ok(
@@ -726,6 +942,8 @@ ansible_python_interpreter=/usr/bin/python3
 
         vars_dict: dict[str, Any] = {
             "ssh_port": deployment.ssh_port,
+            "praho_generated_node": not bool(deployment.virtualmin_server_id),
+            "ssh_webmin_tunnel_enabled": deployment.panel_type.panel_type == "virtualmin",
             # Deployment info
             "deployment_id": str(deployment.id),
             "inventory_hostname": deployment.hostname,

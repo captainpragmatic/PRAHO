@@ -43,6 +43,8 @@ class LegacyAccountNamePostgresRaceTests(AccountNameTransactionCase):
         self.server.save(update_fields=["last_health_check"])
         self.target = VirtualminServer.objects.create(
             name="Legacy race target",
+            # Existing rollout node, as in MigrationTestBase; new nodes remain unadmitted by default.
+            legacy_security_admission=True,
             hostname="legacy-target.example.com",
             api_username="praho-acl",
             ipv4_address="203.0.113.20",
@@ -164,7 +166,10 @@ class LegacyAccountNamePostgresRaceTests(AccountNameTransactionCase):
         ):
             winner = executor.submit(self._thread, first, ready1, done1, pids1)
             try:
-                self.assertTrue(reached.wait(_SECONDS), "The first service never reached its external boundary")
+                if not reached.wait(_SECONDS):
+                    if winner.done():
+                        self.fail(f"The first public service exited before its external boundary: {winner.result()}")
+                    self.fail("The first service never reached its external boundary")
                 follower = executor.submit(self._thread, second, ready2, done2, pids2)
                 self.assertTrue(ready2.wait(_SECONDS), "The second SQL connection never became ready")
                 self.assertNotEqual(pids1[0], pids2[0])
@@ -173,7 +178,9 @@ class LegacyAccountNamePostgresRaceTests(AccountNameTransactionCase):
                 release.set()
             first_result = winner.result(timeout=_SECONDS)
             second_result = follower.result(timeout=_SECONDS)
-        self.assertTrue(blocked, "The second public service did not wait on the first service's publication lock")
+        self.assertTrue(
+            blocked, f"The second public service did not wait on the first service's publication lock: {second_result}"
+        )
         self.node_mutation.assert_not_called()
         self.enqueue.assert_not_called()
         return first_result, second_result

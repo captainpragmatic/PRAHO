@@ -47,7 +47,7 @@
     "success": {
       "body": {
         "command": "install-cert",
-        "output": "Installing new SSL files ..\n.. done\n\nUpdating Webmin user ..\n.. done\n\nApplying webserver configuration ..\n.. done\n\nRe-loading Webmin ..\n.. done\n\n",
+        "output": "Installing new SSL files ..\n.. done\n\nApplying webserver configuration ..\n.. done\n\nRe-loading Webmin ..\n.. done\n\n",
         "status": "success"
       },
       "body_format": "json",

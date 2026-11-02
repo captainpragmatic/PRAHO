@@ -474,7 +474,7 @@ class TestCleanupFailedDeploymentsTeardown(TestCase):
     def test_failed_deployment_torn_down_and_destroyed(self, mock_gw_factory, mock_token):
         d = self._aged_failed()
         mock_token.return_value = Ok("tok")
-        gw = _teardown_gateway()
+        gw = _teardown_gateway(d)
         gw.delete_server.return_value = Ok(True)
         mock_gw_factory.return_value = gw
 
@@ -491,7 +491,7 @@ class TestCleanupFailedDeploymentsTeardown(TestCase):
     def test_delete_failure_leaves_destroying_for_retry(self, mock_gw_factory, mock_token):
         d = self._aged_failed()
         mock_token.return_value = Ok("tok")
-        gw = _teardown_gateway()
+        gw = _teardown_gateway(d)
         gw.delete_server.return_value = Err("provider 500")
         mock_gw_factory.return_value = gw
 
@@ -543,7 +543,7 @@ class TestRecoverStuckDeployments(TestCase):
         )
         self._force(d, "destroying", 5)
         mock_token.return_value = Ok("tok")
-        gw = _teardown_gateway()
+        gw = _teardown_gateway(d)
         gw.delete_server.return_value = Ok(True)
         mock_gw_factory.return_value = gw
 

@@ -108,9 +108,22 @@ def snapshot_frontends(migration: VirtualminMigration, names: tuple[str, ...]) -
     """Capture old cache bounds before commit; a later shorter TTL never erases an earlier bound."""
     from .account_hostname_models import AccountHostname  # noqa: PLC0415
 
-    hostname = AccountHostname.objects.get(account_id=migration.account_id, retired_at__isnull=True)
+    hostname = (
+        AccountHostname.objects.filter(account_id=migration.account_id, retired_at__isnull=True).first()
+        if getattr(migration, "contract", "") == "imported_web"
+        else AccountHostname.objects.get(account_id=migration.account_id, retired_at__isnull=True)
+    )
     names_to_check = _inventory(
-        list(dict.fromkeys((*names, migration.account.domain, f"www.{migration.account.domain}", hostname.fqdn)))
+        list(
+            dict.fromkeys(
+                (
+                    *names,
+                    migration.account.domain,
+                    f"www.{migration.account.domain}",
+                    *((hostname.fqdn,) if hostname else ()),
+                )
+            )
+        )
     )
     saved = dict(migration.barrier_state.get("frontend_dns_before", {}))
     source = migration.source_server
@@ -265,6 +278,23 @@ def _attestation_expiry(bridge: MigrationBridge, names: list[str]) -> datetime:
     return expires
 
 
+def _attestation_hostname_current(bridge: MigrationBridge, target: VirtualminServer) -> bool:
+    from .account_hostname_models import AccountHostname  # noqa: PLC0415
+    from .component_migration_transport import component_network_current  # noqa: PLC0415
+
+    migration = bridge.migration
+    hostname = AccountHostname.objects.filter(account_id=migration.account_id).first()
+    if migration.contract == "imported_web":
+        expected = migration.pre_migration_snapshot.get("component_account_name")
+        if not isinstance(expected, str) or not component_network_current(migration):
+            return False
+        if (hostname.fqdn if hostname else "") != expected:
+            return False
+        if hostname is None:
+            return True
+    return hostname is not None and hostname.target_server_id == target.pk and hostname.retired_at is None
+
+
 def attest_proxy_origin(  # noqa: PLR0911  # Staff, ownership and distinct routing-proof refusals
     bridge: MigrationBridge, actor: User | None, fields: Mapping[str, str]
 ) -> Result[None, str]:
@@ -275,7 +305,6 @@ def attest_proxy_origin(  # noqa: PLR0911  # Staff, ownership and distinct routi
     """
     from apps.audit.services import AuditContext, AuditEventData, AuditService  # noqa: PLC0415
 
-    from .account_hostname_models import AccountHostname  # noqa: PLC0415
     from .migration_optional_aliases import (  # noqa: PLC0415
         declared_independent_names,
         independent_statement_evidence,
@@ -297,7 +326,7 @@ def attest_proxy_origin(  # noqa: PLR0911  # Staff, ownership and distinct routi
     account = VirtualminAccount.objects.get(pk=bridge.migration.account_id)
     if (
         account.server_id != target.pk
-        or not AccountHostname.objects.filter(account=account, target_server=target, retired_at__isnull=True).exists()
+        or not _attestation_hostname_current(bridge, target)
         or fields.get("target_id") != str(target.pk)
         or fields.get("ipv4") != _ipv4(target)
         or fields.get("ipv6", "") != (target.ipv6_address or "")

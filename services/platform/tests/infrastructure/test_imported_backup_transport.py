@@ -63,6 +63,36 @@ class ImportedBackupTransportTests(SimpleTestCase):
         self.assertTrue(self.trust.exists())
         self.service._ssh_manager.get_private_key_file.assert_not_called()
 
+    def test_component_migration_archives_use_the_imported_identity_without_managed_node_fallback(self) -> None:
+        variables = {
+            "archive_name": f"migration_{uuid4()}.tar.gz", "spool_dir": self.directory.name,
+            "spool_free_bytes": 1000000, "expected_sha256": "a" * 64,
+        }
+        with patch(
+            "apps.infrastructure.ansible_service.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, "MIGRATE_SHA256=" + "a" * 64, ""),
+        ) as run:
+            for playbook in ("virtualmin_migrate_fetch.yml", "virtualmin_migrate_push.yml"):
+                with self.subTest(playbook=playbook):
+                    result = self.service.run_server_playbook(self.server, playbook, variables)
+                    self.assertTrue(result.is_ok(), result)
+                    self.assertTrue(result.unwrap().success)
+        self.assertEqual(run.call_count, 2)
+        self.service._ssh_manager.get_private_key_file.assert_not_called()
+
+    def test_component_inspection_is_action_scoped_and_never_bootstraps_imported_ssh(self) -> None:
+        with patch(
+            "apps.infrastructure.ansible_service.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, "read-only inspection", ""),
+        ) as run:
+            result = self.service.run_server_playbook(self.server, "virtualmin_component.yml", {"component_action": "inspect"})
+            self.assertTrue(result.is_ok(), result)
+            self.assertTrue(result.unwrap().success)
+            denied = self.service.run_server_playbook(self.server, "virtualmin_component.yml", {"component_action": "fence"})
+            self.assertTrue(denied.is_err())
+        self.assertEqual(run.call_count, 1)
+        self.service._ssh_manager.get_private_key_file.assert_not_called()
+
     def test_missing_key_refuses_before_execution(self) -> None:
         self.key.unlink()
         with patch("apps.infrastructure.ansible_service.subprocess.run") as run:
@@ -70,6 +100,26 @@ class ImportedBackupTransportTests(SimpleTestCase):
         self.assertTrue(result.is_err())
         self.assertIn("key", result.unwrap_err().lower())
         run.assert_not_called()
+
+    def test_exact_receipted_source_actions_use_pinned_imported_transport(self) -> None:
+        actions = ("source_hold", "source_verify", "source_export", "source_release", "source_commit")
+        with patch(
+            "apps.infrastructure.ansible_service.subprocess.run",
+            return_value=subprocess.CompletedProcess([], 0, "private native action finished", ""),
+        ) as run:
+            for action in actions:
+                with self.subTest(action=action):
+                    result = self.service.run_server_playbook(
+                        self.server, "virtualmin_component.yml", {"component_action": action}
+                    )
+                    self.assertTrue(result.is_ok(), result)
+                    self.assertTrue(result.unwrap().success)
+            denied = self.service.run_server_playbook(
+                self.server, "virtualmin_component.yml", {"component_action": "delete-domain"}
+            )
+            self.assertTrue(denied.is_err())
+        self.assertEqual(run.call_count, len(actions))
+        self.service._ssh_manager.get_private_key_file.assert_not_called()
 
     def test_malformed_enrolled_host_key_is_a_definite_local_refusal(self) -> None:
         from apps.infrastructure.imported_backup_transport import server_transport_ready  # noqa: PLC0415
@@ -80,7 +130,7 @@ class ImportedBackupTransportTests(SimpleTestCase):
         self.assertEqual(retriability_of(result), Retriability.NOT_RETRIABLE)
 
     def test_managed_key_failure_never_consults_imported_identity(self) -> None:
-        self.server.node_deployment = SimpleNamespace(ipv4_address="203.0.113.10")
+        self.server.node_deployment = SimpleNamespace(ipv4_address="203.0.113.10", ssh_host_keys="enrolled")
         self.service._ssh_manager.get_private_key_file.return_value = Err("Missing managed identity")
         with patch("apps.infrastructure.ansible_service.imported_identity") as imported, patch("apps.infrastructure.ansible_service.subprocess.run") as run:
             result = self.service.run_server_playbook(self.server, "virtualmin_backup_fetch.yml")

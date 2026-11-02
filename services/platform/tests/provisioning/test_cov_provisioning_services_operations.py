@@ -102,7 +102,9 @@ class VirtualminOperationsCoverageTests(VirtualminServiceCoverageCase):
 
     def test_restore_admission_snapshots_target_and_restores_management_server(self) -> None:
         account = self._account()
-        target = create_test_virtualmin_server(name="Restore target", hostname="restore-target.example.com")
+        target = create_test_virtualmin_server(
+            name="Restore target", hostname="restore-target.example.com", legacy_security_admission=True
+        )
         management = VirtualminBackupManagementService(self.server)
         config = RestoreConfig(backup_id="backup-coverage", restore_email=False, force_restore=True)
         job = management.create_restore_job(account, config, target_server=target, initiated_by="operator").unwrap()

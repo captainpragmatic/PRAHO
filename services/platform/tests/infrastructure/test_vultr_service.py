@@ -7,7 +7,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import requests as req_lib
-
 from django.test import TestCase
 
 from apps.infrastructure.cloud_gateway import (
@@ -88,10 +87,12 @@ class VultrServiceDeleteServerTest(TestCase):
         self.svc = VultrService(token="test-token")
 
     def test_delete_server_success(self):
-        with patch(_PATCH_TARGET, return_value=_mock_response()):
+        absent = req_lib.HTTPError(response=MagicMock(status_code=404))
+        with patch(_PATCH_TARGET, side_effect=[_mock_response(status_code=204), absent]) as request:
             result = self.svc.delete_server("inst-123")
         assert result.is_ok()
         assert result.unwrap() is True
+        assert [call.args[0] for call in request.call_args_list] == ["DELETE", "GET"]
 
     def test_delete_server_failure(self):
         with patch(_PATCH_TARGET, side_effect=Exception("API error")):

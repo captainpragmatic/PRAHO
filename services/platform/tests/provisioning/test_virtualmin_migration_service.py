@@ -34,6 +34,7 @@ from apps.provisioning.virtualmin_service import VirtualminProvisioningService
 from apps.users.models import User
 from tests.mocks.virtualmin_mock import MockVirtualminGateway
 from tests.provisioning import test_virtualmin_tasks as task_tests
+from tests.provisioning.test_node_security_policy import OPERATOR_KEY
 
 
 @override_settings(
@@ -51,6 +52,7 @@ class MigrationTestBase(task_tests.VirtualminTaskTestBase):
         self.server.refresh_from_db()
         self.target = VirtualminServer.objects.create(
             name="migration-target",
+            legacy_security_admission=True,
             hostname="migration-target.example.com",
             api_username="praho-acl",
             last_health_check=timezone.now(),
@@ -766,13 +768,15 @@ class MigrationAnsibleTimeoutTests(SimpleTestCase):
         service._ansible_path = "/usr/bin/ansible-playbook"
         service._ssh_manager = MagicMock()
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-migration-key"))
-        deployment = NodeDeployment(ipv4_address="203.0.113.1", hostname="migration-node", ssh_port=9876)
+        deployment = NodeDeployment(
+            ipv4_address="203.0.113.1", hostname="migration-node", ssh_port=9876, ssh_host_keys=[OPERATOR_KEY]
+        )
         with (
             patch(
                 "apps.infrastructure.ansible_service.trusted_node_known_hosts",
                 return_value=Path("nonexistent-migration-pins"),
             ),
-            patch("apps.infrastructure.ansible_service.recover_connection_port", return_value=9876),
+            patch("apps.infrastructure.ansible_service.recover_connection_port") as recover,
             patch.object(service, "_wait_for_ssh", return_value=Ok(True)),
             patch.object(service, "_configured_known_hosts_covers", return_value=True),
             patch.object(service, "_generate_inventory", return_value=Path("nonexistent-migration-inventory")),
@@ -791,4 +795,5 @@ class MigrationAnsibleTimeoutTests(SimpleTestCase):
             result = service.run_playbook(deployment, "virtualmin_migrate_push.yml", timeout_seconds=3600)
             self.assertFalse(result.unwrap().success)
             self.assertIn("3600", result.unwrap().stderr)
+            recover.assert_not_called()
         self.assertEqual(service.timeout, 30)

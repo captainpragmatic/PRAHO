@@ -1,0 +1,32 @@
+{% load i18n ui_components %}
+{% if obligation_rows %}
+  <section class="space-y-4 rounded-lg border border-slate-700 bg-slate-800 p-6">
+    <h2 class="text-lg font-semibold">{% trans "Retained source responsibilities" %}</h2>
+    <p>{% trans "These records remain attached to their original source even after later website moves. Recording a resolution never deletes native resources or stops services." %}</p>
+    {{ release_form.errors }}
+    {% for row in obligation_rows %}
+      <div class="space-y-3 rounded border border-slate-600 p-4">
+        <h3 class="font-semibold">{{ row.obligation.source_server.name }} · {{ row.obligation.domain }} · {{ row.obligation.owner }}</h3>
+        <p>{% for service in row.obligation.retained_services %}{{ service }}{% if not forloop.last %}, {% endif %}{% endfor %}</p>
+        <p>{{ row.obligation.backup_responsible.email }} — {{ row.obligation.backup_responsibility }}</p>
+        {% if row.obligation.release %}
+          <p>{% trans "Resolution recorded by" %} {{ row.obligation.release.actor.email }} · {{ row.obligation.release.created_at }}</p>
+          <p>{{ row.obligation.release.backup_handoff }}</p>
+        {% else %}
+          <p>{% trans "Resolve retained services independently before requesting release. Live verification must prove both the original native domain and every domain using its Unix owner are absent. A website move or drain confirmation cannot substitute for that proof." %}</p>
+          <form method="post" class="space-y-3">
+            {% csrf_token %}
+            <input type="hidden" name="action" value="release">
+            {{ row.form.obligation_id }}
+            {% for field in row.form.visible_fields %}
+              <div>{% if field.field.widget.input_type == "checkbox" %}<div class="flex items-start gap-3">{{ field }}{{ field.label_tag }}</div>{% else %}{{ field.label_tag }}{{ field }}{% endif %}{{ field.errors }}</div>
+            {% endfor %}
+            {% trans "Verify absence and record source resolution" as release_label %}
+            {% trans "Verify that the original native domain and Unix owner services are absent, then record the independent backup handoff without deleting resources?" as release_confirmation %}
+            {% button release_label type="submit" variant="warning" hx_confirm=release_confirmation %}
+          </form>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </section>
+{% endif %}

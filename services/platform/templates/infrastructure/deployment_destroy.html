@@ -21,8 +21,8 @@
                     <h3 class="text-red-400 font-semibold">{% trans "Warning: Destructive Action" %}</h3>
                     <p class="text-red-300 mt-2">{% trans "You are about to permanently destroy this node. This will:" %}</p>
                     <ul class="mt-2 text-red-300 list-disc list-inside space-y-1">
-                        <li>{% trans "Delete the server from Hetzner Cloud" %}</li>
-                        <li>{% trans "Remove all DNS records from Cloudflare" %}</li>
+                        <li>{% blocktrans with provider=deployment.provider.name %}Delete the VM from {{ provider }}{% endblocktrans %}</li>
+                        <li>{% trans "Withdraw DNS records owned by this deployment" %}</li>
                         <li>{% trans "Delete the SSH key from the credential vault" %}</li>
                         <li>{% trans "Remove all data stored on the server" %}</li>
                         {% if deployment.virtualmin_server %}
@@ -57,8 +57,22 @@
         </div>
 
         <!-- Confirmation Form -->
-        <form method="post" action="{{ form_action }}">
+        <section class="bg-slate-800 rounded-lg border border-slate-700 p-6 mb-6">
+            <h2 class="text-lg font-semibold text-white mb-4">{% trans "Provider backups and snapshots" %}</h2>
+            <p class="text-slate-300 mb-4">{% trans "Choose an outcome for the exact resources below. Keeping existing restore points may require conversion or provider-console preparation before teardown; storage charges continue. This choice concerns provider-side restore points." %}</p>
+            {% if inventory_error %}<p role="alert" class="text-red-400">{{ inventory_error }}</p>{% endif %}
+            {% if resource_options %}
+            <div class="overflow-x-auto"><table class="w-full text-sm text-slate-300">
+                <thead><tr><th class="text-left p-2">{% trans "Resource" %}</th><th class="text-left p-2">{% trans "If keeping restore points" %}</th><th class="text-left p-2">{% trans "If deleting restore points" %}</th></tr></thead>
+                <tbody>{% for resource in resource_options %}<tr class="border-t border-slate-700"><td class="p-2 font-mono">{{ resource.key }}</td><td class="p-2">{{ resource.keep }}</td><td class="p-2">{{ resource.delete }}</td></tr>{% endfor %}</tbody>
+            </table></div>
+            {% endif %}
+            <p class="text-slate-400 mt-4">{% trans "Unknown, shared and base images remain preserved unless exclusive ownership is proven. Any required manual preparation is completed before VM deletion." %}</p>
+        </section>
+        <form method="post" action="{{ form_action }}" hx-confirm="{% trans 'Destroy this VM using the reviewed provider retention choice?' %}">
             {% csrf_token %}
+            {{ form.resource_digest }}
+            {{ form.non_field_errors }}
             <div class="bg-slate-800 rounded-lg border border-slate-700 p-6">
                 <h2 class="text-lg font-semibold text-white mb-4">{% trans "Confirm Destruction" %}</h2>
                 <p class="text-slate-300 mb-4">
@@ -71,6 +85,13 @@
                     <p class="mt-1 text-sm text-red-400">{{ form.confirm_hostname.errors.0 }}</p>
                     {% endif %}
                 </div>
+                <div class="space-y-4 text-slate-300">
+                    <div><label for="{{ form.provider_restore_points.id_for_label }}">{{ form.provider_restore_points.label }}</label>{{ form.provider_restore_points }}{{ form.provider_restore_points.errors }}</div>
+                    <div><label for="{{ form.retention_reason.id_for_label }}">{{ form.retention_reason.label }}</label>{{ form.retention_reason }}{{ form.retention_reason.errors }}</div>
+                    {% for field in form.manual_snapshot_fields %}<div>{{ field.label_tag }}{{ field }}<p class="text-sm text-slate-400">{{ field.help_text }}</p>{{ field.errors }}</div>{% endfor %}
+                    <div><label>{{ form.accepted_provider_impact }} {{ form.accepted_provider_impact.label }}</label>{{ form.accepted_provider_impact.errors }}</div>
+                    {{ form.resource_digest.errors }}
+                </div>
             </div>
 
             <!-- Actions -->
@@ -78,7 +99,7 @@
                 <a href="{{ cancel_url }}" class="px-6 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded-lg transition-colors">
                     {% trans "Cancel" %}
                 </a>
-                {% trans "Destroy Node" as destroy_label %}{% button destroy_label type="submit" variant="danger" %}
+                {% if inventory_ready %}{% trans "Destroy Node" as destroy_label %}{% button destroy_label type="submit" variant="danger" %}{% endif %}
             </div>
         </form>
     </div>

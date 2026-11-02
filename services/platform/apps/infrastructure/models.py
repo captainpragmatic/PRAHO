@@ -23,6 +23,13 @@ from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from .cloud_destroy_models import (  # noqa: F401 -- feature models are registered through the app's models module
+    CloudResourceCleanup,
+    CloudResourceOwnership,
+    CloudResourceRetention,
+    NodeDestroyPlan,
+)
+
 if TYPE_CHECKING:
     from django.utils.functional import _StrPromise
 

@@ -115,7 +115,7 @@ RUN chmod 0755 /usr/local/sbin/lab-node-* /usr/local/sbin/virtualmin-lab-* \
       virtualmin-lab-firstboot.service ssh.service \
  && systemctl mask getty@tty1.service console-getty.service systemd-firstboot.service
 
-EXPOSE 22 10000
+EXPOSE 9876 10000
 STOPSIGNAL SIGRTMIN+3
 HEALTHCHECK --interval=10s --timeout=5s --start-period=30s --retries=90 \
   CMD ["/usr/local/sbin/virtualmin-lab-health"]

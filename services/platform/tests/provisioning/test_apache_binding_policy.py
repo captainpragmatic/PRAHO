@@ -69,6 +69,25 @@ class ApacheBindingPolicyTests(SimpleTestCase):
         self.assertLess(self.policy.configuration.name, "praho-default-site.conf")
         self.assertEqual(self.policy.probe_addresses({"80": ["*"]}, "80"), ["127.0.0.1", "192.0.2.20", "2001:db8::20"])
 
+    def test_both_neutral_vhosts_explicitly_inherit_global_maintenance_rules(self) -> None:
+        # Native regression: a restore drops an old mail/admin ServerAlias;
+        # that formerly-held spelling then reaches the neutral vhost. Apache
+        # does not inherit RewriteEngine itself from its main server config.
+        text = self.policy.render({"80": ["*"], "443": ["*"]}).decode()
+        vhosts = text.split("<VirtualHost ")[1:]
+        self.assertEqual(len(vhosts), 2)
+        for vhost in vhosts:
+            before_end = vhost.split("</VirtualHost>", 1)[0]
+            self.assertIn("RewriteEngine On", before_end)
+            self.assertIn("RewriteOptions InheritBefore", before_end)
+        static = HELPER.with_name("praho-default-site.conf").read_text()
+        static_vhosts = static.split("<VirtualHost ")[1:]
+        self.assertEqual(len(static_vhosts), 2)
+        for vhost in static_vhosts:
+            before_end = vhost.split("</VirtualHost>", 1)[0]
+            self.assertIn("RewriteEngine On", before_end)
+            self.assertIn("RewriteOptions InheritBefore", before_end)
+
     def test_explicit_groups_and_retained_bridges_are_observed_but_policy_groups_do_not_feed_themselves(self) -> None:
         self.native.write_text(
             "<VirtualHost 192.0.2.20:80 [2001:db8::20]:443>\nServerName customer.example.net\n</VirtualHost>\n"

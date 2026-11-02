@@ -22,6 +22,8 @@
     pair_base_sha: ""
     pair_diff_sha: ""
     pair_recovery: false
+    pair_web_only: true
+    pair_restore_configuration: false
   tasks:
     - name: Validate pair restore inputs
       ansible.builtin.assert:
@@ -33,6 +35,7 @@
           - chain_token is match('^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
           - pair_lock_wait_seconds | string is match('^[0-9]{1,4}$')
           - pair_step_hold_seconds | string is match('^[0-9]{1,2}$')
+          - not (pair_restore_configuration | bool) or not (pair_recovery | bool)
           - pair_action == 'release' or pair_base_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$') or (pair_recovery | bool and pair_base_archive == 'migration_' ~ chain_token ~ '.tar.gz' and pair_diff_archive == '')
           - pair_action == 'release' or (pair_recovery | bool and pair_diff_archive == '') or pair_diff_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
           - pair_action == 'release' or pair_base_sha is match('^[0-9a-f]{64}$')
@@ -86,6 +89,8 @@
         PRAHO_DIFF_SHA: "{{ pair_diff_sha }}"
         PRAHO_STEP_HOLD: "{{ pair_step_hold_seconds }}"
         PRAHO_RECOVERY: "{{ (pair_recovery | bool) | ternary('1', '0') }}"
+        PRAHO_WEB_ONLY: "{{ (pair_web_only | bool) | ternary('1', '0') }}"
+        PRAHO_RESTORE_CONFIGURATION: "{{ (pair_restore_configuration | bool) | ternary('1', '0') }}"
       register: pair_step
       changed_when: true
 

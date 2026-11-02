@@ -44,6 +44,7 @@ class RebuildServerFromPrahoTests(TestCase):
         )
         self.server = VirtualminServer.objects.create(
             name="dead-server",
+            legacy_security_admission=True,
             hostname="dead.example.com",
             api_username="api_user",
             max_domains=1000,
@@ -171,6 +172,7 @@ class ReprovisionAccountTests(TestCase):
         )
         self.server = VirtualminServer.objects.create(
             name="reprov-server",
+            legacy_security_admission=True,
             hostname="reprov.example.com",
             api_username="api_user",
             max_domains=1000,

@@ -268,6 +268,7 @@ class MigrationBoundaryTests(MigrationTestBase):
         """The dropdown must present targets in placement order, not database order."""
         heavy = VirtualminServer.objects.create(
             name="heavyweight",
+            legacy_security_admission=True,
             hostname="heavyweight.example.com",
             api_username="praho-acl",
             last_health_check=timezone.now(),

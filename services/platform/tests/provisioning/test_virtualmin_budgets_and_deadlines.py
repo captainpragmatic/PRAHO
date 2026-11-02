@@ -88,6 +88,7 @@ class ProvisioningDeepReviewTests(TestCase):
         )
         self.server = VirtualminServer.objects.create(
             name="review",
+            legacy_security_admission=True,
             hostname="review-node.example.test",
             api_username="review-api",
             status="active",

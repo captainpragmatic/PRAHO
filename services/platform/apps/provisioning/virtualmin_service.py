@@ -41,6 +41,7 @@ from .virtualmin_backup_service import (
     RestoreConfig,
     VirtualminBackupService,
 )
+from .virtualmin_create_node_identity import lock_create_retry_node
 from .virtualmin_create_retry_binding import (
     CreateRetryBinding,
     binding_current,
@@ -65,6 +66,7 @@ from .virtualmin_models import (
     VirtualminProvisioningJob,
     VirtualminServer,
 )
+from .virtualmin_node_capability import destination_refusal
 from .virtualmin_revoked_create import (
     OFF_SOURCE_KEY,
     OffClaim,
@@ -75,8 +77,9 @@ from .virtualmin_revoked_create import (
     retire_closed_off_claim,
     settle_off,
 )
+from .virtualmin_security import connection_identity
 from .virtualmin_units import quota_parameters
-from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE, VirtualminValidator
+from .virtualmin_validators import DEFAULT_VIRTUALMIN_TEMPLATE, WEB_ONLY_VIRTUALMIN_FEATURES, VirtualminValidator
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -133,11 +136,9 @@ def create_domain_params(  # noqa: PLR0913  # One keyword per remote.cgi paramet
         "template": template,
         # The recovery seed, as the server description (8.x has no --comment).
         "desc": recovery_seed,
-        # Virtualmin 8.x enables no feature unless asked ("No virtual
-        # server features enabled"). PRAHO plans carry no feature list,
-        # so a server gets the node's default-on set, which the node
-        # playbook pins to unix dir web ssl logrotate mysql webmin.
-        "default-features": "",
+        # Explicit flags prevent mutable templates/defaults from introducing
+        # customer Webmin, mail/DNS or additional plugins on a web destination.
+        **dict.fromkeys(WEB_ONLY_VIRTUALMIN_FEATURES, ""),
     }
     # Disk in KiB and bandwidth in bytes; zero and the -1 sentinel mean unlimited (shared with recovery).
     params.update(quota_parameters(disk_quota_mb, bandwidth_quota_mb))
@@ -278,12 +279,16 @@ class VirtualminProvisioningService:
             maintenance_refusal,
         )
 
+        if locked.security_operation:
+            return Err("Target server has an unresolved hardening operation", retriability=Retriability.RETRIABLE)
         if refusal := maintenance_refusal(locked.pk):
             return Err(refusal, retriability=Retriability.RETRIABLE)
         if locked.is_draining:
             return Err("Target server is draining", retriability=Retriability.RETRIABLE)
         if locked.status != "active":
             return Err(f"Server {locked.name} is not accepting new accounts")
+        if refusal := destination_refusal(locked):
+            return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
         return Ok(locked)
 
     def create_virtualmin_account(  # noqa: PLR0911, PLR0912  # One refusal per admission check
@@ -339,6 +344,7 @@ class VirtualminProvisioningService:
                 admission = self._lock_open_server(server)
                 if admission.is_err():
                     return Err(admission.unwrap_err(), retriability=retriability_of(admission))
+                server = admission.unwrap()
                 account = VirtualminAccount(
                     domain=domain,
                     service=creation_data.service,
@@ -367,6 +373,7 @@ class VirtualminProvisioningService:
                             "username": username,
                             "template": template,
                             "recovery_seed": account.get_recovery_seed(),
+                            "node_connection_identity": connection_identity(server),
                             "creation_intent": creation_intent(creation_data.service.pk, purpose="create"),
                             "creation_credential_generation": password_fingerprint(account),
                         }
@@ -428,6 +435,10 @@ class VirtualminProvisioningService:
             server = target_server or previous_server
 
             with transaction.atomic():
+                admitted = self._lock_open_server(server)
+                if admitted.is_err():
+                    return Err(admitted.unwrap_err(), retriability=retriability_of(admitted))
+                server = admitted.unwrap()
                 # Rotate password — the pre-loss secret cannot be recovered.
                 VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=account.pk)
                 from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server admission
@@ -458,6 +469,7 @@ class VirtualminProvisioningService:
                             "username": account.virtualmin_username,
                             "template": account.template_name or DEFAULT_VIRTUALMIN_TEMPLATE,
                             "recovery_seed": account.get_recovery_seed(),
+                            "node_connection_identity": connection_identity(server),
                             "creation_intent": creation_intent(account.service_id, purpose="reprovision"),
                             "creation_credential_generation": password_fingerprint(account),
                             "reprovision_source_server_id": str(
@@ -507,25 +519,60 @@ class VirtualminProvisioningService:
             return Err("Target server is draining", retriability=Retriability.RETRIABLE)
         from apps.infrastructure.node_maintenance_gate import begin_account_job  # noqa: PLC0415  # Native admission
 
-        if refusal := begin_account_job(account, job, preserve_claim=retry):
-            if retry:
-                with transaction.atomic():
-                    VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=account.pk)
-                    current = VirtualminProvisioningJob.objects.select_for_update(of=("self",)).get(pk=job.pk)
-                    if (
-                        current.status == job.status == "running"
-                        and current.claimed_at == job.claimed_at
-                        and current.started_at == job.started_at
-                        and current.account_id == job.account_id
-                        and current.server_id == job.server_id
-                        and current.operation == job.operation
-                    ):
-                        current.mark_failed(refusal, retriability=Retriability.RETRIABLE)
-            else:
-                job.mark_failed(refusal, retriability=Retriability.RETRIABLE)
-            return Err(refusal, retriability=Retriability.RETRIABLE)
+        capability_refusal = destination_refusal(account.server)
+        if refusal := capability_refusal or begin_account_job(account, job, preserve_claim=retry):
+            retriability = Retriability.NOT_RETRIABLE if capability_refusal else Retriability.RETRIABLE
+            return self._creation_refusal(account, job, refusal, retry=retry, retriability=retriability)
         self._apply_default_quotas(account)
         return None
+
+    @staticmethod
+    def _creation_refusal(
+        account: VirtualminAccount,
+        job: VirtualminProvisioningJob,
+        refusal: str,
+        *,
+        retry: bool,
+        retriability: Retriability,
+    ) -> Err[str]:
+        if retry:
+            with transaction.atomic():
+                VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=account.pk)
+                current = VirtualminProvisioningJob.objects.select_for_update(of=("self",)).get(pk=job.pk)
+                if (
+                    current.status == job.status == "running"
+                    and current.claimed_at == job.claimed_at
+                    and current.started_at == job.started_at
+                    and current.account_id == job.account_id
+                    and current.server_id == job.server_id
+                    and current.operation == job.operation
+                ):
+                    current.mark_failed(refusal, retriability=retriability)
+        else:
+            job.mark_failed(refusal, retriability=retriability)
+        return Err(refusal, retriability=retriability)
+
+    def _creation_dispatch_refusal(
+        self,
+        account: VirtualminAccount,
+        job: VirtualminProvisioningJob,
+        *,
+        retry: bool,
+        before_create: Callable[[], Err[str] | None] | None,
+    ) -> Err[str] | None:
+        target = lock_create_retry_node(account, job)
+        if target.is_err():
+            return Err(target.unwrap_err())
+        if refusal := destination_refusal(target.unwrap()):
+            return self._creation_refusal(
+                account,
+                job,
+                refusal,
+                retry=retry,
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        # The original account/service/generation callback is the final DB check.
+        return before_create() if before_create is not None else None
 
     def _execute_domain_creation(  # noqa: PLR0911, PLR0915  # Verified create and atomic node-ownership commit
         self,
@@ -571,17 +618,20 @@ class VirtualminProvisioningService:
                 bandwidth_quota_mb=account.bandwidth_quota_mb,
             )
 
-            if before_create is not None:
-                refusal = before_create()
-                if refusal is not None:
-                    return refusal
-
-            # Make API call
+            provisioning_timeout = get_virtualmin_timeouts()["PROVISIONING_TIMEOUT"]
+            refusal = self._creation_dispatch_refusal(
+                account,
+                job,
+                retry=settle_created is not None,
+                before_create=before_create,
+            )
+            if refusal is not None:
+                return refusal
             result = gateway.call(
                 "create-domain",
                 params,
                 correlation_id=job.correlation_id,
-                timeout_seconds=get_virtualmin_timeouts()["PROVISIONING_TIMEOUT"],
+                timeout_seconds=provisioning_timeout,
             )
 
             if result.is_ok():
@@ -1483,6 +1533,10 @@ class VirtualminProvisioningService:
         if account.server.is_draining:
             job.mark_failed("Target server is draining", retriability=Retriability.RETRIABLE)
             return Err("Target server is draining", retriability=Retriability.RETRIABLE)
+        target = lock_create_retry_node(account, job)
+        if target.is_err():
+            return Err(target.unwrap_err())
+        account.server = target.unwrap()
         gateway = self._get_gateway(account.server)
         owner_result = gateway.get_domain_owner(account.domain)
         if not binding_current(binding, job.pk):
@@ -1515,9 +1569,7 @@ class VirtualminProvisioningService:
         if owner is not None:
             # Remote domain exists on OUR server for OUR account row: the
             # original create succeeded past the response. Finalize in place.
-            settled = settle_retry_created(
-                binding, job.pk, {"recovered": "remote domain already present"}, native_outcome="adopted"
-            )
+            settled = self._settle_observed_create(account, job, binding)
             if settled.is_err():
                 return Err(settled.unwrap_err())
             logger.info(f"✅ [VirtualminService] Retry converged existing remote domain {account.domain}")
@@ -1536,6 +1588,23 @@ class VirtualminProvisioningService:
         if creation_result.is_err():
             return Err(creation_result.unwrap_err())
         return self._finish_create_retry(account, job, native_outcome="created")
+
+    @staticmethod
+    def _settle_observed_create(
+        account: VirtualminAccount,
+        job: VirtualminProvisioningJob,
+        binding: CreateRetryBinding,
+    ) -> Result[dict[str, Any], str]:
+        with transaction.atomic():
+            target = lock_create_retry_node(account, job)
+            if target.is_err():
+                return Err(target.unwrap_err())
+            return settle_retry_created(
+                binding,
+                job.pk,
+                {"recovered": "remote domain already present"},
+                native_outcome="adopted",
+            )
 
     def _retry_dispatch_refusal(
         self, account: VirtualminAccount, job: VirtualminProvisioningJob, binding: CreateRetryBinding
@@ -1899,7 +1968,7 @@ class VirtualminProvisioningService:
             .exclude(pk__in=exclude_server_ids)
         )
         for server in order_placement_candidates(available_servers, preferred_region, required_tags):
-            if server.can_host_domain():
+            if server.can_host_domain() and destination_refusal(server) is None:
                 return Ok(server)
 
         return Err(str(_("No available servers can host new domains")))
@@ -2282,7 +2351,19 @@ class VirtualminBackupManagementService:
             account, BackupConfig(chain_role=role), initiated_by=initiated_by, execute_inline=execute_inline
         )
 
-    def _admit_job(  # noqa: PLR0911, PLR0913  # Distinct admission refusals + execution-context seams
+    @staticmethod
+    def _backup_server_refusal(
+        account: VirtualminAccount, server: VirtualminServer, operation: str, parameters: dict[str, Any]
+    ) -> str | None:
+        from .virtualmin_restore_policy import restore_destination_refusal  # noqa: PLC0415 -- archive admission
+
+        if server.security_operation:
+            return "Node hardening is unresolved; reconcile it before backup or restore"
+        if operation != "restore_domain":
+            return None
+        return restore_destination_refusal(account, server, force=parameters.get("force_restore") is True)
+
+    def _admit_job(  # noqa: C901, PLR0911, PLR0913  # Distinct account, node and execution-context admission refusals
         self,
         account: VirtualminAccount,
         *,
@@ -2336,7 +2417,9 @@ class VirtualminBackupManagementService:
             )
 
             node_id = locked.server_id if source_bound else self.server.pk
-            VirtualminServer.objects.select_for_update(of=("self",)).get(pk=node_id)
+            target_server = VirtualminServer.objects.select_for_update(of=("self",)).get(pk=node_id)
+            if refusal := self._backup_server_refusal(locked, target_server, operation, parameters):
+                return Err(refusal)
             if refusal := maintenance_refusal(node_id):
                 return Err(refusal)
             if account_has_active_operation(locked):

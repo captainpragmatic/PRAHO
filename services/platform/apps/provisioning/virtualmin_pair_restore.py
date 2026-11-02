@@ -30,10 +30,13 @@ import base64
 import json
 import logging
 import re
+import tarfile
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -52,6 +55,8 @@ from .virtualmin_chain import (
     node_lost_refusal,
 )
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from .virtualmin_restore_policy import prepare_restore_params
+from .virtualmin_validators import WEB_ONLY_VIRTUALMIN_FEATURES
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -385,6 +390,7 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
     )
     from .virtualmin_backup_service import (  # noqa: PLC0415  # Circular
         CHAIN_ROLE_STANDALONE,
+        REMOTE_ARCHIVE_DIR,
         BackupConfig,
         VirtualminBackupService,
         backup_task_timeout,
@@ -424,6 +430,21 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
         if refusal is not None:
             return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
         domain_id = str(manifests["base"].get("virtualmin_domain_id"))
+        try:
+            scopes = [
+                prepare_restore_params(
+                    account,
+                    target_server,
+                    Path(path),
+                    manifests[label],
+                    source=f"{REMOTE_ARCHIVE_DIR}/{name}",
+                    force=config.force_restore,
+                    restore_configuration=True,
+                )
+                for (path, name), label in zip(held, ("base", "differential"), strict=True)
+            ]
+        except (ValidationError, ValueError, OSError, tarfile.TarError) as error:
+            return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
 
         # ---- the target must be the live domain this pair belongs to ------------------------------
         service._update_restore_progress(restore_id, "verifying_target", 25)
@@ -477,6 +498,22 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
             pushed.append(str(manifest["archive_name"]))
 
         # ---- last gates before anything destructive ------------------------------------------------
+        try:
+            scopes = [
+                prepare_restore_params(
+                    account,
+                    target_server,
+                    Path(path),
+                    manifests[label],
+                    source=f"{REMOTE_ARCHIVE_DIR}/{name}",
+                    force=config.force_restore,
+                    restore_configuration=True,
+                )
+                for (path, name), label in zip(held, ("base", "differential"), strict=True)
+            ]
+        except (ValidationError, ValueError, OSError, tarfile.TarError) as error:
+            determinate = True
+            return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
         regate = service._target_domain_gate(target_server, account, force=config.force_restore)
         if regate.is_err() or not regate.unwrap():
             determinate = True
@@ -526,6 +563,10 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
             "pair_diff_archive": manifests["differential"]["archive_name"],
             "pair_base_sha": manifests["base"]["checksum_sha256"],
             "pair_diff_sha": manifests["differential"]["checksum_sha256"],
+            "pair_web_only": all("only-features" in scope for scope in scopes),
+            "pair_restore_configuration": all(
+                scope.get("feature") == ["virtualmin", *WEB_ONLY_VIRTUALMIN_FEATURES] for scope in scopes
+            ),
         }
         timeout = (
             2 * service._backup_command_timeout()
@@ -601,8 +642,6 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
     finally:
         for path, name in held:
             try:
-                from pathlib import Path  # noqa: PLC0415
-
                 Path(path).unlink(missing_ok=True)
             except OSError:
                 logger.warning("⚠️ [PairRestore] Spool cleanup failed for %s", path)

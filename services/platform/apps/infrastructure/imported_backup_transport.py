@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 import paramiko
 from django.conf import settings
 
-from apps.common.ssh import MAX_SSH_PORT
+from apps.common.ssh import MAX_SSH_PORT, parse_ssh_host_keys
 from apps.common.types import Err, Ok, Result, Retriability
 
 if TYPE_CHECKING:
@@ -22,17 +22,49 @@ if TYPE_CHECKING:
 BACKUP_PLAYBOOKS = frozenset(
     {
         "virtualmin_usage_read.yml",
+        "virtualmin_security_read.yml",
         "virtualmin_backup_fetch.yml",
         "virtualmin_backup_push.yml",
         "virtualmin_remote_cleanup.yml",
         "virtualmin_chain_backup.yml",
         "virtualmin_pair_restore.yml",
+        "virtualmin_migrate_fetch.yml",
+        "virtualmin_migrate_push.yml",
     }
 )
 # The recovery playbook's other actions mutate a held target. Over the archive transport only the
 # owner-aging capture that precedes a recovery-capable backup may run.
 ACTION_SCOPED_PLAYBOOKS: dict[str, tuple[str, frozenset[str]]] = {
+    "virtualmin_component_bridge.yml": (
+        "component_bridge_action",
+        frozenset({"prepare", "origin_install", "origin_verify", "install", "verify", "remove", "origin_remove"}),
+    ),
     "virtualmin_recovery.yml": ("recovery_action", frozenset({"capture-owner"})),
+    "virtualmin_component.yml": (
+        "component_action",
+        frozenset(
+            {
+                "inspect",
+                "source_hold",
+                "source_verify",
+                "source_export",
+                "source_release",
+                "source_commit",
+                "source_route",
+                "source_retire",
+                "source_retire_artifacts",
+                "target_prepare",
+                "target_restore",
+                "target_verify",
+                "target_seal",
+                "target_activate",
+                "target_policy",
+                "target_remove",
+                "target_retire_artifacts",
+                "target_retire_unprepared_archive",
+            }
+        ),
+    ),
 }
 DEFAULT_SSH_PORT = 22
 
@@ -81,12 +113,16 @@ def imported_identity(server: VirtualminServer) -> ImportedIdentity:
         raise ValueError(
             "Configure a readable private root SSH key with private permissions using VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH"
         )
+    alias = host if port == DEFAULT_SSH_PORT else f"[{host}]:{port}"
+    persisted_keys = getattr(server, "imported_ssh_host_keys", "")
+    if persisted_keys:
+        pins = parse_ssh_host_keys(persisted_keys)
+        return ImportedIdentity(host, port, key, tuple(f"{alias} {pin.get_name()} {pin.get_base64()}" for pin in pins))
     configured_trust = str(getattr(settings, "PRAHO_SSH_KNOWN_HOSTS_PATH", "")).strip()
     if not configured_trust:
         raise ValueError("Configure enrolled SSH trust using PRAHO_SSH_KNOWN_HOSTS_PATH")
     try:
         trust = paramiko.HostKeys(configured_trust)
-        alias = host if port == DEFAULT_SSH_PORT else f"[{host}]:{port}"
         keys = trust.lookup(alias)
         if not keys:
             raise ValueError("No enrolled SSH trust for the registered hostname and exact port")

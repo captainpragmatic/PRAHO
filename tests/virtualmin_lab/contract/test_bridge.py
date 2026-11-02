@@ -53,9 +53,10 @@ def _copy(source: str, target: str) -> None:
 class NativeMigrationAdapter:
     """Keep real production node work; only the namespace's DB checkpoint seam is local to this test."""
 
-    def __init__(self, source: Lab, target: Lab, token: UUID) -> None:
+    def __init__(self, source: Lab, target: Lab, token: UUID, spool: Path) -> None:
         self.nodes = {source.server.pk: source, target.server.pk: target}
         self.token = token
+        self.spool = spool
         self.backup_timeout = SettingsService.get_integer_setting(
             "provisioning.migration_backup_timeout_seconds", BACKUP_TIMEOUT
         )
@@ -195,18 +196,18 @@ def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deleti
             )
         )
         with tempfile.TemporaryDirectory(prefix="praho-lab-bridge-") as spool:
-            local = str(Path(spool) / "migration.tar.gz")
+            local = str(Path(spool) / migration.archive_name)
             _copy(f"{source_node.container}:{archive}", local)
             lab.exec("install", "-d", "-m", "0700", "/var/lib/praho-transfer")
             _copy(local, f"{lab.node.container}:{archive}")
-        checksum = source.exec("sha256sum", archive).split()[0]
-        adapter = NativeMigrationAdapter(source, lab, lease_token)
-        restore_held_target(
-            cast(VirtualminMigrationService, adapter),
-            migration,
-            lease_token,
-            [{"archive_name": migration.archive_name, "checksum_sha256": checksum}],
-        )
+            checksum = source.exec("sha256sum", archive).split()[0]
+            adapter = NativeMigrationAdapter(source, lab, lease_token, Path(spool))
+            restore_held_target(
+                cast(VirtualminMigrationService, adapter),
+                migration,
+                lease_token,
+                [{"archive_name": migration.archive_name, "checksum_sha256": checksum}],
+            )
         assert lab.exec("passwd", "-S", owner).split()[1] == "L", (
             "restored target Unix account stays locked until commit"
         )

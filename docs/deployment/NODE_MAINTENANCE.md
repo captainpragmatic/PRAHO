@@ -40,6 +40,10 @@ Notices use the normal encrypted email queue, claim and retry budget. Maintenanc
 
 Times use the viewer's display timezone. Default notification templates are seeded in Romanian and English; existing operator edits are preserved.
 
+Affected services include current hosting placement and unreleased source mail, DNS, database or authentication responsibilities after a website moves. The staff preview lists these responsibilities separately from accounts currently hosted on the node. Releasing a source responsibility removes it from future notices; an actual maintenance outcome retains its captured audience and current customer ownership checks. A retained responsibility alone does not prohibit maintenance, and finishing maintenance does not release source teardown or backup handoff duties.
+
+The default notices describe a server supporting hosting services, since the website may already run elsewhere. A forward migration updates only pristine defaults and preserves customized templates. Operators maintaining custom notices should review any wording that says the website itself runs on the affected node.
+
 ## Deployment and verification
 
 Run the normal migrations. Post-migration setup installs `infra_node_maintenance`, a one-minute Django-Q schedule; `manage.py setup_scheduled_tasks` repairs its registration idempotently. Run the normal queue workers. Keep Platform and Portal versions compatible so signed maintenance reads and banner polling are available together.

@@ -5,6 +5,10 @@ name: virtualmin-lab
 
 x-virtualmin-node: &virtualmin-node
   image: praho-virtualmin-lab:${VIRTUALMIN_LAB_TAG:-8.3.0}
+  # Match a host's listeners: a custom Docker network injects an unrelated DNS
+  # proxy on random loopback ports. The lab reaches every service by published
+  # port or exact container address and does not need that embedded resolver.
+  network_mode: bridge
   privileged: true
   cgroup: host
   tmpfs:
@@ -13,12 +17,30 @@ x-virtualmin-node: &virtualmin-node
   stop_signal: SIGRTMIN+3
 
 services:
+  # The component migration fixture registers this as an import, without a NodeDeployment.
+  # It is excluded from ordinary bootstrap/qualification, which converts destinations to web-only.
+  component-source:
+    <<: *virtualmin-node
+    image: praho-virtualmin-lab-mixed-source:8.3.0
+    build:
+      context: .
+      dockerfile: mixed-source/Dockerfile
+    profiles: ["component-source"]
+    container_name: vmlab-component-source
+    hostname: vm-d.praho.test
+    ports:
+      - "127.0.0.1:${LAB_D_SSH_PORT:-2822}:9876"
+      - "127.0.0.1:${LAB_D_WEBMIN_PORT:-10104}:10000"
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+      - ./.state/component-source/inject:/etc/lab-node/inject:ro
+
   vm-a:
     <<: *virtualmin-node
     container_name: vmlab-a
     hostname: vm-a.praho.test
     ports:
-      - "127.0.0.1:${LAB_A_SSH_PORT:-2522}:22"
+      - "127.0.0.1:${LAB_A_SSH_PORT:-2522}:9876"
       - "127.0.0.1:${LAB_A_WEBMIN_PORT:-10101}:10000"
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
@@ -29,7 +51,7 @@ services:
     container_name: vmlab-b
     hostname: vm-b.praho.test
     ports:
-      - "127.0.0.1:${LAB_B_SSH_PORT:-2622}:22"
+      - "127.0.0.1:${LAB_B_SSH_PORT:-2622}:9876"
       - "127.0.0.1:${LAB_B_WEBMIN_PORT:-10102}:10000"
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup:rw
@@ -65,6 +87,7 @@ services:
   # Bare Debian node for provisioning-playbook tests (opt-in profile).
   debian-node:
     image: praho-debian-node:12
+    network_mode: bridge
     profiles: ["debian-node"]
     container_name: vmlab-debian-node
     hostname: node-c.praho.test
@@ -75,7 +98,7 @@ services:
       - /run/lock
     stop_signal: SIGRTMIN+3
     ports:
-      - "127.0.0.1:${LAB_C_SSH_PORT:-2722}:22"
+      - "127.0.0.1:${LAB_C_SSH_PORT:-2722}:9876"
       # Published for the panel once virtualmin.yml has installed it (make test-virtualmin-node-deploy).
       - "127.0.0.1:${LAB_C_WEBMIN_PORT:-10103}:10000"
     volumes:

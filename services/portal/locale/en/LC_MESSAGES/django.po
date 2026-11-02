@@ -3107,3 +3107,12 @@ msgstr "The work took longer than planned."
 #. Customer maintenance windows (#780).
 msgid "Maintenance information is temporarily unavailable. Please check again shortly."
 msgstr "Maintenance information is temporarily unavailable. Please check again shortly."
+# Retained-source maintenance can affect mail/DNS independently of website placement.
+msgid "A restart of a server supporting your hosting services"
+msgstr "A restart of a server supporting your hosting services"
+
+msgid "Updates to a server supporting your hosting services"
+msgstr "Updates to a server supporting your hosting services"
+
+msgid "Emergency work on a server supporting your hosting services"
+msgstr "Emergency work on a server supporting your hosting services"

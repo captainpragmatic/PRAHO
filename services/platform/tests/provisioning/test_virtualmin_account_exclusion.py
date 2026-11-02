@@ -38,6 +38,7 @@ class ExclusionCase(VirtualminServiceCoverageCase):
     def _other_server(self) -> VirtualminServer:
         return VirtualminServer.objects.create(
             name="Other VM",
+            legacy_security_admission=True,
             hostname="vm-other.example.com",
             api_username="other-api",
             status="active",

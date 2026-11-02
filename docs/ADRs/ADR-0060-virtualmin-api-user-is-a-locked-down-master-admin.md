@@ -38,9 +38,10 @@ The Docker lab (`deploy/virtualmin-lab`, Virtualmin 8.3.0) showed that this cann
    - The helper refuses to run without networks, and `virtualmin.yml` stops the deploy before calling it.
    - Entries carry explicit prefixes (`203.0.113.7/32`), because Webmin reads a bare `203.0.113.0` as the whole 203.0.113.x range.
 3. **A firewall.**
-   - `virtualmin_harden.yml` opens ports 22 and 10000 only to the same allowlist; web, mail, FTP, DNS and Usermin stay public.
+   - Virtualmin nodes use the `virtualmin-web-only` host role before installation. Public inbound TCP is limited to 80/443; SSH (9876 after its verified handoff) and Webmin TCP 10000 admit only the reviewed networks. Port 2222 stays closed pending #787.
+   - The pinned installer and its matching `slib` utility are checksum-verified. The installer is context-patched to preserve UFW and excludes the Nftables/Firewalld configuration plugins, which otherwise replace the host firewall. Fail2ban, ProFTPd and Usermin are removed; ancillary public services are stopped, SMTP/MySQL bind to loopback, and live Webmin UDP discovery is disabled.
    - It refuses to run with an empty allowlist, or when its own SSH connection comes from outside the list, so a deploy cannot lock Platform out.
-   - It adds the allow rules before removing the old any-source rules and before the deny default, and always ends with UFW enabled.
+   - It adds allows before removing stale rules over both families. A token-owned snapshot, fresh pinned SSH proof and recovery timer protect changes. Unknown INPUT rules and executable reload hooks need explicit preparation/review; unrelated forwarding/NAT policies are preserved.
 4. **The allowlist is one setting.**
    - `infrastructure.node_admin_allowed_cidrs` holds Platform's egress addresses plus the operators' admin networks.
    - The settings write chokepoint accepts only addresses or strict networks: no host bits, no `/0`, no duplicates.
@@ -50,6 +51,77 @@ The Docker lab (`deploy/virtualmin-lab`, Virtualmin 8.3.0) showed that this cann
    - It reaches the node through a 0600 vars file and the helper's stdin, never a command line.
    - The helper resets it on every deploy, so the node always converges to the vault's password.
 6. **TLS.** Platform verifies the panel certificate, with optional pinning per server (`ssl_cert_fingerprint`, or `VIRTUALMIN_PINNED_CERT_SHA256`).
+
+### Reviewed conversion of existing nodes (#768)
+
+Imports and observations never apply hardening. Staff can inspect a node from its
+security page and review bounded native evidence, every administrator, current
+listeners/services, the proposed removals, networks, operator key fingerprints and
+interruption/recovery limits. Health remains independent of `unreviewed`,
+`acknowledged_source_only` and `verified_web` security capability.
+
+A deploy-authorized operator can either acknowledge responsibility for an unchanged
+migration source, or approve the exact conversion. Decisions bind to immutable
+evidence, connection/credential/trust identity, policy/native versions and a
+15-minute preview. The worker reinspects before claiming a durable execution.
+Reviewed CIDRs and public keys are frozen into each transport invocation; a changed
+configuration cannot silently widen that invocation's access.
+
+Conversion persists a dedicated credential before enrollment, proves its API login
+over the SSH-pinned panel certificate, and only then changes interactive access.
+Non-API Webmin users become loopback-only, existing customer Webmin features are
+disabled before the global/default setting, and new accounts request exactly
+`unix`, `dir`, `web`, `ssl`, `logrotate`, `mysql`. Ancillary defaults are switched
+off without deleting existing mail/DNS data. Operators use the key-only
+`praho-webmin-tunnel` account, restricted to local forwarding to
+`127.0.0.1:10000`; it permits neither commands nor other forwarding destinations.
+
+An interrupted attempt retains the node exclusion and never automatically replays.
+After confirming its commands have stopped, an operator can request read-only
+verification. Only fresh native principal/default/listener checks, effective
+dual-stack INPUT verification and a real dedicated API login release the exclusion
+and record `verified_web`. A marker on disk or a successful play recap is insufficient.
+
+The SSH proof binds the full canonical configuration and service startup, effective
+authentication/forwarding policy, and the exact approved tunnel key fingerprints.
+An extra Match/Include policy, startup override or unrestricted secondary key cannot
+qualify through a probe from just one administrative address. Native control traffic
+includes Virtualmin's loopback-only domain lookup daemon on TCP 11000.
+
+Operators open the panel through the enrolled key and the restricted identity:
+
+```sh
+ssh -N -p 9876 -L 127.0.0.1:11000:127.0.0.1:10000 praho-webmin-tunnel@node.example.net
+```
+
+The local browser endpoint is `https://127.0.0.1:11000`. The separate root rescue
+credential remains the local operator login; PRAHO uses only the dedicated API
+credential. Commands, remote forwarding, Unix-socket forwarding and other tunnel
+destinations are refused.
+
+### Qualification rollout and restores
+
+Existing database rows receive an explicit `legacy_security_admission` exception,
+without changing remote services or declaring them verified. New imports and new
+generated nodes never inherit it. Inspect and qualify existing destinations before
+turning on `provisioning.enforce_verified_web_nodes`; its default is false during
+this rollout. Health and capacity checks remain independent. A source acknowledgment
+withdraws destination admission even while the legacy exception is enabled.
+
+Admission and worker dispatch recheck the capability. Changing the endpoint,
+credential, enrolled trust, operator key bundle or administrative networks invalidates
+the bound verification until the node is qualified again. Generated nodes must prove
+the native policy and real dedicated API authentication under their activation lock.
+
+Web-only restores inspect native archive metadata before mutating the destination.
+Both restored data and recreated features are limited to `unix`, `dir`, `web`, `ssl`,
+`logrotate`, `mysql`, using explicit features and `--only-features`. Mixed-service
+archives need a component-scoped migration; missing manifest metadata requires native
+archive inspection. Pair and held recovery callbacks use the same feature boundary.
+The explicit legacy rollout exception preserves existing-node restore behavior.
+An acknowledged source permits full-stack rollback only with explicit overwrite
+confirmation, the original account/node binding and its still-existing native domain
+ID; that exception cannot recreate a domain or provision a destination.
 
 ## Threat model
 

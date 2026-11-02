@@ -12,10 +12,9 @@ from rest_framework.response import Response
 
 from apps.api.secure_auth import require_customer_authentication
 from apps.customers.models import Customer
-from apps.infrastructure.node_maintenance_audience import is_unstarted_not_run, not_run_service_ids
+from apps.infrastructure.node_maintenance_audience import is_unstarted_not_run, live_node_services, not_run_service_ids
 from apps.infrastructure.node_maintenance_models import NodeMaintenanceWindow
 from apps.provisioning.service_models import Service
-from apps.provisioning.virtualmin_models import VirtualminAccount
 
 
 class PublicWindow(TypedDict):
@@ -68,11 +67,11 @@ def maintenance_for_customer(customer: Customer, service_id: int | None = None) 
     if service_id is not None:
         services = services.filter(pk=service_id)
     owned_ids = set(services.values_list("pk", flat=True))
-    placements = dict(VirtualminAccount.objects.filter(service_id__in=owned_ids).values_list("service_id", "server_id"))
+    dependencies = live_node_services(owned_ids)
     now = timezone.now()
     windows = (
         NodeMaintenanceWindow.objects.filter(
-            Q(node_id__in=placements.values())
+            Q(node_id__in=dependencies)
             | Q(audience__service_id_snapshot__in=owned_ids, audience__provenance="execution")
             | Q(
                 status="failed",
@@ -93,7 +92,7 @@ def maintenance_for_customer(customer: Customer, service_id: int | None = None) 
     latest_finish: datetime | None = None
     for window in windows:
         captured_ids = {row.service_id_snapshot for row in window.audience.all() if row.provenance == "execution"}
-        placed_ids = {identity for identity, node_id in placements.items() if node_id == window.node_id}
+        placed_ids = dependencies.get(window.node_id, set()) if window.node_id is not None else set()
         affected_ids = captured_ids if window.status in {"completed", "failed"} else captured_ids | placed_ids
         if is_unstarted_not_run(window):
             affected_ids = not_run_service_ids(window)

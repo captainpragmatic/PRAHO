@@ -84,6 +84,7 @@ class VirtualminTaskTestBase(TestCase):
         )
         self.server = VirtualminServer.objects.create(
             name="vm-test-1",
+            legacy_security_admission=True,
             hostname="vm1.example.com",
             api_username="praho-acl",
             api_port=10000,

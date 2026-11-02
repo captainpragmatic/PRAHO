@@ -85,6 +85,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Validate published image source inputs against its recorded revision.
 
       - uses: ./.github/actions/virtualmin-lab-setup
 
@@ -104,14 +106,14 @@ jobs:
       - name: Start the lab
         run: make virtualmin-lab-up
 
-      - name: Lab suites (round trip, contract, workflows, checks)
+      - name: Lab suites (round trip, contract, workflows, checks, components)
         run: make test-virtualmin-lab
 
       - name: Lab diagnostics
         if: failure()
         run: |
           docker ps -a
-          for node in vmlab-a vmlab-b vmlab-minio; do
+          for node in vmlab-a vmlab-b vmlab-minio vmlab-component-source; do
             echo "::group::docker logs ${node}"
             docker logs --tail 200 "${node}" || true
             echo "::endgroup::"

@@ -36,6 +36,7 @@ from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from apps.provisioning.virtualmin_node_capability import destination_refusal
 from apps.provisioning.virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
 from apps.provisioning.virtualmin_tasks import process_failed_virtualmin_jobs
 from apps.settings.services import SettingsService
@@ -163,9 +164,11 @@ class CreateRpcTimeoutTests(TransactionTestCase):
             status="active",
             ssl_verify=False,
             ssl_cert_fingerprint=fingerprint,
+            legacy_security_admission=True,
         )
         self.server.set_api_password(secrets.token_urlsafe(24))
         self.server.save(update_fields=["encrypted_api_password"])
+        self.assertIsNone(destination_refusal(self.server), "The intended legacy fixture must be truly admitted")
         self.io_atomic: list[bool] = []
         self.timeouts: list[float] = []
         self.enterContext(patch("apps.common.outbound_http.validate_and_resolve", side_effect=self._owned_target))

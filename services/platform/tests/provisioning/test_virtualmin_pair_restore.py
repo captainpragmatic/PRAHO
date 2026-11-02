@@ -23,6 +23,7 @@ from apps.provisioning.virtualmin_backup_service import VirtualminBackupService
 from apps.provisioning.virtualmin_migration_models import account_has_active_operation
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService
+from apps.provisioning.virtualmin_validators import WEB_ONLY_VIRTUALMIN_FEATURES
 from apps.settings.services import SettingsService
 from tests.provisioning.test_virtualmin_account_exclusion import ExclusionCase
 from tests.provisioning.test_virtualmin_chain_playbook import SNAP_A, SNAP_B
@@ -86,7 +87,9 @@ GOOD_CHECKPOINTS = (
 )
 
 
-def node_result(outcome: str = "ok", reason: str = "completed", *, ran: bool = True, checkpoints: Any = GOOD_CHECKPOINTS) -> Any:
+def node_result(
+    outcome: str = "ok", reason: str = "completed", *, ran: bool = True, checkpoints: Any = GOOD_CHECKPOINTS
+) -> Any:
     return Ok(pair.PairStepResult(outcome=outcome, reason=reason, ran=ran, checkpoints=tuple(checkpoints)))
 
 
@@ -189,7 +192,9 @@ class PairRestoreCase(ChainFixtures, ExclusionCase):
             patch.object(VirtualminBackupService, "_verify_restored_domain", return_value=Ok(None)),
             patch.object(VirtualminBackupService, "_domain_features", return_value=None),
             patch.object(
-                VirtualminBackupService, "_cleanup_remote_archive", side_effect=lambda server, name: self.cleaned.append(name)
+                VirtualminBackupService,
+                "_cleanup_remote_archive",
+                side_effect=lambda server, name: self.cleaned.append(name),
             ),
             patch.object(pair, "run_pair_step", side_effect=node),
             patch.object(
@@ -258,6 +263,19 @@ class PairAdmissionTests(PairRestoreCase):
 
 
 class PairWorkflowTests(PairRestoreCase):
+    def test_ordinary_pair_passes_the_inspected_configuration_scope_to_the_node(self) -> None:
+        with patch.object(
+            pair,
+            "prepare_restore_params",
+            return_value={"only-features": "", "feature": ["virtualmin", *WEB_ONLY_VIRTUALMIN_FEATURES]},
+        ) as prepare:
+            job = self.execute(self.admit().unwrap())
+        self.assertEqual(job.status, "completed", job.status_message)
+        self.assertTrue(self.node_variables["pair_restore_configuration"])
+        self.assertTrue(self.node_variables["pair_web_only"])
+        self.assertEqual(prepare.call_count, 4)
+        self.assertTrue(all(call.kwargs["restore_configuration"] is True for call in prepare.call_args_list))
+
     def test_a_verified_pair_restore_runs_in_order_and_leaves_the_enabling_to_reconcile(self) -> None:
         job = self.execute(self.admit().unwrap())
         self.assertEqual(job.status, "completed", job.status_message)
@@ -331,7 +349,9 @@ class PairWorkflowTests(PairRestoreCase):
                 self.assertEqual(self.cleaned, [], "the pushed archives are the operator's reconciliation artifact")
                 self.assertTrue(account_has_active_operation(self.account))
                 if label == "stopped between the restores":
-                    self.assertEqual([c["step"] for c in job.parameters["pair_checkpoints"]], ["barrier_up", "after_base"])
+                    self.assertEqual(
+                        [c["step"] for c in job.parameters["pair_checkpoints"]], ["barrier_up", "after_base"]
+                    )
 
     def test_a_superseded_runner_stops_before_it_pushes_or_restores(self) -> None:
         job = self.admit().unwrap()
@@ -426,13 +446,19 @@ class PairResolutionTests(PairRestoreCase):
         calls: list[dict[str, Any]] = []
 
         def release(server: Any, variables: dict[str, Any], **kwargs: Any) -> Any:
-            calls.append({"variables": variables, "job_status": VirtualminProvisioningJob.objects.get(pk=job.pk).status})
+            calls.append(
+                {"variables": variables, "job_status": VirtualminProvisioningJob.objects.get(pk=job.pk).status}
+            )
             return node_result("released", "barrier_removed", ran=False, checkpoints=())
 
         removed: list[str] = []
         with (
             patch.object(pair, "run_pair_step", side_effect=release),
-            patch.object(VirtualminBackupService, "remove_staged_archive", side_effect=lambda name: removed.append(name) or Ok(None)),
+            patch.object(
+                VirtualminBackupService,
+                "remove_staged_archive",
+                side_effect=lambda name: removed.append(name) or Ok(None),
+            ),
         ):
             resolved = pair.resolve_pair_job(job, resolved_by="staff@example.com", note="checked")
         self.assertTrue(resolved.is_ok(), resolved)
@@ -447,7 +473,10 @@ class PairResolutionTests(PairRestoreCase):
 
     def test_nothing_is_released_when_the_node_cannot_confirm(self) -> None:
         job = self.parked()
-        for outcome in (Err("unreachable", retriability=Retriability.UNKNOWN), node_result("refused", "lock_busy", ran=False, checkpoints=())):
+        for outcome in (
+            Err("unreachable", retriability=Retriability.UNKNOWN),
+            node_result("refused", "lock_busy", ran=False, checkpoints=()),
+        ):
             with self.subTest(outcome=str(outcome)[:30]), patch.object(pair, "run_pair_step", return_value=outcome):
                 resolved = pair.resolve_pair_job(job, resolved_by="staff", note="x")
                 self.assertTrue(resolved.is_err())
@@ -468,11 +497,17 @@ class PairResolutionTests(PairRestoreCase):
 
         from apps.users.models import User  # noqa: PLC0415
 
-        staff = User.objects.create_user(email="pair-resolver@example.com", password="pair-test-password", staff_role="admin")
+        staff = User.objects.create_user(
+            email="pair-resolver@example.com", password="pair-test-password", staff_role="admin"
+        )
         self.client.force_login(staff)
         job = self.parked()
         with (
-            patch.object(pair, "run_pair_step", return_value=node_result("released", "barrier_removed", ran=False, checkpoints=())) as step,
+            patch.object(
+                pair,
+                "run_pair_step",
+                return_value=node_result("released", "barrier_removed", ran=False, checkpoints=()),
+            ) as step,
             patch.object(VirtualminBackupService, "remove_staged_archive", return_value=Ok(None)),
         ):
             self.client.post(reverse("provisioning:virtualmin_job_resolve", args=[job.pk]), {"note": "ok"})
@@ -515,7 +550,9 @@ class PairBudgetSettingsTests(PairRestoreCase):
             backup_id="base-1", differential_backup_id="diff-1", force_restore=True, pair_token=str(uuid.uuid4())
         )
         with patch("apps.provisioning.spool.renew_spool_reservation", side_effect=lambda name, ttl: leases.append(ttl)):
-            outcome = pair.restore_pair(VirtualminBackupService(self.server), self.account, config, self.server, "r-1", None)
+            outcome = pair.restore_pair(
+                VirtualminBackupService(self.server), self.account, config, self.server, "r-1", None
+            )
         self.assertTrue(outcome.is_ok(), outcome)
         self.assertEqual(len(leases), 6, "both held archives, before the safety backup and before each push")
         self.assertEqual(set(leases[2:]), {1234 + 600}, "the push stages use the transfer lease")

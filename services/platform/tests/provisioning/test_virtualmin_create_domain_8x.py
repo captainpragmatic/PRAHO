@@ -11,7 +11,6 @@ Observed against Virtualmin 8.3.0 in deploy/virtualmin-lab:
 
 from __future__ import annotations
 
-import json
 from typing import cast
 from unittest.mock import patch
 
@@ -152,7 +151,8 @@ class CreateDomainParameterTests(VirtualminTaskTestBase):
         self.assertEqual(len(create), 1)
         argv = remote_cgi_argv(create[0])
         self.assertEqual(argv[argv.index("--template") + 1], "Default Settings")
-        self.assertIn("--default-features", argv)
-        # A bare flag: nothing may follow it as a value.
-        following = argv[argv.index("--default-features") + 1 :]
-        self.assertTrue(not following or following[0].startswith("--"), json.dumps(argv))
+        self.assertNotIn("--default-features", argv)
+        for feature in ("unix", "dir", "web", "ssl", "logrotate", "mysql"):
+            self.assertIn("--" + feature, argv)
+        for excluded in ("webmin", "mail", "dns", "virtualmin-awstats"):
+            self.assertNotIn("--" + excluded, argv)

@@ -948,6 +948,11 @@ class TestCleanupSnapshotTask(DriftRemediationTestBase):
     def _run(self):
         return cleanup_old_snapshots_task()
 
+    def setUp(self):
+        super().setUp()
+        self.deployment.provider_token_fingerprint = provider_token_fingerprint("tok")
+        self.deployment.save(update_fields=["provider_token_fingerprint"])
+
     def _expired_available(self, sid="snap-1"):
         return DriftSnapshot.objects.create(
             deployment=self.deployment,
@@ -1805,6 +1810,9 @@ class PR341HardeningTests(DriftRemediationTestBase):
         mock_gw = MagicMock()
         mock_gw.find_servers_by_label.return_value = Ok([])
         mock_gw.delete_server.return_value = Ok(True)
+        from tests.helpers.teardown_provider import attach_teardown_provider  # noqa: PLC0415
+
+        attach_teardown_provider(mock_gw, self.deployment)
         with (
             patch("apps.infrastructure.provider_config.get_provider_token", return_value=Ok("token")),
             patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=mock_gw),
@@ -1831,5 +1839,5 @@ class PR341HardeningTests(DriftRemediationTestBase):
         self.assertFalse(_is_hcloud_not_found(FakeApiError("resource not found or access denied", "forbidden")))
         # a genuine not_found code is still detected.
         self.assertTrue(_is_hcloud_not_found(FakeApiError("gone", "not_found")))
-        # no structured code → message fallback still works.
-        self.assertTrue(_is_hcloud_not_found(Exception("server not found")))
+        # A generic message cannot prove authoritative provider absence.
+        self.assertFalse(_is_hcloud_not_found(Exception("server not found")))

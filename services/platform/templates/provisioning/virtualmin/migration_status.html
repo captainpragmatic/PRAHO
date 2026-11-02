@@ -1,6 +1,9 @@
 {% load i18n %}
 {% load ui_components %}
 {% if migration %}
+  {% if migration.contract == "imported_web" %}
+    {% include "provisioning/virtualmin/components/status.html" %}
+  {% else %}
   <section class="space-y-2 rounded-lg border border-slate-700 bg-slate-800 p-4">
     <h2 class="font-semibold text-slate-100">{% trans "Migration" %}</h2>
     <p>{% trans "Status:" %} {{ migration.get_status_display }}</p>
@@ -136,4 +139,5 @@
       {% endif %}
     {% endif %}
   </section>
+  {% endif %}
 {% endif %}

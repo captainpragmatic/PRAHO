@@ -15,6 +15,7 @@ from unittest import mock
 from django.test import TestCase
 
 from apps.common.types import Err, Ok
+from apps.infrastructure.cloud_gateway import SSHKeyResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.models import NodeDeployment
 from tests.infrastructure.test_deployment_operation_ownership import _gateway, _pipeline_service
@@ -30,7 +31,7 @@ def _row(**fields: Any) -> NodeDeployment:
 
 def _deploy(deployment: NodeDeployment, token: str = "token-b") -> tuple[Any, mock.Mock, Any]:  # noqa: S107  # A fake provider token
     gateway = _gateway()
-    gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+    gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
     gateway.get_server.return_value = Ok(None)
     service = _pipeline_service()
     with (

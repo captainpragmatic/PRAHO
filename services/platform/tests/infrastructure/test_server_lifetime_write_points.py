@@ -12,25 +12,32 @@ from django.test import TestCase
 from django.utils import timezone
 
 from apps.common.types import Err, Ok, Retriability
-from apps.infrastructure.cloud_gateway import ServerCreateResult
+from apps.infrastructure.cloud_gateway import ServerCreateResult, SSHKeyResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog, NodeServerLifetime, NodeSize
+from tests.helpers.teardown_provider import attach_teardown_provider
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
 from tests.infrastructure.test_node_teardown import Harness
 
 
 def _gateway(create: Any) -> MagicMock:
     gateway = MagicMock()
-    gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+    gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
     gateway.create_firewall.return_value = Ok("fw-1")
     gateway.create_server.return_value = create
     gateway.delete_server.return_value = Ok(True)
     gateway.delete_firewall.return_value = Ok(True)
     gateway.delete_ssh_key.return_value = Ok(True)
+    gateway.delete_ssh_key_by_id.return_value = Ok(True)
     return gateway
 
 
 def _deploy(deployment: NodeDeployment, gateway: MagicMock, *, dns_fails: bool = True) -> Any:
+    created = gateway.create_server.return_value
+    if created.is_ok():
+        attach_teardown_provider(
+            gateway, deployment, server_id=created.unwrap().server_id, ssh_key_ids=("key-1",)
+        )
     service = _make_service()
     service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
     # Stop right after provisioning: the DNS step fails, which is not under test here.

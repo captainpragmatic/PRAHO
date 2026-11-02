@@ -23,6 +23,7 @@ from apps.provisioning.management.commands._virtualmin_lab import LAB_STAFF_EMAI
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_gateway import VirtualminGateway
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from apps.provisioning.virtualmin_node_capability import destination_refusal
 from apps.users.models import User
 from tests.mocks.virtualmin_mock import MockVirtualminGateway
 
@@ -83,6 +84,7 @@ class LabCreateRetryContractTests(TransactionTestCase):
         )
         User.objects.create_user(email=LAB_STAFF_EMAIL, password="lab-only-password", is_staff=True, is_superuser=True)
         self.server = VirtualminServer.objects.create(
+            legacy_security_admission=True,
             name="Lab checks",
             hostname="vm-b.praho.test",
             api_username="api",
@@ -93,6 +95,7 @@ class LabCreateRetryContractTests(TransactionTestCase):
         )
         self.server.set_api_password("lab-wire-password")
         self.server.save()
+        self.assertIsNone(destination_refusal(self.server))
         self.node = LabNode("vm-b", "owned-wire-node", self.server.hostname, "fixture", 10102, 2523)
         self.wire = _WireNode()
         self.output = io.StringIO()

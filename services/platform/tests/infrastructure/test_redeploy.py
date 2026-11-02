@@ -19,6 +19,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from apps.common.types import Ok
+from apps.infrastructure.cloud_gateway import SSHKeyResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
 from apps.infrastructure.models import DriftCheck, DriftRemediationRequest, DriftReport, NodeDeployment, NodeSize
 from apps.provisioning.virtualmin_models import VirtualminServer
@@ -49,7 +50,7 @@ def new_size(deployment: NodeDeployment, type_id: str = "cx23", **kwargs: Any) -
 def redeploy(deployment: NodeDeployment, size: NodeSize, user: Any = None) -> tuple[Any, mock.Mock]:
     service = _pipeline_service()
     gateway = _gateway()
-    gateway.upload_owned_ssh_key.return_value = Ok("praho-key")
+    gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
     with (
         mock.patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
         mock.patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
@@ -101,7 +102,7 @@ class RedeployTests(TestCase):
 
         suffix = str(deployment.correlation_id)[:8]
         self.assertTrue(gateway.upload_owned_ssh_key.call_args.args[0].endswith(suffix))
-        self.assertTrue(gateway.create_firewall.call_args.kwargs["name"].endswith(suffix))
+        gateway.create_firewall.assert_not_called()
 
     def test_a_reconciled_never_created_row_is_eligible(self) -> None:
         deployment = destroyed_row(server_create_state="unknown")

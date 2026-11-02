@@ -14,6 +14,8 @@ import time
 from collections.abc import Sequence
 from typing import Any, cast
 
+from azure.core.exceptions import HttpResponseError
+from azure.core.rest import HttpRequest
 from pydo import Client
 
 from apps.common.types import Err, Ok, Result
@@ -29,12 +31,24 @@ from apps.infrastructure.cloud_gateway import (
     normalize_server_status,
     register_cloud_gateway,
 )
+from apps.infrastructure.cloud_resource_inventory import CloudResourceClient, ResourceResponse
 
 logger = logging.getLogger(__name__)
 
 # Polling configuration for async DigitalOcean actions
 DO_ACTION_POLL_INTERVAL = 5  # seconds between polls
 _DEFAULT_DO_ACTION_TIMEOUT = 300  # max seconds to wait for action completion
+HTTP_OK = 200
+HTTP_NO_CONTENT = 204
+HTTP_NOT_FOUND = 404
+
+
+def _response_with_status(response: object, payload: object, _headers: object) -> tuple[int, object]:
+    """pydo includes 404 in successful endpoint responses; retain its authoritative HTTP status."""
+    status: object = getattr(getattr(response, "http_response", None), "status_code", None)
+    if not isinstance(status, int) or isinstance(status, bool):
+        raise ValueError("DigitalOcean response is missing an HTTP status")
+    return status, payload
 
 
 def _get_do_action_timeout() -> int:
@@ -70,6 +84,22 @@ class DigitalOceanService(CloudProviderGateway):
 
     def __init__(self, token: str, **_kwargs: Any) -> None:
         self.client = Client(token=token)
+
+    def resource_client(self) -> CloudResourceClient:
+        return CloudResourceClient("digitalocean", self._resource_request)
+
+    def _resource_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, object] | None = None,
+        body: dict[str, object] | None = None,
+    ) -> ResourceResponse:
+        query = {key: str(value) for key, value in (params or {}).items()}
+        request = HttpRequest(method, f"https://api.digitalocean.com/v2{path}", params=query, json=body)
+        response = self.client.send_request(request)
+        return ResourceResponse(response.status_code, response.json() if response.content else None)
 
     # =========================================================================
     # CloudProviderGateway implementation
@@ -133,42 +163,57 @@ class DigitalOceanService(CloudProviderGateway):
         """Delete a droplet by ID and poll until gone."""
         logger.info(f"🗑️ [DigitalOcean] Deleting droplet: {server_id}")
         try:
-            self.client.droplets.destroy(droplet_id=int(server_id))
+            status, _ = cast(
+                "tuple[int, object]", self.client.droplets.destroy(droplet_id=int(server_id), cls=_response_with_status)
+            )
+            if status == HTTP_NOT_FOUND:
+                return Ok(True)
+            if status != HTTP_NO_CONTENT:
+                raise ValueError(f"Droplet deletion returned unexpected HTTP status {status}")
         except Exception as e:
-            error_str = str(e).lower()
-            if "not found" in error_str or "404" in error_str:
+            if isinstance(e, HttpResponseError) and e.status_code == HTTP_NOT_FOUND:
                 logger.info(f"✅ [DigitalOcean] Droplet already gone: {server_id}")
                 return Ok(True)
             logger.error(f"🔥 [DigitalOcean] Droplet deletion failed: {e}")
             return Err(f"Droplet deletion failed: {e}")
 
         # Poll until droplet is gone
-        deadline = time.monotonic() + _get_do_action_timeout()
+        poll_timeout = _get_do_action_timeout()
+        deadline = time.monotonic() + poll_timeout
         while time.monotonic() < deadline:
             result = self.get_server(server_id)
-            if result.is_ok() and result.unwrap() is None:
+            if result.is_err():
+                return Err(f"Droplet deletion unconfirmed: {result.unwrap_err()}")
+            if result.unwrap() is None:
                 logger.info(f"✅ [DigitalOcean] Droplet deleted: {server_id}")
                 return Ok(True)
             time.sleep(DO_ACTION_POLL_INTERVAL)
 
-        logger.warning(f"⚠️ [DigitalOcean] Droplet {server_id} delete requested but still visible after timeout")
-        return Ok(True)
+        logger.warning(f"⚠️ [DigitalOcean] Droplet {server_id} deletion requested but absence unconfirmed after timeout")
+        return Err(f"Droplet {server_id} deletion was not confirmed within {poll_timeout}s")
 
     def get_server(self, server_id: str) -> Result[ServerInfo | None, str]:
         """Get droplet info by ID. Returns None if not found."""
         try:
-            response = self.client.droplets.get(droplet_id=int(server_id))
-            # pydo does NOT raise on 404 for this endpoint — 404 sits in its allowed status
-            # list and the DECODED ERROR PAYLOAD is returned instead ({"id": "not_found", ...}).
-            # The absence of the droplet key IS the not-found signal; reading it blindly raised
-            # KeyError('droplet'), which matched neither string below, so a deleted droplet
-            # could never be confirmed gone and delete_server polled to its full timeout (#299).
-            droplet = response.get("droplet") if isinstance(response, dict) else None
-            if droplet is None:
+            sid = int(server_id)
+            status, response = cast(
+                "tuple[int, object]", self.client.droplets.get(droplet_id=sid, cls=_response_with_status)
+            )
+            if status == HTTP_NOT_FOUND:
                 return Ok(None)
+            if status != HTTP_OK or not isinstance(response, dict):
+                return Err(f"Malformed response for droplet {server_id}")
+            droplet = response.get("droplet")
+            if (
+                not isinstance(droplet, dict)
+                or type(droplet.get("id")) is not int
+                or droplet["id"] != sid
+                or any(not isinstance(droplet.get(key), str) or not droplet[key] for key in ("name", "status"))
+            ):
+                return Err(f"Malformed response for droplet {server_id}")
             return Ok(self._droplet_to_server_info(droplet))
         except Exception as e:
-            if "not found" in str(e).lower() or "404" in str(e).lower():
+            if isinstance(e, HttpResponseError) and e.status_code == HTTP_NOT_FOUND:
                 return Ok(None)
             return Err(f"Failed to get droplet {server_id}: {e}")
 
@@ -276,13 +321,34 @@ class DigitalOceanService(CloudProviderGateway):
             return Err(f"Firewall creation failed: {e}")
 
     def delete_firewall(self, firewall_id: str) -> Result[bool, str]:
-        """Delete a DigitalOcean firewall by ID."""
+        """Delete a firewall and confirm its absence with an authoritative native response."""
         try:
-            self.client.firewalls.delete(firewall_id=firewall_id)
-            logger.info(f"✅ [DigitalOcean] Firewall deleted: {firewall_id}")
-            return Ok(True)
+            status, _ = cast(
+                "tuple[int, object]", self.client.firewalls.delete(firewall_id=firewall_id, cls=_response_with_status)
+            )
+            if status == HTTP_NOT_FOUND:
+                return Ok(True)
+            if status != HTTP_NO_CONTENT:
+                raise ValueError(f"Firewall deletion returned unexpected HTTP status {status}")
+
+            poll_timeout = _get_do_action_timeout()
+            deadline = time.monotonic() + poll_timeout
+            while time.monotonic() < deadline:
+                status, response = cast(
+                    "tuple[int, object]", self.client.firewalls.get(firewall_id=firewall_id, cls=_response_with_status)
+                )
+                if status == HTTP_NOT_FOUND:
+                    logger.info(f"✅ [DigitalOcean] Firewall deleted: {firewall_id}")
+                    return Ok(True)
+                if status != HTTP_OK or not isinstance(response, dict):
+                    raise ValueError(f"Malformed confirmation response for firewall {firewall_id}")
+                firewall = response.get("firewall")
+                if not isinstance(firewall, dict) or firewall.get("id") != firewall_id:
+                    raise ValueError(f"Malformed confirmation response for firewall {firewall_id}")
+                time.sleep(DO_ACTION_POLL_INTERVAL)
+            return Err(f"Firewall {firewall_id} deletion was not confirmed within {poll_timeout}s")
         except Exception as e:
-            if "not found" in str(e).lower() or "404" in str(e).lower():
+            if isinstance(e, HttpResponseError) and e.status_code == HTTP_NOT_FOUND:
                 return Ok(True)
             return Err(f"Firewall deletion failed: {e}")
 

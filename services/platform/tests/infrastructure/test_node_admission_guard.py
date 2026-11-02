@@ -52,7 +52,12 @@ def make_service(domain: str) -> Service:
 
 def make_node(name: str) -> tuple[VirtualminServer, NodeDeployment]:
     server = VirtualminServer.objects.create(
-        name=name, hostname=f"{name}.example.test", api_username="api", encrypted_api_password=b"", status="active"
+        name=name,
+        hostname=f"{name}.example.test",
+        api_username="api",
+        encrypted_api_password=b"",
+        status="active",
+        legacy_security_admission=True,
     )
     deployment = _create_deployment("completed", external_node_id=f"{name}-vm")
     deployment.virtualmin_server = server

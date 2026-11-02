@@ -21,6 +21,7 @@ from apps.ui.widgets import (
 )
 
 from .virtualmin_models import VirtualminAccount, VirtualminServer
+from .virtualmin_node_capability import destination_refusal
 from .virtualmin_validators import VirtualminValidator
 
 
@@ -543,7 +544,13 @@ class VirtualminAccountForm(forms.ModelForm):  # type: ignore[type-arg]
         # Filter servers to only active ones
         cast(
             "forms.ModelChoiceField[VirtualminServer]", self.fields["server"]
-        ).queryset = VirtualminServer.objects.filter(status="active")
+        ).queryset = VirtualminServer.objects.filter(
+            pk__in=[
+                server.pk
+                for server in VirtualminServer.objects.filter(status="active")
+                if destination_refusal(server) is None
+            ]
+        )
 
         # Make some fields required
         self.fields["domain"].required = True

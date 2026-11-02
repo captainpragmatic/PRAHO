@@ -19,6 +19,7 @@ from django.test import TestCase
 from apps.common.types import Err, Ok, Retriability, retriability_of
 from apps.provisioning.virtualmin_backup_service import RestoreConfig, VirtualminBackupService
 from apps.provisioning.virtualmin_gateway import VirtualminResponse
+from apps.provisioning.virtualmin_models import VirtualminServer
 
 
 def _listing_row(domain: str, username: str, enabled: bool | None) -> dict[str, Any]:
@@ -43,8 +44,9 @@ class RestoreFailClosedTests(TestCase):
     """The real restore workflow refuses everything it cannot prove safe."""
 
     def setUp(self) -> None:
-        self.server = MagicMock()
-        self.server.hostname = "vm.example.com"
+        self.server = VirtualminServer.objects.create(
+            hostname="vm.example.com", api_username="praho-api", legacy_security_admission=True
+        )
         self.service = VirtualminBackupService(self.server)
         self.account = MagicMock()
         self.account.domain = "example.com"

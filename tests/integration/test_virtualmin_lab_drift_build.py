@@ -49,7 +49,12 @@ def gpl_selector() -> tuple[str, str]:
 def select_gpl(rows: str) -> str:
     separator, program = gpl_selector()
     done = subprocess.run(  # noqa: S603  # The awk program of the Dockerfile, run on sample text.
-        [shutil.which("awk") or "awk", f"-F{separator}", program], input=rows, capture_output=True, text=True, check=True, timeout=30
+        [shutil.which("awk") or "awk", f"-F{separator}", program],
+        input=rows,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=30,
     )
     return done.stdout.strip()
 
@@ -70,7 +75,9 @@ class TestGplVersionIsResolvedBeforeApt:
         assert select_gpl(madison(*versions)) == expected
 
     def test_the_build_stops_when_there_is_no_gpl_build(self) -> None:
-        assert re.search(r'\[ -n "\$\{virtual_server_version\}" \] \|\| \{ echo "[^"]*-gpl[^"]*" >&2; exit 1; \}', DOCKERFILE)
+        assert re.search(
+            r'\[ -n "\$\{virtual_server_version\}" \] \|\| \{ echo "[^"]*-gpl[^"]*" >&2; exit 1; \}', DOCKERFILE
+        )
 
     def test_apt_is_given_the_resolved_version_not_a_wildcard(self) -> None:
         assert '"webmin-virtual-server=${virtual_server_version}"' in DOCKERFILE
@@ -100,7 +107,12 @@ class StubDocker:
         environment["PATH"] = f"{self.root / 'bin'}{os.pathsep}{environment['PATH']}"
         environment.update(env)
         return subprocess.run(  # noqa: S603  # A copy of lab.sh against a stub docker.
-            [shutil.which("bash") or "bash", str(self.lab_sh), command], capture_output=True, text=True, env=environment, timeout=60, check=True
+            [shutil.which("bash") or "bash", str(self.lab_sh), command],
+            capture_output=True,
+            text=True,
+            env=environment,
+            timeout=60,
+            check=True,
         )
 
     def builds(self) -> list[str]:
@@ -114,6 +126,15 @@ class StubDocker:
 @pytest.fixture
 def lab(tmp_path: Path) -> StubDocker:
     return StubDocker(tmp_path)
+
+
+def test_lab_down_explicitly_includes_deployed_and_imported_source_profiles(lab: StubDocker) -> None:
+    lab.run("status")
+    lab.run("down")
+    command = next(line for line in lab.calls.read_text().splitlines() if " down " in line)
+    assert "--profile debian-node" in command
+    assert "--profile component-source" in command
+    assert "down --volumes --remove-orphans" in command
 
 
 class TestTheDriftTagIsNeverPersisted:

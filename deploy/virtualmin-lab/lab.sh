@@ -3,6 +3,7 @@
 #
 #   lab.sh build              build praho-virtualmin-lab:<version> and praho-debian-node:12
 #   lab.sh up                 start the lab and wait until every node is healthy
+#   lab.sh ensure-image       validate/build the current base image without changing running containers
 #   lab.sh down               stop the lab and remove its containers and data
 #   lab.sh apply-credentials  re-apply .state/<node>/inject on running nodes
 #   lab.sh status             show container health
@@ -98,7 +99,7 @@ wait_healthy() {
 cmd_build() {
   local revision
   local -a unpinned=() fresh=()
-  revision="$(git -C "${LAB_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  revision="$(git -C "${LAB_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
   if [ "${VIRTUALMIN_LAB_UNPINNED:-0}" = "1" ]; then
     [ "${VIRTUALMIN_TAG}" != "${PINNED_TAG}" ] || die "an unpinned build needs its own tag: set VIRTUALMIN_LAB_TAG=latest"
     # The repository carries a GPL and a Pro build of webmin-virtual-server under one name, and the Pro one is the
@@ -118,6 +119,32 @@ cmd_build() {
   info "built praho-virtualmin-lab:${VIRTUALMIN_TAG} and praho-debian-node:12"
 }
 
+cached_image_matches_inputs() {
+  local revision untracked
+  local -a inputs=(virtualmin/Dockerfile virtualmin/Dockerfile.dockerignore virtualmin/rootfs common/rootfs .dockerignore)
+  revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+    "praho-virtualmin-lab:${VIRTUALMIN_TAG}" 2>/dev/null)" || return 1
+  # A label must identify a locally available immutable commit. Unknown labels,
+  # shallow history and unreadable inputs rebuild rather than accepting an old
+  # credential writer, SSH listener or first-boot service under the same tag.
+  [[ "${revision}" =~ ^[0-9a-fA-F]{7,64}$ ]] || return 1
+  git -C "${LAB_DIR}" rev-parse --verify "${revision}^{commit}" >/dev/null 2>&1 || return 1
+  git -C "${LAB_DIR}" diff --quiet "${revision}" -- "${inputs[@]}" || return 1
+  # Docker COPY also includes Git-ignored, untracked files unless Docker's own
+  # ignore rules exclude them. Treat any such new input conservatively.
+  untracked="$(git -C "${LAB_DIR}" ls-files --others -- "${inputs[@]}")" || return 1
+  [ -z "${untracked}" ]
+}
+
+cmd_ensure_image() {
+  if cached_image_matches_inputs; then
+    info "cached lab image matches the current image source inputs"
+  else
+    info "lab image input identity is changed or unknown; rebuilding"
+    cmd_build
+  fi
+}
+
 install_web_root_guard() {
   local name conf=/etc/apache2/conf-available/praho-home-symlinks.conf
   [ -s "${WEB_ROOT_GUARD}" ] || die "missing ${WEB_ROOT_GUARD}"
@@ -131,9 +158,7 @@ install_web_root_guard() {
 
 cmd_up() {
   ensure_state
-  if ! docker image inspect "praho-virtualmin-lab:${VIRTUALMIN_TAG}" >/dev/null 2>&1; then
-    cmd_build
-  fi
+  cmd_ensure_image
   compose up -d vm-a vm-b minio
   local attempt=0
   until compose --profile setup run --rm --no-deps minio-bucket >/dev/null 2>&1; do
@@ -154,7 +179,7 @@ cmd_up() {
 
 cmd_down() {
   [ -s "${ENV_FILE}" ] || { info "no lab state; nothing to stop"; return 0; }
-  compose --profile debian-node down --volumes --remove-orphans
+  compose --profile debian-node --profile component-source down --volumes --remove-orphans
   info "lab down"
 }
 
@@ -203,6 +228,7 @@ cmd_node_down() {
 }
 
 case "${1:-}" in
+  ensure-image) cmd_ensure_image ;;
   build-node) cmd_build_node ;;
   node-down) cmd_node_down ;;
   build) cmd_build ;;

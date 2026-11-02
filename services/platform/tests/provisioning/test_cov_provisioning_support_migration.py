@@ -28,7 +28,10 @@ class ProvisioningSupportMigrationFixture(VirtualminViewsFixture):
     def setUp(self) -> None:
         super().setUp()
         self.target = VirtualminServer.objects.create(
-            name="Support migration target", hostname="support-target.example.com", api_username="praho-acl"
+            name="Support migration target",
+            hostname="support-target.example.com",
+            api_username="praho-acl",
+            legacy_security_admission=True,
         )
         self.target.set_api_password("support-target-password")
         self.target.save(update_fields=["encrypted_api_password"])
