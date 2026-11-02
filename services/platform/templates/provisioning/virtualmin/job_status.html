@@ -106,12 +106,39 @@
             <div class="bg-amber-900/20 border border-amber-700 rounded-lg p-6 space-y-4">
                 <h3 class="text-sm font-medium text-amber-300">{% trans "This job needs an operator" %}</h3>
                 <p class="text-sm text-slate-300">
+                    {% if is_creation_review %}
+                    {% trans "This is a creation review. Acknowledging it records your review; it does not change the service or run a native command." %}
+                    {% else %}
                     {% trans "The account stays locked for backups, restores and deletes until the job is resolved." %}
+                    {% endif %}
                 </p>
+                {% if creation_review_off_id %}
+                <p class="text-sm text-slate-300">
+                  <a class="text-blue-400 hover:text-blue-300" href="{% url 'provisioning:virtualmin_job_status' creation_review_off_id %}">{% trans "Inspect the linked disable operation before acknowledging this creation." %}</a>
+                </p>
+                {% endif %}
                 {% trans 'Resolution note' as note_aria_label %}{% trans 'What did you check?' as note_placeholder %}
                 {% input_field "note" html_id="job-resolution-note" aria_label=note_aria_label maxlength=200 placeholder=note_placeholder %}
+                {% if is_receipt_off %}
+                <div id="receipt-off-review" class="space-y-3">
+                  <p class="text-sm text-slate-300">{% trans "Verify all commands for this exact resource have stopped. Reading a disabled domain does not prove a command has stopped. Platform will check the recorded node, owner and disabled domain before releasing this operation; creation will not replay." %}</p>
+                  <p class="text-sm text-slate-300">{% trans "Recorded resource:" %} {{ job.account.domain }} · {{ job.account.virtualmin_username }} · {{ job.server.hostname }}</p>
+                  {% trans "I verified all commands for the recorded resource have stopped." as stopped_label %}
+                  {% trans "I checked the recorded node, domain and owner against the actual target." as resource_label %}
+                  {% checkbox_field "commands_stopped" html_id="off-commands-stopped" label=stopped_label required=True variant="warning" %}
+                  {% checkbox_field "resource_confirmed" html_id="off-resource-confirmed" label=resource_label required=True variant="warning" %}
+                  <input type="hidden" name="off_review_fingerprint" value="{{ off_review_fingerprint|default:'' }}">
+                </div>
+                {% endif %}
                 <div class="flex items-center space-x-3">
-                    {% url 'provisioning:virtualmin_job_resolve' job.id as resolve_url %}{% trans "Confirm stopped" as resolve_label %}{% if half_restore_safety_backup_id %}{% blocktrans with backup_id=half_restore_safety_backup_id asvar resolve_confirm %}The restore had already started, so the domain may be half-restored. Confirming releases the barrier but the domain stays disabled, and nothing enables it again until you re-enable it as it is or restore the safety backup {{ backup_id }}. Continue?{% endblocktrans %}{% else %}{% trans 'Confirm the remote operation has stopped. This releases the account.' as resolve_confirm %}{% endif %}{% button resolve_label variant="warning" hx_post=resolve_url hx_include="#job-resolution-note" hx_confirm=resolve_confirm hx_target="body" %}
+                    {% url 'provisioning:virtualmin_job_resolve' job.id as resolve_url %}{% trans "Confirm stopped" as resolve_label %}
+                    {% if is_receipt_off %}{% firstof "#job-resolution-note,#receipt-off-review" as resolve_include %}{% else %}{% firstof "#job-resolution-note" as resolve_include %}{% endif %}
+                    {% if is_receipt_off %}{% trans 'Confirm the commands have stopped and the exact resource identity was checked. Platform will read native ownership and disabled state, record your proof and release this operation if verified. Normal current service policy can resume hosting after release.' as resolve_confirm %}
+                    {% elif is_creation_review and creation_review_off_id %}{% trans 'Acknowledge the verified creation recovery history. The linked disable operation must be settled first; this acknowledgement does not change the service or issue a native command.' as resolve_confirm %}
+                    {% elif is_creation_review %}{% trans 'This is a creation review. Acknowledging it records your review; it does not change the service or run a native command.' as resolve_confirm %}
+                    {% elif half_restore_safety_backup_id %}{% blocktrans with backup_id=half_restore_safety_backup_id asvar resolve_confirm %}The restore had already started, so the domain may be half-restored. Confirming releases the barrier but the domain stays disabled, and nothing enables it again until you re-enable it as it is or restore the safety backup {{ backup_id }}. Continue?{% endblocktrans %}
+                    {% else %}{% trans 'Confirm the remote operation has stopped. This releases the account.' as resolve_confirm %}{% endif %}
+                    {% button resolve_label variant="warning" hx_post=resolve_url hx_include=resolve_include hx_confirm=resolve_confirm hx_target="body" %}
                     {% if can_resolve_node_lost %}
                     {% url 'provisioning:virtualmin_job_node_lost' job.id as node_lost_url %}{% trans "Node lost" as node_lost_label %}{% trans 'The node is lost: nothing on it can be cancelled. Its differential chain is discarded and a late result from it is ignored. Release the account?' as node_lost_confirm %}{% button node_lost_label variant="danger" hx_post=node_lost_url hx_include="#job-resolution-note" hx_confirm=node_lost_confirm hx_target="body" %}
                     {% endif %}

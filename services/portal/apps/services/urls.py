@@ -19,6 +19,7 @@ urlpatterns = [
     path("<int:service_id>/request-action/", views.service_request_action, name="request_action"),
     # HTMX endpoints
     path("<int:service_id>/usage/", views.service_usage, name="usage"),
+    path("<int:service_id>/maintenance/", views.service_maintenance, name="maintenance"),
     # Dashboard widget
     path("widget/", views.services_dashboard_widget, name="dashboard_widget"),
 ]

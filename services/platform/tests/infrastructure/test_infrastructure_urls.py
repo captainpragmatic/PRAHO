@@ -1,8 +1,9 @@
 """
 Tests for infrastructure URL routing.
 
-Verifies that all infrastructure URL patterns accept integer PKs (not UUIDs),
-matching the actual model primary key types. These tests catch the NoReverseMatch
+Verifies that infrastructure URL converters match their model primary key types.
+Legacy deployment/provider/region routes use integers; maintenance records use UUIDs.
+These tests catch the NoReverseMatch
 bugs where URL patterns used <uuid:pk> but models use auto-incrementing int PKs.
 """
 
@@ -10,10 +11,15 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+from django.db.models import UUIDField
 from django.test import TestCase
 from django.urls import NoReverseMatch, reverse
+from django.urls.converters import IntConverter, UUIDConverter
 
+from apps.infrastructure.models import NodeDeployment
+from apps.infrastructure.node_maintenance_models import NodeMaintenanceExecution, NodeMaintenanceWindow
 from apps.infrastructure.urls import urlpatterns
+from apps.provisioning.virtualmin_models import VirtualminServer
 
 
 class TestDeploymentURLsAcceptIntegerPK(TestCase):
@@ -107,22 +113,20 @@ class TestRegionURLsAcceptIntegerPK(TestCase):
             )
 
 
-class TestNoUUIDPatternsInInfrastructureURLs(TestCase):
-    """Regression guard: no infrastructure URL should use <uuid:pk>.
+class TestInfrastructureIdentifierConverters(TestCase):
+    """Preserve legacy integer routing while checking new UUID resource identities."""
 
-    All infrastructure models use integer auto-incrementing PKs.
-    This test reads the URL configuration to catch future regressions.
-    """
-
-    def test_no_uuid_pk_in_url_patterns(self) -> None:
-        """Infrastructure urlpatterns must not contain <uuid:pk>."""
+    def test_url_identifiers_match_their_model_fields(self) -> None:
+        fields = {
+            "pk": NodeDeployment._meta.pk,
+            "node_id": VirtualminServer._meta.pk,
+            "window_id": NodeMaintenanceWindow._meta.pk,
+            "execution_id": NodeMaintenanceExecution._meta.pk,
+        }
         for pattern in urlpatterns:
             route = getattr(pattern, "pattern", None)
-            route_str = str(route) if route else ""
-            with self.subTest(route=route_str):
-                self.assertNotIn(
-                    "uuid",
-                    route_str.lower(),
-                    f"URL pattern '{route_str}' uses UUID converter but "
-                    f"infrastructure models use integer PKs.",
-                )
+            for argument, converter in getattr(route, "converters", {}).items():
+                if argument in fields:
+                    with self.subTest(route=str(route), argument=argument):
+                        expected = UUIDConverter if isinstance(fields[argument], UUIDField) else IntConverter
+                        self.assertIsInstance(converter, expected)

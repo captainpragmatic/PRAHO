@@ -15,6 +15,7 @@ from apps.billing.issuers.tasks import setup_issuance_scheduled_tasks
 from apps.billing.tasks import setup_billing_scheduled_tasks, setup_fx_scheduled_tasks
 from apps.common.tasks import setup_system_status_scheduled_tasks
 from apps.domains.tasks import setup_domain_scheduled_tasks
+from apps.infrastructure.node_maintenance_tasks import setup_node_maintenance_schedule
 from apps.integrations.tasks import setup_webhook_scheduled_tasks
 from apps.notifications.tasks import setup_notification_scheduled_tasks
 from apps.orders.tasks import setup_order_scheduled_tasks
@@ -158,6 +159,10 @@ class Command(BaseCommand):
             self.stdout.write("  - Process Pending Orders: Every 5 minutes")
             self.stdout.write("  - Sync Payment Status: Every 15 minutes")
 
+        if run_all:
+            self.stdout.write(
+                _("Node maintenance: dispatch, overdue windows and safe unissued-claim recovery every minute.")
+            )
         self._print_operations_schedule(flags, run_all)
 
     def _print_operations_schedule(self, flags: dict[str, bool], run_all: bool) -> None:
@@ -254,6 +259,7 @@ class Command(BaseCommand):
                 self._setup_task_category("domains", "🌐", setup_domain_scheduled_tasks, all_results)
 
             if run_all:
+                self._setup_task_category("node maintenance", "🔧", setup_node_maintenance_schedule, all_results)
                 self._setup_task_category("email recovery", "📧", setup_notification_scheduled_tasks, all_results)
                 self._setup_task_category("webhook drains", "🔗", setup_webhook_scheduled_tasks, all_results)
 

@@ -273,6 +273,17 @@ class Chaos:
                 docker("exec", container, "kill", "-KILL", *survivors, check=False)
                 survivors = self._alive(container, survivors, wait_seconds=10)
             left, still_locked = in_flight_operations(container), held_locks(container)
+            if not survivors and (left or still_locked):
+                # Normal background work can arrive after the captured cohort was
+                # reaped. Let it finish without signalling these newly observed
+                # PIDs. Establish one deadline; later arrivals never extend it.
+                self._append(
+                    path, ["fresh work after captured cohort ended; waiting without signalling", *left, *still_locked]
+                )
+                deadline = time.monotonic() + DRAIN_WAIT_SECONDS
+                while (left or still_locked) and time.monotonic() < deadline:
+                    time.sleep(min(2, max(0, deadline - time.monotonic())))
+                    left, still_locked = in_flight_operations(container), held_locks(container)
             self._append(path, [f"after: survivors={survivors} in-flight={left} locks={still_locked}"])
             assert not survivors, f"{key}: {survivors} survived TERM and KILL (see {path})"
             assert not left and not still_locked, f"{key}: work remains after settling (see {path})"

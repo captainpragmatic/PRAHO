@@ -571,6 +571,7 @@ class EmailService:
         track_clicks: bool = True,
         async_send: bool = True,
         essential: bool = False,
+        require_async: bool = False,
     ) -> EmailResult:
         """
         Send an email with full tracking and logging.
@@ -595,6 +596,7 @@ class EmailService:
             async_send: Send asynchronously via Django-Q2
             essential: Account-protection mail (security notices): a marketing unsubscribe does not
                 suppress it
+            require_async: Refuse synchronous delivery and every synchronous fallback.
 
         Returns:
             EmailResult with success status and message ID
@@ -655,16 +657,18 @@ class EmailService:
             cap = SettingsService.get_integer_setting("notifications.max_async_attachment_kb", 5120) * 1024
             if cap > 0 and sum(len(part.content) for part in parts) > cap:
                 async_send = False
+        if require_async and not async_send:
+            return EmailResult(success=False, error="Required asynchronous delivery cannot use a synchronous fallback")
 
         try:
-            return cls._dispatch(message, async_send=async_send)
+            return cls._dispatch(message, async_send=async_send, require_async=require_async)
         except EncryptionError as refused:
             # The message could not be stored sealed (a body that looks like ciphertext): nothing was kept.
             logger.error(f"🔥 [Email] Message refused, not stored: {refused}")
             return EmailResult(success=False, error=f"Message refused: {refused}")
 
     @classmethod
-    def _dispatch(cls, message: OutgoingEmail, *, async_send: bool) -> EmailResult:
+    def _dispatch(cls, message: OutgoingEmail, *, async_send: bool, require_async: bool = False) -> EmailResult:
         allowed, _remaining = EmailRateLimiter.check_rate_limit()
         if not allowed:
             logger.warning("Email rate limit exceeded")
@@ -672,7 +676,7 @@ class EmailService:
                 return cls._queue_email_for_retry(message)
             return EmailResult(success=False, error="Rate limit exceeded")
         if async_send:
-            return cls._send_async(message)
+            return cls._send_async(message, require_async=require_async)
         return cls._send_now(message)
 
     @classmethod
@@ -694,6 +698,12 @@ class EmailService:
 
             if not renew_claim(str(email_log.id), email_log.claim_token):
                 raise RuntimeError("Claim lost before sending")
+            from apps.infrastructure.node_maintenance_delivery import (  # noqa: PLC0415  # Deferred feature policy.
+                maintenance_dispatch_allowed,
+            )
+
+            if not maintenance_dispatch_allowed(str(email_log.id), email_log.claim_token):
+                raise RuntimeError("Maintenance delivery is no longer permitted")
             msg.send(fail_silently=False)
             reserved = False
 
@@ -735,18 +745,19 @@ class EmailService:
             )
 
     @classmethod
-    def _send_async(cls, message: OutgoingEmail) -> EmailResult:
+    def _send_async(cls, message: OutgoingEmail, *, require_async: bool = False) -> EmailResult:
         """Store the whole message, then queue its id once the row has committed (never the content)."""
         provider = getattr(settings, "EMAIL_PROVIDER", "smtp")
-        email_log = cls._create_email_log(message, provider=provider, status="queued")
         try:
             from django_q.tasks import async_task  # noqa: PLC0415  # Deferred: avoids circular import
         except ImportError:
+            if require_async:
+                return EmailResult(success=False, error="Asynchronous email queue is unavailable")
             # Django-Q2 not available, fall back to sync sending
             logger.warning("Django-Q2 not available, falling back to sync email sending")
-            email_log.delete()
             return cls._send_now(message)
 
+        email_log = cls._create_email_log(message, provider=provider, status="queued")
         email_log_id = str(email_log.id)
         transaction.on_commit(
             lambda: async_task(
@@ -857,6 +868,7 @@ class EmailService:
         bcc: list[str] | None = None,
         attachments: list[AttachmentInput] | None = None,
         async_send: bool = True,
+        require_async: bool = False,
         **kwargs: Any,
     ) -> EmailResult:
         """
@@ -875,6 +887,7 @@ class EmailService:
             bcc: BCC recipients
             attachments: File attachments
             async_send: Send asynchronously
+            require_async: Refuse synchronous delivery and every synchronous fallback.
 
         Returns:
             EmailResult with send status
@@ -954,6 +967,7 @@ class EmailService:
                 template_key=template_key,
                 priority=priority,
                 async_send=async_send,
+                require_async=require_async,
                 tags={"template": template_key, "locale": locale, "category": template.category},
             )
 

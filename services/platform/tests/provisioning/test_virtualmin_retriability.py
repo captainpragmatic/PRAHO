@@ -8,24 +8,31 @@ wires up retries). Unexpected exceptions carry no signal, so they must
 stay UNKNOWN — the fail-closed default the tri-state design mandates.
 """
 
+from decimal import Decimal
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import requests
 from django.test import TestCase
+from django.utils import timezone
 
+from apps.billing.currency_models import Currency
 from apps.common.types import Err, Retriability
+from apps.customers.models import Customer
+from apps.provisioning.service_models import Service, ServicePlan
 from apps.provisioning.virtualmin_gateway import (
     VirtualminAPIError,
     VirtualminConfig,
     VirtualminGateway,
     VirtualminTransientError,
 )
-from apps.provisioning.virtualmin_models import VirtualminServer
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_service import (
     VirtualminAccountCreationData,
     VirtualminProvisioningService,
     VirtualminServerManagementService,
 )
+from tests.mocks.virtualmin_mock import MockVirtualminGateway
 
 
 def _gateway() -> VirtualminGateway:
@@ -111,37 +118,95 @@ class ServiceTestServerConnectionRetriabilityTests(TestCase):
 
     def test_failed_creation_preserves_inner_retriability(self) -> None:
         service = VirtualminProvisioningService()
-        customer = MagicMock(id=42)
+        customer = Customer.objects.create(name="Retry owner", primary_email="retry-owner@example.com", status="active")
+        currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+        plan = ServicePlan.objects.create(name="Retry hosting", plan_type="shared_hosting", price_monthly=Decimal("10"))
+        hosting = Service.objects.create(
+            customer=customer,
+            currency=currency,
+            service_plan=plan,
+            service_name="Retry hosting",
+            domain="retry.example.com",
+            username="retryuser",
+            billing_cycle="monthly",
+            price=Decimal("10"),
+            status="active",
+        )
+        server = VirtualminServer.objects.create(
+            name="Retry node",
+            hostname="retry-node.example.com",
+            api_username="api",
+            status="active",
+            max_domains=100,
+            current_domains=0,
+            last_health_check=timezone.now(),
+        )
+        server.set_api_password("retry-fixture-password")
+        server.save()
         creation_data = VirtualminAccountCreationData(
-            service=MagicMock(id=7, customer=customer),
+            service=hosting,
             domain="retry.example.com",
             username="retryuser",
             password="StrongPassword123!",
-            server=MagicMock(),
+            server=server,
         )
-        account = MagicMock(id=11)
-        job = MagicMock()
+        gateway = MockVirtualminGateway()
+        actual_call = gateway.call
         inner = Err("connect timeout", retriability=Retriability.RETRIABLE)
 
-        with (
-            patch("apps.provisioning.virtualmin_service.transaction.atomic"),
-            patch("apps.provisioning.virtualmin_service.VirtualminServer") as server_cls,
-            patch("apps.provisioning.virtualmin_service.VirtualminAccount") as account_cls,
-            patch("apps.provisioning.virtualmin_service.VirtualminProvisioningJob") as job_cls,
-            patch.object(service, "_execute_domain_creation", return_value=inner),
-        ):
-            account_cls.objects.filter.return_value.first.return_value = None
-            server_cls.objects.select_for_update.return_value.get.return_value = MagicMock(
-                status="active", is_draining=False
-            )
-            account_cls.return_value = account
-            job_cls.return_value = job
+        def external_call(program: str, *args: Any, **kwargs: Any) -> Any:
+            return inner if program == "create-domain" else actual_call(program, *args, **kwargs)
 
+        with (
+            patch("apps.provisioning.virtualmin_service.VirtualminGateway", return_value=gateway),
+            patch.object(gateway, "call", side_effect=external_call),
+        ):
             result = service.create_virtualmin_account(creation_data)
 
         assert isinstance(result, Err)
         self.assertEqual(result.unwrap_err(), "connect timeout")
         self.assertEqual(result.retriability, Retriability.RETRIABLE)
+        account = VirtualminAccount.objects.get(service=hosting)
+        self.assertEqual(account.status, "error")
+        self.assertEqual(VirtualminProvisioningJob.objects.get(account=account).status, "failed")
+
+    def test_failed_preflight_preserves_inner_retriability(self) -> None:
+        customer = Customer.objects.create(name="Retry customer")
+        currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
+        plan = ServicePlan.objects.create(name="Retry plan", price_monthly=Decimal("10.00"))
+        hosting = Service.objects.create(
+            customer=customer,
+            service_plan=plan,
+            currency=currency,
+            service_name="Retry hosting",
+            domain="retry.example.com",
+            username="retryuser",
+            price=Decimal("10.00"),
+            status="active",
+        )
+        server = VirtualminServer.objects.create(name="Retry node", hostname="retry-node.example.com", status="active")
+        service = VirtualminProvisioningService(server)
+        creation_data = VirtualminAccountCreationData(
+            service=hosting,
+            domain="retry.example.com",
+            username="retryuser",
+            password="StrongPassword123!",
+            server=server,
+        )
+        inner = Err("connect timeout", retriability=Retriability.RETRIABLE)
+
+        with patch.object(VirtualminGateway, "test_connection", return_value=inner) as connection:
+            result = service.create_virtualmin_account(creation_data)
+
+        assert isinstance(result, Err)
+        self.assertEqual(
+            result.unwrap_err(), "Pre-flight validation failed: Server health check failed: connect timeout"
+        )
+        self.assertEqual(result.retriability, Retriability.RETRIABLE)
+        connection.assert_called_once()
+        account = VirtualminAccount.objects.get(service=hosting)
+        self.assertEqual(account.status, "error")
+        self.assertEqual(VirtualminProvisioningJob.objects.get(account=account).status, "failed")
 
     def test_server_statistics_preserves_gateway_retriability(self) -> None:
         server = MagicMock()

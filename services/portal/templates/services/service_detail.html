@@ -147,6 +147,10 @@
     </div>
   </div>
 
+  <div id="maintenance-attention" hx-get="{% url 'services:maintenance' service_id %}" hx-trigger="every 30s" hx-swap="innerHTML" hx-sync="this:replace" aria-live="polite">
+    {% include "services/partials/maintenance_attention.html" %}
+  </div>
+
   <!-- Main Content -->
   <div class="space-y-8" x-data="tabGroup">
       <!-- Navigation Tabs -->
