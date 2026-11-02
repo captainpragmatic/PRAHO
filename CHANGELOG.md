@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Recording a provider storno now locks its original invoice without locking the shared currency. Unrelated customers' invoices can commit concurrently; correction and original-invoice serialization remain protected (#832).
+- Invoice creation, issuance, payment, overdue and void emails now show the recorded invoice number and customer details expected by the default templates. Amounts and dates come from the invoice; an unnumbered draft shows pending issuance without inventing a number or link (#836).
 - Hosting fulfilment and staff completion now survive a concurrent plan change while waiting for a service lock, and use the current plan to choose automatic or manual delivery (#816).
 - Renewal preparation now reloads payment mandates and service eligibility after waiting for a subscription lock. Concurrent automatic-payment changes no longer abort the renewal run, and a service that opts out while preparation waits is excluded (#813).
 - e-Factura submission finalizers now lock the invoice before its document, matching duplicate submissions. Recording an ANAF result no longer deadlocks a concurrent active-claim check; accepted results, retry policy and unknown-outcome quarantine are preserved (#818).
