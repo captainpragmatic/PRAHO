@@ -95,7 +95,7 @@ def prepare(
 
 def _claim_resume(operation: DomainOperation) -> Result[tuple[DomainOperation, BaseRegistrarGateway | None], str]:
     with transaction.atomic():
-        domain = Domain.objects.select_for_update().select_related("registrar").get(pk=operation.domain_id)
+        domain = Domain.objects.select_for_update(of=("self",)).get(pk=operation.domain_id)
         current = DomainOperation.objects.select_for_update().get(pk=operation.pk)
         if (
             current.operation_type != "nameserver_update"
