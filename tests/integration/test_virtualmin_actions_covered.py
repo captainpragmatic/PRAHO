@@ -282,7 +282,15 @@ class TestScannerSeesTheRealCode:
         }
         # Disabling account-name previews removed _home() and its direct list-domains call.
         assert not any(site.path == "provisioning/account_hostname_service.py" and site.function == "_home" for site in sites)
-        assert len([site for site in sites if site.program]) == 51, "call sites changed: review them, then update this count"
+        # The lab's claimed-retry proof no longer deletes a successfully created
+        # domain just to call the private retry helper on a completed job.
+        assert not any(
+            site.path == "provisioning/management/commands/virtualmin_lab_checks.py"
+            and site.function == "_check_create_domain"
+            and site.program == "delete-domain"
+            for site in sites
+        )
+        assert len([site for site in sites if site.program]) == 50, "call sites changed: review them, then update this count"
 
     def test_the_loyalty_program_keyword_is_not_a_virtualmin_program(self, sites: list[CallSite]) -> None:
         assert not [site for site in sites if site.path.startswith("promotions/")]
