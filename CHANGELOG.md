@@ -34,11 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Account creation now waits for the configured provisioning timeout instead of the shorter general API timeout (#828).
-  An expired provisioning timeout still records an unknown outcome without replaying the creation.
-
-- Hosting provisioning no longer deadlocks with immediate subscription cancellation on PostgreSQL; it observes cancellation before validating the service and refuses a changed customer safely (#823).
-
 - Recording a provider storno now locks its original invoice without locking the shared currency. Unrelated customers' invoices can commit concurrently; correction and original-invoice serialization remain protected (#832).
 - Hosting fulfilment and staff completion now survive a concurrent plan change while waiting for a service lock, and use the current plan to choose automatic or manual delivery (#816).
 - Renewal preparation now reloads payment mandates and service eligibility after waiting for a subscription lock. Concurrent automatic-payment changes no longer abort the renewal run, and a service that opts out while preparation waits is excluded (#813).
@@ -53,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reconcile and re-deploy node deployments.** `manage.py reconcile_deployment <hostname> --operator <email>` clears a deployment's reconciliation flag once nothing it owned remains. It searches the provider project by label, name, recorded id and key fingerprint, and the DNS zones by stored record, stored name, current name and tag. It deletes nothing, refuses on any find or failed lookup, and runs only on a deployment untouched for longer than any task can run. A deployment whose provider token was never recorded needs `--attest-no-resources` with `--evidence`; `--attest-never-created` (refused when anything shows a server was created) makes it eligible for re-deploy. Success settles it destroyed, with the operator, the invoking OS user and the evidence in its audit event. A failed or destroyed deployment that never got a server can then be re-deployed under the same hostname from its page, with a size sold in its region. This needs the destroy permission, and every new server is named after its attempt so leftovers never collide.
   - **Staging:** reconcile `-001`/`-002` with the command (check the Hetzner console first, then `--attest-no-resources --attest-never-created --evidence ...`) before re-deploying them.
 - **Leaving a customer view returns its tab to the customer's Platform page.** Leave customer view, logging out of the view, and a view that ends while its tab is open (Platform ends it, its time runs out, or the feature is switched off) now answer with a short page that takes the tab back to that customer on Platform, instead of the portal's login page, which staff never use. It navigates by script with a link as fallback: the portal's CSP `form-action 'self'` stops a browser following a redirect to Platform after a form post. A customer's own logout is unchanged (ADR-0065).
+
+- Account creation now waits for the configured provisioning timeout instead of the shorter general API timeout (#828).
+  An expired provisioning timeout still records an unknown outcome without replaying the creation.
+
+- Hosting provisioning no longer deadlocks with immediate subscription cancellation on PostgreSQL; it observes cancellation before validating the service and refuses a changed customer safely (#823).
 
 ### Security
 
