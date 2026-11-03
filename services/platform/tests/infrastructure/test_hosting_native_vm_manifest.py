@@ -5,8 +5,8 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from uuid import uuid4
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.conf import settings
 from django.test import SimpleTestCase
@@ -70,11 +70,17 @@ class NativeVMManifestTests(SimpleTestCase):
     def test_fresh_intent_persists_private_authority_without_creating_provider_resources(self):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "fresh.json"
-            with patch.dict(os.environ, {
-                "PRAHO_NATIVE_ADMIN_CIDR": "192.0.2.17/32",
-                "PRAHO_NATIVE_LOCATION": "fsn1",
-                "PRAHO_NATIVE_SERVER_TYPE": "cx33",
-            }), patch.object(self.vm, "client", side_effect=AssertionError("Intent must make no provider call")):
+            with (
+                patch.dict(
+                    os.environ,
+                    {
+                        "PRAHO_NATIVE_ADMIN_CIDR": "192.0.2.17/32",
+                        "PRAHO_NATIVE_LOCATION": "fsn1",
+                        "PRAHO_NATIVE_SERVER_TYPE": "cx33",
+                    },
+                ),
+                patch.object(self.vm, "client", side_effect=AssertionError("Intent must make no provider call")),
+            ):
                 self.vm.fresh_intent(path)
             self.assertTrue(path.is_file(), "Fresh intent did not durably bind its local authority")
             manifest = self.vm.read_manifest(path)

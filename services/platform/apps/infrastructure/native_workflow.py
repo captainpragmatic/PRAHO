@@ -8,12 +8,13 @@ This does not certify the separate fresh deploy_node/DNS/create acceptance leg.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import secrets
 import socket
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from django.db import connection, transaction
@@ -28,6 +29,48 @@ from apps.infrastructure.native_lab import (
     native_run_lock,
     write_private,
 )
+
+if TYPE_CHECKING:
+    from apps.users.models import User
+
+
+def native_fixture_actor(run: UUID | str, *, create: bool = False) -> User:
+    """Grant only a new isolated fixture actor its exact deploy/cleanup permissions.
+
+    Replaying the fixture never restores a revoked permission or escalates an
+    existing account. The real infrastructure gates recheck this same actor.
+    """
+    from django.contrib.auth.models import Permission  # noqa: PLC0415
+    from django.contrib.contenttypes.models import ContentType  # noqa: PLC0415
+
+    from apps.users.models import User  # noqa: PLC0415
+
+    from .permissions import can_deploy_nodes, can_destroy_nodes  # noqa: PLC0415
+
+    email = "native-" + str(UUID(str(run))) + "@example.invalid"
+    if create:
+        actor, created = User.objects.get_or_create(
+            email=email,
+            defaults={"staff_role": "admin", "is_staff": True, "is_active": True},
+        )
+        if created:
+            content_type = ContentType.objects.get_for_model(NodeDeployment)
+            for code in ("deploy_nodes", "destroy_nodes"):
+                permission, _created = Permission.objects.get_or_create(
+                    content_type=content_type,
+                    codename=code,
+                    defaults={"name": "Native fixture " + code.replace("_", " ")},
+                )
+                actor.user_permissions.add(permission)
+            actor = User.objects.get(pk=actor.pk)
+    else:
+        try:
+            actor = User.objects.get(email=email)
+        except User.DoesNotExist as error:
+            raise ValueError("The original native fixture actor is unavailable") from error
+    if not actor.is_active or not can_deploy_nodes(actor) or not can_destroy_nodes(actor):
+        raise ValueError("The original native fixture actor lacks its real deployment or cleanup permission")
+    return actor
 
 
 def _database_identity() -> str:
@@ -78,8 +121,6 @@ def bind_native_fixture(authority: NativeAuthority, *, dns_zone: str) -> NodeDep
     changed manifest or conflicting row refuses, including after an interrupted
     manifest publication. No native network operation runs in this transaction.
     """
-    from apps.users.models import User  # noqa: PLC0415 -- Fixture authority after Django initialization.
-
     validated = validate_deployment_dns_zone(dns_zone)
     if validated.is_err():
         raise ValueError("Provide the approved native test DNS zone; no customer DNS is created")
@@ -190,14 +231,7 @@ def bind_native_fixture(authority: NativeAuthority, *, dns_zone: str) -> NodeDep
             secrets.token_urlsafe(48),
             {"native_run": str(run), "deployment_id": str(deployment.pk), "pending_registration": True},
         )
-        User.objects.get_or_create(
-            email="native-" + str(run) + "@example.invalid",
-            defaults={
-                "staff_role": "admin",
-                "is_staff": True,
-                "is_active": True,
-            },
-        )
+        native_fixture_actor(run, create=True)
     manifest["platform_fixture"] = expected
     native_driver().write_manifest(authority.path, manifest)
     return deployment
@@ -220,13 +254,19 @@ def _bound_deployment(authority: NativeAuthority) -> NodeDeployment:
 def require_fixture_dns(deployment: NodeDeployment, ipv4: str) -> None:
     """Use real DNS, with no hosts/resolver override and no DNS publication."""
     try:
-        addresses = {value[4][0] for value in socket.getaddrinfo(deployment.fqdn, 10000, type=socket.SOCK_STREAM)}
+        addresses = {
+            str(ipaddress.ip_address(value[4][0]))
+            for value in socket.getaddrinfo(deployment.fqdn, 10000, type=socket.SOCK_STREAM)
+        }
     except socket.gaierror as error:
         raise ValueError(
             "The approved native test FQDN is unresolved; inspect the private platform_fixture binding"
         ) from error
-    if addresses != {ipv4}:
-        raise ValueError("The approved native test FQDN must resolve only to the exact owned VM IPv4")
+    expected = {str(ipaddress.ip_address(ipv4))}
+    if deployment.ipv6_address:
+        expected.add(str(ipaddress.ip_address(deployment.ipv6_address)))
+    if addresses != expected:
+        raise ValueError("The approved native test FQDN must resolve only to the exact owned VM addresses")
 
 
 def _prepare(authority: NativeAuthority, *, dns_zone: str) -> None:
@@ -282,11 +322,10 @@ def _register(authority: NativeAuthority) -> NodeDeployment:
     from apps.infrastructure.registration_service import NodeRegistrationService  # noqa: PLC0415
     from apps.provisioning.hosting_node_bundle import helper_bundle  # noqa: PLC0415
     from apps.provisioning.hosting_node_tasks import review_node_hosting  # noqa: PLC0415
-    from apps.users.models import User  # noqa: PLC0415
 
     deployment = _bound_deployment(authority)
     require_fixture_dns(deployment, authority.manifest["ipv4"])
-    actor = User.objects.get(email="native-" + authority.manifest["run"] + "@example.invalid", is_active=True)
+    actor = native_fixture_actor(authority.manifest["run"])
     if deployment.status == "failed":
         result = NodeDeploymentService().retry_deployment(
             deployment, {"api_token": os.environ.get("HCLOUD_TOKEN", "")}, user=actor
@@ -325,8 +364,23 @@ def _register(authority: NativeAuthority) -> NodeDeployment:
 
 
 def run_workflow(path: Path, action: str, *, dns_zone: str = "") -> None:
-    authority = native_authority(path)
+    cleanup_only = os.environ.get("PRAHO_NATIVE_CLEANUP_ONLY") == "1"
+    if cleanup_only and action != "fresh-destroy":
+        raise ValueError("Expired native authority may only run exact public teardown")
+    authority = native_authority(path, cleanup=cleanup_only)
     with native_run_lock(authority):
+        if action in {"fresh-deploy", "fresh-proof", "fresh-destroy"}:
+            from .native_fresh_workflow import deploy_fresh_vm, destroy_fresh_vm, verify_fresh_vm  # noqa: PLC0415
+
+            if action == "fresh-deploy":
+                deploy_fresh_vm(authority, dns_zone=dns_zone)
+            elif action == "fresh-proof":
+                verify_fresh_vm(authority)
+            else:
+                destroy_fresh_vm(authority)
+            return
+        if authority.manifest.get("origin") == "platform_fresh" and action == "prepare":
+            raise ValueError("Fresh public deployments must use fresh-deploy; raw provider preparation is separate")
         native_driver().owned_server(path)  # Exact provider ownership before any private DB fixture or native action.
         if action == "prepare":
             _prepare(authority, dns_zone=dns_zone)

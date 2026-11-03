@@ -10,7 +10,7 @@ from uuid import UUID, uuid5
 
 from apps.infrastructure.models import NodeDeployment
 from apps.infrastructure.native_lab import ROOT, NativeAuthority, native_driver
-from apps.infrastructure.native_workflow import require_fixture_dns
+from apps.infrastructure.native_workflow import native_fixture_actor, require_fixture_dns
 from apps.provisioning.hosting_limit_execution import apply_hosting_limits
 from apps.provisioning.hosting_limit_override_service import grant_resource_override
 from apps.provisioning.hosting_node_policy import managed_quota_refusal
@@ -126,10 +126,9 @@ def _node_enabled(account: VirtualminAccount) -> bool:
 
 def _adopt_node(authority: NativeAuthority, deployment: NodeDeployment) -> tuple[VirtualminServer, User]:
     from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
-    from apps.users.models import User  # noqa: PLC0415
 
     run = UUID(authority.manifest["run"])
-    actor = User.objects.get(email="native-" + str(run) + "@example.invalid", is_active=True)
+    actor = native_fixture_actor(run)
     server_id = deployment.virtualmin_server_id
     if server_id is None:
         raise ValueError("The public deployment has no registered native server")

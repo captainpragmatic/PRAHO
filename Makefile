@@ -880,6 +880,7 @@ else
 	@$(VENV_DIR)/bin/python scripts/lint_test_suppressions.py --fail-on critical
 	@echo "📋 Phase 5: i18n coverage scan"
 	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/portal/apps services/platform/templates services/portal/templates
+	@$(MAKE) i18n-check
 	@echo "📋 Phase 6: Code health scan"
 	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps
 	@echo "📋 Phase 7: FSM guardrail lint (ADR-0034)"
@@ -1172,6 +1173,7 @@ pre-commit:
 
 PLATFORM_PO = services/platform/locale/ro/LC_MESSAGES/django.po
 PORTAL_PO   = services/portal/locale/ro/LC_MESSAGES/django.po
+SHARED_UI_PO = shared/ui/locale/ro/LC_MESSAGES/django.po
 PYTHON_I18N = uv run python
 
 i18n-extract:
@@ -1187,6 +1189,17 @@ i18n-compile:
 	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/python manage.py compilemessages --settings=config.settings.dev
 	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/python manage.py compilemessages --settings=config.settings.dev
 	@echo "✅ Translations compiled."
+
+.PHONY: i18n-check test-i18n-guards test-i18n
+i18n-check:
+	@PRAHO_SKIP_DOTENV=1 PYTHONDONTWRITEBYTECODE=1 $(PYTHON_SHARED) scripts/translate_po.py check
+
+# The checker runs only these guards in its snapshot; including checker fixtures here recurses.
+test-i18n-guards:
+	@PRAHO_SKIP_DOTENV=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(PWD)/services/platform $(PYTHON_SHARED) -m pytest -o addopts= --no-cov -p no:cacheprovider tests/integration/test_platform_error_localisation.py tests/integration/test_translation_catalog_markup.py -q
+
+test-i18n:
+	@PRAHO_SKIP_DOTENV=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(PWD)/services/platform $(PYTHON_SHARED) -m pytest -o addopts= --no-cov -p no:cacheprovider tests/integration/test_translation_catalog_check.py tests/integration/test_translate_po.py tests/integration/test_platform_error_localisation.py tests/integration/test_translation_catalog_markup.py $(I18N_TEST_ARGS) -q
 
 translate-stats:
 	@echo "📊 Translation coverage stats (both services)..."
@@ -1205,15 +1218,16 @@ translate-stats-portal:
 
 translate:
 	@echo "📖 Generating review YAML (dictionary mode)..."
-	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) -o i18n-review-platform.yaml
-	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) -o i18n-review-portal.yaml
-	@echo "✅ Review files: i18n-review-platform.yaml, i18n-review-portal.yaml"
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) -o i18n-review-platform.yaml $(TRANSLATE_ARGS)
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) -o i18n-review-portal.yaml $(TRANSLATE_ARGS)
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(SHARED_UI_PO) -o i18n-review-shared.yaml $(TRANSLATE_ARGS)
+	@echo "✅ Review files: i18n-review-platform.yaml, i18n-review-portal.yaml, i18n-review-shared.yaml"
 
 translate-platform:
-	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) -o i18n-review-platform.yaml
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) -o i18n-review-platform.yaml $(TRANSLATE_ARGS)
 
 translate-portal:
-	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) -o i18n-review-portal.yaml
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) -o i18n-review-portal.yaml $(TRANSLATE_ARGS)
 
 translate-ai:
 	@echo "🤖 Generating review YAML (Claude AI mode)..."
@@ -1412,7 +1426,7 @@ case "$$NATIVE_VM_MANIFEST" in /*) ;; *) NATIVE_VM_MANIFEST="$$PWD/$$NATIVE_VM_M
 export NATIVE_VM_MANIFEST PRAHO_NATIVE_LAB=1;
 endef
 
-.PHONY: native-vm-manifest native-dns-zone native-vm-create native-vm-migrate native-vm-prepare native-vm-register native-vm-destroy test-virtualmin-quotas test-virtualmin-native-workflow test-virtualmin-native-fresh-deployment
+.PHONY: native-vm-manifest native-dns-zone native-vm-create native-vm-migrate native-vm-prepare native-vm-register native-vm-destroy native-vm-fresh-intent native-vm-fresh-deploy native-vm-fresh-destroy test-virtualmin-quotas test-virtualmin-native-workflow test-virtualmin-native-fresh-deployment
 native-vm-manifest:
 	@test -n "$$NATIVE_VM_MANIFEST" || { echo 'Set NATIVE_VM_MANIFEST to the private disposable VM manifest path.' >&2; exit 2; }
 
@@ -1421,6 +1435,15 @@ native-dns-zone:
 
 native-vm-create: native-vm-manifest
 	@$(PYTHON_SHARED) tests/virtualmin_lab/native/provider_vm.py create --manifest "$$NATIVE_VM_MANIFEST"
+
+native-vm-fresh-intent: native-vm-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/provider_vm.py fresh-intent --manifest "$$NATIVE_VM_MANIFEST"
+
+native-vm-fresh-deploy: native-vm-manifest native-dns-zone
+	@$(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) hosting_native_workflow fresh-deploy --manifest "$$NATIVE_VM_MANIFEST" --dns-zone "$$NATIVE_DNS_ZONE" --settings=config.settings.native
+
+native-vm-fresh-destroy: native-vm-manifest
+	@export PRAHO_NATIVE_CLEANUP_ONLY=1; $(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) hosting_native_workflow fresh-destroy --manifest "$$NATIVE_VM_MANIFEST" --settings=config.settings.native
 
 native-vm-migrate: native-vm-manifest
 	@$(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.native --noinput
@@ -1435,7 +1458,7 @@ test-virtualmin-native-workflow: native-vm-manifest
 	@$(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) hosting_native_workflow workflow --manifest "$$NATIVE_VM_MANIFEST" --settings=config.settings.native
 
 test-virtualmin-native-fresh-deployment: native-vm-manifest
-	@$(PYTHON_SHARED) tests/virtualmin_lab/native/provider_vm.py fresh-proof --manifest "$$NATIVE_VM_MANIFEST"
+	@$(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) hosting_native_workflow fresh-proof --manifest "$$NATIVE_VM_MANIFEST" --settings=config.settings.native
 
 test-virtualmin-quotas: native-vm-manifest
 	@$(PYTHON_SHARED) tests/virtualmin_lab/native/provider_vm.py verify --manifest "$$NATIVE_VM_MANIFEST"

@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Assigned hosting allowances and verified Virtualmin quota applications (#776). Catalog edits no longer change an existing service's allowance. Explicit adoption, node qualification, fenced application and recovery, capacity reservations and staff resource overrides retain desired and last verified limits separately. Native policy activation remains gated by the documented Ubuntu acceptance checks; existing accounts are not automatically converted.
+
 - Customer maintenance windows (#780): staff can schedule work in each node's permitted calendar, record manual outcomes and run supported managed adapters. Customers see current service-scoped notices and 24-hour outcomes in the Portal; Romanian/English emails announce, correct and report qualifying outcomes. Execution ownership and operator reconciliation fence concurrent operations, stale queued work and uncertain provider results. See [the operator runbook](docs/deployment/NODE_MAINTENANCE.md).
 
 - Measured hosting usage (#782): hourly owner-scoped file/database and web response-byte observations, source times, independent stale/unknown states, disk breakdown and history in the portal. Usage remains observational. `provisioning.usage_sync_enabled` is on by default: new nodes install the collector during deployment, and nodes deployed earlier need the usage playbook. Legacy usage writers and the Virtualmin billing collector are retired; see ADR-0068 for rollout and period semantics.
@@ -36,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Complete Romanian translations across Platform, Portal and shared UI, preserving existing reviewed translations. Full lint now rejects incomplete catalogs, stale compiled translations and source extraction drift before they reach customers or staff (#822).
 - Card order confirmation uses the order line's existing Service and canonical fulfilment (#839), preventing duplicate unlinked Services and generic provisioning jobs when a webhook is delayed. Failed-Service pages direct staff to review the order line or native provisioning history, including when diagnostics are empty.
 - **Node deploys get past their first playbook on native hosts.** The Platform and worker units hide `/home` (`ProtectHome=yes`), and Ansible's SSH control-path directory defaults to `~/.ansible/cp` whatever `ANSIBLE_HOME` says, so every playbook failed before reaching the node. The directory now lives under `ANSIBLE_HOME`. A failed SSH transition also records Ansible's own error line instead of only a generic message.
 - **The deployment page follows a queued operation.** After Re-deploy, Retry or Destroy, the page keeps refreshing and shows "Queued: <operation>" until the worker starts it (for at most 15 minutes), instead of showing the old status until a manual reload.
