@@ -203,11 +203,10 @@ jobs:
         PYTHONPATH=$(pwd) ${{ env.UV_PROJECT_ENVIRONMENT }}/bin/python manage.py createcachetable
 
     - name: API token and registrar intent tests (PostgreSQL)
-      # The tests run in ~3s, but the runner builds a fresh test database
-      # first (full migration stack), which alone can exceed 3 minutes on a
-      # slow runner — that flake has struck twice (tests passed, then the
-      # step timed out during teardown). 8 minutes gives setup headroom.
-      timeout-minutes: 8
+      # Fresh test-database migrations took 6m47s in the merge queue, leaving too little of the
+      # old 8-minute budget for this 127-test suite and teardown. Match the nightly concurrency
+      # step's 15-minute budget; keep the same serial tests and failure handling.
+      timeout-minutes: 15
       env:
         DJANGO_SETTINGS_MODULE: config.settings.ci
       run: |

@@ -92,7 +92,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         self.assertEqual(startup["run"], "make ci-postgres-start CI_POSTGRES_IMAGE_TAG=16")
         steps_by_name = {step.get("name"): step for step in self.integration_job["steps"]}
         api_token_step = steps_by_name[_API_TOKEN_STEP_NAME]
-        self.assertEqual(api_token_step["timeout-minutes"], 8)
+        self.assertEqual(api_token_step["timeout-minutes"], 15)
         self.assertNotIn("continue-on-error", api_token_step)
         self.assertEqual(api_token_step["env"]["DJANGO_SETTINGS_MODULE"], "config.settings.ci")
         command = api_token_step["run"]
