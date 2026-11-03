@@ -505,7 +505,10 @@ coverage-portal-union:
 coverage: coverage-platform coverage-platform-packages coverage-portal
 	@echo "✅ Coverage measured for both services."
 
-.PHONY: test-deploy test-deploy-docker test-ssh test-ssh-docker ssh-harden
+.PHONY: test-deploy test-deploy-docker test-ssh test-ssh-docker test-crowdsec-docker ssh-harden
+test-crowdsec-docker:
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_crowdsec*_docker.py -m docker -q
+
 test-ssh:
 	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_ssh_hardening.py -q
 
