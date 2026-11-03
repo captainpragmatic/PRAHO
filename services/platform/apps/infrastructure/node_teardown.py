@@ -33,6 +33,7 @@ from apps.infrastructure.deployment_lifecycle import (
     provider_token_fingerprint,
     recorded_provider_resources,
 )
+from apps.infrastructure.server_lifetimes import gone_server_fields
 
 if TYPE_CHECKING:
     from apps.infrastructure.cloud_destroy_execution import ResourceDestroyExecution
@@ -337,7 +338,7 @@ class NodeTeardown:
         if result.is_err():
             return result
         deployment = self.deployment
-        owned_update(self.lease, deployment, external_node_id="", ipv4_address=None, ipv6_address=None)
+        owned_update(self.lease, deployment, **gone_server_fields())
         self.proved_absent = self._cloud_execution.servers_absent
         return Ok(True)
 

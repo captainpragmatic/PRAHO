@@ -20,6 +20,11 @@ if TYPE_CHECKING:
     from apps.infrastructure.models import NodeDeployment, NodeServerLifetime, NodeSize
 
 
+def gone_server_fields() -> dict[str, Any]:
+    """Return fresh deployment fields to clear when its server is proved gone."""
+    return {"external_node_id": "", "ipv4_address": None, "ipv6_address": None}
+
+
 def _model() -> type[NodeServerLifetime]:
     from apps.infrastructure.models import NodeServerLifetime  # noqa: PLC0415  # Deferred: models import lifecycle
 

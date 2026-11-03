@@ -36,6 +36,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Node deploys get past their first playbook on native hosts.** The Platform and worker units hide `/home` (`ProtectHome=yes`), and Ansible's SSH control-path directory defaults to `~/.ansible/cp` whatever `ANSIBLE_HOME` says, so every playbook failed before reaching the node. The directory now lives under `ANSIBLE_HOME`. A failed SSH transition also records Ansible's own error line instead of only a generic message.
+- **The deployment page follows a queued operation.** After Re-deploy, Retry or Destroy, the page keeps refreshing and shows "Queued: <operation>" until the worker starts it (for at most 15 minutes), instead of showing the old status until a manual reload.
+- **A failed deploy no longer keeps a deleted server's id and addresses.** When cleanup deletes the server it just created, the deployment's server id and IP addresses are cleared with it, as teardown already did.
+- **Romanian: node deployment is "instalare".** Deployment terms read Instalare/Reinstalare instead of Implementare, operation names are nouns (Reîncercare, Distrugere) while buttons keep their imperative, and three mistranslated entries now have correct translations.
 - Complete the Platform row-lock audit (#805): load related rows after locking, retain explicit configuration and ownership protection, and enforce zero combined eager-loading/locking queries. Bridge cleanup uses migration admission's lock order; shared TLD and ServicePlan locks allow unrelated references to commit, and reconciliation rechecks cancellation before queueing provisioning.
 - Preserve legacy node cost history when redeploying a reconciled unknown-create deployment or recording its first resize (#838). Historical hours retain their old rate; teardown closes the captured resize window without late results reopening it. Fresh and never-created deployments acquire no fabricated historical charges.
 

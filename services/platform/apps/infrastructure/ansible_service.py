@@ -55,6 +55,32 @@ PLAYBOOKS_PATH = ANSIBLE_BASE_PATH / "playbooks"
 _SYSTEM_ANSIBLE_PATHS = ("/usr/local/bin/ansible-playbook", "/usr/bin/ansible-playbook")
 
 
+def _first_failure_line(stdout: str, stderr: str) -> str:
+    """Keep the first actionable controller error or task failure, bounded for display."""
+    stdout_lines = stdout.splitlines()
+    for lines in (stdout_lines, stderr.splitlines()):
+        for line in lines:
+            if line.strip().startswith("[ERROR]:"):
+                return line.strip()[:300]
+
+    for index, line in enumerate(stdout_lines):
+        fatal_line = line.strip()
+        fatal = re.match(r"fatal: \[.*\]: FAILED! =>", fatal_line)
+        if fatal is None:
+            continue
+        if fatal_line[fatal.end() :].strip():
+            return fatal_line[:300]
+        for following in stdout_lines[index + 1 :]:
+            if following and not following.startswith((" ", "\t")):
+                break
+            msg_line = following.strip()
+            if msg_line.startswith("msg:"):
+                return f"{fatal_line} {msg_line}"[:300]
+        return fatal_line[:300]
+
+    return next((line.strip()[:300] for line in stderr.splitlines() if line.strip()), "")
+
+
 def node_admin_allowed_cidrs() -> list[str]:
     """The node admin allowlist as explicit networks, for Webmin and UFW (ADR-0060).
 
@@ -758,8 +784,11 @@ class AnsibleService:
         result = self.run_playbook(deployment, "ssh-hardening.yml", operator_public_keys=operator_public_keys)
         if result.is_err():
             return Err(result.unwrap_err())
-        if not result.unwrap().success:
-            return Err("Node SSH transition failed; inspect the retained snapshot and verified port")
+        failure = result.unwrap()
+        if not failure.success:
+            message = "Node SSH transition failed; inspect the retained snapshot and verified port"
+            detail = _first_failure_line(failure.stdout, failure.stderr)
+            return Err(f"{message}: {detail}" if detail else message)
         return Ok(True)
 
     @staticmethod
@@ -800,6 +829,9 @@ class AnsibleService:
             "ANSIBLE_CALLBACK_RESULT_FORMAT": "yaml",
             "ANSIBLE_FORCE_COLOR": "0",
         }
+        # ProtectHome blocks Ansible's literal default ~/.ansible/cp, even with ANSIBLE_HOME set.
+        if not ansible_env.get("ANSIBLE_SSH_CONTROL_PATH_DIR") and ansible_env.get("ANSIBLE_HOME"):
+            ansible_env["ANSIBLE_SSH_CONTROL_PATH_DIR"] = str(Path(ansible_env["ANSIBLE_HOME"]) / "cp")
         # Prefer the freshly-scanned host key for a new node; otherwise a configured verified
         # file — but only if it actually exists, so a misconfigured/placeholder path (e.g. an
         # inline .env comment mis-parsed as the value) can't inject garbage into the SSH args.

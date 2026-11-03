@@ -21,7 +21,7 @@ from apps.infrastructure.models import NodeDeployment, NodeDeploymentLog, NodeSe
 from apps.infrastructure.node_maintenance_models import NodeMaintenanceExecution
 from tests.helpers.teardown_provider import attach_teardown_provider
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
-from tests.infrastructure.test_node_teardown import Harness
+from tests.infrastructure.test_node_teardown import TOKEN, Harness, cloud_gateway, dns_gateway
 
 
 def _gateway(create: Any) -> MagicMock:
@@ -124,6 +124,81 @@ class DeployWritePointTests(TestCase):
         deployment = _create_deployment("pending")
         _deploy(deployment, _gateway(Ok(ServerCreateResult(server_id="srv-1", ipv4_address=""))))
         self.assertEqual(_lifetimes(deployment), [("srv-1", False, False)])
+
+
+class CompensationServerFieldsTests(TestCase):
+    """Cleanup that proves the new server gone clears the row's server id and addresses with it."""
+
+    def _deploy_with_addresses(self, gateway: MagicMock) -> NodeDeployment:
+        deployment = _create_deployment("pending")
+        planted: list[tuple[str, str | None, str | None]] = []
+
+        def dns_after_provision(*_args: Any, **_kwargs: Any) -> Any:
+            row = NodeDeployment.objects.get(pk=deployment.pk)
+            planted.append((row.external_node_id, row.ipv4_address, row.ipv6_address))
+            return Err("dns stops the pipeline here")
+
+        attach_teardown_provider(gateway, deployment, server_id="srv-1", ssh_key_ids=("key-1",))
+        service = _make_service()
+        service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
+        service._configure_dns = MagicMock(side_effect=dns_after_provision)
+        service._resolve_dns_config = MagicMock(return_value=Ok(("dns-token", "zone")))
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
+        self.assertTrue(result.is_err(), result)
+        # The provisioned row held the server before cleanup ran.
+        self.assertEqual(planted, [("srv-1", "1.2.3.4", "2001:db8::1")])
+        deployment.refresh_from_db()
+        return deployment
+
+    @staticmethod
+    def _created() -> Any:
+        return Ok(ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="2001:db8::1"))
+
+    def test_cleanup_that_deletes_the_server_clears_its_id_and_addresses(self) -> None:
+        deployment = self._deploy_with_addresses(_gateway(self._created()))
+
+        self.assertEqual(deployment.status, "failed")
+        self.assertEqual((deployment.external_node_id, deployment.ipv4_address, deployment.ipv6_address), ("", None, None))
+        self.assertEqual(_lifetimes(deployment), [("srv-1", False, False)])
+
+    def test_cleanup_whose_server_delete_fails_keeps_its_id_and_addresses(self) -> None:
+        gateway = _gateway(self._created())
+        gateway.delete_server.return_value = Err("provider refused deletion")
+
+        deployment = self._deploy_with_addresses(gateway)
+
+        self.assertEqual(deployment.status, "failed")
+        self.assertEqual(
+            (deployment.external_node_id, deployment.ipv4_address, deployment.ipv6_address),
+            ("srv-1", "1.2.3.4", "2001:db8::1"),
+        )
+        self.assertEqual(_lifetimes(deployment), [("srv-1", True, False)])
+
+    def test_destroying_a_cleaned_failed_row_still_deletes_its_labelled_server(self) -> None:
+        deployment = _create_deployment("failed")
+        NodeDeployment.objects.filter(pk=deployment.pk).update(
+            server_create_state="created", provider_token_fingerprint=provider_token_fingerprint(TOKEN)
+        )
+        deployment.refresh_from_db()
+        self.assertEqual((deployment.external_node_id, deployment.server_create_state), ("", "created"))
+        gateway = cloud_gateway()
+        attach_teardown_provider(gateway, deployment, server_id="srv-left")
+
+        with (
+            patch("apps.infrastructure.node_teardown.get_cloud_gateway", return_value=gateway),
+            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=dns_gateway()),
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value="dns-tok"),
+        ):
+            result = _make_service().destroy_node(deployment, credentials={"api_token": TOKEN})
+
+        self.assertTrue(result.is_ok(), result)
+        gateway.delete_server.assert_called_once_with("srv-left")
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "destroyed")
 
 
 class TeardownWritePointTests(TestCase):

@@ -6,7 +6,7 @@
     <div class="flex items-center justify-between mb-4">
         <div class="flex items-center">
             {% badge deployment.get_status_display variant=status_variant %}
-            {% if is_in_progress %}
+            {% if is_running %}
             <span class="ml-3 text-slate-400 text-sm flex items-center">
                 {% spinner size="sm" color="blue" css_class="-ml-1 mr-2" %}
                 {% trans "In progress..." %}
@@ -15,7 +15,11 @@
         </div>
     </div>
 
-    {% if is_in_progress or deployment.status == 'completed' %}
+    {% if operation_queued %}
+    <p class="mb-3 text-sm text-slate-400">{% blocktranslate with kind=deployment.get_operation_kind_display %}Queued: {{ kind }}{% endblocktranslate %}</p>
+    {% endif %}
+
+    {% if is_running or deployment.status == 'completed' %}
     <!-- Progress Bar -->
     <div class="mb-2">
         <div class="flex justify-between text-sm text-slate-400 mb-1">
