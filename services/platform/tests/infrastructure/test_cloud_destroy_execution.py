@@ -1,6 +1,7 @@
 """Retention completes before teardown, and retries retain exact dependency IDs after the VM is gone."""
 
 import uuid
+from dataclasses import replace
 from unittest.mock import Mock, patch
 
 from django.test import TestCase
@@ -73,7 +74,7 @@ class ResourceExecutionTests(TestCase):
 
     def confirm_absent(self, kind, resource_id):
         present = any(row.kind == kind and row.resource_id == resource_id for row in self.resources)
-        return Err("still present") if present else Ok(True)
+        return Err("resource still present") if present else Ok(True)
 
     def execution(self, policy="keep"):
         preview = inspect_destroy(self.deployment, "token")
@@ -115,9 +116,57 @@ class ResourceExecutionTests(TestCase):
             CloudResourceCleanup.objects.get(plan=self.plan, kind="primary_ip", resource_id="ip").state, "deleted"
         )
 
+    def test_owned_auto_delete_primary_ip_becomes_unassigned_then_disappears_without_explicit_delete(self):
+        primary_ip = CloudResource("primary_ip", "ip", attached_to=("vm",), auto_delete=True)
+        self.resources.append(primary_ip)
+        record_resource_ownership(self.deployment, "primary_ip", "ip", "create_response")
+
+        def delete_server_and_unassign_primary_ip(kind, resource_id):
+            result = self.delete(kind, resource_id)
+            if (kind, resource_id) == ("server", "vm"):
+                self.resources[:] = [
+                    replace(row, attached_to=()) if row.key == primary_ip.key else row for row in self.resources
+                ]
+            return result
+
+        def confirm_primary_ip_absent(kind, resource_id):
+            self.assertEqual((kind, resource_id), ("primary_ip", "ip"))
+            self.assertIsNone(self.read("server", "vm"))
+            resource = next(row for row in self.resources if row.key == primary_ip.key)
+            self.assertEqual(resource, replace(primary_ip, attached_to=()))
+            self.resources.remove(resource)
+            return Ok(True)
+
+        self.client.delete_exact.side_effect = delete_server_and_unassign_primary_ip
+        self.client.confirm_absent.side_effect = confirm_primary_ip_absent
+        execution = self.execution("delete")
+        decision = next(row for row in self.plan.decisions if (row["kind"], row["resource_id"]) == ("primary_ip", "ip"))
+        self.assertEqual(decision["action"], "parent_delete")
+        self.assertEqual(next(row for row in self.resources if row.key == primary_ip.key), primary_ip)
+        self.assertTrue(execution.prepare().is_ok())
+        self.assertIsNotNone(self.read("primary_ip", "ip"))
+        result = execution.delete_resources()
+        self.assertTrue(result.is_ok(), result)
+        self.assertIsNone(self.read("primary_ip", "ip"))
+        self.client.confirm_absent.assert_called_once_with("primary_ip", "ip")
+        self.assertEqual([call.args for call in self.client.delete_exact.call_args_list], [("server", "vm")])
+        self.assertEqual(
+            CloudResourceCleanup.objects.get(plan=self.plan, kind="primary_ip", resource_id="ip").state, "deleted"
+        )
+
     def test_owned_auto_delete_primary_ip_still_present_is_unresolved_after_server_absence(self):
         self.resources.append(CloudResource("primary_ip", "ip", attached_to=("vm",), auto_delete=True))
         record_resource_ownership(self.deployment, "primary_ip", "ip", "create_response")
+
+        def delete_server_and_unassign_primary_ip(kind, resource_id):
+            result = self.delete(kind, resource_id)
+            if (kind, resource_id) == ("server", "vm"):
+                self.resources[:] = [
+                    replace(row, attached_to=()) if row.key == "primary_ip:ip" else row for row in self.resources
+                ]
+            return result
+
+        self.client.delete_exact.side_effect = delete_server_and_unassign_primary_ip
         lifetime = NodeServerLifetime.objects.create(
             deployment=self.deployment,
             correlation_id=self.deployment.correlation_id,
@@ -127,11 +176,14 @@ class ResourceExecutionTests(TestCase):
             started_at=timezone.now(),
         )
         execution = self.execution("delete")
+        decision = next(row for row in self.plan.decisions if (row["kind"], row["resource_id"]) == ("primary_ip", "ip"))
+        self.assertEqual(decision["action"], "parent_delete")
+        self.assertEqual(next(row for row in self.resources if row.key == "primary_ip:ip").attached_to, ("vm",))
         self.assertTrue(execution.prepare().is_ok())
         result = execution.delete_resources()
         self.assertTrue(result.is_err(), result)
         self.assertIn(
-            "Provider resource primary_ip:ip is still present after its server was deleted: still present",
+            "Provider resource primary_ip:ip was not confirmed absent after its server was deleted: resource still present",
             result.unwrap_err(),
         )
         self.assertEqual(
@@ -141,6 +193,7 @@ class ResourceExecutionTests(TestCase):
         self.assertEqual([call.args for call in self.client.delete_exact.call_args_list], [("server", "vm")])
         self.assertIsNone(self.read("server", "vm"))
         self.assertIsNotNone(self.read("primary_ip", "ip"))
+        self.assertEqual(next(row for row in self.resources if row.key == "primary_ip:ip").attached_to, ())
         lifetime.refresh_from_db()
         self.assertIsNotNone(lifetime.ended_at)
 
@@ -156,7 +209,7 @@ class ResourceExecutionTests(TestCase):
         self.assertEqual(
             CloudResourceCleanup.objects.get(plan=self.plan, kind="backup", resource_id="b").state, "awaiting_expiry"
         )
-        self.client.confirm_absent.assert_called_once_with("backup", "b")
+        self.client.confirm_absent.assert_not_called()
         self.assertEqual([call.args for call in self.client.delete_exact.call_args_list], [("server", "vm")])
         self.assertIsNone(self.read("server", "vm"))
         self.assertIsNotNone(self.read("backup", "b"))

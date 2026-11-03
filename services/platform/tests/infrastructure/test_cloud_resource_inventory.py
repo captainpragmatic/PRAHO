@@ -163,7 +163,12 @@ class ResourceInventoryTests(SimpleTestCase):
     def test_delete_receipt_requires_exact_authoritative_absence(self):
         request = Mock(side_effect=[ResourceResponse(204, None), ResourceResponse(200, {"snapshot": {"id": "s"}})])
         client = CloudResourceClient("vultr", request, poll_timeout=0)
-        self.assertFalse(client.delete_exact("snapshot", "s").is_ok())
+        result = client.delete_exact("snapshot", "s")
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(
+            result.unwrap_err(),
+            "Provider accepted deletion but resource absence is unconfirmed: resource still present",
+        )
         request = Mock(side_effect=[ResourceResponse(204, None), ResourceResponse(404, {})])
         self.assertTrue(CloudResourceClient("vultr", request, poll_timeout=0).delete_exact("snapshot", "s").is_ok())
 
@@ -275,6 +280,7 @@ class ResourceInventoryTests(SimpleTestCase):
         client = CloudResourceClient("hetzner", request, poll_timeout=0, sleep=sleep)
         result = client.confirm_absent("primary_ip", "7")
         self.assertTrue(result.is_err(), result)
+        self.assertEqual(result.unwrap_err(), "resource still present")
         self.assertEqual([call.args[:2] for call in request.call_args_list], [("GET", "/primary_ips/7")])
         sleep.assert_not_called()
 
@@ -282,7 +288,7 @@ class ResourceInventoryTests(SimpleTestCase):
         request = Mock(side_effect=ProviderError("locked"))
         result = CloudResourceClient("hetzner", request, poll_timeout=0).confirm_absent("primary_ip", "7")
         self.assertTrue(result.is_err(), result)
-        self.assertIn("ProviderError (locked)", result.unwrap_err())
+        self.assertEqual(result.unwrap_err(), "absence read failed: ProviderError (locked)")
         self.assertEqual([call.args[:2] for call in request.call_args_list], [("GET", "/primary_ips/7")])
 
     def test_conversion_cannot_dispatch_snapshot_create_or_claim_pending_snapshot_ready(self):

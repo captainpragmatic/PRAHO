@@ -6,6 +6,7 @@ relationships, never permission to delete. Provider payloads are reduced before 
 
 from __future__ import annotations
 
+import contextlib
 import re
 import time
 from collections.abc import Callable
@@ -32,7 +33,7 @@ MAX_RESOURCE_PAGES = 100
 MAX_RESOURCES = 20000
 MAX_RESOURCE_ID_LENGTH = 128
 MAX_CURSOR_LENGTH = 4096
-_ERROR_CODE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+_ERROR_CODE_PATTERN = re.compile(r"[a-z][a-z0-9_]{0,63}")
 
 
 def _error_label(error: BaseException) -> str:
@@ -474,10 +475,10 @@ class CloudResourceClient:
                 if self.read_exact(kind, resource_id) is None:
                     return Ok(True)
                 if time.monotonic() >= deadline:
-                    return Err("Provider resource is still present")
+                    return Err("resource still present")
                 self.sleep(2)
         except Exception as error:
-            return Err(f"Provider resource absence is unconfirmed: {_error_label(error)}")
+            return Err(f"absence read failed: {_error_label(error)}")
 
     def delete_exact(self, kind: ResourceKind, resource_id: str) -> Result[bool, str]:
         try:
@@ -496,11 +497,9 @@ class CloudResourceClient:
         except Exception as error:
             message = f"Provider deletion unconfirmed: {_error_label(error)}"
         # A refused or failed DELETE can still have taken effect; only structured absence proves it.
-        try:
+        with contextlib.suppress(Exception):
             if self.read_exact(kind, resource_id) is None:
                 return Ok(True)
-        except Exception:  # noqa: S110 -- the re-read is best effort; the original error is the answer
-            pass
         return Err(message)
 
     def retain_backup(self, backup_id: str) -> Result[str, str]:

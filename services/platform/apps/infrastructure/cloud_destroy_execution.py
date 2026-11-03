@@ -121,7 +121,14 @@ class ResourceDestroyExecution:
         }
         for decision in current_decisions:
             before = approved_dispositions.get(decision.key)
-            if before is not None and before != (decision.action, decision.blocks_parent):
+            after = (decision.action, decision.blocks_parent)
+            # Auto-deleted primary IPs can briefly become unassigned after server deletion.
+            if decision.kind == "primary_ip":
+                if before is not None and before[0] in {"delete", "parent_delete"}:
+                    before = ("delete", before[1])
+                if after[0] in {"delete", "parent_delete"}:
+                    after = ("delete", after[1])
+            if before is not None and before != after:
                 raise ValueError(f"Provider cleanup disposition changed for {decision.key}; review it again")
         for resource in resources:
             if resource.key not in allowed or resource.key not in expected:
@@ -227,16 +234,15 @@ class ResourceDestroyExecution:
         if row is None:
             self._record(decision, "deleted")
             return True
-        if decision.action == "parent_delete":
+        if decision.action == "parent_delete" and decision.kind not in RESTORE_POINT_KINDS:
             result = self.client.confirm_absent(decision.kind, decision.resource_id)
             if result.is_ok():
                 self._record(decision, "deleted")
                 return True
-            if decision.kind not in RESTORE_POINT_KINDS:
-                err = result.unwrap_err()
-                raise ValueError(
-                    f"Provider resource {decision.key} is still present after its server was deleted: {err}"
-                )
+            err = result.unwrap_err()
+            raise ValueError(
+                f"Provider resource {decision.key} was not confirmed absent after its server was deleted: {err}"
+            )
         if decision.action == "delete":
             result = self.client.delete_exact(decision.kind, decision.resource_id)
             if result.is_err() or result.unwrap() is not True:
