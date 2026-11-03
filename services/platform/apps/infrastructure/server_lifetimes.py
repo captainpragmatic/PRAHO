@@ -42,15 +42,21 @@ def _new(deployment: NodeDeployment, size: NodeSize, started_at: datetime, **fie
     )
 
 
-def save_legacy_window(deployment: NodeDeployment, ended_at: datetime) -> None:
+def save_legacy_window(
+    deployment: NodeDeployment, ended_at: datetime, *, allow_created_at_fallback: bool = False
+) -> None:
     """Keep a window recorded only in the row's timestamps before lifetime accounting starts or is reset."""
-    if deployment.started_at is None or _model().objects.filter(deployment=deployment).exists():
+    started_at = deployment.started_at
+    if started_at is None and allow_created_at_fallback and not deployment.never_got_a_server:
+        started_at = deployment.created_at
+    end = deployment.destroyed_at or ended_at
+    if started_at is None or end <= started_at or _model().objects.filter(deployment=deployment).exists():
         return
     _new(
         deployment,
         deployment.node_size,
-        deployment.started_at,
-        ended_at=deployment.destroyed_at or ended_at,
+        started_at,
+        ended_at=end,
         legacy=True,
     )
 
@@ -159,13 +165,10 @@ def split_lifetime_for_resize(lifetime_id: uuid.UUID | None, server_id: str, new
         return True
 
 
-def start_lifetimes_at_resize(
-    deployment: NodeDeployment, server_id: str, old_size: NodeSize, new_size: NodeSize
-) -> bool:
-    """The first resize of a row whose window predates lifetimes: keep that window at the old rate, then bill on.
+def prepare_lifetime_for_resize(deployment: NodeDeployment, server_id: str, old_size: NodeSize) -> uuid.UUID | None:
+    """Capture the old-rate window before provider I/O, so teardown can close the exact pending resize's window.
 
-    Nothing happens when the row already has lifetimes (``split_lifetime_for_resize`` handles those), has no window
-    of its own, or is no longer this running server's row: a teardown that finished during the resize wins.
+    Called with the native invocation guard. Existing closed/unmatched history is never reconstructed.
     """
     from apps.infrastructure.models import NodeDeployment  # noqa: PLC0415  # Deferred: models import lifecycle
 
@@ -174,15 +177,32 @@ def start_lifetimes_at_resize(
         row = NodeDeployment.objects.select_for_update().filter(pk=deployment.pk).first()
         if (
             row is None
-            or row.status != "completed"
+            or row.correlation_id != deployment.correlation_id
+            or not server_id
             or row.external_node_id != server_id
-            or row.started_at is None
-            or _model().objects.filter(deployment=row).exists()
+            or row.node_size_id != old_size.pk
         ):
-            return False
-        _new(row, old_size, row.started_at, ended_at=now, legacy=True)
-        _new(row, new_size, now, server_id=server_id)
-        return True
+            raise ValueError("The resize resource binding changed before dispatch")
+        pending = (
+            _model()
+            .objects.filter(
+                deployment=row,
+                correlation_id=row.correlation_id,
+                server_id=server_id,
+                ended_at__isnull=True,
+            )
+            .first()
+        )
+        if pending is not None:
+            return pending.pk
+        if _model().objects.filter(deployment=row).exists() or row.destroyed_at is not None:
+            return None
+        started_at = row.started_at
+        if started_at is None and not row.never_got_a_server:
+            started_at = row.created_at
+        if started_at is None or started_at > now:
+            return None
+        return _new(row, row.node_size, started_at, server_id=server_id, legacy=True).pk
 
 
 def delete_unconfirmed_lifetimes(deployment: NodeDeployment) -> int:

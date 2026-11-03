@@ -133,9 +133,8 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
     # Only staff can manage services (edit/suspend)
     can_manage = user.is_staff_user and service.status in ["active", "suspended"]
 
-    # A real hosting failure leaves the Service active and fails its order line; order cancellation (and the legacy
-    # API confirm path) fail the Service itself. The page points to the line, where staff retry it
-    # (orders: retry_line_for_staff).
+    # A hosting failure leaves the Service active and fails its order line; cancellation and historical
+    # generic jobs can fail the Service itself. The order line decides whether retry is safe.
     from apps.orders.models import OrderItem  # noqa: PLC0415  # ADR-0007
 
     failed_line = (
@@ -363,12 +362,16 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
             from apps.orders.models import OrderItem  # noqa: PLC0415  # ADR-0007
 
             # The FSM allows failed -> active, but that only flips the status: nothing is provisioned, and none of
-            # fulfilment's checks run. Order cancellation fails a Service, and so does the legacy API confirm path
-            # (provision_service_task) on any error. A hosting failure is retried on its order line, when it has one.
+            # fulfilment's checks run. Cancellation and stored generic jobs can fail a Service. Neither a
+            # failed status nor an order identifier in JSON proves what happened on the native server.
             if OrderItem.objects.filter(service=service, provisioning_status="failed").exists():
-                messages.error(request, _("A failed service can't be activated here; retry its order line instead."))
+                messages.error(request, _("A failed service can't be activated here; review its order line."))
             else:
-                messages.error(request, _("A failed service can't be activated; it was never set up."))
+                messages.error(
+                    request,
+                    _("A failed service can't be activated here. "
+                      "Review its provisioning history and native state before any repair."),
+                )
             return _back_to_service(request, pk)
         try:
             service.activate()

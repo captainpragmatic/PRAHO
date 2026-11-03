@@ -22,6 +22,7 @@ from apps.orders.services import OrderPaymentConfirmationService, OrderService, 
 from apps.products.models import Product
 from apps.provisioning.models import ServicePlan
 from tests.helpers.fsm_helpers import force_status
+from tests.helpers.task_queue import quiet_task_queue
 
 User = get_user_model()
 
@@ -331,19 +332,14 @@ class TestSyncTaskRespectsReviewGate(ReviewGateTestBase):
 class TestC1ProvisioningGuard(ReviewGateTestBase):
     """C1: confirm_order API must NOT provision in_review orders."""
 
-    @patch("apps.api.orders.views._provision_confirmed_order_item")
     @patch("apps.orders.services.OrderPaymentConfirmationService._get_review_threshold")
     @patch("apps.api.secure_auth.get_authenticated_customer")
     @patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway")
     def test_high_value_order_does_not_provision_after_confirm(
-        self, mock_gateway_factory, mock_auth, mock_threshold, mock_provision
+        self, mock_gateway_factory, mock_auth, mock_threshold
     ):
-        """C1 RED: confirm_order API calls _provision_confirmed_order_item even for in_review orders.
-
-        HIGH-VALUE order → confirm_order() → status becomes in_review (review gate).
-        Bug: provisionable_items is collected and dispatched regardless of resulting status.
-        Fix: guard provisioning with `if order.status == "provisioning":`.
-        """
+        """Confirmation must leave high-value services untouched until staff approval."""
+        broker = quiet_task_queue(self)
         from unittest.mock import MagicMock  # noqa: PLC0415
 
         from rest_framework.test import APIRequestFactory  # noqa: PLC0415
@@ -376,7 +372,8 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
 
         # Create high-value order with exact total (no tax recalculation drift).
         # Give it an invoice directly so confirm_order uses the order.invoice branch.
-        from apps.billing.models import Invoice, Payment  # noqa: PLC0415
+        from apps.billing.models import Invoice, Payment, Subscription  # noqa: PLC0415
+        from apps.orders.services import OrderServiceCreationService  # noqa: PLC0415
 
         order = self._create_order_exact(total_cents=DEFAULT_THRESHOLD)
         invoice = Invoice.objects.create(
@@ -393,6 +390,9 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
         order.invoice = invoice
         order.save(update_fields=["payment_method", "payment_intent_id", "invoice"])
         force_status(order, "awaiting_payment")
+        services = OrderServiceCreationService.create_pending_services(order).unwrap()
+        self.assertEqual(len(services), 1)
+        self.assertEqual(services[0].status, "pending")
         Payment.objects.create(
             customer=self.customer,
             currency=self.currency,
@@ -411,7 +411,9 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
         request.user = user
         request._portal_authenticated = True
 
-        response = confirm_order(request, str(order.id))
+        linked_service_ids = list(order.items.values_list("service_id", flat=True))
+        with self.captureOnCommitCallbacks(execute=True):
+            response = confirm_order(request, str(order.id))
         self.assertIn(
             response.status_code,
             [200, 201],
@@ -422,8 +424,15 @@ class TestC1ProvisioningGuard(ReviewGateTestBase):
         self.assertEqual(
             order.status, "in_review", f"High-value order should be in_review after confirm, got: {order.status}"
         )
-        # C1 BUG: without fix, _provision_confirmed_order_item IS called for in_review orders
-        mock_provision.assert_not_called()
+        self.assertEqual(list(order.items.values_list("service_id", flat=True)), linked_service_ids)
+        services[0].refresh_from_db()
+        self.assertEqual(services[0].status, "pending")
+        self.assertFalse(Subscription.objects.filter(service=services[0]).exists())
+        self.assertEqual(response.data["provisioning"], [])
+        self.assertFalse(any(job[0] in {
+            "apps.orders.tasks.provision_order_item", "apps.provisioning.tasks.provision_service_task",
+            "apps.provisioning.virtualmin_tasks.provision_virtualmin_account_async",
+        } for job in broker.queued()))
 
 
 class TestReviewGateConfigurable(ReviewGateTestBase):

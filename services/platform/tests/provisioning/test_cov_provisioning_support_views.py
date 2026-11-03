@@ -6,11 +6,15 @@ from decimal import Decimal
 
 from django.test import override_settings
 from django.urls import reverse
+from django.utils.translation import override
 
 from apps.billing.currency_policy import get_selling_currency_policy
 from apps.customers.models import Customer
 from apps.provisioning.models import Service, ServicePlanPrice
+from apps.users.models import UserProfile
 from tests.factories.core_factories import create_staff_user, create_user
+from tests.helpers.fsm_helpers import force_status
+from tests.helpers.task_queue import quiet_task_queue
 from tests.provisioning.test_virtualmin_tasks import VirtualminTaskTestBase
 
 
@@ -138,6 +142,33 @@ class ProvisioningServicePageTests(VirtualminTaskTestBase):
         saved = Service.objects.get(pk=self.service.pk)
         self.assertEqual(saved.status, "suspended")
         self.assertEqual(saved.suspension_reason, "Already suspended")
+
+    def test_failed_orphan_requires_review_even_without_diagnostics(self) -> None:
+        broker = quiet_task_queue(self)
+        force_status(self.service, "provisioning")
+        self.service.fail_provisioning()
+        self.service.save()
+        self.assertFalse(self.service.order_items.exists())
+        for language, guidance in (("en", "Review its provisioning history and native state"),
+                                   ("ro", "Verificați istoricul provizionării și starea de pe server")):
+            UserProfile.objects.update_or_create(user=self.staff, defaults={"preferred_language": language})
+            for errors in ("", "<script>unknown native outcome</script>"):
+                with self.subTest(language=language, errors=errors), override(language):
+                    Service.objects.filter(pk=self.service.pk).update(provisioning_errors=errors)
+                    response = self.client.get(reverse("provisioning:service_detail", args=[self.service.pk]),
+                                               HTTP_ACCEPT_LANGUAGE=language)
+                    self.assertContains(response, guidance)
+                    self.assertEqual(response["Content-Language"], language)
+                    self.assertNotContains(response, "<script>unknown native outcome</script>")
+                    if errors:
+                        self.assertContains(response, "&lt;script&gt;unknown native outcome&lt;/script&gt;")
+                    self.assertNotContains(response, "never set up")
+        UserProfile.objects.update_or_create(user=self.staff, defaults={"preferred_language": "en"})
+        with override("en"), self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse("provisioning:service_activate", args=[self.service.pk]), follow=True)
+        self.assertContains(response, "Review its provisioning history and native state")
+        self.assertEqual(Service.objects.get(pk=self.service.pk).status, "failed")
+        self.assertEqual(broker.queued(), [])
 
     def test_create_resolves_username_collision_and_persists_retail_price(self) -> None:
         domain = "collision.example.com"

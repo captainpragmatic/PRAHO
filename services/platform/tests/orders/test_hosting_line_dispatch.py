@@ -19,18 +19,25 @@ from django_q.signing import SignedPackage
 from apps.audit.models import AuditEvent
 from apps.billing.payment_models import Payment
 from apps.billing.signals import _activate_pending_services
+from apps.common.types import Retriability
+from apps.orders.hosting_fulfilment import retry_line_for_staff
 from apps.orders.models import Order, OrderItem, OrderStatusHistory
 from apps.orders.services import OrderPaymentConfirmationService, OrderService, StatusChangeData
 from apps.provisioning.models import Service
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
+from apps.users.models import CustomerMembership, User
 from tests.helpers.fsm_helpers import force_status
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundSessionMixin
+from tests.helpers.task_queue import run_queued
+from tests.orders import test_confirm_order_service_identity as identity
 from tests.orders._hosting_workflow_case import HostingWorkflowCase
 
 FULFIL = "apps.orders.tasks.provision_order_item"
 CREATE = "apps.provisioning.virtualmin_tasks.provision_virtualmin_account"
 
 
-def _node_creates_the_account(params: Any, **_kwargs: Any) -> dict[str, Any]:
+def _node_creates_the_account(params: Any, *, failed: bool = False, **_kwargs: Any) -> dict[str, Any]:
     """The Virtualmin node, replaced: the account comes up and its create job completes."""
     service_id = (params if isinstance(params, dict) else params.decrypt())["service_id"]
     service = Service.objects.get(pk=service_id)
@@ -43,7 +50,7 @@ def _node_creates_the_account(params: Any, **_kwargs: Any) -> dict[str, Any]:
         server=server,
         virtualmin_username=service.username,
         template_name="Default",
-        status="active",
+        status="error" if failed else "active",
         praho_customer_id=service.customer_id,
         praho_service_id=service.pk,
     )
@@ -54,12 +61,17 @@ def _node_creates_the_account(params: Any, **_kwargs: Any) -> dict[str, Any]:
         correlation_id=f"create-{account.pk}",
         started_at=timezone.now(),
     )
+    if failed:
+        job.retry_count = job.max_retries
+        job.save(update_fields=["retry_count"])
+        job.mark_failed("quota refused", retriability=Retriability.RETRIABLE)
+        return {"success": False, "error": "quota refused"}
     job.mark_completed({"domain": account.domain})
     return {"success": True, "account_id": str(account.pk)}
 
 
 @override_settings(VIRTUALMIN_AUTO_PROVISIONING_ENABLED=True)
-class HostingLineDispatchTests(HostingWorkflowCase):
+class HostingLineDispatchTests(BoundSessionMixin, HMACTestMixin, HostingWorkflowCase):
     def setUp(self) -> None:
         super().setUp()
         OrmQ.objects.all().delete()
@@ -130,6 +142,65 @@ class HostingLineDispatchTests(HostingWorkflowCase):
         with self.captureOnCommitCallbacks(execute=True):
             self.assertTrue(OrderPaymentConfirmationService.confirm_order(order).is_ok())
         self._assert_fulfilled_once(order)
+
+    @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+    def test_signed_confirmation_and_duplicate_delivery_create_one_native_account(self) -> None:
+        self.owner = User.objects.create_user(email="dispatch-owner@example.test")
+        CustomerMembership.objects.create(customer=self.customer, user=self.owner, role="owner", is_primary=True)
+        order = self.create_order(items=self._items())
+        service_id = order.items.get().service_id
+        identity.ConfirmOrderServiceIdentityTests.prepare_payment(self, order)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = identity.ConfirmOrderServiceIdentityTests.request_confirmation(self, order, billing_first=True)
+        self.assertEqual(response.status_code, 200, response.content)
+        line = order.items.get()
+        self.assertEqual(line.service_id, service_id)
+        self.assertEqual(Service.objects.count(), 1)
+        self._assert_fulfilled_once(order)
+        # Replay the actual line payload, as duplicate delivery/recovery would.
+        from apps.orders.tasks import provision_order_item  # noqa: PLC0415
+
+        provision_order_item(str(line.pk))
+        replay = identity.ConfirmOrderServiceIdentityTests.request_confirmation(self, order)
+        self.assertEqual(replay.status_code, 200, replay.content)
+        self._assert_fulfilled_once(order)
+        self.assertEqual(Service.objects.get().pk, service_id)
+        self.assertEqual(VirtualminAccount.objects.count(), 1)
+        self.assertNotIn("apps.provisioning.tasks.provision_service_task", self.ran)
+
+    @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+    def test_signed_confirmation_keeps_failed_create_recoverable_on_its_line(self) -> None:
+        self.owner = User.objects.create_user(email="recoverable-owner@example.test")
+        CustomerMembership.objects.create(customer=self.customer, user=self.owner, role="owner", is_primary=True)
+        order = self.create_order(items=self._items())
+        service_id = order.items.get().service_id
+        identity.ConfirmOrderServiceIdentityTests.prepare_payment(self, order)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = identity.ConfirmOrderServiceIdentityTests.request_confirmation(self, order)
+        self.assertEqual(response.status_code, 200, response.content)
+        with patch(CREATE, side_effect=lambda params, **kw: _node_creates_the_account(params, failed=True, **kw)):
+            self._drain()
+        line = order.items.get()
+        self.assertEqual((line.service_id, line.provisioning_status), (service_id, "failed"))
+        job = VirtualminProvisioningJob.objects.get(account__service_id=service_id)
+        self.assertEqual((job.status, job.retry_count), ("failed", job.max_retries))
+        with self.captureOnCommitCallbacks(execute=True):
+            self.assertEqual(retry_line_for_staff(line.pk, actor=self.admin).unwrap(), "retried")
+        with self.captureOnCommitCallbacks(execute=True):
+            run_queued(FULFIL)
+        line.refresh_from_db()
+        self.assertEqual(line.provisioning_status, "in_progress")
+        # The retried node operation succeeds; its completion wakes the same line.
+        VirtualminAccount.objects.filter(pk=job.account_id).update(status="active")
+        with self.captureOnCommitCallbacks(execute=True):
+            job.mark_completed({"domain": line.domain_name})
+        with self.captureOnCommitCallbacks(execute=True):
+            run_queued(FULFIL)
+        order.refresh_from_db()
+        line.refresh_from_db()
+        self.assertEqual((order.status, line.provisioning_status), ("completed", "completed"))
+        self.assertEqual(Service.objects.get().pk, service_id)
+        self.assertEqual(VirtualminAccount.objects.count(), 1)
 
 
 class DispatchEntryPointTests(HostingWorkflowCase):
