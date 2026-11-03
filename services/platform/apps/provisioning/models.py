@@ -17,7 +17,16 @@ from .component_migration_models import (
     SourceServiceRelease,
 )
 from .hosted_domain_dns_models import HostedDomainDnsStatus
+from .hosting_limit_execution_models import HostingLimitExecution
 from .hosting_limit_models import HostingLimitApplication, ServiceHostingLimits
+from .hosting_node_policy_models import NodeHostingExecution, NodeHostingPolicy, NodeHostingReview
+from .hosting_raise_models import ServiceHostingRaise
+from .hosting_warning_models import (
+    HostingWarningDelivery,
+    HostingWarningDeliveryPart,
+    HostingWarningIntent,
+    HostingWarningState,
+)
 from .relationship_models import ServiceDomain, ServiceGroup, ServiceGroupMember, ServiceRelationship
 from .service_models import ProvisioningTask, Server, Service, ServicePlan, ServicePlanPrice
 from .service_request_models import ServiceRequest
@@ -42,8 +51,16 @@ __all__ = [
     "ComponentMigrationReview",
     "HostedDomainDnsStatus",
     "HostingLimitApplication",
+    "HostingLimitExecution",
+    "HostingWarningDelivery",
+    "HostingWarningDeliveryPart",
+    "HostingWarningIntent",
+    "HostingWarningState",
     "MigrationBridge",
     "NodeDrain",
+    "NodeHostingExecution",
+    "NodeHostingPolicy",
+    "NodeHostingReview",
     "NodeSecurityDecision",
     "NodeSecurityExecution",
     "NodeSecurityReview",
@@ -55,6 +72,7 @@ __all__ = [
     "ServiceGroup",
     "ServiceGroupMember",
     "ServiceHostingLimits",
+    "ServiceHostingRaise",
     "ServicePlan",
     "ServicePlanPrice",
     "ServiceRelationship",

@@ -402,11 +402,23 @@ class RecurringBillingOrchestrator:
                     .filter(Q(next_proforma_at__lte=run_at) | Q(current_period_end__lte=preparation_cutoff))
                     .order_by("customer_id", "currency_id", "next_charge_at", "id")
                 )
+                # Protect buyer identity before Subscription, matching payment
+                # and plan-change acceptance. In particular, an erasure that
+                # already owns Customer must finish before fiscal data is read.
+                from apps.customers.models import Customer  # noqa: PLC0415 -- Cross-app financial boundary.
+
+                locked_customers = list(
+                    Customer.all_objects.filter(pk__in=due_subscriptions.order_by().values("customer_id"))
+                    .select_for_update(of=("self",), no_key=True)
+                    .order_by("pk")
+                    .values_list("pk", flat=True)
+                )
+                due_subscriptions = due_subscriptions.filter(customer_id__in=locked_customers)
                 # A locking SELECT that waits on PostgreSQL refreshes the
                 # subscription, but not eager joined mandate/customer rows.
                 # Lock IDs first, then materialize fresh relations and recheck
                 # the same service eligibility in a new statement.
-                candidate_subscriptions = lock_many_and_load(due_subscriptions)
+                candidate_subscriptions = lock_many_and_load(due_subscriptions, no_key=True)
                 result["subscriptions_checked"] = len(candidate_subscriptions)
 
                 groups: dict[tuple[object, ...], list[tuple[Subscription, BillingCycle, datetime]]] = {}

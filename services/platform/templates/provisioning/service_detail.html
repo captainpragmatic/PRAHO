@@ -7,6 +7,10 @@
 
 {% block content %}
 <div class="max-w-7xl mx-auto px-4 py-6">
+  {% include "provisioning/partials/hosting_limits.html" with limits=hosting_limits %}
+  {% if request.user.is_staff_user %}
+    <p class="mb-4 text-xs text-slate-400">{% trans "Assigned allowance provenance" %}: {% trans "Disk:" %} {{ hosting_limits.provenance.disk }} · {% trans "Monthly bandwidth:" %} {{ hosting_limits.provenance.bandwidth }}</p>
+  {% endif %}
 
     <!-- {% icon "services" %} Hero Section with Status -->
     <div class="bg-gradient-to-r from-slate-800 to-slate-700 rounded-xl p-6 mb-6 border border-slate-600">
@@ -69,6 +73,12 @@
                     {% endif %}
                     {% url 'provisioning:service_edit' service.pk as edit_url %}
                     {% trans "Edit" as bt9 %}{% button bt9 variant="secondary" href=edit_url class="sm:text-sm mobile-full-width" %}
+                    {% if can_override_resources %}
+                      {% url 'provisioning:service_resource_override' service.pk as override_url %}
+                      {% trans "Resource-only exception" as override_label %}{% button override_label variant="secondary" href=override_url %}
+                      {% url 'provisioning:service_hosting_raise' service.pk as relief_url %}
+                      {% trans "Temporary disk relief" as relief_label %}{% button relief_label variant="secondary" href=relief_url %}
+                    {% endif %}
                 {% endif %}
                 {% url 'provisioning:services' as services_url %}
                 {% trans "← Back to Services" as bt10 %}{% button bt10 variant="secondary" href=services_url class="sm:text-sm mobile-full-width" %}
@@ -188,17 +198,17 @@
                     </div>
 
                     <div class="space-y-2">
-                        {% if service.service_plan.disk_space_gb %}
+                        {% if operational_disk_gib %}
                         <div class="flex justify-between text-sm">
                             <span class="text-slate-400">{% trans 'Disk Space' %}</span>
-                            <span class="text-white">{{ service.service_plan.disk_space_gb }} GB</span>
+                            <span class="text-white">{{ operational_disk_gib|floatformat:"-3" }} GiB</span>
                         </div>
                         {% endif %}
 
-                        {% if service.service_plan.bandwidth_gb %}
+                        {% if operational_bandwidth_gib %}
                         <div class="flex justify-between text-sm">
                             <span class="text-slate-400">{% trans 'Bandwidth' %}</span>
-                            <span class="text-white">{{ service.service_plan.bandwidth_gb }} GB</span>
+                            <span class="text-white">{{ operational_bandwidth_gib|floatformat:"-3" }} GiB</span>
                         </div>
                         {% endif %}
 
@@ -272,6 +282,10 @@
                 </div>
 
             </div>
+
+            {% if staff_hosting_history %}
+              {% include "provisioning/partials/hosting_warning_history.html" with history=staff_hosting_history only %}
+            {% endif %}
 
             <!-- Status Timeline -->
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">

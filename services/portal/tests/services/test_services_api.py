@@ -26,6 +26,8 @@ CANONICAL_SERVICES_SUMMARY_KEYS = {
     "monthly_costs_by_currency",
     "total_disk_usage_gb",
     "total_bandwidth_usage_gb",
+    "hosting_warning_counts",
+    "hosting_warning_counts_valid_until",
     "service_types",
     "recent_services",
 }
@@ -70,9 +72,7 @@ class ServicesAPIClientSummaryShapeTests(SimpleTestCase):
 
     @patch("apps.services.services.ServicesAPIClient._make_request")
     def test_platform_api_error_fallback_matches_canonical(self, mock_make_request) -> None:
-        mock_make_request.side_effect = PlatformAPIError(
-            "platform down", status_code=500, is_rate_limited=False
-        )
+        mock_make_request.side_effect = PlatformAPIError("platform down", status_code=500, is_rate_limited=False)
         result = ServicesAPIClient().get_services_summary(customer_id=1, user_id=2)
         self.assertEqual(set(result.keys()), CANONICAL_SERVICES_SUMMARY_KEYS)
 

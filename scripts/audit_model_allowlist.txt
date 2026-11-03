@@ -128,7 +128,12 @@ common.Counter                  # infrastructure counters and claims: expiring r
 common.SystemCheckState         # bounded current operational evidence and claims, not business history; security and backup jobs retain their own audits (ADR-0064)
 common.NodeResourceHourlySummary # 30-day aggregate telemetry, no customer data; per-poll auditing would create an unbounded duplicate history (ADR-0064)
 provisioning.AccountUsageState   # current technical owner scope and last-good metric pointers; business ownership writes retain audits (ADR-0068)
+provisioning.HostingWarningState # technical accepted-observation and warning-episode cursor; no duplicate per-poll business audit
+provisioning.HostingWarningIntent # technical durable customer-warning obligation; customer consent and raise grants remain independently audited
+provisioning.HostingWarningDelivery # technical EmailLog linkage and immutable dispatch/refusal evidence; EmailLog owns transport history
+provisioning.HostingWarningDeliveryPart # technical immutable warning-intent/body membership and send-eligibility projection; delivery retains refusal history
 provisioning.NodeUsageSyncState  # bounded hourly usage claim and transport outcome; credential access retains audits (ADR-0068)
+provisioning.HostingLimitExecution # Technical native lease, fence and capacity projection; immutable HostingLimitApplication and VirtualminProvisioningJob retain acceptance and lifecycle audits.
 provisioning.UsageInterval       # technical canonical-node attribution and finalized response-byte segments; migration retains lifecycle audits (ADR-0068)
 provisioning.UsageReading        # ninety-day technical observations; never business billing events or per-poll AuditEvents (ADR-0068)
 common.LegalDocument            # publish_legal_document() writes legal_document_published in the same transaction; rows are immutable, so there is no other write to audit

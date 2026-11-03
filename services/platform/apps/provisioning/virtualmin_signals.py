@@ -276,6 +276,8 @@ def audit_virtualmin_account_changes(
                         "status": instance.status,
                         "customer_id": str(instance.praho_customer_id) if instance.praho_customer_id else None,
                         "service_id": str(instance.service_id),
+                        "quota_managed": instance.quota_managed,
+                        "quota_generation": instance.quota_generation,
                     },
                     description=f"Virtualmin account created for domain {instance.domain}",
                 ),
@@ -298,6 +300,23 @@ def audit_virtualmin_account_changes(
             update_fields = save_field_intent(instance, kwargs.get("update_fields"))
 
             if update_fields:
+                if "quota_managed" in update_fields:
+                    _log_optional_virtualmin_event(
+                        lambda: AuditEventData(
+                            event_type="virtualmin_account_updated",
+                            content_object=instance,
+                            old_values={"quota_managed": getattr(instance, "_hosting_quota_old_managed", None)},
+                            new_values={
+                                "quota_managed": instance.quota_managed,
+                                "quota_generation": instance.quota_generation,
+                                "hosting_limit_authority": getattr(instance, "_hosting_quota_authority", None),
+                            },
+                            description=f"Managed hosting quota verified for {instance.domain}",
+                        ),
+                        context=lambda: AuditContext(
+                            actor_type="system", metadata={"source_app": "provisioning", "quota_verification": True}
+                        ),
+                    )
                 if "status" in update_fields:
                     # Status change is critical for compliance
                     _log_optional_virtualmin_event(

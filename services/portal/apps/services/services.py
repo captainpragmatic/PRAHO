@@ -212,6 +212,8 @@ def _empty_services_summary() -> dict[str, Any]:
         "monthly_costs_by_currency": [],
         "total_disk_usage_gb": 0.0,
         "total_bandwidth_usage_gb": 0.0,
+        "hosting_warning_counts": None,
+        "hosting_warning_counts_valid_until": None,
         "service_types": {},
         "recent_services": [],
     }

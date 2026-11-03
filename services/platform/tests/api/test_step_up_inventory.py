@@ -42,6 +42,7 @@ GUARDED: dict[str, str] = {
     "api/dns/zones/<uuid:zone_id>/records/": "adds a record, which can send the domain's mail or web traffic elsewhere",
     "api/dns/zones/<uuid:zone_id>/records/<uuid:record_id>/": "changes or deletes a record",
     "api/services/<int:service_id>/actions/": "asks staff to upgrade, downgrade, suspend or cancel the service",
+    "api/services/<int:service_id>/plan-changes/<uuid:change_id>/status/": "shows an accepted sensitive plan checkout; current billing authority and identity check are required",
 }
 
 EXEMPT: dict[str, str] = {
@@ -163,6 +164,7 @@ PROVEN_BY: dict[str, str] = {
     "api/dns/zones/<uuid:zone_id>/records/": _DNS,
     "api/dns/zones/<uuid:zone_id>/records/<uuid:record_id>/": _DNS,
     "api/services/<int:service_id>/actions/": "tests.api.test_service_action_requests.ServiceActionRequestTests.test_a_request_needs_a_recent_identity_check",
+    "api/services/<int:service_id>/plan-changes/<uuid:change_id>/status/": "tests.api.test_service_plan_changes.ServicePlanChangeAPITests.test_an_old_identity_check_cannot_inspect_the_sensitive_checkout",
 }
 
 
@@ -203,7 +205,7 @@ class StepUpInventoryTests(SimpleTestCase):
         tested = {"api/" + action.path: EVERY_ACTION for action in ACTIONS} | PROVEN_BY
         self.assertEqual(sorted(set(GUARDED) - set(tested)), [])
         self.assertEqual(sorted(set(tested) - set(GUARDED)), [])
-        self.assertEqual(len(GUARDED), 24)
+        self.assertEqual(len(GUARDED), 25)
         for route, test in tested.items():
             with self.subTest(route=route):
                 # The named test must exist: renaming or deleting it fails here, not silently.

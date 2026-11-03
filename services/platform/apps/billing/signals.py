@@ -1211,6 +1211,15 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
     with best_effort_atomic(logger=logger, scope="Customer Credit", message="Credit score update failed"):
         if (payment.meta or {}).get("reservation_abandoned") is True:
             return
+        if (
+            (payment.meta or {}).get("source") == "hosting_plan_change"
+            and payment.status == "succeeded"
+            and old_status == "pending"
+        ):
+            # The gateway fact transaction owns Payment before Customer. Its
+            # durable attempt journal applies this reversible effect later,
+            # under the complete document-first customer context.
+            return
 
         event_type = None
         reverted_event_type = None
@@ -1235,6 +1244,17 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
                 payment.customer.id,
                 reverted_event_type,
             )
+
+
+def settle_plan_change_payment_credit(payment: Payment) -> None:
+    """Apply once while the caller holds document context, Customer and Payment."""
+    if (
+        (payment.meta or {}).get("source") != "hosting_plan_change"
+        or payment.status != "succeeded"
+        or _get_payment_credit_adjustment(payment, "positive_payment") is not None
+    ):
+        return
+    _apply_customer_payment_credit(payment, "positive_payment")
 
 
 def _get_payment_credit_adjustment(payment: Payment, event_type: str) -> int | None:

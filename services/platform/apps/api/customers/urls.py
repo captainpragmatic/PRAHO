@@ -5,6 +5,7 @@
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from .notification_preferences import quota_warning_preferences_api
 from .views import (
     CustomerProfileAPIView,
     CustomerSearchViewSet,
@@ -45,6 +46,7 @@ urlpatterns = [
     path("create/", customer_create_api, name="customer-create"),
     # Customer profile management (authenticated)
     path("profile/", CustomerProfileAPIView.as_view(), name="customer-profile"),
+    path("notification-preferences/", quota_warning_preferences_api, name="customer-notification-preferences"),
     # Customer billing address update for checkout UX (HMAC authenticated)
     path("billing-address/", update_customer_billing_address, name="customer-billing-address"),
     # Customer detail endpoint (HMAC authenticated)

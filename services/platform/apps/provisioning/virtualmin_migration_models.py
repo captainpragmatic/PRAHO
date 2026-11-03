@@ -363,7 +363,7 @@ ACTIVE_JOB_STATUSES = _ACTIVE_JOB_STATUSES
 
 # Operations that take the account exclusion: backups and restores, and deletion
 # (a delete mutates the very domain a backup or restore is reading or writing).
-_EXCLUSIVE_JOB_OPERATIONS = ("backup_domain", "restore_domain", "delete_domain")
+_EXCLUSIVE_JOB_OPERATIONS = ("backup_domain", "restore_domain", "delete_domain", "apply_hosting_limits")
 
 # The refusal every admission path gives while account_has_active_operation() holds.
 ACCOUNT_BUSY_REFUSAL = "Account already has another active operation"
@@ -410,7 +410,9 @@ def account_blocks_reconcile(account: VirtualminAccount) -> bool:
     if VirtualminAccount.objects.filter(pk=account.pk).exclude(restore_hold="").exists():
         return True
     return VirtualminProvisioningJob.objects.filter(
-        models.Q(operation__in=("restore_domain", "delete_domain"), status__in=_ACTIVE_JOB_STATUSES)
+        models.Q(
+            operation__in=("restore_domain", "delete_domain", "apply_hosting_limits"), status__in=_ACTIVE_JOB_STATUSES
+        )
         | models.Q(operation__in=_EXCLUSIVE_JOB_OPERATIONS, status="running")
         | models.Q(
             operation="suspend_domain", status__in=_ACTIVE_JOB_STATUSES, parameters__revoked_create_job_id__isnull=False

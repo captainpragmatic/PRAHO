@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% if edge %}{% trans "Edit upgrade path" %}{% else %}{% trans "Add upgrade path" %}{% endif %} - {{ product.name }}{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-6">
+  <h1 class="text-2xl font-semibold text-white">{% if edge %}{% trans "Edit upgrade path" %}{% else %}{% trans "Add upgrade path" %}{% endif %}</h1>
+  <p class="my-3 text-slate-300">{% trans "Source product:" %} {{ product.name }}</p>
+  <form method="post" class="rounded-lg border border-slate-700 bg-slate-800 p-6 space-y-4">
+    {% csrf_token %}{{ form.non_field_errors }}
+    {% for field in form %}<div>{{ field.label_tag }}{{ field }}{{ field.errors }}</div>{% endfor %}
+    {% trans "Save upgrade path" as save_label %}{% button save_label type="submit" variant="primary" %}
+    {% url 'products:upgrade_paths' product.slug as back_url %}
+    {% trans "Cancel" as cancel_label %}{% button cancel_label href=back_url variant="secondary" %}
+  </form>
+</div>
+{% endblock %}

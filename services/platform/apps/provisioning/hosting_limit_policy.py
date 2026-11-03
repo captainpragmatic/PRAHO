@@ -9,12 +9,74 @@ AllowanceSource = Literal["plan", "stored_default", "unlimited", "legacy_unknown
 MIB_PER_GIB = 1024
 BYTES_PER_MIB = 1024 * 1024
 POLICY_VERSION = 1
+OVERLAY_QUOTA_PROTOCOL = 2
 
 
 @dataclass(frozen=True)
 class Allowance:
     mib: int | None
     source: AllowanceSource
+
+
+@dataclass(frozen=True)
+class HostingAssignmentTerms:
+    """Internal accepted commercial authority; no new catalog/default lookup after claim."""
+
+    plan_id: int
+    disk_allowance_mib: int
+    bandwidth_allowance_mib: int
+    disk_source: AllowanceSource
+    bandwidth_source: AllowanceSource
+    policy_version: int = POLICY_VERSION
+
+    def __post_init__(self) -> None:
+        if type(self.plan_id) is not int or self.plan_id <= 0:
+            raise ValueError("Accepted hosting terms require an exact plan identity")
+        if type(self.policy_version) is not int or self.policy_version != POLICY_VERSION:
+            raise ValueError("The accepted hosting policy is unsupported")
+        for amount, source in (
+            (self.disk_allowance_mib, self.disk_source),
+            (self.bandwidth_allowance_mib, self.bandwidth_source),
+        ):
+            if (
+                type(amount) is not int
+                or amount < 0
+                or not isinstance(source, str)
+                or source not in {"plan", "stored_default", "unlimited"}
+            ):
+                raise ValueError("Accepted hosting allowances require known nonnegative integer MiB")
+            if source == "unlimited" and amount != 0:
+                raise ValueError("Unlimited provenance requires explicit zero")
+
+    def as_snapshot(self) -> dict[str, int | str]:
+        return {
+            "plan_id": self.plan_id,
+            "disk_allowance_mib": self.disk_allowance_mib,
+            "bandwidth_allowance_mib": self.bandwidth_allowance_mib,
+            "disk_source": self.disk_source,
+            "bandwidth_source": self.bandwidth_source,
+            "policy_version": self.policy_version,
+        }
+
+    @classmethod
+    def from_snapshot(cls, value: object) -> HostingAssignmentTerms:
+        if not isinstance(value, dict) or set(value) != {
+            "plan_id",
+            "disk_allowance_mib",
+            "bandwidth_allowance_mib",
+            "disk_source",
+            "bandwidth_source",
+            "policy_version",
+        }:
+            raise ValueError("The accepted hosting snapshot has an unsupported shape")
+        return cls(
+            plan_id=value["plan_id"],
+            disk_allowance_mib=value["disk_allowance_mib"],
+            bandwidth_allowance_mib=value["bandwidth_allowance_mib"],
+            disk_source=value["disk_source"],
+            bandwidth_source=value["bandwidth_source"],
+            policy_version=value["policy_version"],
+        )
 
 
 def resolve_allowance(plan_gib: object, stored_default_mib: object) -> Allowance:

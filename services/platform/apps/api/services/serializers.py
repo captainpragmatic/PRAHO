@@ -10,6 +10,14 @@ from rest_framework import serializers
 
 from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.services import preview_customer_vat_rate
+from apps.provisioning.hosting_limit_selectors import (
+    allowance_gib,
+    hosting_limits_summary,
+    operational_allowances,
+    usage_percentage,
+)
+from apps.provisioning.hosting_raise_service import prime_hosting_raises, service_raise_public_state
+from apps.provisioning.hosting_warning_selectors import prime_hosting_warnings, service_warning_data
 from apps.provisioning.relationship_models import ServiceDomain
 from apps.provisioning.service_models import Service, ServicePlan, ServicePlanPrice
 
@@ -18,6 +26,18 @@ def service_monthly_price(service: Service) -> Decimal:
     """Display the saved service charge, without repricing it from today's catalog."""
     months = {"monthly": 1, "quarterly": 3, "semi_annual": 6, "annual": 12}[service.billing_cycle]
     return service.price / months
+
+
+def hosting_raise_data(service: Service) -> dict[str, object] | None:
+    state = service_raise_public_state(service)
+    if state is None:
+        return None
+    return {
+        "state": state.state,
+        "extra_mib": state.extra_mib,
+        "expires_at": state.expires_at.isoformat(),
+        "revision": state.revision,
+    }
 
 
 class ServiceDomainSerializer(serializers.ModelSerializer):
@@ -102,11 +122,31 @@ class ServicePlanListSerializer(serializers.ModelSerializer):
         ]
 
 
+class ServiceUsageListSerializer(serializers.ListSerializer):
+    def to_representation(self, data: Any) -> list[dict[str, object]]:
+        from apps.provisioning.virtualmin_usage_service import prime_service_usage  # noqa: PLC0415
+
+        records = list(data.all() if hasattr(data, "all") else data)
+        prime_service_usage(records)
+        prime_hosting_raises(records)
+        prime_hosting_warnings(records)
+        return super().to_representation(records)
+
+
 class UsageRepresentationMixin(serializers.ModelSerializer):
     def to_representation(self, instance: Service) -> dict[str, object]:
-        from apps.provisioning.virtualmin_usage_service import observations_apply, public_usage  # noqa: PLC0415
+        from apps.provisioning.virtualmin_usage_service import (  # noqa: PLC0415
+            observations_apply,
+            prime_service_usage,
+            public_usage,
+        )
 
+        if not hasattr(instance, "_hosting_usage_context"):
+            prime_service_usage([instance])
         result = super().to_representation(instance)
+        result["hosting_limits"] = hosting_limits_summary(instance)
+        result["hosting_warnings"] = service_warning_data(instance)
+        result["hosting_raise"] = hosting_raise_data(instance)
         if observations_apply(instance):
             result.update(public_usage(instance))
         return result
@@ -146,6 +186,7 @@ class ServiceListSerializer(UsageRepresentationMixin):
 
     class Meta:
         model = Service
+        list_serializer_class = ServiceUsageListSerializer
         fields: ClassVar = [
             "id",
             "service_name",
@@ -329,28 +370,23 @@ class ServiceDetailSerializer(UsageRepresentationMixin):
         """Convert bandwidth usage from MB to GB"""
         return round(obj.bandwidth_usage_mb / 1024, 2)
 
-    def get_disk_usage_percentage(self, obj: Service) -> float:
+    def get_disk_usage_percentage(self, obj: Service) -> float | None:
         """Calculate disk usage percentage"""
-        if not obj.service_plan.disk_space_gb or obj.disk_usage_mb == 0:
-            return 0.0
+        return usage_percentage(obj.disk_usage_mb, operational_allowances(obj)[0])
 
-        used_gb = obj.disk_usage_mb / 1024
-        return round((used_gb / obj.service_plan.disk_space_gb) * 100, 1)
-
-    def get_bandwidth_usage_percentage(self, obj: Service) -> float:
+    def get_bandwidth_usage_percentage(self, obj: Service) -> float | None:
         """Calculate bandwidth usage percentage"""
-        if not obj.service_plan.bandwidth_gb or obj.bandwidth_usage_mb == 0:
-            return 0.0
-
-        used_gb = obj.bandwidth_usage_mb / 1024
-        return round((used_gb / obj.service_plan.bandwidth_gb) * 100, 1)
+        return usage_percentage(obj.bandwidth_usage_mb, operational_allowances(obj)[1])
 
     def get_monthly_price(self, obj: Service) -> Decimal:
         """Get monthly equivalent price"""
         return service_monthly_price(obj)
 
     def get_service_plan(self, obj: Service) -> dict[str, Any]:
-        return ServicePlanListSerializer(obj.service_plan, context={"currency_code": obj.currency_id}).data
+        result = ServicePlanListSerializer(obj.service_plan, context={"currency_code": obj.currency_id}).data
+        disk, bandwidth = operational_allowances(obj)
+        result.update(disk_space_gb=allowance_gib(disk), bandwidth_gb=allowance_gib(bandwidth))
+        return result
 
     def get_available_plans(self, obj: Service) -> list[dict[str, Any]]:
         plans = ServicePlan.objects.filter(
@@ -386,9 +422,10 @@ class ServiceDetailSerializer(UsageRepresentationMixin):
     def get_features(self, obj: Service) -> dict[str, Any]:
         """Get service plan features and limits"""
         plan = obj.service_plan
+        disk, bandwidth = operational_allowances(obj)
         return {
-            "disk_space_gb": plan.disk_space_gb,
-            "bandwidth_gb": plan.bandwidth_gb,
+            "disk_space_gb": allowance_gib(disk),
+            "bandwidth_gb": allowance_gib(bandwidth),
             "email_accounts": plan.email_accounts,
             "databases": plan.databases,
             "domains": plan.domains,

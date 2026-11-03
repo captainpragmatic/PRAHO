@@ -407,10 +407,14 @@ class VirtualminMigrationService:
     def _local_preflight(
         self, account: VirtualminAccount, target: VirtualminServer, *, component_scope: bool = False
     ) -> None:
+        from apps.infrastructure.node_maintenance_gate import native_account_observation_refusal  # noqa: PLC0415
+
         from .managed_dns_service import assert_move_ready  # noqa: PLC0415  # Customer zone integration
 
         if not self.enabled:
             raise ValueError("Virtualmin migration is disabled")
+        if refusal := native_account_observation_refusal(account.pk):
+            raise ValueError(refusal)
         if account_has_active_operation(account):
             raise ValueError(ACCOUNT_BUSY_REFUSAL)
         assert_move_ready(account)
@@ -548,6 +552,10 @@ class VirtualminMigrationService:
                         raise ValueError("Mail-enabled domains need the verified mail bridge before they can migrate")
                     if remote["enabled"] is not (account.status == "active"):
                         raise ValueError("Source enabled state disagrees with the account snapshot")
+                    from .hosting_limit_execution import (  # noqa: PLC0415
+                        freeze_migration_limits,
+                    )
+
                     self._move(
                         migration,
                         token,
@@ -556,6 +564,7 @@ class VirtualminMigrationService:
                             "domain": account.domain,
                             "status": account.status,
                             "remote": remote,
+                            "hosting_limits": freeze_migration_limits(account),
                         },
                     )
                 except Exception as error:
@@ -1005,7 +1014,14 @@ class VirtualminMigrationService:
                 [{"archive_name": migration.archive_name, "checksum_sha256": migration.archive_sha256}],
             )
             return
+        from .hosting_limit_execution import (  # noqa: PLC0415
+            reserve_managed_migration,
+        )
         from .virtualmin_restore_policy import prepare_restore_params  # noqa: PLC0415 -- shared archive capability gate
+
+        reserved = reserve_managed_migration(migration)
+        if reserved.is_err():
+            raise ValueError(reserved.unwrap_err())
 
         params = prepare_restore_params(
             migration.account,
@@ -1164,6 +1180,13 @@ class VirtualminMigrationService:
     def _activate(self, migration: VirtualminMigration, token: UUID) -> None:
         if refusal := destination_refusal(migration.target_server):
             raise ValueError(refusal)
+        from .hosting_limit_execution import (  # noqa: PLC0415 -- Current canonical-target policy completion barrier.
+            ensure_managed_limits,
+        )
+
+        limits = ensure_managed_limits(migration.account, migration=migration, native_server=migration.target_server)
+        if limits.is_err():
+            raise ValueError(limits.unwrap_err())
         if migration.contract == VirtualminMigration.Contract.CUTOVER:
             if migration.cutover_committed_at is None:
                 raise ValueError("The ownership commit must precede target activation")

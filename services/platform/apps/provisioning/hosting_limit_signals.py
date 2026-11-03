@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -11,6 +12,7 @@ from apps.audit.services import AuditService
 from apps.audit.switches import audit_signals_disabled
 
 from .hosting_limit_models import HostingLimitApplication, ServiceHostingLimits
+from .hosting_raise_models import ServiceHostingRaise
 
 
 def _limits_state(instance: ServiceHostingLimits) -> dict[str, object]:
@@ -24,6 +26,10 @@ def _limits_state(instance: ServiceHostingLimits) -> dict[str, object]:
         "disk_source": instance.disk_source,
         "bandwidth_source": instance.bandwidth_source,
         "applied_revision": instance.applied_revision,
+        "applied_overlay_revision": instance.applied_overlay_revision,
+        "operational_revision": instance.operational_revision,
+        "operational_disk_allowance_mib": instance.operational_disk_allowance_mib,
+        "operational_bandwidth_allowance_mib": instance.operational_bandwidth_allowance_mib,
     }
 
 
@@ -70,6 +76,9 @@ def audit_hosting_assignment(
             new_values={
                 "service_id": instance.service_id,
                 "revision": instance.revision,
+                "overlay_revision": instance.overlay_revision,
+                "overlay_extra_mib": instance.overlay_extra_mib,
+                "overlay_expires_at": instance.overlay_expires_at.isoformat() if instance.overlay_expires_at else None,
                 "policy_version": instance.policy_version,
                 "service_plan_id": instance.target_plan_id,
                 "disk_allowance_mib": instance.disk_allowance_mib,
@@ -79,3 +88,34 @@ def audit_hosting_assignment(
                 "authority": instance.authority,
             },
         )
+
+
+@receiver(post_save, sender=ServiceHostingRaise)
+def audit_hosting_raise(
+    sender: type[ServiceHostingRaise], instance: ServiceHostingRaise, created: bool, **kwargs: Any
+) -> None:
+    if not audit_signals_disabled():
+        AuditService.log_simple_event(
+            "create" if created else "update",
+            content_object=instance,
+            description="Temporary hosting resource overlay changed",
+            new_values={
+                "service_id": instance.service_id,
+                "revision": instance.revision,
+                "owner_id": instance.owner_id,
+                "extra_mib": instance.extra_mib,
+                "first_granted_at": instance.first_granted_at.isoformat(),
+                "expires_at": instance.expires_at.isoformat(),
+                "status": instance.status,
+            },
+        )
+
+
+@receiver(post_save, sender=HostingLimitApplication)
+def queue_hosting_assignment(
+    sender: type[HostingLimitApplication], instance: HostingLimitApplication, created: bool, **kwargs: Any
+) -> None:
+    if created:
+        from .hosting_limit_tasks import enqueue_application  # noqa: PLC0415 -- Enqueue only after commit.
+
+        transaction.on_commit(lambda: enqueue_application(instance.pk), using=kwargs.get("using"), robust=True)

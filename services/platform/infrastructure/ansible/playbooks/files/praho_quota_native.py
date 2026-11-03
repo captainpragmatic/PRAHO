@@ -10,6 +10,8 @@ import pwd
 import re
 import stat
 import subprocess
+import time
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -20,7 +22,40 @@ CAP_SYS_RESOURCE = 24
 KERNEL_QUOTA_REQUIRED_FIELDS = 15  # QIF_BLIMITS | QIF_SPACE | QIF_ILIMITS | QIF_INODES
 DATABASE_PROBE_COLUMNS = 2
 MAX_DATABASE_TABLES = 1000
+MAX_NATIVE_DOMAINS = 1000
+MAX_DATABASES = 32
+MAX_DATABASE_FILES = 4096
+PROBE_BUDGET_SECONDS = 60
+APPLY_BUDGET_SECONDS = 240
+_PROBE_DEADLINE: ContextVar[float | None] = ContextVar("quota_probe_deadline", default=None)
 DOMAIN_ROOT = Path("/etc/webmin/virtual-server/domains")
+
+
+def _overlay_window(request: dict[str, object]) -> bool:
+    """Recheck after long probes and before each native mutation phase."""
+    policy = request.get("policy")
+    if policy is None:
+        return False
+    if not isinstance(policy, dict) or type(policy.get("expiry_reduction")) is not bool:
+        raise ValueError("An exact temporary quota policy is required")
+    if type(policy.get("monotonic_reduction")) is not bool or (
+        policy["monotonic_reduction"] and not policy["expiry_reduction"]
+    ):
+        raise ValueError("An exact native expiry decrease policy is required")
+    expiry = datetime.fromisoformat(policy["expires_at"])
+    if expiry.tzinfo is None:
+        raise ValueError("An exact temporary quota expiry is required")
+    expired = expiry <= datetime.now(UTC)
+    if policy.get("extra_mib") and expired:
+        raise ValueError("The temporary quota overlay expired before native mutation")
+    if policy["expiry_reduction"] and (policy.get("extra_mib") != 0 or not expired):
+        raise ValueError("A preauthorized quota expiry requires an expired zero-extra overlay")
+    return policy["expiry_reduction"]
+
+
+def _no_cap_increase(limit: int, user_hard: object, group_hard: object) -> None:
+    if limit <= 0 or any(type(value) is not int or value < limit for value in (user_hard, group_hard)):
+        raise ValueError("Expiry cannot increase either independently observed native hard cap")
 
 
 def _read(path: Path) -> str:
@@ -50,11 +85,15 @@ def _fields(path: Path) -> dict[str, str]:
 def _run(arguments: list[str], *, timeout: int = 20, lock_fd: int | None = None, payload: str | None = None) -> str:
     # All executables/options are fixed here; tenant metadata is passed as argv,
     # never shell text. Diagnostics remain on the node and never enter a receipt.
+    deadline = _PROBE_DEADLINE.get()
+    remaining = timeout if deadline is None else min(timeout, deadline - time.monotonic())
+    if remaining <= 0:
+        raise TimeoutError("The bounded native quota probe budget expired")
     result = subprocess.run(  # noqa: S603 -- Fixed executables and validated identities, no shell.
         arguments,
         capture_output=True,
         text=True,
-        timeout=timeout,
+        timeout=remaining,
         check=False,
         input=payload,
         pass_fds=() if lock_fd is None else (lock_fd,),
@@ -72,6 +111,29 @@ def _integer(value: str | None) -> int:
     if result > (1 << 63) - 1:
         raise ValueError("A native quota quantity exceeds its bound")
     return result
+
+
+def _configured_bandwidth(domain: dict[str, str]) -> int:
+    # Virtualmin8.3 virtual-server-lib-funcs.pl:8139 treats both absent/empty
+    # bw_limit and literal0 as unlimited. This is a root-owned LOCAL domain file,
+    # never missing transport fields; malformed/nonempty values still refuse.
+    return _configured_limit(domain, "bw_limit")
+
+
+def _configured_limit(domain: dict[str, str], field: str) -> int:
+    # The same pinned native aggregate uses empty/absent quota and uquota as
+    # unlimited at8133; these are local config values, not missing RPC evidence.
+    if field not in {"quota", "uquota", "bw_limit"}:
+        raise ValueError("Unsupported native quota metadata field")
+    return _integer(domain.get(field) or "0")
+
+
+def _bandwidth_actions_safe(domain: dict[str, str], config: dict[str, str]) -> bool:
+    # Pinned8.3 bw.pl uses Perl truth: only absent/empty/literal0 are off.
+    # Require our exact repaired per-domain value, independently of mail ownership.
+    return domain.get("bw_no_disable") == "1" and all(
+        config.get(key, "") in {"", "0"} for key in ("bw_disable", "bw_enable")
+    )
 
 
 class _Quota(ctypes.Structure):
@@ -237,7 +299,11 @@ class NativeQuotaBackend:
             or (str(account.pw_uid), str(account.pw_gid)) != (domain.get("uid"), domain.get("gid"))
         ):
             raise ValueError("Qualify a standalone web-only quota owner before managed limits")
-        for path in DOMAIN_ROOT.iterdir():
+        for number, path in enumerate(DOMAIN_ROOT.iterdir()):
+            if number >= MAX_NATIVE_DOMAINS or (
+                _PROBE_DEADLINE.get() is not None and time.monotonic() >= _PROBE_DEADLINE.get()
+            ):
+                raise ValueError("The native domain inventory exceeds the bounded qualification budget")
             if path.name == identifier or re.fullmatch(r"[0-9]{1,30}", path.name) is None:
                 continue
             other = _fields(path)
@@ -249,7 +315,11 @@ class NativeQuotaBackend:
                 raise ValueError("One quota-bearing service must own the complete native UID/GID scope")
         return domain, account
 
-    def _storage(self, domain: dict[str, str], account: pwd.struct_passwd) -> tuple[str, str]:
+    def _storage(  # noqa: C901, PLR0912 -- Every filesystem, writer, tablespace and bounded-inventory proof must hold.
+        self,
+        domain: dict[str, str],
+        account: pwd.struct_passwd,
+    ) -> tuple[str, str]:
         home = Path(account.pw_dir)
         if home.resolve() != home or home.stat().st_uid != account.pw_uid or home.stat().st_gid != account.pw_gid:
             raise ValueError("The native home filesystem or ownership changed")
@@ -290,7 +360,10 @@ class NativeQuotaBackend:
         datadir = Path(database[0].rstrip("/"))
         if datadir.resolve() != datadir or datadir.stat().st_dev != home.stat().st_dev:
             raise ValueError("Home and tenant database data must share the quota filesystem")
-        for name in domain.get("db_mysql", "").split():
+        names = domain.get("db_mysql", "").split()
+        if len(names) > MAX_DATABASES:
+            raise ValueError("The native database inventory exceeds the bounded qualification budget")
+        for name in names:
             if re.fullmatch(r"[A-Za-z0-9_]{1,64}", name) is None:
                 raise ValueError("The database storage name is unsupported")
             directory = datadir / name
@@ -303,14 +376,27 @@ class NativeQuotaBackend:
                 or not info.st_mode & stat.S_ISGID
             ):
                 raise ValueError("Database group ownership/setgid is not qualified")
-            for path in directory.iterdir():
+            for number, path in enumerate(directory.iterdir()):
+                deadline = _PROBE_DEADLINE.get()
+                if number >= MAX_DATABASE_FILES or (deadline is not None and time.monotonic() >= deadline):
+                    raise ValueError("The native database files exceed the bounded qualification budget")
                 item = path.lstat()
                 if not stat.S_ISREG(item.st_mode) or item.st_gid != account.pw_gid or item.st_dev != info.st_dev:
                     raise ValueError("Tenant database files are outside the group quota")
             qualify_table_storage(directory, _table_inventory(name), gid=account.pw_gid, device=home.stat().st_dev)
+        self._qualified_databases = tuple(datadir / name for name in names)
         return source, filesystem_uuid
 
     def probe(self, request: dict[str, object]) -> dict[str, object]:
+        deadline = time.monotonic() + PROBE_BUDGET_SECONDS
+        outer = _PROBE_DEADLINE.get()
+        token = _PROBE_DEADLINE.set(deadline if outer is None else min(outer, deadline))
+        try:
+            return self._probe(request)
+        finally:
+            _PROBE_DEADLINE.reset(token)
+
+    def _probe(self, request: dict[str, object]) -> dict[str, object]:
         domain, account = self._domain(request)
         device, filesystem_uuid = self._storage(domain, account)
         installation = _read(Path("/var/lib/praho/usage/installation")).strip()
@@ -335,8 +421,20 @@ class NativeQuotaBackend:
         if any(quota.inode_hard or quota.inode_soft for quota in (user_quota, group_quota)):
             raise ValueError("Inode caps require separate reviewed support")
         space = os.statvfs(account.pw_dir)
+        # Reuse ADR0068's canonical allocated-home + tenant-local DB measurement,
+        # independently of the kernel's UID/GID accounting used for safety.
+        from praho_usage import allocated_bytes, disk_measurement  # noqa: PLC0415 -- Root-owned installed sibling.
+
+        deadline = _PROBE_DEADLINE.get()
+        databases = []
+        for directory in self._qualified_databases:
+            budget = 20 if deadline is None else min(20, deadline - time.monotonic())
+            databases.append((directory, allocated_bytes(directory, budget_seconds=budget)))
+        budget = 20 if deadline is None else min(20, deadline - time.monotonic())
+        observation = disk_measurement(Path(account.pw_dir), databases, budget_seconds=budget)
         return {
             "schema": 1,
+            "quota_protocol": 2,
             "identity": identity,
             "observed_at": datetime.now(UTC).isoformat(),
             "filesystem": "ext4",
@@ -350,12 +448,27 @@ class NativeQuotaBackend:
             "uid_used_bytes": user_quota.space,
             "gid_used_bytes": group_quota.space,
             "available_bytes": space.f_bavail * space.f_frsize,
-            "configured_quota_kib": _integer(domain.get("quota")),
-            "configured_uquota_kib": _integer(domain.get("uquota")),
-            "configured_bandwidth_bytes": _integer(domain.get("bw_limit")),
+            "configured_quota_kib": _configured_limit(domain, "quota"),
+            "configured_uquota_kib": _configured_limit(domain, "uquota"),
+            "configured_bandwidth_bytes": _configured_bandwidth(domain),
+            "bandwidth_actions_safe": _bandwidth_actions_safe(
+                domain, _fields(Path("/etc/webmin/virtual-server/config"))
+            ),
+            "observation": {
+                "files_bytes": observation["disk_files_bytes"],
+                "database_bytes": observation["disk_db_bytes"],
+                "total_bytes": observation["disk_total_bytes"],
+            },
         }
 
     def apply(self, request: dict[str, object], *, lock_fd: int) -> None:
+        token = _PROBE_DEADLINE.set(time.monotonic() + APPLY_BUDGET_SECONDS)
+        try:
+            self._apply(request, lock_fd=lock_fd)
+        finally:
+            _PROBE_DEADLINE.reset(token)
+
+    def _apply(self, request: dict[str, object], *, lock_fd: int) -> None:
         identity = request["identity"]
         if not isinstance(identity, dict) or set(identity) != IDENTITY_FIELDS:
             raise ValueError("A mutation requires the complete reviewed native identity")
@@ -364,7 +477,17 @@ class NativeQuotaBackend:
         bandwidth = request["bandwidth_limit_bytes"]
         if type(limit) is not int or type(bandwidth) is not int or min(limit, bandwidth) < 0:
             raise ValueError("Native limits must be explicit nonnegative integers")
-        if limit and max(before["uid_used_bytes"], before["gid_used_bytes"]) > limit * 1024:
+        expiry_reduction = _overlay_window(request)
+        policy = request.get("policy")
+        monotonic_reduction = isinstance(policy, dict) and policy["monotonic_reduction"] is True
+        if monotonic_reduction:
+            _no_cap_increase(limit, before.get("uid_hard_kib"), before.get("gid_hard_kib"))
+        if (
+            limit
+            and not expiry_reduction
+            and max(before["uid_used_bytes"], before["gid_used_bytes"], before["observation"]["total_bytes"])
+            > limit * 1024
+        ):
             raise ValueError("Current native usage exceeds the requested cap")
         # Only this fixed, synchronous metadata helper may mutate in a child. It
         # inherits the lane FD, rechecks the permanent fence under that lock, and
@@ -376,6 +499,23 @@ class NativeQuotaBackend:
             payload=json.dumps(request, sort_keys=True, separators=(",", ":")),
         )
         domain, account = self._domain(request)
-        device, _ = self._storage(domain, account)
-        _set_kernel_quota(device, account.pw_uid, limit, group=False)
-        _set_kernel_quota(device, account.pw_gid, limit, group=True)
+        device, filesystem_uuid = self._storage(domain, account)
+        if (
+            domain.get("id") != identity["domain_id"]
+            or domain.get("dom") != identity["domain"]
+            or account.pw_uid != identity["uid"]
+            or account.pw_gid != identity["gid"]
+            or filesystem_uuid != identity["filesystem_uuid"]
+        ):
+            raise ValueError("The native quota owner or filesystem changed before the kernel update")
+        _overlay_window(request)
+        if monotonic_reduction:
+            _no_cap_increase(
+                limit,
+                _kernel_quota(device, identity["uid"], group=False).hard,
+                _kernel_quota(device, identity["gid"], group=True).hard,
+            )
+        # Always target the immutable reviewed numeric owner, never a newly
+        # retargeted UID/GID obtained from a later local metadata read.
+        _set_kernel_quota(device, identity["uid"], limit, group=False)
+        _set_kernel_quota(device, identity["gid"], limit, group=True)

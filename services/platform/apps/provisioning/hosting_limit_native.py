@@ -10,7 +10,7 @@ from uuid import UUID
 
 from django.utils.dateparse import parse_datetime
 
-from .hosting_limit_policy import BYTES_PER_MIB
+from .hosting_limit_policy import BYTES_PER_MIB, OVERLAY_QUOTA_PROTOCOL
 
 MAX_QUANTITY = (1 << 63) - 1
 MAX_RECEIPT_AGE = timedelta(minutes=2)
@@ -51,6 +51,57 @@ class VerifiedQuota:
     observed_at: datetime
 
 
+@dataclass(frozen=True)
+class VerifiedQuotaProbe:
+    """Known current evidence; differing caps are not a successful application."""
+
+    capacity_baseline_kib: int | None
+    safety_used_bytes: int
+    available_bytes: int
+    observed_at: datetime
+
+
+def current_verified_binding(  # noqa: PLR0913 -- Batch selectors supply preloaded scalar authority, never native I/O.
+    *,
+    record: Mapping[str, object],
+    service_id: int,
+    owner_id: int,
+    revision: int,
+    server_id: object,
+    connection_identity: str,
+    node_identity: Mapping[str, str],
+    overlay_revision: int = 0,
+    overlay_extra_mib: int = 0,
+    overlay_expires_at: datetime | None = None,
+) -> bool:
+    """Pure current-state predicate; historical verified receipts remain visible separately.
+
+    ``record`` is a values()/preloaded projection of execution and its job. This
+    function performs zero queries, so list selectors can cache node policy once.
+    """
+    identity, receipt = record.get("identity"), record.get("receipt")
+    return bool(
+        record.get("phase") == "completed"
+        and record.get("service_id") == service_id
+        and record.get("owner_id") == owner_id
+        and record.get("service_revision") == revision
+        and record.get("overlay_revision", 0) == overlay_revision
+        and record.get("overlay_extra_mib", 0) == overlay_extra_mib
+        and record.get("overlay_expires_at") == overlay_expires_at
+        and record.get("server_id") == server_id
+        and record.get("connection_identity") == connection_identity
+        and set(node_identity) == {"installation", "filesystem_uuid", "boot_id"}
+        and isinstance(identity, dict)
+        and isinstance(receipt, dict)
+        and receipt.get("bandwidth_actions_safe") is True
+        and (overlay_revision == 0 or receipt.get("quota_protocol") == OVERLAY_QUOTA_PROTOCOL)
+        and all(identity.get(key) == value for key, value in node_identity.items())
+        and receipt.get("identity") == identity
+        and receipt.get("generation") == record.get("account_epoch")
+        and receipt.get("token") == record.get("token")
+    )
+
+
 def quantity(value: object) -> int:
     if type(value) is not int or not 0 <= value <= MAX_QUANTITY:
         raise ValueError("Native quota quantities must be explicit nonnegative integers")
@@ -81,38 +132,29 @@ def verify_quota_receipt(  # noqa: PLR0913 -- All expected authority is mandator
     disk_limit_mib: int,
     bandwidth_limit_mib: int,
     now: datetime,
+    require_bandwidth_actions_safe: bool = False,
 ) -> VerifiedQuota:
     """Verify an exact, recent result of the fenced application, including both kernel targets.
 
     Calling this on an arbitrary probe is NOT recovery: the caller must first obtain
     the native terminal receipt or fence the original token under the native lock.
     """
-    if not isinstance(receipt, dict) or set(receipt) != RECEIPT_FIELDS:
-        raise ValueError("The native quota receipt has an unsupported shape")
     if (
-        type(receipt["schema"]) is not int
-        or receipt["schema"] != 1
-        or validate_identity(receipt["identity"]) != validate_identity(dict(identity))
+        not isinstance(receipt, dict)
+        or set(receipt) - {"observation", "bandwidth_actions_safe", "quota_protocol"} != RECEIPT_FIELDS
     ):
-        raise ValueError("The native quota receipt belongs to a different identity or policy")
+        raise ValueError("The native quota receipt has an unsupported shape")
+    probe = verify_quota_probe(
+        {key: value for key, value in receipt.items() if key not in {"token", "generation"}},
+        identity=identity,
+        now=now,
+    )
     if str(UUID(token)) != token or receipt["token"] != token:
         raise ValueError("The native quota receipt belongs to another application")
     if quantity(receipt["generation"]) != quantity(generation) or generation == 0:
         raise ValueError("The native quota receipt belongs to another generation")
-    observed = parse_datetime(receipt["observed_at"]) if isinstance(receipt["observed_at"], str) else None
-    if (
-        observed is None
-        or observed.utcoffset() is None
-        or now.utcoffset() is None
-        or not -timedelta(seconds=5) <= now - observed <= MAX_RECEIPT_AGE
-    ):
-        raise ValueError("The native quota receipt is stale or has no trustworthy time")
-    if receipt["filesystem"] != "ext4" or any(
-        receipt[field] is not True for field in ("storage_qualified", "uid_enforced", "gid_enforced")
-    ):
-        raise ValueError("The native filesystem, storage or kernel enforcement is not qualified")
-    for field in QUANTITY_FIELDS:
-        quantity(receipt[field])
+    if require_bandwidth_actions_safe and receipt.get("bandwidth_actions_safe") is not True:
+        raise ValueError("Native bandwidth suspension and reactivation must remain disabled")
     expected_kib = quantity(disk_limit_mib) * 1024
     if any(
         receipt[field] != expected_kib
@@ -133,5 +175,71 @@ def verify_quota_receipt(  # noqa: PLR0913 -- All expected authority is mandator
         bandwidth_limit_mib=bandwidth_limit_mib,
         safety_used_bytes=max(receipt["uid_used_bytes"], receipt["gid_used_bytes"]),
         available_bytes=receipt["available_bytes"],
+        observed_at=probe.observed_at,
+    )
+
+
+def verify_quota_probe(
+    probe: object,
+    *,
+    identity: Mapping[str, str | int],
+    now: datetime,
+) -> VerifiedQuotaProbe:
+    """Validate a fresh closed read without assuming old UID/GID/config caps agree.
+
+    Explicit adoption can repair a known historical missing-uquota configuration.
+    Only the final token-bound receipt may certify the new exact matching caps.
+    """
+    fields = RECEIPT_FIELDS - {"token", "generation"}
+    if (
+        not isinstance(probe, dict)
+        or set(probe) - {"observation", "bandwidth_actions_safe", "quota_protocol"} != fields
+    ):
+        raise ValueError("The native quota probe has an unsupported shape")
+    if "quota_protocol" in probe and (
+        type(probe["quota_protocol"]) is not int or probe["quota_protocol"] not in {1, 2}
+    ):
+        raise ValueError("The native quota protocol is unsupported")
+    if "bandwidth_actions_safe" in probe and type(probe["bandwidth_actions_safe"]) is not bool:
+        raise ValueError("Native bandwidth action safety must be explicit")
+    if (
+        type(probe["schema"]) is not int
+        or probe["schema"] != 1
+        or validate_identity(probe["identity"]) != validate_identity(dict(identity))
+    ):
+        raise ValueError("The native quota probe belongs to another identity or policy")
+    observed = parse_datetime(probe["observed_at"]) if isinstance(probe["observed_at"], str) else None
+    if (
+        observed is None
+        or observed.utcoffset() is None
+        or now.utcoffset() is None
+        or not -timedelta(seconds=5) <= now - observed <= MAX_RECEIPT_AGE
+    ):
+        raise ValueError("The native quota probe is stale or has no trustworthy time")
+    if probe["filesystem"] != "ext4" or any(
+        probe[field] is not True for field in ("storage_qualified", "uid_enforced", "gid_enforced")
+    ):
+        raise ValueError("The native filesystem, storage or kernel enforcement is not qualified")
+    for field in QUANTITY_FIELDS:
+        quantity(probe[field])
+    if "observation" in probe:
+        canonical_observation(probe["observation"])
+    positive = [
+        probe[key] for key in ("uid_soft_kib", "uid_hard_kib", "gid_soft_kib", "gid_hard_kib") if probe[key] > 0
+    ]
+    return VerifiedQuotaProbe(
+        capacity_baseline_kib=min(positive) if positive else None,
+        safety_used_bytes=max(probe["uid_used_bytes"], probe["gid_used_bytes"]),
+        available_bytes=probe["available_bytes"],
         observed_at=observed,
     )
+
+
+def canonical_observation(value: object) -> int:
+    """A distinct canonical numerator; kernel totals never stand in for missing data."""
+    if not isinstance(value, dict) or set(value) != {"files_bytes", "database_bytes", "total_bytes"}:
+        raise ValueError("The canonical disk observation has an unsupported shape")
+    files, database, total = (quantity(value[key]) for key in ("files_bytes", "database_bytes", "total_bytes"))
+    if files + database != total:
+        raise ValueError("The canonical disk observation does not conserve allocated bytes")
+    return total

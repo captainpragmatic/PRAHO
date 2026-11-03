@@ -34,9 +34,15 @@ class ServiceHostingLimits(models.Model):
     bandwidth_allowance_mib = models.PositiveBigIntegerField(null=True)
     disk_source = models.CharField(max_length=24)
     bandwidth_source = models.CharField(max_length=24)
+    # Keep the operational allowance while a newer paid/explicit assignment is
+    # pending. Native verification is represented separately below.
+    operational_revision = models.PositiveBigIntegerField(null=True)
+    operational_disk_allowance_mib = models.PositiveBigIntegerField(null=True)
+    operational_bandwidth_allowance_mib = models.PositiveBigIntegerField(null=True)
     # Last verified state is deliberately separate from desired state. A successful
     # metadata write or a catalog change must not certify kernel enforcement.
     applied_revision = models.PositiveBigIntegerField(null=True)
+    applied_overlay_revision = models.PositiveBigIntegerField(default=0)
     applied_disk_allowance_mib = models.PositiveBigIntegerField(null=True)
     applied_bandwidth_allowance_mib = models.PositiveBigIntegerField(null=True)
     verified_receipt = models.JSONField(default=dict)
@@ -63,6 +69,9 @@ class HostingLimitApplication(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     service = models.ForeignKey("provisioning.Service", on_delete=models.CASCADE, related_name="limit_applications")
     revision = models.PositiveBigIntegerField()
+    overlay_revision = models.PositiveBigIntegerField(default=0)
+    overlay_extra_mib = models.PositiveIntegerField(default=0)
+    overlay_expires_at = models.DateTimeField(null=True)
     submission_id = models.UUIDField()
     expected_plan_id = models.PositiveBigIntegerField()
     target_plan_id = models.PositiveBigIntegerField()
@@ -79,7 +88,9 @@ class HostingLimitApplication(models.Model):
         db_table = "provisioning_hosting_limit_application"
         db_table_comment = "Durable accepted resource assignments, independent of native account locks and retries."
         constraints: ClassVar[list[models.BaseConstraint]] = [
-            models.UniqueConstraint(fields=("service", "revision"), name="hosting_application_revision_unique"),
+            models.UniqueConstraint(
+                fields=("service", "revision", "overlay_revision"), name="hosting_application_base_overlay_unique"
+            ),
             models.UniqueConstraint(fields=("service", "submission_id"), name="hosting_application_submission_unique"),
         ]
 

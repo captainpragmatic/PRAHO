@@ -6,6 +6,8 @@ use warnings;
 use JSON::PP ();
 use Digest::SHA qw(sha256_hex);
 use Fcntl qw(:flock);
+use Time::Local qw(timegm);
+use Time::HiRes ();
 
 die "Root quota metadata operation required\n" unless $> == 0 && @ARGV == 1 && $ARGV[0] =~ /^[0-9]{1,5}$/ && $ARGV[0] >= 3;
 open(my $lane, '>&='.$ARGV[0]) or die "Native quota lane unavailable\n";
@@ -63,9 +65,24 @@ my $ok = eval {
         my $expected = $field eq 'id' ? $identity->{'domain_id'} : $field eq 'dom' ? $identity->{'domain'} : $identity->{$field};
         die "Native quota ownership changed\n" unless defined($expected) && "$domain->{$field}" eq "$expected";
     }
+    my $policy = $request->{'policy'};
+    if (defined($policy)) {
+        die "Invalid quota overlay policy\n" unless ref($policy) eq 'HASH';
+        my $expiry = $policy->{'expires_at'} || '';
+        die "Invalid quota overlay expiry\n" unless $expiry =~ /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,6}))?\+00:00$/;
+        my $deadline = timegm($6, $5, $4, $3, $2 - 1, $1) + (defined($7) ? "0.$7" : 0);
+        my $expired = $deadline <= Time::HiRes::time();
+        die "Temporary quota overlay expired\n" if $policy->{'extra_mib'} && $expired;
+        die "Quota overlay has not expired\n" if $policy->{'expiry_reduction'} && !$expired;
+    }
     $domain->{'quota'} = $request->{'disk_limit_kib'};
     $domain->{'uquota'} = $request->{'disk_limit_kib'};
     $domain->{'bw_limit'} = $request->{'bandwidth_limit_bytes'};
+    # The same synchronous child owns the inherited quota lane and native
+    # domain lock; restored customer notification rows cannot outlive its fence.
+    require '/usr/local/lib/praho/praho-notification-policy.pl';
+    &virtual_server::praho_enforce_resource_policy($domain);
+    &virtual_server::praho_enforce_domain_notifications($domain);
     &save_domain($domain) or die "Native quota metadata could not be saved\n";
     1;
 };

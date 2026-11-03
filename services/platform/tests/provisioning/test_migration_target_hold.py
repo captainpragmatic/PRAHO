@@ -40,11 +40,13 @@ class HeldTargetRestoreTests(TestCase):
             barrier_state={},
             target_server=SimpleNamespace(pk=target.pk, node_deployment=object(), security_state="unreviewed"),
             account=SimpleNamespace(
+                quota_managed=False,
                 domain="customer.example",
                 virtualmin_username="customer",
                 template_name="Default",
                 get_recovery_seed=lambda: "seed",
                 disk_quota_mb=10,
+                effective_disk_quota_mb=None,
                 bandwidth_quota_mb=20,
             ),
             pre_migration_snapshot={"status": "active"},

@@ -16,7 +16,7 @@ from django.urls import reverse
 
 from apps.customers.models import Customer
 from apps.provisioning.models import Service
-from apps.provisioning.virtualmin_models import VirtualminAccount
+from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from tests.provisioning.test_cov_virtualmin_views_servers import VirtualminViewsFixture
 
 SYNC = "provisioning:virtualmin_accounts_sync"
@@ -83,6 +83,28 @@ class UnknownDomainSyncTests(VirtualminViewsFixture):
         text = self.messages(response)
         self.assertIn("1 updated", text)
         self.assertIn("1 unassigned", text)
+
+    def test_discovery_cannot_retarget_an_uncertain_quota_operation_off_its_original_node(self) -> None:
+        original = VirtualminServer.objects.create(
+            name="failed-original",
+            hostname="failed-original.example.com",
+            api_username="root",
+            status="failed",
+        )
+        self.account.server = original
+        self.account.save(update_fields=["server", "updated_at"])
+        VirtualminProvisioningJob.objects.create(
+            operation="apply_hosting_limits",
+            account=self.account,
+            server=original,
+            status="attention",
+            correlation_id="quota-original-node",
+        )
+        self.payload["data"] = [listing_row(self.account.domain, self.account.virtualmin_username)]
+        self.client.post(reverse(SYNC))
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.server_id, original.pk)
+        self.assertIsNone(self.account.last_sync_at)
 
 
 class StaleSaveSyncTests(VirtualminViewsFixture):

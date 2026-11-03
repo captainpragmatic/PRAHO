@@ -10,7 +10,7 @@ from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.metering_models import BillingCycle, UsageAggregation
-from apps.billing.models import CreditLedger, Currency, Invoice, Payment, PriceGrandfathering
+from apps.billing.models import CreditLedger, Currency, Invoice, InvoiceSequence, Payment, PriceGrandfathering
 from apps.billing.subscription_service import GrandfatheringService, SubscriptionService
 from apps.billing.usage_invoice_service import UsageInvoiceService
 from apps.customers.models import Customer
@@ -26,8 +26,12 @@ class CurrencyBoundCreditTests(TestCase):
 
     def invoice(self, currency: Currency, number: str) -> Invoice:
         return Invoice.objects.create(
-            customer=self.customer, currency=currency, number=number,
-            subtotal_cents=1000, total_cents=1000, due_at=timezone.now(),
+            customer=self.customer,
+            currency=currency,
+            number=number,
+            subtotal_cents=1000,
+            total_cents=1000,
+            due_at=timezone.now(),
         )
 
     def test_manual_credit_requires_original_currency(self) -> None:
@@ -37,26 +41,38 @@ class CurrencyBoundCreditTests(TestCase):
     def test_document_evidence_sets_original_currency_and_rejects_conflicts(self) -> None:
         invoice = self.invoice(self.eur, "EUR-CREDIT")
         credit = CreditLedger.objects.create(
-            customer=self.customer, invoice=invoice, delta_cents=1200, reason="Invoice adjustment",
+            customer=self.customer,
+            invoice=invoice,
+            delta_cents=1200,
+            reason="Invoice adjustment",
         )
         self.assertEqual(credit.currency_id, "EUR")
         self.assertEqual(credit.delta_cents, 1200)
         self.assertEqual(credit.currency_hold_reason, "")
         with self.assertRaises(ValidationError):
             CreditLedger.objects.create(
-                customer=self.customer, invoice=invoice, currency=self.ron,
-                delta_cents=1200, reason="Incorrect relabel",
+                customer=self.customer,
+                invoice=invoice,
+                currency=self.ron,
+                delta_cents=1200,
+                reason="Incorrect relabel",
             )
         payment = Payment.objects.create(customer=self.customer, currency=self.ron, amount_cents=1000)
         with self.assertRaises(ValidationError):
             CreditLedger.objects.create(
-                customer=self.customer, invoice=invoice, payment=payment,
-                delta_cents=1200, reason="Conflicting evidence",
+                customer=self.customer,
+                invoice=invoice,
+                payment=payment,
+                delta_cents=1200,
+                reason="Conflicting evidence",
             )
 
     def test_credit_currency_cannot_be_relabelled_after_creation(self) -> None:
         credit = CreditLedger.objects.create(
-            customer=self.customer, currency=self.eur, delta_cents=1200, reason="Manual EUR credit",
+            customer=self.customer,
+            currency=self.eur,
+            delta_cents=1200,
+            reason="Manual EUR credit",
         )
         credit.currency = self.ron
         with self.assertRaises(ValidationError):
@@ -67,7 +83,10 @@ class CurrencyBoundCreditTests(TestCase):
     def test_removing_source_does_not_allow_credit_currency_to_change(self) -> None:
         source = self.invoice(self.eur, "REMOVED-CREDIT-SOURCE")
         credit = CreditLedger.objects.create(
-            customer=self.customer, invoice=source, delta_cents=1200, reason="Original invoice credit",
+            customer=self.customer,
+            invoice=source,
+            delta_cents=1200,
+            reason="Original invoice credit",
         )
         source.delete()
         credit.refresh_from_db()
@@ -81,13 +100,22 @@ class CurrencyBoundCreditTests(TestCase):
     def test_balances_remain_separate_and_held_legacy_entries_are_reported(self) -> None:
         for currency, value in [(self.ron, 300), (self.eur, 700)]:
             CreditLedger.objects.create(
-                customer=self.customer, currency=currency, delta_cents=value, reason="Explicit credit",
+                customer=self.customer,
+                currency=currency,
+                delta_cents=value,
+                reason="Explicit credit",
             )
         # Historical migrations retain this entry without inventing a currency.
-        CreditLedger.objects.bulk_create([
-            CreditLedger(customer=self.customer, delta_cents=900, reason="Legacy manual credit",
-                         currency_hold_reason="No immutable source identifies the original currency")
-        ])
+        CreditLedger.objects.bulk_create(
+            [
+                CreditLedger(
+                    customer=self.customer,
+                    delta_cents=900,
+                    reason="Legacy manual credit",
+                    currency_hold_reason="No immutable source identifies the original currency",
+                )
+            ]
+        )
         service = UsageInvoiceService()
         self.assertEqual(service._get_customer_credit_balance(self.customer, self.ron), 300)
         self.assertEqual(service._get_customer_credit_balance(self.customer, self.eur), 700)
@@ -98,12 +126,21 @@ class CurrencyBoundCreditTests(TestCase):
 
     def test_unattributed_debit_holds_spending_without_erasing_known_balances(self) -> None:
         CreditLedger.objects.create(
-            customer=self.customer, currency=self.eur, delta_cents=1200, reason="Original EUR credit",
+            customer=self.customer,
+            currency=self.eur,
+            delta_cents=1200,
+            reason="Original EUR credit",
         )
-        CreditLedger.objects.bulk_create([
-            CreditLedger(customer=self.customer, delta_cents=-300, reason="Legacy use",
-                         currency_hold_reason="No immutable source identifies the original currency")
-        ])
+        CreditLedger.objects.bulk_create(
+            [
+                CreditLedger(
+                    customer=self.customer,
+                    delta_cents=-300,
+                    reason="Legacy use",
+                    currency_hold_reason="No immutable source identifies the original currency",
+                )
+            ]
+        )
         self.assertEqual(CreditLedger.balances_for_customer(self.customer), {"EUR": 1200})
         self.assertEqual(UsageInvoiceService()._get_customer_credit_balance(self.customer, self.eur), 0)
 
@@ -115,12 +152,19 @@ class UsageInvoiceCurrencyIsolationTests(TestCase):
     def test_euro_credit_cannot_pay_a_ron_usage_invoice(self) -> None:
         eur, _ = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "€"})
         source = Invoice.objects.create(
-            customer=self.customer, currency=eur, number="EUR-ORIGINAL",
-            subtotal_cents=5000, total_cents=5000, due_at=timezone.now(),
+            customer=self.customer,
+            currency=eur,
+            number="EUR-ORIGINAL",
+            subtotal_cents=5000,
+            total_cents=5000,
+            due_at=timezone.now(),
         )
         CreditLedger.objects.create(customer=self.customer, invoice=source, delta_cents=5000, reason="Euro refund")
         CreditLedger.objects.create(
-            customer=self.customer, invoice=self.collection_invoice, delta_cents=1000, reason="RON refund",
+            customer=self.customer,
+            invoice=self.collection_invoice,
+            delta_cents=1000,
+            reason="RON refund",
         )
         result = self.service.generate_invoice_from_cycle(str(self.billing_cycle.id))
         self.assertTrue(result.is_ok(), result)
@@ -134,6 +178,7 @@ class UsageInvoiceCurrencyIsolationTests(TestCase):
 
 class GrandfatheringCurrencyTests(TestCase):
     def setUp(self) -> None:
+        InvoiceSequence.objects.get_or_create(scope="subscription", defaults={"prefix": "SUB"})
         self.ron, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.eur, _ = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "€"})
         self.customer = Customer.objects.create(name="Protected buyer", customer_type="individual")
@@ -141,15 +186,21 @@ class GrandfatheringCurrencyTests(TestCase):
 
     def protection(self, currency: Currency, price: int) -> PriceGrandfathering:
         return PriceGrandfathering.objects.create(
-            customer=self.customer, product=self.product, currency=currency,
-            locked_price_cents=price, original_price_cents=price,
-            current_product_price_cents=2999, reason="Original promise",
+            customer=self.customer,
+            product=self.product,
+            currency=currency,
+            locked_price_cents=price,
+            original_price_cents=price,
+            current_product_price_cents=2999,
+            reason="Original promise",
         )
 
     def test_other_currency_protection_cannot_reprice_a_new_subscription(self) -> None:
         self.protection(self.eur, 300)
         result = SubscriptionService.create_subscription(
-            self.customer, self.product, {"currency_code": "RON", "apply_grandfathering": True},
+            self.customer,
+            self.product,
+            {"currency_code": "RON", "apply_grandfathering": True},
         )
         self.assertTrue(result.is_ok(), result)
         self.assertIsNone(result.unwrap().locked_price_cents)
@@ -160,7 +211,9 @@ class GrandfatheringCurrencyTests(TestCase):
         self.assertEqual(ron.locked_price, Decimal("15"))
         self.assertEqual(eur.locked_price, Decimal("3"))
         result = SubscriptionService.create_subscription(
-            self.customer, self.product, {"currency_code": "RON", "apply_grandfathering": True},
+            self.customer,
+            self.product,
+            {"currency_code": "RON", "apply_grandfathering": True},
         )
         self.assertTrue(result.is_ok(), result)
         self.assertEqual(result.unwrap().locked_price_cents, 1500)
@@ -169,7 +222,10 @@ class GrandfatheringCurrencyTests(TestCase):
         ron = make_subscription(self.customer, self.product, self.ron, unit_price_cents=1500)
         eur = make_subscription(self.customer, self.product, self.eur, unit_price_cents=300)
         result = GrandfatheringService.apply_grandfathering_for_price_increase(
-            self.product, 1500, 1800, currency=self.ron,
+            self.product,
+            1500,
+            1800,
+            currency=self.ron,
         )
         self.assertTrue(result.is_ok(), result)
         self.assertEqual(result.unwrap(), 1)
@@ -182,7 +238,10 @@ class GrandfatheringCurrencyTests(TestCase):
         subscription = make_subscription(self.customer, self.product, self.ron, unit_price_cents=1500)
         subscription.apply_grandfathered_price(0, "Original free service promise")
         result = GrandfatheringService.apply_grandfathering_for_price_increase(
-            self.product, 1500, 1800, currency=self.ron,
+            self.product,
+            1500,
+            1800,
+            currency=self.ron,
         )
         self.assertTrue(result.is_ok(), result)
         subscription.refresh_from_db()
@@ -205,15 +264,23 @@ class GrandfatheringCurrencyTests(TestCase):
         self.assertEqual(eur.locked_price_cents, 300)
 
     def test_unknown_legacy_currency_preserves_protection_until_review(self) -> None:
-        PriceGrandfathering.objects.bulk_create([
-            PriceGrandfathering(
-                customer=self.customer, product=self.product, locked_price_cents=1500,
-                original_price_cents=1500, current_product_price_cents=2000, reason="Legacy promise",
-                currency_hold_reason="Original monetary unit unknown",
-            )
-        ])
+        PriceGrandfathering.objects.bulk_create(
+            [
+                PriceGrandfathering(
+                    customer=self.customer,
+                    product=self.product,
+                    locked_price_cents=1500,
+                    original_price_cents=1500,
+                    current_product_price_cents=2000,
+                    reason="Legacy promise",
+                    currency_hold_reason="Original monetary unit unknown",
+                )
+            ]
+        )
         result = SubscriptionService.create_subscription(
-            self.customer, self.product, {"currency_code": "RON", "apply_grandfathering": True},
+            self.customer,
+            self.product,
+            {"currency_code": "RON", "apply_grandfathering": True},
         )
         self.assertTrue(result.is_err())
         self.assertIn("price protection needs review", result.unwrap_err())
@@ -226,7 +293,10 @@ class ConcurrentUsageCreditTests(TransactionTestCase):
     def setUp(self) -> None:
         metering_fixtures.UsageInvoiceServiceTestCase.setUp(self)
         CreditLedger.objects.create(
-            customer=self.customer, currency=self.currency, delta_cents=4000, reason="Shared account credit",
+            customer=self.customer,
+            currency=self.currency,
+            delta_cents=4000,
+            reason="Shared account credit",
         )
 
     @staticmethod
@@ -277,14 +347,24 @@ class ConcurrentUsageCreditTests(TransactionTestCase):
     def test_two_usage_cycles_cannot_spend_the_same_credit(self) -> None:
         second_subscription = make_subscription(self.customer, self.product, self.currency)
         second_cycle = BillingCycle.objects.create(
-            subscription=second_subscription, period_start=self.billing_cycle.period_start,
-            period_end=self.billing_cycle.period_end, status="closed", usage_charge_cents=2500,
+            subscription=second_subscription,
+            period_start=self.billing_cycle.period_start,
+            period_end=self.billing_cycle.period_end,
+            status="closed",
+            usage_charge_cents=2500,
         )
         UsageAggregation.objects.create(
-            meter=self.meter, customer=self.customer, subscription=second_subscription, billing_cycle=second_cycle,
-            period_start=second_cycle.period_start, period_end=second_cycle.period_end,
-            total_value=Decimal(50), billable_value=Decimal(50), overage_value=Decimal(50),
-            charge_cents=2500, status="rated",
+            meter=self.meter,
+            customer=self.customer,
+            subscription=second_subscription,
+            billing_cycle=second_cycle,
+            period_start=second_cycle.period_start,
+            period_end=second_cycle.period_end,
+            total_value=Decimal(50),
+            billable_value=Decimal(50),
+            overage_value=Decimal(50),
+            charge_cents=2500,
+            status="rated",
         )
         cycle_ids = [str(self.billing_cycle.pk), str(second_cycle.pk)]
         if connection.vendor == "postgresql":

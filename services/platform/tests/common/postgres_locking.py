@@ -47,7 +47,9 @@ def database_worker[T](action: Callable[[], T]) -> Iterator[tuple[int, Future[T]
         yield pids[0], pending
 
 
-def wait_for_blocker[T](pid: int, blocker: int, pending: Future[T], *, table: str, operation: str = "SELECT") -> str:
+def wait_for_blocker[T](
+    pid: int, blocker: int, pending: Future[T], *, table: str | tuple[str, ...], operation: str = "SELECT"
+) -> str:
     """Require the intended SQL to wait on the exact writer before it may commit."""
     deadline = monotonic() + 10
     poll = Event()
@@ -61,7 +63,8 @@ def wait_for_blocker[T](pid: int, blocker: int, pending: Future[T], *, table: st
             sample = cursor.fetchone()
         if sample and sample[0] == "Lock" and blocker in sample[1]:
             assert sample[2].lstrip().startswith(operation), sample
-            assert table in sample[2], sample
+            names = (table,) if isinstance(table, str) else table
+            assert any(name in sample[2] for name in names), sample
             return str(sample[2])
         if pending.done():
             raise AssertionError(f"Worker completed without the expected wait: {pending.result()!r}")

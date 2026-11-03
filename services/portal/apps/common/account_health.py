@@ -20,6 +20,7 @@ from typing import Any, cast
 
 from django.core.cache import cache
 from django.http import HttpRequest
+from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext as _
 from django.utils.translation import ngettext
@@ -75,6 +76,42 @@ class _AccountHealthRequest(HttpRequest):
     _account_health_banner: AccountHealthBanner | None
 
 
+def _hosting_conditions(services_summary: dict[str, Any]) -> list[AccountCondition]:
+    counts = services_summary.get("hosting_warning_counts")
+    if not isinstance(counts, dict):
+        return []
+    conditions = []
+    for kind, severity, priority in (("critical", "critical", 3), ("warning", "warning", 4)):
+        count = counts.get(kind)
+        if type(count) is not int or count <= 0:
+            continue
+        message = (
+            ngettext(
+                "%(count)d service has a recorded warning that its hosting allowance was reached.",
+                "%(count)d services have recorded warnings that their hosting allowances were reached.",
+                count,
+            )
+            if kind == "critical"
+            else ngettext(
+                "%(count)d service has a recorded warning about high hosting usage.",
+                "%(count)d services have recorded warnings about high hosting usage.",
+                count,
+            )
+        ) % {"count": count}
+        conditions.append(
+            AccountCondition(
+                key=f"hosting_{kind}",
+                severity=severity,
+                priority=priority,
+                count=count,
+                message=message,
+                cta_text=_("Review usage"),
+                cta_url="/services/",
+            )
+        )
+    return conditions
+
+
 def evaluate_conditions(
     invoice_summary: dict[str, Any],
     services_summary: dict[str, Any],
@@ -87,7 +124,7 @@ def evaluate_conditions(
 
     Pure function — no I/O, no side effects. Returns an empty list when everything is healthy.
     """
-    conditions: list[AccountCondition] = []
+    conditions: list[AccountCondition] = _hosting_conditions(services_summary)
 
     # Priority 1: Suspended services (critical)
     suspended = int(services_summary.get("suspended_services", 0))
@@ -330,6 +367,12 @@ def cached_account_health(session: Any, customer_id: object) -> dict[str, Any] |
         return None
     if time.time() - session.get("account_health_fetched_at", 0) > ACCOUNT_HEALTH_CACHE_TTL:
         return None
+    services = cached.get("services", {})
+    deadline = services.get("hosting_warning_counts_valid_until") if isinstance(services, dict) else None
+    if isinstance(deadline, str):
+        expires_at = parse_datetime(deadline)
+        if expires_at is None or timezone.is_naive(expires_at) or expires_at <= timezone.now():
+            return None
     return cached
 
 

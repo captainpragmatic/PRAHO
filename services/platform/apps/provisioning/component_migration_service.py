@@ -242,6 +242,9 @@ def start_component_migration(
     if obligation is not None:
         _require_source_history_cleanup(obligation)
     invalidate_chain(account)
+    from .hosting_limit_execution import freeze_migration_limits  # noqa: PLC0415 -- Immutable reviewed quota authority.
+
+    hosting_limits = freeze_migration_limits(account)
     migration = VirtualminMigration.objects.create(
         account=account,
         source_server=source,
@@ -257,9 +260,12 @@ def start_component_migration(
             "component_network": network,
             "component_account_name": hostname.fqdn if hostname else "",
             "target_limits": {
-                "disk_quota_mb": account.disk_quota_mb,
+                "disk_quota_mb": account.effective_disk_quota_mb
+                if account.effective_disk_quota_mb is not None
+                else account.disk_quota_mb,
                 "bandwidth_quota_mb": account.bandwidth_quota_mb,
             },
+            "hosting_limits": hosting_limits,
         },
     )
     if obligation is None:
