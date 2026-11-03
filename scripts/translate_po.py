@@ -1784,8 +1784,19 @@ def _compare_catalogs(
             else:
                 reason = "changed plural" if old[key].msgid_plural != new[key].msgid_plural else "changed translation"
             raise CatalogCheckError(f"{location}: {reason}")
-        if not compiled and set(old[key].flags) != set(new[key].flags):
-            raise CatalogCheckError(f"{location}: changed extraction flags {old[key].flags} -> {new[key].flags}")
+        if not compiled:
+            # Gettext releases infer format markers differently for identical text.
+            # These PO-only hints do not change runtime content; original msgfmt
+            # checks and placeholder validation remain mandatory. Preserve every
+            # other flag check, especially fuzzy, which suppresses runtime entries.
+            old_flags = {flag for flag in old[key].flags if not flag.endswith("-format")}
+            new_flags = {flag for flag in new[key].flags if not flag.endswith("-format")}
+            if "fuzzy" in new_flags:
+                raise CatalogCheckError(
+                    f"{location}: fuzzy translation; review the current source before clearing fuzzy"
+                )
+            if old_flags != new_flags:
+                raise CatalogCheckError(f"{location}: changed extraction flags {old[key].flags} -> {new[key].flags}")
 
 
 def check_catalogs(root: Path | None = None) -> None:

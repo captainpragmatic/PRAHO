@@ -286,6 +286,66 @@ def test_semantic_extraction_drift(checker, project: Path, defect: str, monkeypa
     rejects(checker, project, defect)
 
 
+@pytest.mark.parametrize("original_format_flag", [False, True], ids=["flag-added", "flag-removed"])
+@pytest.mark.parametrize("fuzzy", [False, True], ids=["format-only", "fuzzy-rejected"])
+def test_gettext_format_inference_variation_is_not_catalog_drift(
+    checker, project: Path, monkeypatch, original_format_flag: bool, fuzzy: bool
+) -> None:
+    source = "Your data deletion request has been submitted. This action cannot be undone. Request ID: {}"
+
+    def prepare(po: polib.POFile) -> None:
+        entry = po[0]
+        entry.msgid = source
+        entry.msgstr = (
+            "Cererea dvs. de ștergere a datelor a fost trimisă. Această acțiune nu poate fi anulată. ID cerere: {}"
+        )
+        entry.flags = ["python-brace-format"] if original_format_flag else []
+        entry.occurrences = [("messages.py", "2")]
+
+    change_po(project, prepare, recompile=True)
+    (project / TREES[0] / "messages.html").unlink()
+    (project / TREES[0] / "messages.py").write_text(
+        f'from django.utils.translation import gettext as _\n_("{source}")\n'
+    )
+    run = subprocess.run
+
+    def vary_gettext_inference(args, **kwargs):
+        result = run(args, **kwargs)
+        if "i18n-extract" in args:
+
+            def change(po):
+                entry = po.find(source)
+                assert entry is not None
+                entry.flags = [] if original_format_flag else ["python-brace-format"]
+                if fuzzy:
+                    entry.flags.append("fuzzy")
+
+            change_po(Path(kwargs["cwd"]), change)
+        return result
+
+    monkeypatch.setattr(subprocess, "run", vary_gettext_inference)
+    if fuzzy:
+        error = rejects(checker, project, "fuzzy")
+        assert source in error and "messages.py:2" in error
+    else:
+        before = files(project)
+        checker.check_catalogs(project)
+        assert files(project) == before
+
+
+def test_non_format_extraction_flags_still_require_review(checker, project: Path, monkeypatch) -> None:
+    run = subprocess.run
+
+    def add_non_format_flag(args, **kwargs):
+        result = run(args, **kwargs)
+        if "i18n-extract" in args:
+            change_po(Path(kwargs["cwd"]), lambda po: po[0].flags.append("no-wrap"))
+        return result
+
+    monkeypatch.setattr(subprocess, "run", add_non_format_flag)
+    assert "no-wrap" in rejects(checker, project, "changed extraction flags")
+
+
 def test_missing_gettext_is_actionable(checker, project: Path, monkeypatch) -> None:
     which = shutil.which
     monkeypatch.setattr(shutil, "which", lambda name: None if name == "msgfmt" else which(name))

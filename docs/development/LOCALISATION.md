@@ -55,7 +55,10 @@ runs compilation, extraction and guards in a unique temporary directory. It vali
 captured originals first, so stale `.mo` files fail before temporary compilation can mask
 them. It checks messages, contexts, translations, plural forms and `Plural-Forms`, then
 compares fresh extraction semantically; timestamps, references, comments and ordering do
-not cause drift failures. Missing tools, incomplete or fuzzy translations, format errors,
+not cause drift failures. Gettext versions can infer different format-marker flags;
+these do not change runtime messages and are ignored in extraction comparisons.
+Placeholder content, GNU format checks and fuzzy status are validated independently.
+Missing tools, incomplete or fuzzy translations, format errors,
 guard failures and inputs changing during inspection fail with diagnostics. Repository
 files remain unchanged on success and failure; the check has no repair mode.
 
