@@ -67,6 +67,11 @@ jobs:
         uv python install
         uv sync --all-groups
 
+    - name: Install GNU gettext
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gettext
+
     - name: Lint all services (every make lint phase)
       run: make lint
 
@@ -176,6 +181,11 @@ jobs:
       run: |
         uv python install
         uv sync --all-groups
+
+    - name: Install GNU gettext
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y gettext
 
     # A PR compares against its base branch, not against its own previous push: every file the PR changes
     # is checked, however many pushes it took.

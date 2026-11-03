@@ -68,6 +68,7 @@ Pull Request Checklist
 - [ ] I grant maintainers the right to relicense my contribution under
       AGPL-3.0-or-later or another OSI-approved license used by PRAHO
 - [ ] Focused tests pass locally, and every required CI check is green
+- [ ] New or changed user-facing strings include reviewed Romanian translations and compiled catalogs
 
 How to build and test
 ---------------------
@@ -86,6 +87,24 @@ with the Virtualmin lab when the change can reach it (see
 touched: the pre-commit hooks, `make lint FILE=<path>`, `make test-file FILE=<label>` for platform
 tests (or `pytest <path>` for portal), and `make check-types FILE=<path>`. There is no need to run
 the full gate before pushing; push at logical checkpoints and let CI run it.
+
+Romanian translations
+---------------------
+Every PR that adds or changes translatable strings must ship their Romanian translations,
+including Platform, Portal and shared UI catalogs. Preserve existing translations, formal
+address, placeholders, markup and all three Romanian plural forms. Review fuzzy entries
+against their current source before clearing the flag.
+
+Install GNU gettext first: `brew install gettext` on macOS (ensure its binaries are on
+`PATH`), or `sudo apt-get install gettext` on Debian/Ubuntu. It is required by full lint
+and translation tests. Run `make i18n-extract`, `make translate TRANSLATE_ARGS=--include-fuzzy`,
+review the generated YAML, then `make translate-diff` and `make translate-apply`.
+Finish with `make i18n-compile`, `make i18n-check` and `make test-i18n`.
+
+`make i18n-check` is the read-only gate included in full `make lint`: it checks source
+extraction, complete Romanian catalogs, compiled runtime content and translation guards.
+It never repairs or compiles repository files. The detailed workflow is in
+[`docs/development/LOCALISATION.md`](docs/development/LOCALISATION.md#romanian-catalog-workflow).
 
 Security
 --------
