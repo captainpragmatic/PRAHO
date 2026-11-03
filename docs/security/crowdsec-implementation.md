@@ -1,24 +1,30 @@
 # CrowdSec implementation ledger
 
 Baseline: `9fd0d62fcbb288e9e766e6ede9403a4b2745f3eb`.
-Updated: 2026-11-03. Design: [ADR-0067](../ADRs/ADR-0067-crowdsec-independent-host-protection.md).
+Updated: 2026-11-04. Design: [ADR-0067](../ADRs/ADR-0067-crowdsec-independent-host-protection.md).
 
 ## Current boundary
 
-The exact nftables bouncer candidate **fails native CIDR enforcement**. Dependent
-implementation requires an explicit revised artifact choice; do not weaken CIDR
-acceptance, silently substitute a package, or enable the role. The real acceptance
-tests remain failing, and Integration CI invokes the explicit target for PRs and
-merge groups. No runtime role, profile, gateway, mirror or Portal change has landed.
+The signed package bouncer fails native CIDR enforcement. Both requested remedies
+have now passed the 13 core packet cases. The upstream alternative then failed
+the real LAPI zero-duration case by creating a permanent ban. The selected
+`0.0.36-praho.1` patched build passed that case, real failure recovery and
+10,000-decision capacity; a clean rebuild reproduced both binaries and the
+license/source archive. The complete shared-role trajectory now passes, including
+acquisition, convergence, enforcing/simulation transitions, UFW reload, container
+reboot and interrupted-apply/rollback repair. The default CI target uses locked
+bytes; the rejected package remains an explicit negative reproduction.
+Foundation delivery is verified at the userspace/runner-kernel boundary. Mirror
+and page work is in a separate checkout; no production enablement follows.
 
 | Order | Outcome | State |
 |---|---|---|
-| 1 | KB decisions, ADR-0067, exact package/Hub lock, gateway contract | Recorded; candidate rejected by native gate |
-| 2 | Optional persistent qualification profile and all consumers | Audited; no edits, awaiting viable candidate |
-| 3 | Shared simulation role | Blocked by bouncer CIDR failure |
-| 4 | Read-only restricted gateway | Schema/identity/SSH contracts audited; no implementation |
-| 5 | Mirror, coalesced work, fencing and retention | Pending foundation |
-| 6 | Read-only Security page | Pending mirror |
+| 1 | KB decisions, ADR-0067, exact package/Hub/build lock, gateway contract | Recorded; both remedies tested; patched build selected |
+| 2 | Optional persistent qualification profile and all consumers | Implemented; base preservation, exact native evidence and one-way legacy retirement verified |
+| 3 | Shared simulation role | Complete native installation/convergence/acquisition/lifecycle and failure-repair trajectory passes |
+| 4 | Read-only restricted gateway | 86 unit and 14 native SSH/schema/identity/privacy cases pass; strict applied-state witnesses |
+| 5 | Mirror, coalesced work, fencing and retention | In progress in isolated checkout; first six real PostgreSQL ownership cases pass |
+| 6 | Read-only Security page | In progress in isolated checkout; DB-only rendering, role/navigation/filter cases pass |
 | 7 | Audited actions and uncertain-result reconciliation | Pending mirror/gateway |
 | 8 | Qualified replication and revoke races | Pending actions |
 | 9 | Portal sanitized instrumentation/customer observations | Pending foundation |
@@ -26,8 +32,10 @@ merge groups. No runtime role, profile, gateway, mirror or Portal change has lan
 
 ## Native rejection evidence
 
-Run `CROWDSEC_ARTIFACT_DIR=<package-cache> make test-crowdsec-docker`, or omit the
-cache variable to download the locked package with size/hash verification.
+Run `CROWDSEC_BOUNCER_REJECTED_PACKAGE=1 CROWDSEC_ARTIFACT_DIR=<package-cache>
+make test-crowdsec-docker`, or omit the cache variable to download the original
+package with size/hash verification. Restrict to the four original cases with
+`PYTEST_ADDOPTS='-k test_pinned_bouncer_enforces_https_and_preserves_protected_addresses'`.
 The test executes the actual package binary, with only its local LAPI stream
 replaced by a protocol-shaped test server. HTTPS and nftables packet handling are
 real. Every source first receives HTTP 200 over TLS; each individual-host ban then
@@ -64,12 +72,18 @@ bytes match those indexes. All 14 selected Hub leaf hashes match the pinned
 commit; parsed YAML has no collection or external data-download dependency.
 See [artifact provenance](../../deploy/crowdsec/README.md).
 
-Existing regression evidence: `make test-ssh` passed 25 tests. `make test-deploy`
-passed 344 tests and 33 subtests, with one Ansible temporary-directory sandbox
-failure; its focused rerun passed with `ANSIBLE_REMOTE_TEMP` inside the writable
-temporary directory. Focused Ruff and Python syntax checks passed for the new
-native test. KB frontmatter/path validation passed. Full application verification
-is still required when runtime implementation proceeds.
+Foundation regression evidence: `make test-crowdsec` passes 194 tests;
+the focused Platform profile/review suite passes 29 tests and seven subtests.
+The broader related Platform suite passed 103 tests and 65 subtests. Existing
+`make test-ssh` passes all 25 tests. The integration target, with browser access,
+explicit dev settings, `--nomigrations` and the Docker marker excluded, passes
+1,338 tests and 961 subtests (11 existing backend-specific skips). Native CrowdSec
+tests run separately. Full project lint/types, audit coverage, migration checksums
+and additive forward/reverse DDL checks pass. The strict security scanner passed
+after the four signed foundation commits, scanning 15 changed service files with
+1,072 rules and reporting no blocking findings. A prior zero-file precommit scan
+was not counted as security evidence. All 34 native cases pass (33 final-suite
+cases plus the full role trajectory).
 
 ## Integration findings to preserve
 
@@ -77,23 +91,30 @@ is still required when runtime implementation proceeds.
   bind it in connection identity and carry it through review/execution/admission.
   Existing schema-1 evidence forbids extra top-level keys: use bounded service and
   firewall facts, with profile-aware hashing. Preserve base canonical SSH digests.
-- Three firewall validators reject the new schema today. Validate exact ownership
-  before omitting volatile ban members/expiry from review digests; keep protected
-  membership bound. Otherwise routine bans invalidate reviews or exceed bounds.
+- All three firewall validators now recognize exact ownership before omitting
+  volatile ban members/expiry from review digests; protected membership remains
+  bound. Routine bans preserve reviews while unknown facilities still fail.
 - Preserve gateway Match settings in both Ansible variable builders on SSH reruns.
   Preserve only `SSH_ORIGINAL_COMMAND` through sudo so arbitrary exec is rejected.
-- SQLite summary columns are present in pinned generated schema; actual PRAGMA
-  types still need native engine qualification. Bind the installation UUID to a
+- SQLite summary columns and PRAGMA types are verified against the signed native
+  engine. Bind the installation UUID to a
   dedicated cscli-created machine marker and recorded DB device/inode. Never
   recreate that marker during routine convergence or accept DB replacement silently.
-- Use distinct IPv4/IPv6 table names: pinned bouncer table lookup compares name
-  without family. Simultaneous dual-stack enforcement still requires a native test.
+- Use distinct IPv4/IPv6 table names; family-aware lookup and simultaneous
+  dual-stack enforcement are verified by real packet tests.
+- Applied-state witnesses must be invalidated before changing files/runtime and
+  written only after successful service convergence. An interrupted apply once
+  returned success while a real SSH alert still used the old non-simulation
+  runtime. The regression now verifies actual post-repair alerts, degraded reads
+  during failure, and B-start/crash followed by rollback to A.
+- CLI policy guards must resolve pinned Cobra aliases and interposed global flags.
+  Native tests verify refusal of singular mutation aliases and preserve reads.
 
 ## Remaining gates
 
-The fixed artifact choice must be revised before dependent work. All subsequent
-plan requirements remain open, including actual SSH rejection tests, engine
-installation/convergence/telemetry, real SQLite snapshot bounds/schema/replacement,
-PostgreSQL races, UI/Portal paths, 48-hour simulation, enforcing canary and actual
+The candidate blocker is resolved; see [the comparison](crowdsec-bouncer-trials.md).
+Foundation userspace integration and final trusted-manifest binding are verified.
+Later gates include the complete PostgreSQL race suite, UI/Portal paths,
+48-hour simulation, enforcing canary and actual
 Ubuntu 26.04 production-kernel qualification. No deployment or production claim
 follows from the documentation, signed artifacts, host controls or existing tests.

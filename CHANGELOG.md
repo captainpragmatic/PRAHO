@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Opt-in CrowdSec host protection (#767): guarded pinned installation, simulation by default, restricted read-only SSH summaries and a persistent optional Virtualmin qualification profile. The release-derived bouncer handles IPv4/IPv6 ranges, fixed expiry and failure recovery. Existing base-qualified nodes retain their policy; production enforcement requires fresh host/kernel qualification. See [the operations procedure](docs/security/crowdsec-operations.md).
+
 - Customer maintenance windows (#780): staff can schedule work in each node's permitted calendar, record manual outcomes and run supported managed adapters. Customers see current service-scoped notices and 24-hour outcomes in the Portal; Romanian/English emails announce, correct and report qualifying outcomes. Execution ownership and operator reconciliation fence concurrent operations, stale queued work and uncertain provider results. See [the operator runbook](docs/deployment/NODE_MAINTENANCE.md).
 
 - Measured hosting usage (#782): hourly owner-scoped file/database and web response-byte observations, source times, independent stale/unknown states, disk breakdown and history in the portal. Usage remains observational. `provisioning.usage_sync_enabled` is on by default: new nodes install the collector during deployment, and nodes deployed earlier need the usage playbook. Legacy usage writers and the Virtualmin billing collector are retired; see ADR-0068 for rollout and period semantics.
