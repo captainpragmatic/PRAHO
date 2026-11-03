@@ -6,6 +6,7 @@ Modes:
   stats     - Show per-app translation coverage statistics
   generate  - Generate review YAML from untranslated entries (dictionary + AI)
   apply     - Apply approved translations from review YAML back to .po
+  check     - Read-only Romanian catalog, compiled content and extraction gate
 
 Usage:
   translate_po.py stats <po-file>
@@ -19,11 +20,14 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import fnmatch
+import gettext
 import json
 import logging
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -636,12 +640,18 @@ class DictionaryEngine:
 # Placeholder / format validation
 # ---------------------------------------------------------------------------
 
-_PRINTF_RE = re.compile(r"%(?:\([^)]+\))?[sdiouxXeEfFgGcr%]|%\d+\$[sdiouxXeEfFgG]|\{[^}]*\}")
+_PRINTF_PATTERN = (
+    r"%(?:\([^)]+\)|\d+\$)?[-+#0{space}]*(?:\d+|\*)?(?:\.(?:\d+|\*))?[hlL]?[sadiouxXeEfFgGcr%]|\{{[^}}]*\}}"
+)
+_PRINTF_RE = re.compile(_PRINTF_PATTERN.format(space=""))
+_STRICT_PRINTF_RE = re.compile(_PRINTF_PATTERN.format(space=" "))
 _EXPLANATION_PREFIXES = ("Translation:", "Translated:", "Romanian:", "RO:", "EN:")
 
 
-def _extract_placeholders(text: str) -> list[str]:
-    return _PRINTF_RE.findall(text)
+def _extract_placeholders(text: str, *, percent_format: bool = False) -> list[str]:
+    # An unflagged percentage followed by prose ("10% for ...") is not `% f`.
+    # Explicit python-format entries may legitimately use the printf space flag.
+    return (_STRICT_PRINTF_RE if percent_format else _PRINTF_RE).findall(text)
 
 
 def validate_translation(msgid: str, msgstr: str) -> list[str]:
@@ -1520,6 +1530,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub = parser.add_subparsers(dest="command", required=True)
+    sub.add_parser("check", help="Check Romanian catalogs without changing repository files")
 
     # stats
     stats_p = sub.add_parser("stats", help="Show per-app translation coverage statistics")
@@ -1601,11 +1612,275 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+class CatalogCheckError(ValueError):
+    """A read-only catalog check failed."""
+
+
+CATALOG_TREES = (Path("services/platform"), Path("services/portal"), Path("shared/ui"))
+ROMANIAN_CATALOG = Path("locale/ro/LC_MESSAGES/django.po")
+_DISCOVERY_IGNORES = ("CVS", ".*", "*~", "*.pyc")
+# The fixed extraction recipe uses config.settings.dev. Exclude those settings'
+# exact roots before reading uploads/build products; same-named directories under
+# shared UI or elsewhere remain source. A source-settings contract test pins this
+# list so changing the extraction roots also requires changing the capture rules.
+_RUNTIME_DIRECTORIES = {
+    Path("services/platform/media"),
+    Path("services/platform/staticfiles"),
+    Path("services/portal/staticfiles"),
+}
+_GUARD_INPUTS = (
+    "Makefile",
+    "pyproject.toml",
+    "pytest.ini",
+    "tests/integration/conftest.py",
+    "tests/integration/test_platform_error_localisation.py",
+    "tests/integration/test_translation_catalog_markup.py",
+)
+
+
+def _capture_catalog_inputs(root: Path, *, require_catalogs: bool = True) -> dict[Path, bytes]:
+    """Capture source bytes, including untracked files; never follow directory links.
+
+    Match the recipe's Python/HTML/text service inputs and HTML/text shared inputs.
+    Exclude hidden, runtime and directory-symlink trees before reading any contents;
+    Git ignore rules do not control Django extraction. File symlinks are read as bytes,
+    just as makemessages reads them.
+    """
+    inputs: dict[Path, bytes] = {}
+    for tree in CATALOG_TREES:
+        extensions = {".html", ".txt"} if tree == Path("shared/ui") else {".py", ".html", ".txt"}
+        for directory, dirs, names in os.walk(root / tree, followlinks=False):
+            dirs[:] = [
+                name
+                for name in dirs
+                if name != "locale"
+                and not (Path(directory) / name).is_symlink()
+                and (Path(directory) / name).relative_to(root) not in _RUNTIME_DIRECTORIES
+                and not any(fnmatch.fnmatch(name, pattern) for pattern in _DISCOVERY_IGNORES)
+            ]
+            for name in names:
+                path = Path(directory) / name
+                if path.suffix in extensions and not any(
+                    fnmatch.fnmatch(name, pattern) for pattern in _DISCOVERY_IGNORES
+                ):
+                    inputs[path.relative_to(root)] = path.read_bytes()
+        for suffix in (".po", ".mo"):
+            path = root / tree / ROMANIAN_CATALOG.with_suffix(suffix)
+            if not path.is_file():
+                if require_catalogs:
+                    raise CatalogCheckError(
+                        f"{path.relative_to(root)}: missing catalog; extract/translate and compile it"
+                    )
+                continue
+            inputs[path.relative_to(root)] = path.read_bytes()
+    for name in _GUARD_INPUTS:
+        path = root / name
+        if path.is_file():
+            inputs[Path(name)] = path.read_bytes()
+    if require_catalogs and Path("Makefile") not in inputs:
+        raise CatalogCheckError("missing Makefile: run the check from a complete repository checkout")
+    return inputs
+
+
+def _catalog_location(path: Path, entry: polib.POEntry) -> str:
+    references = ", ".join(f"{file}:{line}" for file, line in entry.occurrences) or "no source references"
+    return f"{path}: context={entry.msgctxt!r}, msgid={entry.msgid!r} ({references})"
+
+
+def _read_check_po(path: Path, label: Path) -> polib.POFile:
+    try:
+        po = polib.pofile(str(path), encoding="utf-8")
+    except (OSError, ValueError, UnicodeError) as exc:
+        raise CatalogCheckError(f"{label}: malformed catalog: {exc}") from exc
+    _validate_check_po(po, label)
+    return po
+
+
+def _validate_check_po(po: polib.POFile, label: Path) -> None:
+    content_type = po.metadata.get("Content-Type", "")
+    if (
+        not re.search(r"charset\s*=\s*utf-8\b", content_type, re.IGNORECASE)
+        or not po.metadata.get("Plural-Forms")
+        or _nplurals(po) != 3
+    ):
+        raise CatalogCheckError(f"{label}: malformed Romanian header; require UTF-8 and Plural-Forms with nplurals=3")
+    seen: dict[EntryKey, polib.POEntry] = {}
+    for entry in po:
+        if entry.obsolete:
+            continue
+        location = _catalog_location(label, entry)
+        key = _entry_key(entry)
+        if key in seen:
+            raise CatalogCheckError(f"{location}: duplicate active key; first at {_catalog_location(label, seen[key])}")
+        seen[key] = entry
+        if "fuzzy" in entry.flags:
+            raise CatalogCheckError(f"{location}: fuzzy translation; review the current source before clearing fuzzy")
+        if entry.msgid_plural:
+            if set(entry.msgstr_plural) != {0, 1, 2} or not _has_translation(entry, 3):
+                raise CatalogCheckError(f"{location}: incomplete plural; fill exactly msgstr[0], [1] and [2]")
+            pairs = [
+                (entry.msgid if index == 0 else entry.msgid_plural, text) for index, text in entry.msgstr_plural.items()
+            ]
+        else:
+            if not _has_translation(entry, 3):
+                raise CatalogCheckError(f"{location}: untranslated; supply a Romanian translation")
+            pairs = [(entry.msgid, entry.msgstr)]
+        for source, target in pairs:
+            percent_format = "python-format" in entry.flags
+            if sorted(_extract_placeholders(source, percent_format=percent_format)) != sorted(
+                _extract_placeholders(target, percent_format=percent_format)
+            ):
+                raise CatalogCheckError(f"{location}: Placeholder mismatch: {source!r} -> {target!r}")
+
+
+def _run_catalog_step(args: list[str], stage: Path, env: dict[str, str], step: str) -> None:
+    try:
+        result = subprocess.run(args, cwd=stage, env=env, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        raise CatalogCheckError(f"{step} could not start: {exc}") from exc
+    if result.returncode:
+        raise CatalogCheckError(f"{step} failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}")
+
+
+def _runtime_catalog(path: Path, label: Path) -> polib.MOFile:
+    try:
+        with path.open("rb") as handle:
+            gettext.GNUTranslations(handle)  # Also validate the compiled plural expression.
+        return polib.mofile(str(path))
+    except (OSError, ValueError, UnicodeError, IndexError, struct.error) as exc:
+        raise CatalogCheckError(f"{label}: corrupt compiled catalog: {exc}") from exc
+
+
+def _runtime_state(entry: polib.POEntry) -> tuple[str, str, tuple[tuple[int, str], ...]]:
+    return entry.msgid_plural, entry.msgstr, tuple(sorted(entry.msgstr_plural.items()))
+
+
+def _compare_catalogs(
+    before: polib.POFile | polib.MOFile,
+    after: polib.POFile | polib.MOFile,
+    label: Path,
+    *,
+    compiled: bool = False,
+    references: polib.POFile | None = None,
+) -> None:
+    old = {_entry_key(entry): entry for entry in before if not entry.obsolete}
+    new = {_entry_key(entry): entry for entry in after if not entry.obsolete}
+    source = {_entry_key(entry): entry for entry in references or before if not entry.obsolete}
+    if before.metadata.get("Plural-Forms") != after.metadata.get("Plural-Forms"):
+        raise CatalogCheckError(f"{label}: changed Plural-Forms")
+    for key in old.keys() - new.keys():
+        raise CatalogCheckError(
+            f"{_catalog_location(label, source.get(key, old[key]))}: {'missing compiled' if compiled else 'removed source'} entry"
+        )
+    for key in new.keys() - old.keys():
+        raise CatalogCheckError(
+            f"{_catalog_location(label, new[key])}: {'extra compiled' if compiled else 'added source'} entry"
+        )
+    for key in old.keys() & new.keys():
+        location = _catalog_location(label, source.get(key, old[key]))
+        if _runtime_state(old[key]) != _runtime_state(new[key]):
+            if compiled:
+                reason = "stale compiled translation or plural"
+            else:
+                reason = "changed plural" if old[key].msgid_plural != new[key].msgid_plural else "changed translation"
+            raise CatalogCheckError(f"{location}: {reason}")
+        if not compiled and set(old[key].flags) != set(new[key].flags):
+            raise CatalogCheckError(f"{location}: changed extraction flags {old[key].flags} -> {new[key].flags}")
+
+
+def check_catalogs(root: Path | None = None) -> None:
+    """Check one captured tree; all compilation, extraction and guards run in temp storage."""
+    root = root or Path(__file__).resolve().parents[1]
+    for tool in ("make", "msgfmt", "xgettext", "msgmerge", "msguniq", "msgattrib"):
+        if shutil.which(tool) is None:
+            raise CatalogCheckError(
+                f"missing {tool}; install GNU gettext (brew install gettext / apt-get install gettext) and make"
+            )
+    env = dict(os.environ, PRAHO_SKIP_DOTENV="1", PYTHONDONTWRITEBYTECODE="1")
+    inputs = _capture_catalog_inputs(root)
+    with tempfile.TemporaryDirectory(prefix="praho-i18n-check-") as temp:
+        stage = Path(temp)
+        for relative, data in inputs.items():
+            target = stage / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        # Reuse installed dependencies, never link the source or catalog files.
+        venv_name = f".venv-{sys.platform}"
+        (stage / venv_name).symlink_to(Path(sys.prefix), target_is_directory=True)
+        env["PWD"] = str(stage)
+        try:
+            originals = {
+                tree: _read_check_po(stage / tree / ROMANIAN_CATALOG, tree / ROMANIAN_CATALOG) for tree in CATALOG_TREES
+            }
+            compiled_originals = {
+                tree: _runtime_catalog(
+                    stage / tree / ROMANIAN_CATALOG.with_suffix(".mo"), tree / ROMANIAN_CATALOG.with_suffix(".mo")
+                )
+                for tree in CATALOG_TREES
+            }
+            for tree, original in originals.items():
+                relative = tree / ROMANIAN_CATALOG
+                expected = stage / f"expected-{tree.name}.mo"
+                _run_catalog_step(
+                    ["msgfmt", "--check-format", "--check-header", "-o", str(expected), str(stage / relative)],
+                    stage,
+                    env,
+                    f"{relative}: format validation",
+                )
+                # Compare runtime content, retaining the PO's useful source references.
+                expected_catalog = _runtime_catalog(expected, relative)
+                _compare_catalogs(
+                    expected_catalog, compiled_originals[tree], relative, compiled=True, references=original
+                )
+            # Django leaves the old PO untouched when a tree contains no messages.
+            # A temporary probe forces a merge even after its last real message is
+            # removed. It is stripped from the parsed result before comparison.
+            probes: dict[Path, tuple[Path, str]] = {}
+            for tree in CATALOG_TREES:
+                probe_id = f"__PRAHO_CATALOG_PROBE_{stage.name}_{tree.name}__"
+                probe_path = stage / tree / f"{stage.name}-probe.txt"
+                probe_path.write_text('{% load i18n %}{% translate "' + probe_id + '" %}', encoding="utf-8")
+                probes[tree] = (probe_path, probe_id)
+            _run_catalog_step(["make", "i18n-extract"], stage, env, "extraction")
+            for tree, original in originals.items():
+                relative = tree / ROMANIAN_CATALOG
+                try:
+                    extracted = polib.pofile(str(stage / relative))
+                except (OSError, ValueError, UnicodeError) as exc:
+                    raise CatalogCheckError(f"{relative}: malformed extraction: {exc}") from exc
+                probe_path, probe_id = probes[tree]
+                probe_path.unlink()
+                probe = extracted.find(probe_id)
+                if probe is None:
+                    raise CatalogCheckError(
+                        f"{relative}: extraction did not discover the temporary probe; check the recipe"
+                    )
+                extracted.remove(probe)
+                _compare_catalogs(original, extracted, relative)
+                _validate_check_po(extracted, relative)
+            _run_catalog_step(["make", "test-i18n-guards"], stage, env, "guards")
+        finally:
+            current = _capture_catalog_inputs(root, require_catalogs=False)
+            changed = [str(path) for path in inputs.keys() | current.keys() if inputs.get(path) != current.get(path)]
+            if changed:
+                raise CatalogCheckError(
+                    f"inputs changed during inspection: {', '.join(sorted(changed))}; rerun the check"
+                )
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
 
-    if args.command == "stats":
+    if args.command == "check":
+        try:
+            check_catalogs()
+        except (CatalogCheckError, OSError) as exc:
+            logger.error("%s", exc)
+            sys.exit(1)
+        print("Romanian catalogs: complete, compiled content current, extraction stable, guards passed.")
+
+    elif args.command == "stats":
         cmd_stats(args.po_file, include_fuzzy=args.include_fuzzy)
 
     elif args.command == "generate":

@@ -880,6 +880,7 @@ else
 	@$(VENV_DIR)/bin/python scripts/lint_test_suppressions.py --fail-on critical
 	@echo "📋 Phase 5: i18n coverage scan"
 	@$(PYTHON_SHARED) scripts/lint_i18n_coverage.py --fail-on high --allowlist scripts/i18n_coverage_allowlist.txt services/platform/apps services/portal/apps services/platform/templates services/portal/templates
+	@$(MAKE) i18n-check
 	@echo "📋 Phase 6: Code health scan"
 	@$(VENV_DIR)/bin/python scripts/code_health_scan.py --min-severity=high --exclude-tests --allowlist=scripts/code_health_allowlist.txt services/platform/apps
 	@echo "📋 Phase 7: FSM guardrail lint (ADR-0034)"
@@ -1172,6 +1173,7 @@ pre-commit:
 
 PLATFORM_PO = services/platform/locale/ro/LC_MESSAGES/django.po
 PORTAL_PO   = services/portal/locale/ro/LC_MESSAGES/django.po
+SHARED_UI_PO = shared/ui/locale/ro/LC_MESSAGES/django.po
 PYTHON_I18N = uv run python
 
 i18n-extract:
@@ -1187,6 +1189,17 @@ i18n-compile:
 	@cd services/platform && $(PWD)/$(VENV_DIR)/bin/python manage.py compilemessages --settings=config.settings.dev
 	@cd services/portal && $(PWD)/$(VENV_DIR)/bin/python manage.py compilemessages --settings=config.settings.dev
 	@echo "✅ Translations compiled."
+
+.PHONY: i18n-check test-i18n-guards test-i18n
+i18n-check:
+	@PRAHO_SKIP_DOTENV=1 PYTHONDONTWRITEBYTECODE=1 $(PYTHON_SHARED) scripts/translate_po.py check
+
+# The checker runs only these guards in its snapshot; including checker fixtures here recurses.
+test-i18n-guards:
+	@PRAHO_SKIP_DOTENV=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(PWD)/services/platform $(PYTHON_SHARED) -m pytest -o addopts= --no-cov -p no:cacheprovider tests/integration/test_platform_error_localisation.py tests/integration/test_translation_catalog_markup.py -q
+
+test-i18n:
+	@PRAHO_SKIP_DOTENV=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(PWD)/services/platform $(PYTHON_SHARED) -m pytest -o addopts= --no-cov -p no:cacheprovider tests/integration/test_translation_catalog_check.py tests/integration/test_translate_po.py tests/integration/test_platform_error_localisation.py tests/integration/test_translation_catalog_markup.py $(I18N_TEST_ARGS) -q
 
 translate-stats:
 	@echo "📊 Translation coverage stats (both services)..."
@@ -1205,15 +1218,16 @@ translate-stats-portal:
 
 translate:
 	@echo "📖 Generating review YAML (dictionary mode)..."
-	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) -o i18n-review-platform.yaml
-	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) -o i18n-review-portal.yaml
-	@echo "✅ Review files: i18n-review-platform.yaml, i18n-review-portal.yaml"
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) -o i18n-review-platform.yaml $(TRANSLATE_ARGS)
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) -o i18n-review-portal.yaml $(TRANSLATE_ARGS)
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(SHARED_UI_PO) -o i18n-review-shared.yaml $(TRANSLATE_ARGS)
+	@echo "✅ Review files: i18n-review-platform.yaml, i18n-review-portal.yaml, i18n-review-shared.yaml"
 
 translate-platform:
-	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) -o i18n-review-platform.yaml
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PLATFORM_PO) -o i18n-review-platform.yaml $(TRANSLATE_ARGS)
 
 translate-portal:
-	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) -o i18n-review-portal.yaml
+	@$(PYTHON_I18N) scripts/translate_po.py generate $(PORTAL_PO) -o i18n-review-portal.yaml $(TRANSLATE_ARGS)
 
 translate-ai:
 	@echo "🤖 Generating review YAML (Claude AI mode)..."
