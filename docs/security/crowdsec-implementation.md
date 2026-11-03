@@ -14,8 +14,9 @@ license/source archive. The complete shared-role trajectory now passes, includin
 acquisition, convergence, enforcing/simulation transitions, UFW reload, container
 reboot and interrupted-apply/rollback repair. The default CI target uses locked
 bytes; the rejected package remains an explicit negative reproduction.
-Foundation delivery is verified at the userspace/runner-kernel boundary. Mirror
-and page work is in a separate checkout; no production enablement follows.
+Foundation delivery is verified at the userspace/runner-kernel boundary. The
+fenced mirror and database-only Security page are integrated; no production
+enablement follows.
 
 | Order | Outcome | State |
 |---|---|---|
@@ -23,8 +24,8 @@ and page work is in a separate checkout; no production enablement follows.
 | 2 | Optional persistent qualification profile and all consumers | Implemented; base preservation, exact native evidence and one-way legacy retirement verified |
 | 3 | Shared simulation role | Complete native installation/convergence/acquisition/lifecycle and failure-repair trajectory passes |
 | 4 | Read-only restricted gateway | 86 unit and 14 native SSH/schema/identity/privacy cases pass; strict applied-state witnesses |
-| 5 | Mirror, coalesced work, fencing and retention | In progress in isolated checkout; first six real PostgreSQL ownership cases pass |
-| 6 | Read-only Security page | In progress in isolated checkout; DB-only rendering, role/navigation/filter cases pass |
+| 5 | Mirror, coalesced work, fencing and retention | Integrated; 31 tests pass on real PostgreSQL, including seven ownership/concurrency cases |
+| 6 | Read-only Security page | Integrated; 12 view tests and 14 subtests pass, with real Chromium layout/navigation checks at 390/820/1280 px |
 | 7 | Audited actions and uncertain-result reconciliation | Pending mirror/gateway |
 | 8 | Qualified replication and revoke races | Pending actions |
 | 9 | Portal sanitized instrumentation/customer observations | Pending foundation |

@@ -78,6 +78,10 @@
                     {% include 'components/mobile_nav_item.html' with url='/domains/admin/registrars/' title='Registrars' subtitle='Domain registrar partners' staff_only=True icon_name='building' %}
                     {% include 'components/mobile_nav_item.html' with url='/domains/admin/tlds/' title='TLD Management' subtitle='Top-level domain config' staff_only=True icon_name='globe' %}
                     {% include 'components/mobile_nav_item.html' with url='/infrastructure/' title='Infrastructure' subtitle='Server infrastructure' staff_only=True icon_name='server' %}
+                    {% if can_view_security %}
+                    {% trans "Security" as security_title %}{% trans "Decisions & source health" as security_subtitle %}
+                    {% include 'components/mobile_nav_item.html' with url_name='security:dashboard' title=security_title subtitle=security_subtitle icon_name='shield' %}
+                    {% endif %}
                 </div>
 
                 <!-- Support Section (Staff only) -->
