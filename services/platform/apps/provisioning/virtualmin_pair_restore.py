@@ -566,6 +566,13 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
             determinate = True
             return _superseded()
 
+        if not service._mark_restore_limits_issued():
+            determinate = True
+            return Err(
+                "Restore resource dispatch authority changed before native execution",
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+
         # PRAHO's view of the account: suspended for the duration, so reconcile - the only thing
         # allowed to enable it again - re-enables it after a verified restore (ADR-0051).
         prior_status = account.status

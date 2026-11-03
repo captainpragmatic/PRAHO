@@ -857,6 +857,12 @@ class VirtualminBackupService:
                 determinate = True
                 return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
             self._update_restore_progress(restore_id, "restoring", 70)
+            if not self._mark_restore_limits_issued():
+                determinate = True
+                return Err(
+                    "Restore resource dispatch authority changed before native execution",
+                    retriability=Retriability.NOT_RETRIABLE,
+                )
             gateway = VirtualminGateway(VirtualminConfig(server=target_server))
             restore_result = self._call_checked(
                 gateway,
@@ -962,6 +968,12 @@ class VirtualminBackupService:
             detail = result.unwrap_err() if result.is_err() else "playbook reported failure or timed out"
             return Err(f"Backup archive push failed: {detail}", retriability=Retriability.NOT_RETRIABLE)
         return Ok(None)
+
+    def _mark_restore_limits_issued(self) -> bool:
+        from .hosting_parent_limits import mark_parent_limits_issued  # noqa: PLC0415 -- Shared create/restore witness.
+
+        parent = getattr(self, "_quota_parent_job", None)
+        return True if parent is None else mark_parent_limits_issued(parent)
 
     def _verify_restored_domain(self, target_server: VirtualminServer, account: VirtualminAccount) -> Result[None, str]:
         from .virtualmin_migration_service import list_migration_domains  # noqa: PLC0415

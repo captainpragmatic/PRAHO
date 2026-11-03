@@ -38,13 +38,13 @@ from tests.provisioning.test_virtualmin_pair_restore import checkpoint
 from tests.provisioning.test_virtualmin_tasks import VirtualminTaskTestBase
 
 
-class ManagedSingleRestoreLimitsTests(VirtualminTaskTestBase):
+class ManagedSingleRestoreFixture:
     receipt = surface_fixtures.VerifiedHostingLimitSurfaceTests.receipt
     publish_usage = surface_fixtures.VerifiedHostingLimitSurfaceTests.publish_usage
     apply = surface_fixtures.VerifiedHostingLimitSurfaceTests.apply
 
     def setUp(self) -> None:
-        super().setUp()
+        VirtualminTaskTestBase.setUp(self)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         self.directory = Path(directory.name)
@@ -201,6 +201,8 @@ class ManagedSingleRestoreLimitsTests(VirtualminTaskTestBase):
         self.service.refresh_from_db()
         return job, outcome
 
+
+class ManagedSingleRestoreLimitsTests(ManagedSingleRestoreFixture, VirtualminTaskTestBase):
     def test_old_single_archive_reapplies_current_cap_before_reconcile(self) -> None:
         job, outcome = self.execute_restore()
         self.assertEqual(

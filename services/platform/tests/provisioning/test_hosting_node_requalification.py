@@ -8,7 +8,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import connection, transaction
 from django.test import TransactionTestCase
 from django.utils import timezone
 
@@ -17,6 +17,7 @@ from apps.provisioning.hosting_limit_execution import (
     _fail_unissued,
     _prepare_dispatch,
     admit_application,
+    apply_hosting_limits,
     ensure_managed_limits,
     freeze_migration_limits,
     quota_transport_refusal,
@@ -71,12 +72,25 @@ class HostingNodeDispatchRequalificationTests(HostingLimitWorkerFixture, Transac
         self.assertEqual(execution.request, {})
 
     def test_public_parent_resolution_keeps_restore_held_then_releases_child_capacity_for_readoption(self):
+        with (
+            patch("apps.provisioning.hosting_limit_transport.probe_account_quota", return_value=self.receipt()),
+            patch(
+                "apps.provisioning.hosting_limit_transport.run_quota_operation",
+                side_effect=lambda server, action, request: self.receipt(
+                    cap=request["disk_limit_kib"] // 1024, request=request
+                ),
+            ),
+        ):
+            self.assertEqual(apply_hosting_limits(self.application.pk), "completed")
+        self.account.refresh_from_db()
+        self.assertTrue(self.account.quota_managed)
         parent = VirtualminProvisioningJob.objects.create(
             operation="restore_domain",
             server=self.server,
             account=self.account,
             status="running",
             execution_token=uuid4(),
+            execution_deadline=timezone.now() + timedelta(minutes=5),
             parameters={
                 "managed_single_restore": True,
                 "pair_node_step": "quota_verification",
@@ -311,6 +325,17 @@ class HostingNodeDispatchRequalificationTests(HostingLimitWorkerFixture, Transac
             return reserve_managed_creation(account, job, available)
 
         parent = {**child.job.parameters["quota_parent"], "token": str(migration.lease_token)}
+        if connection.vendor != "postgresql":
+            # SQLite proves the same committed reservation outcome. The
+            # independent lock wait below is specifically PostgreSQL evidence.
+            replacement = admit_application(self.application.pk, parent=parent)
+            self.assertIsNotNone(replacement)
+            self.assertNotEqual(replacement.pk, child.pk)
+            self.assertEqual(replacement.reserved_bytes, child.reserved_bytes)
+            result = reserve_managed_creation(account, job, available)
+            self.assertTrue(result.is_err())
+            self.assertIn("capacity", result.unwrap_err().lower())
+            return
         writer = backend_pid()
         with database_worker(competing) as (pid, pending):
             with transaction.atomic():

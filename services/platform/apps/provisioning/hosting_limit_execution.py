@@ -78,6 +78,11 @@ def _managed_or_admitted_parent(
     owner_id: int,
     parent: dict[str, Any],
 ) -> bool:
+    if parent.get("job_id"):
+        from .hosting_parent_limits import held_parent_application_matches  # noqa: PLC0415
+
+        if not held_parent_application_matches(application, parent):
+            return False
     if account.quota_managed:
         return True
     # A new domain or explicitly reviewed move is a first-install authority,
@@ -229,6 +234,10 @@ def freeze_migration_limits(account: VirtualminAccount) -> dict[str, Any]:
 
 
 def _frozen_parent_application(application: HostingLimitApplication, parent: dict[str, Any]) -> bool:
+    if parent.get("job_id"):
+        from .hosting_parent_limits import held_parent_application_matches  # noqa: PLC0415
+
+        return held_parent_application_matches(application, parent)
     return bool(
         parent.get("migration_id")
         and parent.get("frozen_application_id") == str(application.pk)
@@ -904,7 +913,16 @@ def ensure_managed_limits(  # noqa: C901, PLR0911, PLR0912 -- Preserve independe
     # Keep the prior receipt as history, but never display it as current proof.
     if parent:
         ServiceHostingLimits.objects.filter(service_id=account.service_id).update(verified_at=None)
-    application = current_application(account.service_id)
+    if parent_job is not None:
+        from .hosting_parent_limits import frozen_parent_application  # noqa: PLC0415
+
+        try:
+            recorded = VirtualminProvisioningJob.objects.get(pk=parent_job.pk)
+            application = frozen_parent_application(recorded)
+        except (ValidationError, HostingLimitApplication.DoesNotExist, VirtualminAccount.DoesNotExist) as error:
+            return Err(str(error))
+    else:
+        application = current_application(account.service_id)
     if migration is not None:
         frozen = migration.pre_migration_snapshot.get("hosting_limits")
         if (
@@ -943,7 +961,6 @@ def reserve_managed_creation(  # noqa: PLR0911 -- Explicit pre-dispatch refusal 
     """Reserve the full new target cap BEFORE create-domain can publish it."""
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
-    from .hosting_limit_tasks import current_application  # noqa: PLC0415
     from .hosting_node_policy_models import NodeHostingPolicy  # noqa: PLC0415
 
     target = account.server
@@ -961,7 +978,9 @@ def reserve_managed_creation(  # noqa: PLR0911 -- Explicit pre-dispatch refusal 
         "native_server_id": str(target.pk),
     }
     try:
-        application = current_application(actual.service_id)
+        from .hosting_parent_limits import frozen_parent_application  # noqa: PLC0415
+
+        application = frozen_parent_application(VirtualminProvisioningJob.objects.get(pk=job.pk))
         execution = admit_application(application.pk, parent=parent, native_server_id=target.pk)
         if execution is None:
             return Err("The managed creation no longer owns its quota capacity admission.")

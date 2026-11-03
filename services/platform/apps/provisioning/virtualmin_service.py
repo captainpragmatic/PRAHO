@@ -541,7 +541,8 @@ class VirtualminProvisioningService:
         if refusal := capability_refusal or begin_account_job(account, job, preserve_claim=retry):
             retriability = Retriability.NOT_RETRIABLE if capability_refusal else Retriability.RETRIABLE
             return self._creation_refusal(account, job, refusal, retry=retry, retriability=retriability)
-        self._apply_default_quotas(account)
+        if job.hosting_limit_application_id is None:
+            self._apply_default_quotas(account)
         return None
 
     @staticmethod
@@ -590,7 +591,42 @@ class VirtualminProvisioningService:
                 retriability=Retriability.NOT_RETRIABLE,
             )
         # The original account/service/generation callback is the final DB check.
-        return before_create() if before_create is not None else None
+        if before_create is not None and (creation_refusal := before_create()) is not None:
+            return creation_refusal
+        from .hosting_parent_limits import mark_parent_limits_issued  # noqa: PLC0415
+
+        if not mark_parent_limits_issued(job):
+            return self._creation_refusal(
+                account,
+                job,
+                "The native create no longer owns its resource dispatch claim.",
+                retry=retry,
+                retriability=Retriability.NOT_RETRIABLE,
+            )
+        return None
+
+    @staticmethod
+    def _creation_parameters(account: VirtualminAccount, job: VirtualminProvisioningJob) -> dict[str, Any]:
+        params = create_domain_params(
+            domain=account.domain,
+            username=account.virtualmin_username,
+            password=account.get_password(),
+            template=account.template_name,
+            recovery_seed=account.get_recovery_seed(),
+            disk_quota_mb=account.effective_disk_quota_mb
+            if account.effective_disk_quota_mb is not None
+            else account.disk_quota_mb,
+            bandwidth_quota_mb=account.bandwidth_quota_mb,
+        )
+        if job.hosting_limit_application_id is not None:
+            from .hosting_limit_policy import effective_disk_limit  # noqa: PLC0415
+            from .hosting_parent_limits import frozen_parent_application  # noqa: PLC0415
+
+            frozen = frozen_parent_application(job)
+            params.update(
+                quota_parameters(effective_disk_limit(frozen.disk_allowance_mib), frozen.bandwidth_allowance_mib)
+            )
+        return params
 
     def _execute_domain_creation(  # noqa: PLR0911, PLR0912, PLR0915 -- Verified create, native quota and canonical ownership commit.
         self,
@@ -626,19 +662,7 @@ class VirtualminProvisioningService:
             # ===============================================================================
             rollback_operations: list[dict[str, Any]] = []
 
-            params = create_domain_params(
-                domain=account.domain,
-                username=account.virtualmin_username,
-                password=account.get_password(),
-                template=account.template_name,
-                recovery_seed=account.get_recovery_seed(),
-                disk_quota_mb=(
-                    account.effective_disk_quota_mb
-                    if account.effective_disk_quota_mb is not None
-                    else account.disk_quota_mb
-                ),
-                bandwidth_quota_mb=account.bandwidth_quota_mb,
-            )
+            params = self._creation_parameters(account, job)
 
             provisioning_timeout = get_virtualmin_timeouts()["PROVISIONING_TIMEOUT"]
             refusal = self._creation_dispatch_refusal(
