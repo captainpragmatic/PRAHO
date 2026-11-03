@@ -52,7 +52,11 @@ Virtualmin billing schedule is retired; queued invocations are harmless. Generic
 service metering excludes Virtualmin-backed services. This feature creates no meter
 events, invoices, charges, warning emails or quota enforcement, and does not redefine
 ADR-0039 billing periods. Quota enforcement/headroom and threshold emails remain #776
-and #783 responsibilities.
+and #783 responsibilities. Assigned purchased allowances are pinned per Service;
+catalog changes do not redefine existing observation denominators. The quota
+safety maximum of canonical disk, kernel UID and kernel GID usage is separate
+from this ADR's customer-visible disk numerator. Pending native changes preserve
+the previous operational allowance until a verified application commits.
 
 ## Consequences
 

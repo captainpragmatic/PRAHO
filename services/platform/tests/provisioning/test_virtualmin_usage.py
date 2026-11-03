@@ -509,7 +509,7 @@ class UsageApiTests(HMACTestMixin, MigrationTestBase):
         self.assertEqual(value["current_usage"]["usage_state"], "unknown")
         self.assertIsNone(value["historical_usage"]["uptime_percentage"])
 
-    def test_real_reading_fires_existing_80_percent_warning_and_has_source_time_and_history(self):
+    def test_catalog_edit_preserves_assigned_warning_context_and_real_source_history(self):
         self.plan.disk_space_gb = 1
         self.plan.save(update_fields=["disk_space_gb"])
         payload = self.payload()
@@ -518,9 +518,9 @@ class UsageApiTests(HMACTestMixin, MigrationTestBase):
         response = self.portal_post(self.path, self.identity)
         self.assertEqual(response.status_code, 200, response.content)
         value = response.json()["data"]["usage"]
-        self.assertGreater(value["current_usage"]["disk_usage_percentage"], 85)
+        self.assertIsNone(value["current_usage"]["disk_usage_percentage"])
         self.assertEqual(value["current_usage"]["usage_as_of"], payload["records"][0]["scan_finished_at"])
-        self.assertEqual([alert["resource"] for alert in value["alerts"]], ["disk"])
+        self.assertEqual(value["alerts"], [])
         self.assertEqual(len(value["historical_usage"]["disk_usage_trend"]), 1)
         self.assertNotIn("installation", str(value))
 
@@ -544,10 +544,14 @@ class UsageApiTests(HMACTestMixin, MigrationTestBase):
             disk_usage_mb=871,
             bandwidth_usage_mb=456,
         )
+        self.plan.disk_space_gb = 99
+        self.plan.save(update_fields=["disk_space_gb"])
         response = self.portal_post(f"/api/services/{other.pk}/usage/", self.identity)
         self.assertEqual(response.status_code, 200, response.content)
         value = response.json()["data"]["usage"]
         self.assertEqual(value["current_usage"]["disk_usage_gb"], round(871 / 1024, 2))
+        self.assertEqual(value["current_usage"]["disk_limit_gb"], 1)
+        self.assertEqual(value["current_usage"]["disk_usage_percentage"], 85.1)
         self.assertEqual([item["resource"] for item in value["alerts"]], ["disk"])
         from apps.api.services.serializers import ServiceListSerializer  # noqa: PLC0415
 

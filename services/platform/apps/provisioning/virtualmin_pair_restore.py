@@ -144,7 +144,9 @@ def release_restore_hold(account_id: Any, *, how: str, actor: str) -> bool:
 
 def is_pair_job(operation: str, parameters: Mapping[str, Any]) -> bool:
     """True for a restore job that restores a base and a differential together."""
-    return operation == "restore_domain" and str(parameters.get("restore_mode", "")) == RESTORE_MODE_PAIR
+    return operation == "restore_domain" and (
+        str(parameters.get("restore_mode", "")) == RESTORE_MODE_PAIR or parameters.get("managed_single_restore") is True
+    )
 
 
 @dataclass(frozen=True)
@@ -394,6 +396,10 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
         BackupConfig,
         VirtualminBackupService,
         backup_task_timeout,
+        manifest_restore_refusal,
+    )
+    from .virtualmin_restore_policy import (  # noqa: PLC0415
+        inspect_web_archive,
     )
 
     readiness = server_transport_ready(target_server)
@@ -417,22 +423,43 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
         # ---- preflight: download BOTH archives, verify checksums, verify exact lineage ----------
         service._update_restore_progress(restore_id, "downloading", 10)
         manifests: dict[str, dict[str, Any]] = {}
-        for label, backup_id in (("base", config.backup_id), ("differential", config.differential_backup_id)):
+        requested = [("base", config.backup_id)]
+        if not config.managed_single:
+            requested.append(("differential", config.differential_backup_id))
+        labels = [label for label, _backup in requested]
+        for label, backup_id in requested:
             download = service._download_backup_to_spool(backup_id)
             if download.is_err():
                 return Err(download.unwrap_err(), retriability=retriability_of(download))
             path, manifest = download.unwrap()
             held.append((path, str(manifest["archive_name"])))
             manifests[label] = manifest
-        refusal = pair_lineage_refusal(
-            manifests["base"], manifests["differential"], service_id=account.service_id, domain=account.domain
-        )
+        if config.managed_single:
+            base = manifests["base"]
+            refusal = manifest_restore_refusal(base)
+            if str(base.get("praho_service_id")) != str(account.service_id) or base.get("domain") != account.domain:
+                refusal = "The single archive does not belong to this exact hosting service and domain."
+        else:
+            refusal = pair_lineage_refusal(
+                manifests["base"], manifests["differential"], service_id=account.service_id, domain=account.domain
+            )
         if refusal is not None:
             return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
         domain_id = str(manifests["base"].get("virtualmin_domain_id"))
-        try:
-            scopes = [
-                prepare_restore_params(
+        if config.managed_single:
+            identity = service._read_domain_id(account)
+            if identity.is_err():
+                return Err(identity.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
+            domain_id = identity.unwrap()
+
+        def inspected_scopes() -> list[dict[str, object]]:
+            current_scopes = []
+            for (path, name), label in zip(held, labels, strict=True):
+                if config.managed_single:
+                    inspect_web_archive(
+                        Path(path), account.domain, manifests[label].get("domain_features"), restore_configuration=True
+                    )
+                scope = prepare_restore_params(
                     account,
                     target_server,
                     Path(path),
@@ -441,8 +468,14 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
                     force=config.force_restore,
                     restore_configuration=True,
                 )
-                for (path, name), label in zip(held, ("base", "differential"), strict=True)
-            ]
+                if config.managed_single:
+                    scope.pop("all-features", None)
+                    scope.update({"only-features": "", "feature": ["virtualmin", *WEB_ONLY_VIRTUALMIN_FEATURES]})
+                current_scopes.append(scope)
+            return current_scopes
+
+        try:
+            scopes = inspected_scopes()
         except (ValidationError, ValueError, OSError, tarfile.TarError) as error:
             return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
 
@@ -453,7 +486,9 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
             return Err(gate.unwrap_err(), retriability=retriability_of(gate))
         if not gate.unwrap():
             return Err(
-                "A pair restore needs the live domain; restore the base alone to recreate a missing domain",
+                "A managed missing-domain restore requires the retained-backup recovery workflow (virtualmin_recover_node)."
+                if config.managed_single
+                else "A pair restore needs the live domain; restore the base alone to recreate a missing domain",
                 retriability=Retriability.NOT_RETRIABLE,
             )
 
@@ -480,7 +515,7 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
             )
 
         # ---- push both archives; the leases of what is still held are renewed at every stage -----
-        for label in ("base", "differential"):
+        for label in labels:
             if not service._owns_execution():
                 # Nothing destructive was issued: what an earlier push left on the node goes with this runner.
                 determinate = True
@@ -499,18 +534,7 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
 
         # ---- last gates before anything destructive ------------------------------------------------
         try:
-            scopes = [
-                prepare_restore_params(
-                    account,
-                    target_server,
-                    Path(path),
-                    manifests[label],
-                    source=f"{REMOTE_ARCHIVE_DIR}/{name}",
-                    force=config.force_restore,
-                    restore_configuration=True,
-                )
-                for (path, name), label in zip(held, ("base", "differential"), strict=True)
-            ]
+            scopes = inspected_scopes()
         except (ValidationError, ValueError, OSError, tarfile.TarError) as error:
             determinate = True
             return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
@@ -534,7 +558,7 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
                 {
                     "pair_node_step": "dispatching",
                     "virtualmin_domain_id": domain_id,
-                    "pair_archives": [manifests["base"]["archive_name"], manifests["differential"]["archive_name"]],
+                    "pair_archives": [manifests[label]["archive_name"] for label in labels],
                 }
             )
             == 0
@@ -560,9 +584,10 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
             "pair_lock_wait_seconds": PAIR_LOCK_WAIT_SECONDS,
             "pair_step_hold_seconds": config.pair_step_hold_seconds,
             "pair_base_archive": manifests["base"]["archive_name"],
-            "pair_diff_archive": manifests["differential"]["archive_name"],
+            "pair_diff_archive": "" if config.managed_single else manifests["differential"]["archive_name"],
             "pair_base_sha": manifests["base"]["checksum_sha256"],
-            "pair_diff_sha": manifests["differential"]["checksum_sha256"],
+            "pair_diff_sha": "" if config.managed_single else manifests["differential"]["checksum_sha256"],
+            "pair_single": config.managed_single,
             "pair_web_only": all("only-features" in scope for scope in scopes),
             "pair_restore_configuration": all(
                 scope.get("feature") == ["virtualmin", *WEB_ONLY_VIRTUALMIN_FEATURES] for scope in scopes
@@ -613,7 +638,7 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
                 f"Pair restore finished but could not be verified: {verify.unwrap_err()}",
                 retriability=Retriability.UNKNOWN,
             )
-        expected_features = manifests["differential"].get("domain_features")
+        expected_features = manifests[labels[-1]].get("domain_features")
         live_features = service._domain_features(account)
         if (
             isinstance(expected_features, list)
@@ -630,7 +655,7 @@ def restore_pair(  # noqa: C901, PLR0911, PLR0912, PLR0913, PLR0915  # Distinct 
         return Ok(
             {
                 "restore_id": restore_id,
-                "restore_mode": RESTORE_MODE_PAIR,
+                "restore_mode": "single" if config.managed_single else RESTORE_MODE_PAIR,
                 "base_backup_id": config.backup_id,
                 "differential_backup_id": config.differential_backup_id,
                 "safety_backup_id": safety_id,

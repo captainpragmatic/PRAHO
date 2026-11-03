@@ -51,6 +51,9 @@ def _snapshot(service: Service, plan: ServicePlan, defaults: tuple[object, objec
         disk_source=disk.source,
         bandwidth_source=bandwidth.source,
         policy_version=POLICY_VERSION,
+        operational_revision=1,
+        operational_disk_allowance_mib=disk.mib,
+        operational_bandwidth_allowance_mib=bandwidth.mib,
     )
 
 
@@ -63,12 +66,15 @@ def capture_initial_limits(services: Iterable[Service], *, using: str) -> None:
         return
     if not transaction.get_connection(using).in_atomic_block:
         raise RuntimeError("Initial hosting allowances must be captured atomically with their Service")
+    # Pin one statement-visible committed catalog snapshot. The new Service and
+    # allowance still commit atomically; later catalog edits cannot rewrite it.
+    # Taking NO KEY UPDATE here serializes unrelated Service insertions with
+    # provisioning's configuration read lock, beyond the FK's KEY SHARE check.
     plans = {
         plan.pk: plan
         for plan in ServicePlan.objects.using(using)
         .filter(pk__in={service.service_plan_id for service in records})
         .order_by("pk")
-        .select_for_update(of=("self",), no_key=True)
     }
     defaults = _defaults()
     snapshots = ServiceHostingLimits.objects.using(using).bulk_create(

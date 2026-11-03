@@ -129,11 +129,29 @@ def _lock_services(identifiers: Iterable[int], using: str) -> dict[int, int]:
     )
 
 
+def _refuse_quota_owned_accounts(identifiers: Iterable[Any], using: str) -> None:
+    from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415 -- Ownership boundary imports models.
+
+    if (
+        VirtualminProvisioningJob.objects.using(using)
+        .filter(
+            account_id__in=tuple(identifiers),
+            operation="apply_hosting_limits",
+            status__in=("pending", "running", "attention"),
+        )
+        .exists()
+    ):
+        raise ValidationError(
+            _("Verify or permanently fence the native quota operation before changing hosting ownership.")
+        )
+
+
 @contextmanager
 def fence_service_ownership(expected: dict[Any, int], *, using: str) -> Iterator[None]:
     with transaction.atomic(using=using):
         accounts = dict(_accounts(using).filter(service_id__in=expected).values_list("pk", "service_id"))
         locked = _lock_account_names(accounts, using)
+        _refuse_quota_owned_accounts(locked, using)
         current = _lock_services(expected, using)
         fresh_accounts = dict(_accounts(using).filter(service_id__in=expected).values_list("pk", "service_id"))
         if current != expected or locked != accounts or fresh_accounts != accounts:
@@ -159,6 +177,7 @@ def fence_account_ownership(expected: dict[Any, int], desired: Iterable[int], *,
         service_ids = set(expected.values()) | set(desired)
         owners = dict(_services(using).filter(pk__in=service_ids).values_list("pk", "customer_id"))
         locked = _lock_account_names(expected, using)
+        _refuse_quota_owned_accounts(locked, using)
         current_owners = _lock_services(service_ids, using)
         if locked != expected or owners != current_owners or set(current_owners) != service_ids:
             raise _stale()

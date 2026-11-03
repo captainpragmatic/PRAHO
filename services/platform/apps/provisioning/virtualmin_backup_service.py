@@ -59,7 +59,7 @@ from .virtualmin_gateway import (
     has_explicit_success,
     listing_attribute,
 )
-from .virtualmin_models import VirtualminAccount, VirtualminServer
+from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from .virtualmin_restore_policy import prepare_restore_params, restore_destination_refusal
 
 try:
@@ -376,6 +376,7 @@ class RestoreConfig:
     differential_backup_id: str = ""
     pair_token: str = ""
     pair_step_hold_seconds: int = 0
+    managed_single: bool = False
 
 
 logger = logging.getLogger(__name__)
@@ -683,6 +684,7 @@ class VirtualminBackupService:
         progress_key: str | None = None,
         ownership: Callable[[], bool] | None = None,
         note_sink: Callable[[dict[str, Any]], int] | None = None,
+        quota_parent_job: VirtualminProvisioningJob | None = None,
     ) -> Result[dict[str, Any], str]:
         """Restore a domain from a published backup (transport-based, fail-closed).
 
@@ -694,11 +696,12 @@ class VirtualminBackupService:
         restore_id = self._generate_restore_id(account, config.backup_id)
         self._progress_key = progress_key or restore_id
         self._ownership = ownership
+        self._quota_parent_job = quota_parent_job
         try:
             if refusal := restore_destination_refusal(account, target_server, force=config.force_restore):
                 return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
             self._update_restore_progress(restore_id, "initializing", 0)
-            if config.differential_backup_id:
+            if config.differential_backup_id or config.managed_single:
                 from .virtualmin_pair_restore import restore_pair  # noqa: PLC0415  # Circular
 
                 return restore_pair(self, account, config, target_server, restore_id, note_sink)
@@ -710,6 +713,7 @@ class VirtualminBackupService:
         finally:
             self._progress_key = None
             self._ownership = None
+            self._quota_parent_job = None
 
     def _restore_workflow(  # noqa: C901, PLR0911, PLR0912, PLR0915  # Distinct fail-closed gates
         self,
@@ -969,6 +973,15 @@ class VirtualminBackupService:
         rows = [row for row in listing.unwrap() if row["domain"] == account.domain]
         if len(rows) != 1 or rows[0]["username"] != account.virtualmin_username:
             return Err("restored domain missing or owner mismatch on the target listing")
+        from .hosting_limit_execution import ensure_managed_limits  # noqa: PLC0415 -- Archive completion barrier.
+
+        repaired = ensure_managed_limits(
+            account,
+            parent_job=getattr(self, "_quota_parent_job", None),
+            native_server=target_server,
+        )
+        if repaired.is_err():
+            return Err(repaired.unwrap_err(), retriability=Retriability.UNKNOWN)
         return Ok(None)
 
     def _cleanup_remote_archive(self, target_server: VirtualminServer, archive_name: str) -> None:

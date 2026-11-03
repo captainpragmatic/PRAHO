@@ -408,7 +408,7 @@ class VirtualminProvisioningService:
             logger.exception(f"Unexpected error creating Virtualmin account: {e}")
             return Err(f"Internal error: {e}")
 
-    def reprovision_virtualmin_account(
+    def reprovision_virtualmin_account(  # noqa: PLR0911 -- Refuse stale ownership/native operations before credential rotation.
         self, account: VirtualminAccount, target_server: VirtualminServer | None = None
     ) -> Result[VirtualminAccount, str]:
         """Re-create an EXISTING PRAHO account's domain on a Virtualmin server.
@@ -436,12 +436,29 @@ class VirtualminProvisioningService:
             server = target_server or previous_server
 
             with transaction.atomic():
+                locked_account = VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=account.pk)
+                if (
+                    locked_account.service_id != account.service_id
+                    or locked_account.domain != account.domain
+                    or locked_account.virtualmin_username != account.virtualmin_username
+                    or locked_account.server_id != previous_server.pk
+                ):
+                    return Err("Reprovision ownership changed; reload and review the current native binding.")
+                if account_has_active_operation(locked_account):
+                    return Err(ACCOUNT_BUSY_REFUSAL, retriability=Retriability.RETRIABLE)
+                previous_server = locked_account.server
+                list(
+                    VirtualminServer.objects.select_for_update(of=("self",))
+                    .filter(
+                        pk__in=(locked_account.server_id, server.pk),
+                    )
+                    .order_by("pk")
+                )
                 admitted = self._lock_open_server(server)
                 if admitted.is_err():
                     return Err(admitted.unwrap_err(), retriability=retriability_of(admitted))
                 server = admitted.unwrap()
                 # Rotate password — the pre-loss secret cannot be recovered.
-                VirtualminAccount.objects.select_for_update(of=("self",)).get(pk=account.pk)
                 from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server admission
                     maintenance_refusal,
                 )
@@ -575,7 +592,7 @@ class VirtualminProvisioningService:
         # The original account/service/generation callback is the final DB check.
         return before_create() if before_create is not None else None
 
-    def _execute_domain_creation(  # noqa: PLR0911, PLR0915  # Verified create and atomic node-ownership commit
+    def _execute_domain_creation(  # noqa: PLR0911, PLR0912, PLR0915 -- Verified create, native quota and canonical ownership commit.
         self,
         account: VirtualminAccount,
         job: VirtualminProvisioningJob,
@@ -595,7 +612,7 @@ class VirtualminProvisioningService:
             # ===============================================================================
             logger.info(f"🔍 [VirtualminService] Pre-flight validation for {account.domain}")
 
-            validation_result = self._validate_provisioning_preconditions(account, gateway)
+            validation_result = self._validate_provisioning_preconditions(account, gateway, quota_job=job)
             if validation_result.is_err():
                 error_msg = validation_result.unwrap_err()
                 retriability = retriability_of(validation_result)
@@ -643,11 +660,21 @@ class VirtualminProvisioningService:
                 response = result.unwrap()
 
                 if response.success:
+                    from .hosting_limit_execution import ensure_managed_limits, publish_managed_limits  # noqa: PLC0415
+
+                    quotas = ensure_managed_limits(account, parent_job=job, native_server=account.server)
+                    if quotas.is_err():
+                        job.mark_attention(quotas.unwrap_err(), response.data)
+                        return Err(quotas.unwrap_err(), retriability=Retriability.UNKNOWN)
                     if settle_created is not None:
                         # Retry settlement owns its fresh binding/claim checks.
                         # A post-acceptance bookkeeping failure must never delete
                         # the actual resource or replay the creation command.
-                        return settle_created(response.data)
+                        settled = settle_created(response.data)
+                        if settled.is_ok():
+                            account.refresh_from_db()
+                            publish_managed_limits(account)
+                        return settled
                     # Track successful domain creation for potential rollback
                     rollback_operations.append(
                         {
@@ -668,6 +695,10 @@ class VirtualminProvisioningService:
                             # "server" is stored here, with the active state: a reprovision stages its
                             # target on the instance and only a verified create may persist it.
                             account.save(update_fields=["status", "provisioned_at", "server", "updated_at"])
+                            # The held target receipt becomes current only with this
+                            # exact canonical ownership commit, never from a source receipt.
+                            account.refresh_from_db(fields=["quota_generation"])
+                            publish_managed_limits(account)
 
                             # Update server stats (track for rollback)
                             old_domain_count = account.server.current_domains
@@ -846,7 +877,11 @@ class VirtualminProvisioningService:
         return Ok(None)
 
     def _validate_provisioning_preconditions(  # Pre-flight gate: one exit per precondition  # noqa: PLR0911  # Complexity: cohesive workflow
-        self, account: VirtualminAccount, gateway: VirtualminGateway
+        self,
+        account: VirtualminAccount,
+        gateway: VirtualminGateway,
+        *,
+        quota_job: VirtualminProvisioningJob | None = None,
     ) -> Result[bool, str]:
         """
         Validate all preconditions before provisioning (Phase 1 - Quick Win).
@@ -887,6 +922,19 @@ class VirtualminProvisioningService:
             template_result = self._check_template_availability(account, gateway)
             if template_result.is_err():
                 return Err(template_result.unwrap_err(), retriability=retriability_of(template_result))
+
+            if quota_job is not None:
+                from .hosting_limit_execution import reserve_managed_creation  # noqa: PLC0415 -- Shared capacity lane.
+
+                server_info = health_result.unwrap()
+                available_mib = self._available_disk_mb(server_info.get("data", server_info))
+                reservation = reserve_managed_creation(
+                    account,
+                    quota_job,
+                    None if available_mib is None else available_mib * 1024**2,
+                )
+                if reservation.is_err():
+                    return Err(reservation.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
 
             logger.info(f"✅ [VirtualminService] All preconditions validated for {account.domain}")
             return Ok(True)
@@ -1611,16 +1659,31 @@ class VirtualminProvisioningService:
         job: VirtualminProvisioningJob,
         binding: CreateRetryBinding,
     ) -> Result[dict[str, Any], str]:
+        from .hosting_limit_execution import (  # noqa: PLC0415 -- Same native gate as fresh creation.
+            ensure_managed_limits,
+            publish_managed_limits,
+        )
+
+        verified: Result[bool, str] = Ok(False)
+        if create_retry_policy(account, job).allowed:
+            verified = ensure_managed_limits(account, parent_job=job, native_server=job.server)
+            if verified.is_err() and create_retry_policy(account, job).allowed:
+                job.mark_attention(verified.unwrap_err())
+                return Err(verified.unwrap_err(), retriability=Retriability.UNKNOWN)
         with transaction.atomic():
             target = lock_create_retry_node(account, job)
             if target.is_err():
                 return Err(target.unwrap_err())
-            return settle_retry_created(
+            settled = settle_retry_created(
                 binding,
                 job.pk,
                 {"recovered": "remote domain already present"},
                 native_outcome="adopted",
             )
+            if settled.is_ok() and verified.is_ok() and verified.unwrap():
+                account.refresh_from_db()
+                publish_managed_limits(account)
+            return settled
 
     def _retry_dispatch_refusal(
         self, account: VirtualminAccount, job: VirtualminProvisioningJob, binding: CreateRetryBinding
@@ -2379,7 +2442,7 @@ class VirtualminBackupManagementService:
             return None
         return restore_destination_refusal(account, server, force=parameters.get("force_restore") is True)
 
-    def _admit_job(  # noqa: C901, PLR0911, PLR0913  # Distinct account, node and execution-context admission refusals
+    def _admit_job(  # noqa: C901, PLR0911, PLR0912, PLR0913 -- Distinct account, node and managed-restore budget refusals.
         self,
         account: VirtualminAccount,
         *,
@@ -2442,6 +2505,15 @@ class VirtualminBackupManagementService:
                 return Err(ACCOUNT_BUSY_REFUSAL)
             role = str(parameters.get("chain_role", ROLE_STANDALONE))
             if operation == "restore_domain":
+                if locked.quota_managed:
+                    budget += 960  # Fenced quota probe/application and canonical observation after restoration.
+                    if budget + 60 >= retry_window:
+                        return Err(
+                            "Managed restore plus quota verification exceeds broker visibility; review the configured task budget."
+                        )
+                    parameters["task_budget_seconds"] = budget
+                if locked.quota_managed and parameters.get("restore_mode") != "pair":
+                    parameters = {**parameters, "managed_single_restore": True, "pair_token": str(uuid.uuid4())}
                 invalidate_chain(locked)  # a restore deletes the node's snapshot (contract Q8)
             elif role != ROLE_STANDALONE:
                 pins = admit_chain_role(locked, role)
@@ -2585,6 +2657,20 @@ class VirtualminBackupManagementService:
                 "target_server_id": str(target_server.id),
                 "initiated_by": initiated_by,
             }
+            task_budget = None
+            if VirtualminAccount.objects.filter(pk=account.pk, quota_managed=True).exists():
+                from .spool import estimated_transfer_bytes  # noqa: PLC0415
+                from .virtualmin_pair_restore import pair_restore_task_timeout  # noqa: PLC0415
+
+                manifest = VirtualminBackupService(target_server).read_manifest(config.backup_id)
+                if manifest.is_err():
+                    return Err("The managed restore archive could not be inspected: " + manifest.unwrap_err())
+                size = manifest.unwrap().get("file_size_bytes")
+                if type(size) is not int or size <= 0:
+                    return Err("The managed restore archive has no bounded size evidence.")
+                task_budget = pair_restore_task_timeout(
+                    estimated_transfer_bytes(account.current_disk_usage_mb or 0), size, 0
+                )
             original_server = self.server
             self.server = target_server
             try:
@@ -2595,6 +2681,7 @@ class VirtualminBackupManagementService:
                     task_path="apps.provisioning.virtualmin_tasks.run_virtualmin_restore",
                     execute_inline=execute_inline,
                     source_bound=False,
+                    task_budget=task_budget,
                 )
             finally:
                 self.server = original_server

@@ -105,7 +105,10 @@ class CreateAndRecoverAgreeTests(VirtualminTaskTestBase):
             patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=refuse),
             self.assertLogs("apps.provisioning.virtualmin_disaster_recovery", level="INFO") as logs,
         ):
-            VirtualminDisasterRecoveryService()._restore_quotas(self.server, self.account.domain, 2000, 1000)
+            result = VirtualminDisasterRecoveryService()._restore_quotas(self.server, self.account.domain, 2000, 1000)
+
+        self.assertIsNotNone(result, "A quota repair refusal must propagate to the recovery completion decision")
+        self.assertTrue(result.is_err())
 
         text = "\n".join(logs.output)
         self.assertIn("Failed to restore quotas", text)

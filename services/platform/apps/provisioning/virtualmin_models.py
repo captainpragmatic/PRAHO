@@ -388,6 +388,16 @@ class VirtualminAccount(models.Model):
     effective_disk_quota_mb = models.PositiveIntegerField(
         null=True, blank=True, help_text=_("Desired native cap including headroom; not proof of kernel enforcement")
     )
+    quota_generation = models.PositiveBigIntegerField(
+        default=0, editable=False, help_text=_("Monotonic native quota execution epoch; never reset on a move")
+    )
+    quota_managed = models.BooleanField(
+        default=False,
+        editable=False,
+        help_text=_(
+            "Explicit account adoption or verified PRAHO creation; node adoption alone never changes existing caps"
+        ),
+    )
     bandwidth_quota_mb = models.IntegerField(
         null=True, blank=True, verbose_name=_("Bandwidth Quota (MB)"), help_text=_("Use -1 for unlimited bandwidth")
     )
@@ -486,7 +496,20 @@ class VirtualminAccount(models.Model):
         return f"{self.domain} ({self.get_status_display()})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        fields = kwargs.get("update_fields")
+        moved = bool(
+            not self._state.adding
+            and fields is not None
+            and {"server", "server_id"}.intersection(fields)
+            and type(self).objects.using(self._state.db).filter(pk=self.pk).exclude(server_id=self.server_id).exists()
+        )
         save_with_ownership(self, "account", super().save, args, kwargs)
+        if moved:
+            from .hosting_limit_models import ServiceHostingLimits  # noqa: PLC0415 -- Canonical node publication.
+
+            ServiceHostingLimits.objects.using(self._state.db).filter(service_id=self.service_id).update(
+                verified_at=None
+            )
 
     def get_absolute_url(self) -> str:
         """Get URL for account detail view"""
@@ -639,6 +662,7 @@ class VirtualminProvisioningJob(models.Model):
         ("create_domain", _("Create Domain")),
         ("delete_domain", _("Delete Domain")),
         ("modify_domain", _("Modify Domain")),
+        ("apply_hosting_limits", _("Apply Hosting Limits")),
         ("suspend_domain", _("Suspend Domain")),
         ("unsuspend_domain", _("Unsuspend Domain")),
         ("create_user", _("Create User")),
@@ -662,6 +686,13 @@ class VirtualminProvisioningJob(models.Model):
     server = models.ForeignKey(VirtualminServer, on_delete=models.CASCADE, related_name="provisioning_jobs")
     account = models.ForeignKey(
         VirtualminAccount, on_delete=models.CASCADE, related_name="provisioning_jobs", null=True, blank=True
+    )
+    hosting_limit_application = models.ForeignKey(
+        "provisioning.HostingLimitApplication",
+        on_delete=models.PROTECT,
+        related_name="native_jobs",
+        null=True,
+        blank=True,
     )
 
     # Job parameters and results
@@ -785,7 +816,7 @@ class VirtualminProvisioningJob(models.Model):
         jobs = (
             cls.objects.filter(status__in=("pending", "running"))
             # Backup/restore have their own execution_deadline and janitor.
-            .exclude(operation__in=("backup_domain", "restore_domain"))
+            .exclude(operation__in=("backup_domain", "restore_domain", "apply_hosting_limits"))
             .only("operation", "status", "parameters", "claimed_at", "started_at", "updated_at")
         )
         recovered = 0

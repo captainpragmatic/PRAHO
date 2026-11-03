@@ -66,6 +66,11 @@ my $ok = eval {
     $domain->{'quota'} = $request->{'disk_limit_kib'};
     $domain->{'uquota'} = $request->{'disk_limit_kib'};
     $domain->{'bw_limit'} = $request->{'bandwidth_limit_bytes'};
+    # The same synchronous child owns the inherited quota lane and native
+    # domain lock; restored customer notification rows cannot outlive its fence.
+    require '/usr/local/lib/praho/praho-notification-policy.pl';
+    &virtual_server::praho_enforce_resource_policy($domain);
+    &virtual_server::praho_enforce_domain_notifications($domain);
     &save_domain($domain) or die "Native quota metadata could not be saved\n";
     1;
 };

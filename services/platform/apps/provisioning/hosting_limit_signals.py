@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 
@@ -24,6 +25,9 @@ def _limits_state(instance: ServiceHostingLimits) -> dict[str, object]:
         "disk_source": instance.disk_source,
         "bandwidth_source": instance.bandwidth_source,
         "applied_revision": instance.applied_revision,
+        "operational_revision": instance.operational_revision,
+        "operational_disk_allowance_mib": instance.operational_disk_allowance_mib,
+        "operational_bandwidth_allowance_mib": instance.operational_bandwidth_allowance_mib,
     }
 
 
@@ -79,3 +83,13 @@ def audit_hosting_assignment(
                 "authority": instance.authority,
             },
         )
+
+
+@receiver(post_save, sender=HostingLimitApplication)
+def queue_hosting_assignment(
+    sender: type[HostingLimitApplication], instance: HostingLimitApplication, created: bool, **kwargs: Any
+) -> None:
+    if created:
+        from .hosting_limit_tasks import enqueue_application  # noqa: PLC0415 -- Enqueue only after commit.
+
+        transaction.on_commit(lambda: enqueue_application(instance.pk), using=kwargs.get("using"), robust=True)
