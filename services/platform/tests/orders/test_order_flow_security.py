@@ -27,6 +27,7 @@ from apps.common.middleware import CSPNonceMiddleware, SecurityHeadersMiddleware
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.users.models import User
+from tests.helpers.task_queue import quiet_task_queue
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -118,9 +119,9 @@ class StripePaymentVerificationTest(TestCase):
             success=True, status="succeeded", error=None, amount_received=0, currency="ron",
         )
 
+        quiet_task_queue(self)
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
             response = confirm_order(request, str(order.id))

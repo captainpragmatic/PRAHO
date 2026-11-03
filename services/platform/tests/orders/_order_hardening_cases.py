@@ -28,6 +28,7 @@ from apps.orders.services import OrderNumberingService, StatusChangeData
 from apps.users.models import User
 from tests.helpers.checkout import checkout_consents
 from tests.helpers.fsm_helpers import force_status
+from tests.helpers.task_queue import quiet_task_queue
 
 # ===============================================================================
 # HELPERS
@@ -407,9 +408,9 @@ class ConfirmOrderStatusHistoryTest(TestCase):
             "currency": "ron",
         }
 
+        quiet_task_queue(self)
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
             response = confirm_order(
@@ -446,9 +447,9 @@ class ConfirmOrderStatusHistoryTest(TestCase):
             "currency": "ron",
         }
 
+        quiet_task_queue(self)
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
             response = confirm_order(
@@ -501,9 +502,9 @@ class ConfirmOrderStatusHistoryTest(TestCase):
             "currency": "ron",
         }
 
+        quiet_task_queue(self)
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
             req_data = {"payment_intent_id": pi_id, "payment_status": "succeeded"}
@@ -798,9 +799,9 @@ class ConfirmOrderPaymentIntentBindingTest(TestCase):
         order = self._make_pending_order(payment_method="")
         request = self._make_confirm_request({"payment_intent_id": "pi_validformat1234567890"})
 
+        quiet_task_queue(self)
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
         ):
             response = confirm_order(request, str(order.id))
 
@@ -821,9 +822,9 @@ class ConfirmOrderPaymentIntentBindingTest(TestCase):
         order = self._make_pending_order(payment_method="card")
         request = self._make_confirm_request({"payment_intent_id": "pi_validformat1234567890"})
 
+        quiet_task_queue(self)
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
         ):
             response = confirm_order(request, str(order.id))
 
@@ -890,9 +891,9 @@ class ConfirmOrderPIFormatValidationTest(TestCase):
         order = self._make_pending_card_order()
         request = self._make_confirm_request({"payment_intent_id": "pi_validformat1234567890"})
 
+        quiet_task_queue(self)
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
         ):
             response = confirm_order(request, str(order.id))
 
