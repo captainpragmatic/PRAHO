@@ -1,7 +1,85 @@
 {
   "schema": 1,
-  "qualification_status": "failed-cidr",
+  "qualification_status": "bouncer-userspace-qualified",
+  "rejected_package_bouncer": {"version": "0.0.36", "reason": "IPv4 and IPv6 CIDRs enforced only their first address"},
+  "bouncer_build": {
+    "version": "0.0.36-praho.1",
+    "source": {
+      "commit": "4c315193cd4f19e3937cdee2f15183ec4d602f56",
+      "url": "https://codeload.github.com/crowdsecurity/cs-firewall-bouncer/tar.gz/4c315193cd4f19e3937cdee2f15183ec4d602f56",
+      "sha256": "f9506a855c05babdf6882b43b6d67975c8fdc8eb362a85aa5e2ab6003517e912"
+    },
+    "patch": {
+      "path": "patches/0001-set-only-intervals.patch",
+      "sha256": "f38519d83270b9b1aea7bdb00d481fefca3cc8254a39a79f3863c0f6591ca7a2"
+    },
+    "recipe": {
+      "path": "build-patched/Dockerfile",
+      "sha256": "6a09cb112437164c3c7daa84e02d6b8b1e65a652d90e509f12b231462e2a9afc"
+    },
+    "build_script": {
+      "path": "build-patched/build.sh",
+      "sha256": "3451b0364413666955f2b9f9eedc050689e30a9c31e028fef7c10d375e98dbf1"
+    },
+    "builder_image": "golang:1.27.3-bookworm@sha256:d9b6a1beb9474adc2a1ce842573639b44b2a0dd49b6669f51d3821baf9ec37c9",
+    "go_version": "1.27.3",
+    "go_mod_sha256": "953b0cd7471fd8416f65baed6d5f58480647b46483330dc1cb07d1933e8d2500",
+    "go_sum_sha256": "a2a7faf23e9856c9d5f5db6350a9e3e2af0d1f8849d4b341b3367b9ece09180c",
+    "vendor_tree_sha256": "20c83a4a27c2fdac0ae17a5a775ab3a39858200872be040a93b9e6116051db2d",
+    "binaries": {
+      "amd64": {
+        "file": "build/crowdsec-patched/crowdsec-firewall-bouncer-amd64",
+        "sha256": "894c139f9477a0b614689011d4cf9b9da0be9f9a3e14a9cda4e92ac105a2caff",
+        "size": 16629884
+      },
+      "arm64": {
+        "file": "build/crowdsec-patched/crowdsec-firewall-bouncer-arm64",
+        "sha256": "bd8f8466ba611ada38ace34bfcb46b4fe00a3f1666b5c7272ff9d0e7e3a62dc1",
+        "size": 15466620
+      }
+    },
+    "notices": {
+      "file": "build/crowdsec-patched/license-notices.tar.gz",
+      "sha256": "abf2c84d39d2d613c5cc67bbd24777c1523f8fb2b015a80ae1d88bce042f8277",
+      "size": 223381
+    },
+    "nftables": {
+      "set_only_intervals": true,
+      "ban_set_flags": [
+        "interval",
+        "timeout"
+      ]
+    }
+  },
   "verified_at": "2026-11-03",
+  "gateway": {
+    "file": "deploy/ansible/roles/crowdsec/files/gateway.py",
+    "sha256": "fbaa7c2bedb65199fa368bab91b4325ce2f0363f6d50b6ba5431a9a9105ea3ab",
+    "protocol": 1
+  },
+  "stock_units": {
+    "crowdsec.service": {
+      "path": "/usr/lib/systemd/system/crowdsec.service",
+      "sha256": "ec110a27de1ceaa991dd07bbe2cff69413b5c1f7bafd73870a98cb6a77e335ab",
+      "fragment_paths": [
+        "/lib/systemd/system/crowdsec.service",
+        "/usr/lib/systemd/system/crowdsec.service"
+      ],
+      "drop_in_paths": [
+        "/etc/systemd/system/crowdsec.service.d/praho.conf"
+      ]
+    },
+    "crowdsec-firewall-bouncer.service": {
+      "path": "/etc/systemd/system/crowdsec-firewall-bouncer.service",
+      "sha256": "1c459fdc032edf948d2e97eae4ca1160c093f234898c1fb14dcf641fe9fb26f5",
+      "fragment_paths": [
+        "/etc/systemd/system/crowdsec-firewall-bouncer.service"
+      ],
+      "drop_in_paths": [
+        "/etc/systemd/system/crowdsec-firewall-bouncer.service.d/praho.conf"
+      ]
+    }
+  },
   "repository": {
     "url": "https://packagecloud.io/crowdsec/crowdsec/any/",
     "primary_fingerprint": "6A89E3C2303A901A889971D3376ED5326E93CD0C",
@@ -64,71 +142,99 @@
     "files": [
       {
         "path": "parsers/s00-raw/crowdsecurity/syslog-logs.yaml",
+        "installed_path": "/etc/crowdsec/parsers/s00-raw/syslog-logs.yaml",
+        "host_kinds": ["node","portal"],
         "sha256": "66ab30693dfb6c55ca9c1d28132c6bd69bcb1f9f7accf01f2d0bc1361b3d55d9",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/parsers/s00-raw/crowdsecurity/syslog-logs.yaml"
       },
       {
         "path": "parsers/s01-parse/crowdsecurity/sshd-logs.yaml",
+        "installed_path": "/etc/crowdsec/parsers/s01-parse/sshd-logs.yaml",
+        "host_kinds": ["node","portal"],
         "sha256": "045ff4c7895888becf161a8666ec173c45b58e52f2a72583a03f22b40203390d",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/parsers/s01-parse/crowdsecurity/sshd-logs.yaml"
       },
       {
         "path": "parsers/s01-parse/crowdsecurity/apache2-logs.yaml",
+        "installed_path": "/etc/crowdsec/parsers/s01-parse/apache2-logs.yaml",
+        "host_kinds": ["node"],
         "sha256": "e395775112ace41543b4fc3623dab4ed9b5c97f8fc234f2a230e8549fe4a907c",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/parsers/s01-parse/crowdsecurity/apache2-logs.yaml"
       },
       {
         "path": "parsers/s01-parse/crowdsecurity/caddy-logs.yaml",
+        "installed_path": "/etc/crowdsec/parsers/s01-parse/caddy-logs.yaml",
+        "host_kinds": ["portal"],
         "sha256": "dc7ebf4b72fca2d5ae1351d9f58be72bb044a2a20e2f3d8afbe9ee2b70f36af5",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/parsers/s01-parse/crowdsecurity/caddy-logs.yaml"
       },
       {
         "path": "parsers/s01-parse/andreasbrett/webmin-logs.yaml",
+        "installed_path": "/etc/crowdsec/parsers/s01-parse/webmin-logs.yaml",
+        "host_kinds": ["node"],
         "sha256": "604b0334eb171e626fcff15367bf291329291296572cf14ea30b7ca6bc8486de",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/parsers/s01-parse/andreasbrett/webmin-logs.yaml"
       },
       {
         "path": "parsers/s02-enrich/crowdsecurity/dateparse-enrich.yaml",
+        "installed_path": "/etc/crowdsec/parsers/s02-enrich/dateparse-enrich.yaml",
+        "host_kinds": ["node","portal"],
         "sha256": "3f51a6c389bbf1c38f49d8824b6bffd9a265d0fa78a98af71628256019847951",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/parsers/s02-enrich/crowdsecurity/dateparse-enrich.yaml"
       },
       {
         "path": "parsers/s02-enrich/crowdsecurity/http-logs.yaml",
+        "installed_path": "/etc/crowdsec/parsers/s02-enrich/http-logs.yaml",
+        "host_kinds": ["node","portal"],
         "sha256": "c7cef82f42d8682dc0e2e02cd973a096bb6501a1dbc85e7655f6a38b3d96a61c",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/parsers/s02-enrich/crowdsecurity/http-logs.yaml"
       },
       {
         "path": "scenarios/crowdsecurity/ssh-bf.yaml",
+        "installed_path": "/etc/crowdsec/scenarios/ssh-bf.yaml",
+        "host_kinds": ["node","portal"],
         "sha256": "242f36684d66bbae3044e576b7cfffef62d5323465f3f74f87923167c6d93356",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/scenarios/crowdsecurity/ssh-bf.yaml"
       },
       {
         "path": "scenarios/crowdsecurity/ssh-slow-bf.yaml",
+        "installed_path": "/etc/crowdsec/scenarios/ssh-slow-bf.yaml",
+        "host_kinds": ["node","portal"],
         "sha256": "892f9a153c4dafb5392ba40d70616e88896571be8f4cc00996e7f5e8277c869e",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/scenarios/crowdsecurity/ssh-slow-bf.yaml"
       },
       {
         "path": "scenarios/crowdsecurity/ssh-cve-2024-6387.yaml",
+        "installed_path": "/etc/crowdsec/scenarios/ssh-cve-2024-6387.yaml",
+        "host_kinds": ["node","portal"],
         "sha256": "7888f1f31ea75d55f7b4bdf56b6f0840ca4ecbd937af0655cdf263062a11e85a",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/scenarios/crowdsecurity/ssh-cve-2024-6387.yaml"
       },
       {
         "path": "scenarios/crowdsecurity/http-cve-2021-41773.yaml",
+        "installed_path": "/etc/crowdsec/scenarios/http-cve-2021-41773.yaml",
+        "host_kinds": ["node","portal"],
         "sha256": "f3fa755209fab221d6bbe04abd835c6539034cd72521725f960cdb36157e4313",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/scenarios/crowdsecurity/http-cve-2021-41773.yaml"
       },
       {
         "path": "scenarios/crowdsecurity/http-cve-2021-42013.yaml",
+        "installed_path": "/etc/crowdsec/scenarios/http-cve-2021-42013.yaml",
+        "host_kinds": ["node","portal"],
         "sha256": "b9e598a8e063f525a16ba78488787da5d409141c3a8b2665263654d92745e59a",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/scenarios/crowdsecurity/http-cve-2021-42013.yaml"
       },
       {
         "path": "scenarios/crowdsecurity/http-probing.yaml",
+        "installed_path": "/etc/crowdsec/scenarios/http-probing.yaml",
+        "host_kinds": ["node","portal"],
         "sha256": "4b16f896af400e006c28b1476bf5989c748186f2b3756ed9ad7d1559480d278c",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/scenarios/crowdsecurity/http-probing.yaml"
       },
       {
         "path": "scenarios/andreasbrett/webmin-bf.yaml",
+        "installed_path": "/etc/crowdsec/scenarios/webmin-bf.yaml",
+        "host_kinds": ["node"],
         "sha256": "0fa97ae9e9f79be63615dc34a6695cfe5c88a6f7d8d29ef28305593422ff58da",
         "url": "https://raw.githubusercontent.com/crowdsecurity/hub/58d35d108bb310f2ca0bf16c043715f15477adc1/scenarios/andreasbrett/webmin-bf.yaml"
       }

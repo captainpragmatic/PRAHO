@@ -1,18 +1,24 @@
 # CrowdSec qualification artifacts
 
-These are **rejected qualification candidates**, not deployable approvals. The
-actual bouncer fails IPv4/IPv6 CIDR enforcement; `make test-crowdsec-docker` keeps
-that acceptance gate visible. See the [ledger](../../docs/security/crowdsec-implementation.md).
+The original signed bouncer **failed CIDR qualification**. The selected patched
+build passes packet qualification; host-role and production gates remain open.
+See the [comparison](../../docs/security/crowdsec-bouncer-trials.md) and
+[ledger](../../docs/security/crowdsec-implementation.md).
+The [operations procedure](../../docs/security/crowdsec-operations.md) covers
+explicit inventory selection, policy preview, simulation and host qualification.
 
-`artifacts.lock.json` pins exact packages and 14 selected Hub leaves. The signing
+`artifacts.lock.json` pins exact packages, the reproducible patched build and
+14 individually selected Hub leaves with explicit host scope. The signing
 key is public. `provenance/` archives the signed InRelease and exact compressed
 indexes used on 2026-11-03, so future repository rotation cannot erase the evidence.
 Local Git attributes preserve these cryptographic inputs byte-for-byte, including
 upstream signed whitespace.
-Package binaries are not committed. Tests download the appropriate locked package
-or read `CROWDSEC_ARTIFACT_DIR`, then verify size, hash and package version before
-executing its bouncer binary. TLS/HTTPS and nftables handling are real; the test
-replaces only the local LAPI stream. No package maintainer scripts are executed.
+Package and generated binary bytes are not committed. The packet tests verify the
+selected build's size and hash before execution. Explicit rejected-package trials
+download the locked package or read `CROWDSEC_ARTIFACT_DIR`, then verify size, hash
+and package version before extracting its binary. TLS/HTTPS and nftables handling
+are real; the packet fixture replaces only the local LAPI stream and executes no
+package maintainer scripts. Separate role fixtures qualify actual installation.
 
 Verification chain: compare the signing key's primary fingerprint with
 `6A89E3C2303A901A889971D3376ED5326E93CD0C`; verify the archived InRelease signature
@@ -28,3 +34,10 @@ are an allowlist for future qualification, never authorization to copy generic
 SSH alerts without proving the administrative listener provenance. HTTP probing
 and Webmin authentication remain local. Package authenticity and leaf hashes
 do not establish runtime compatibility or detection coverage.
+
+`make build-crowdsec-patched` reproduces both architecture binaries. The default
+`make test-crowdsec-docker` selects these locked bytes and builds them if absent.
+`CROWDSEC_BOUNCER_REJECTED_PACKAGE=1` explicitly reproduces the original package's
+two CIDR failures. Trial overrides require both `CROWDSEC_BOUNCER_BINARY` and its
+explicit `CROWDSEC_BOUNCER_SHA256`; the normal target accepts only locked hashes.
+Integration CI preserves binaries and provenance as downloadable artifacts.

@@ -257,6 +257,14 @@ jobs:
     - name: CrowdSec native artifact qualification
       run: make test-crowdsec-docker
 
+    - name: Preserve CrowdSec binaries and build provenance
+      uses: actions/upload-artifact@v4
+      with:
+        name: crowdsec-bouncer-${{ github.sha }}
+        path: build/crowdsec-patched/
+        if-no-files-found: error
+        retention-days: 30
+
     - name: Integration test suite (make test-integration)
       run: make test-integration
 

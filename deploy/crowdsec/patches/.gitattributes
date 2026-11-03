@@ -1,0 +1,3 @@
+# Unified-diff context contains a required leading space before upstream tabs.
+# The builder checks added source whitespace with git apply --whitespace=error.
+*.patch -whitespace

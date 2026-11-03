@@ -170,3 +170,19 @@ Candidate failures block dependent work rather than weakening these contracts.
 - [Bouncer 0.0.36 nftables](https://github.com/crowdsecurity/cs-firewall-bouncer/blob/v0.0.36/pkg/nftables/nftables.go)
 - [Bouncer 0.0.36 to 0.0.38](https://github.com/crowdsecurity/cs-firewall-bouncer/compare/v0.0.36...v0.0.38)
 - [Signed package metadata](https://packagecloud.io/crowdsec/crowdsec/any/dists/any/InRelease)
+
+## Qualification amendment, 2026-11-03
+
+The signed bouncer 0.0.36 fails real IPv4/IPv6 CIDR enforcement. Under authorization
+to try both remediation paths, upstream experimental PR #523 and a smaller
+release-derived set-only patch both passed the 13 core packet cases. The working
+simulation candidate is `0.0.36-praho.1`, built reproducibly from the original
+source commit with pinned Go 1.27.3 and unchanged dependencies. Further qualification
+rejected upstream PR #523 because a real zero-second LAPI duration creates a
+permanent ban. The PRAHO patch handles elapsed durations, preserves kernel expiry
+across stops, restarts from a full snapshot after a failed atomic write, and uses
+a bounded socket buffer proven with 10,000 decisions. Install it separately from the signed package binary and
+use interval+timeout ban sets with the opt-in backend. Exact hashes and source
+provenance are locked. See [the trials](../security/crowdsec-bouncer-trials.md).
+This amends the candidate artifact choice; it does not waive host installation,
+configuration, kernel or rollout qualification.
