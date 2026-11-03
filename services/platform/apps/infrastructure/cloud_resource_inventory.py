@@ -6,7 +6,6 @@ relationships, never permission to delete. Provider payloads are reduced before 
 
 from __future__ import annotations
 
-import contextlib
 import re
 import time
 from collections.abc import Callable
@@ -497,10 +496,11 @@ class CloudResourceClient:
         except Exception as error:
             message = f"Provider deletion unconfirmed: {_error_label(error)}"
         # A refused or failed DELETE can still have taken effect; only structured absence proves it.
-        with contextlib.suppress(Exception):
-            if self.read_exact(kind, resource_id) is None:
-                return Ok(True)
-        return Err(message)
+        try:
+            gone = self.read_exact(kind, resource_id) is None
+        except Exception:
+            gone = False  # The re-read proves nothing; the original error stands.
+        return Ok(True) if gone else Err(message)
 
     def retain_backup(self, backup_id: str) -> Result[str, str]:
         """Convert an existing restore point; never create a new final snapshot implicitly."""
