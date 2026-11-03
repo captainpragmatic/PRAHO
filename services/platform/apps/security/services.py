@@ -57,7 +57,9 @@ def _audit_values(source: SecuritySource) -> dict[str, object]:
     }
 
 
-def _audit(source: SecuritySource, actor: User, operation: str, old: dict[str, object] | None = None) -> None:
+def _audit(
+    source: SecuritySource, actor: User, operation: str, old: dict[str, object] | None = None, *, reason: str = ""
+) -> None:
     from apps.audit.services import AuditService  # noqa: PLC0415 -- audit service boundary
 
     AuditService.log_simple_event(
@@ -67,7 +69,7 @@ def _audit(source: SecuritySource, actor: User, operation: str, old: dict[str, o
         description="Changed explicit CrowdSec source enrollment",
         old_values=old or {},
         new_values=_audit_values(source),
-        metadata={"source_app": "security", "security_operation": operation},
+        metadata={"source_app": "security", "security_operation": operation, "reason": reason[:2000]},
     )
 
 
@@ -82,7 +84,7 @@ def _apply(source: SecuritySource, config: SourceConfiguration, *, bind: bool = 
 
 
 @transaction.atomic
-def enroll_source(config: SourceConfiguration, actor: User) -> SecuritySource:
+def enroll_source(config: SourceConfiguration, actor: User, *, reason: str = "") -> SecuritySource:
     _authorize(actor)
     source = SecuritySource()
     if config.kind == "node":
@@ -90,16 +92,20 @@ def enroll_source(config: SourceConfiguration, actor: User) -> SecuritySource:
     _apply(source, config)
     source.save()
     SecuritySyncState.objects.create(source=source)
-    _audit(source, actor, "enroll")
+    _audit(source, actor, "enroll", reason=reason)
     return source
 
 
 @transaction.atomic
-def reconfigure_source(source_id: UUID, config: SourceConfiguration, actor: User) -> SecuritySource:
+def reconfigure_source(
+    source_id: UUID, config: SourceConfiguration, actor: User, *, reason: str = "", expected_generation: int | None = None
+) -> SecuritySource:
     _authorize(actor)
     source = lock_source(source_id)
     if source is None:
         raise SecuritySource.DoesNotExist
+    if expected_generation is not None and source.generation != expected_generation:
+        raise ValidationError(_("The source changed. Reload its current configuration before editing."))
     if source.retired_at is not None or (source.installation_id, source.kind, source.virtualmin_server_id) != (
         config.installation_id,
         config.kind,
@@ -118,16 +124,20 @@ def reconfigure_source(source_id: UUID, config: SourceConfiguration, actor: User
     SecuritySyncState.objects.filter(source=source).update(
         claim_token=None, claim_phase="", lease_until=None, next_run=timezone.now(), outcome="reconfigured"
     )
-    _audit(source, actor, "reconfigure", old)
+    _audit(source, actor, "reconfigure", old, reason=reason)
     return source
 
 
 @transaction.atomic
-def retire_source(source_id: UUID, actor: User) -> SecuritySource:
+def retire_source(
+    source_id: UUID, actor: User, *, reason: str = "", expected_generation: int | None = None
+) -> SecuritySource:
     _authorize(actor)
     source = SecuritySource.objects.select_for_update().get(pk=source_id)
     if source.retired_at is not None:
         return source
+    if expected_generation is not None and source.generation != expected_generation:
+        raise ValidationError(_("The source changed. Reload its current configuration before retiring."))
     old = _audit_values(source)
     now = timezone.now()
     source.retired_at, source.sync_enabled = now, False
@@ -136,5 +146,5 @@ def retire_source(source_id: UUID, actor: User) -> SecuritySource:
     SecuritySyncState.objects.filter(source=source).update(
         claim_token=None, claim_phase="", lease_until=None, outcome="retired"
     )
-    _audit(source, actor, "retire", old)
+    _audit(source, actor, "retire", old, reason=reason)
     return source
