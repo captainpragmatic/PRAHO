@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,6 +17,8 @@ from django.utils.translation import gettext_lazy as _
 from apps.common.credential_vault import EncryptedCredential
 from apps.infrastructure.permissions import can_deploy_nodes
 
+from . import crowdsec_policy
+from .crowdsec_policy import CROWDSEC_PROFILE, PROFILES
 from .virtualmin_models import VirtualminServer
 from .virtualmin_security_models import NodeSecurityDecision, NodeSecurityReview
 
@@ -85,34 +88,116 @@ def connection_identity(server: VirtualminServer) -> str:
         # A source inspection remains available before the operator key bundle is
         # provisioned. Apply independently requires a readable, valid bundle.
         operator_keys = "unavailable"
-    return _digest(
-        {
-            "administrative_networks": sorted(node_admin_allowed_cidrs()),
-            "operator_keys": operator_keys,
-            "server": str(server.pk),
-            "hostname": server.hostname,
-            "api_port": server.api_port,
-            "api_path": server.api_path,
-            "api_username": server.api_username,
-            "use_ssl": server.use_ssl,
-            "ssl_verify": server.ssl_verify,
-            "ssl_cert_fingerprint": server.ssl_cert_fingerprint,
-            "credential": hashlib.sha256(bytes(server.encrypted_api_password or b"")).hexdigest(),
-            "vault": _vault_identity(server.hostname),
-            "ssh_port": server.effective_ssh_port,
-            # Reading a preview identity cannot enroll legacy configured trust as a side effect.
-            "ssh_host_keys": host_keys,
-            "deployment": str(deployment.pk) if deployment else None,
-            "resource": deployment.external_node_id if deployment else None,
-            "imported_key": _configured_file_identity("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH")
-            if not deployment
-            else None,
-            "configured_trust": _configured_file_identity("PRAHO_SSH_KNOWN_HOSTS_PATH") if not host_keys else None,
-        }
+    inputs: dict[str, object] = {
+        "administrative_networks": sorted(node_admin_allowed_cidrs()),
+        "operator_keys": operator_keys,
+        "server": str(server.pk),
+        "hostname": server.hostname,
+        "api_port": server.api_port,
+        "api_path": server.api_path,
+        "api_username": server.api_username,
+        "use_ssl": server.use_ssl,
+        "ssl_verify": server.ssl_verify,
+        "ssl_cert_fingerprint": server.ssl_cert_fingerprint,
+        "credential": hashlib.sha256(bytes(server.encrypted_api_password or b"")).hexdigest(),
+        "vault": _vault_identity(server.hostname),
+        "ssh_port": server.effective_ssh_port,
+        # Reading a preview identity cannot enroll legacy configured trust as a side effect.
+        "ssh_host_keys": host_keys,
+        "deployment": str(deployment.pk) if deployment else None,
+        "resource": deployment.external_node_id if deployment else None,
+        "imported_key": _configured_file_identity("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH")
+        if not deployment
+        else None,
+        "configured_trust": _configured_file_identity("PRAHO_SSH_KNOWN_HOSTS_PATH") if not host_keys else None,
+    }
+    # Retain the exact base serialization so unchanged hosts keep their existing attestations.
+    if selected_profile(server) != POLICY_VERSION:
+        inputs.update(
+            security_policy_version=selected_profile(server),
+            security_configuration_digest=server.security_configuration_digest,
+            crowdsec_public_key=_configured_file_identity("PRAHO_CROWDSEC_SSH_PUBLIC_KEY_PATH"),
+            crowdsec_artifact_lock=crowdsec_policy.EXPECTED_ARTIFACT_LOCK_SHA256,
+            crowdsec_helper=crowdsec_policy.EXPECTED_HELPER_SHA256,
+        )
+    return _digest(inputs)
+
+
+def selected_profile(server: VirtualminServer) -> str:
+    profile = server.security_policy_version
+    if profile not in PROFILES:
+        raise ValidationError(_("The selected node security policy is unsupported."))
+    if (profile == POLICY_VERSION and server.security_configuration_digest) or (
+        profile == CROWDSEC_PROFILE and not re.fullmatch(r"[0-9a-f]{64}", server.security_configuration_digest)
+    ):
+        raise ValidationError(_("The selected node security policy lacks its intended configuration digest."))
+    return profile
+
+
+@transaction.atomic
+def select_security_profile(
+    server: VirtualminServer,
+    profile: str,
+    actor: User,
+    *,
+    configuration_digest: str = "",
+) -> None:
+    """Explicit adoption is durable, audited and withdraws older destination authority."""
+    if not actor.is_active or not (actor.is_superuser or actor.staff_role == "admin"):
+        raise PermissionDenied(_("An active administrator must select the node security policy."))
+    locked = VirtualminServer.objects.select_for_update().get(pk=server.pk)
+    current = selected_profile(locked)
+    if profile not in PROFILES or (current == CROWDSEC_PROFILE and profile != CROWDSEC_PROFILE):
+        raise ValidationError(_("CrowdSec adoption cannot automatically restore an earlier security policy."))
+    if profile == CROWDSEC_PROFILE and not re.fullmatch(r"[0-9a-f]{64}", configuration_digest):
+        raise ValidationError(_("CrowdSec adoption requires the complete intended configuration digest."))
+    if profile == POLICY_VERSION and configuration_digest:
+        raise ValidationError(_("The base security policy cannot contain a CrowdSec configuration digest."))
+    if locked.security_operation:
+        raise ValidationError(_("Resolve the current hardening attempt before changing the security policy."))
+    if current == profile and locked.security_configuration_digest == configuration_digest:
+        return
+    previous = {
+        "security_policy_version": current,
+        "security_configuration_digest": locked.security_configuration_digest,
+        "legacy_security_admission": locked.legacy_security_admission,
+    }
+    locked.security_policy_version = profile
+    locked.security_configuration_digest = configuration_digest
+    if profile == CROWDSEC_PROFILE:
+        locked.legacy_security_admission = False
+    locked.security_state = "unreviewed"
+    locked.current_security_review = None
+    locked.verified_security_review = None
+    locked.save(
+        update_fields=[
+            "security_policy_version",
+            "security_configuration_digest",
+            "legacy_security_admission",
+            "security_state",
+            "current_security_review",
+            "verified_security_review",
+            "updated_at",
+        ]
+    )
+    from apps.audit.services import AuditService  # noqa: PLC0415 -- audit app boundary
+
+    AuditService.log_simple_event(
+        "configuration_changed",
+        user=actor,
+        content_object=locked,
+        description="Selected explicit node security qualification policy",
+        old_values=previous,
+        new_values={
+            "security_policy_version": profile,
+            "security_configuration_digest": configuration_digest,
+            "legacy_security_admission": locked.legacy_security_admission,
+        },
+        metadata={"source_app": "provisioning"},
     )
 
 
-def _evidence_digest(evidence: dict[str, object]) -> str:
+def _evidence_digest(evidence: dict[str, object], *, policy_version: str = POLICY_VERSION) -> str:
     """Accept only bounded technical sections, never arbitrary API envelopes/secrets."""
     try:
         encoded = json.dumps(evidence, allow_nan=False)
@@ -147,14 +232,17 @@ def _evidence_digest(evidence: dict[str, object]) -> str:
         )
     ):
         raise ValidationError(_("Inspection must list principal names and access without credentials."))
-    return _digest({"policy": POLICY_VERSION, "evidence": evidence})
+    if policy_version not in PROFILES:
+        raise ValidationError(_("The selected node security policy is unsupported."))
+    return _digest({"policy": policy_version, "evidence": evidence})
 
 
 @transaction.atomic
 def record_inspection(server: VirtualminServer, evidence: dict[str, object]) -> NodeSecurityReview:
     """Supersede the prior preview while preserving node health and services."""
-    digest = _evidence_digest(evidence)
     locked = VirtualminServer.objects.select_for_update().get(pk=server.pk)
+    profile = selected_profile(locked)
+    digest = _evidence_digest(evidence, policy_version=profile)
     if locked.security_operation:
         raise ValidationError(
             _("A hardening attempt is unresolved; reconcile its outcome before replacing the review.")
@@ -165,7 +253,7 @@ def record_inspection(server: VirtualminServer, evidence: dict[str, object]) -> 
     review = NodeSecurityReview.objects.create(
         server=locked,
         server_uuid=locked.pk,
-        policy_version=POLICY_VERSION,
+        policy_version=profile,
         identity=identity,
         digest=digest,
         evidence=evidence,
@@ -206,9 +294,9 @@ def validate_decision(
     if (
         locked.security_operation
         or locked.current_security_review_id != stored.pk
-        or stored.policy_version != POLICY_VERSION
+        or stored.policy_version != selected_profile(locked)
         or stored.identity != connection_identity(locked)
-        or _evidence_digest(current_evidence) != stored.digest
+        or _evidence_digest(current_evidence, policy_version=stored.policy_version) != stored.digest
         or age < 0
         or age > MAX_PREVIEW_AGE_SECONDS
         or NodeSecurityDecision.objects.filter(review=stored).exists()

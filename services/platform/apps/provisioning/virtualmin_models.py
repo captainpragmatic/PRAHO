@@ -116,6 +116,8 @@ class VirtualminServer(NaturalKeySecretsMixin, models.Model):
 
     # Server status and health
     is_draining = models.BooleanField(default=False)
+    security_policy_version = models.CharField(max_length=40, default="virtualmin-web-only-v2", editable=False)
+    security_configuration_digest = models.CharField(max_length=64, default="", blank=True, editable=False)
     security_state = models.CharField(
         max_length=32,
         choices=[

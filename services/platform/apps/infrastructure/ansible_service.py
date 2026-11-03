@@ -1013,6 +1013,21 @@ ansible_python_interpreter=/usr/bin/python3
         if extra_vars:
             vars_dict.update(extra_vars)
 
+        registered = getattr(deployment, "virtualmin_server", None)
+        if registered is not None:
+            from apps.provisioning.crowdsec_policy import (  # noqa: PLC0415 -- profile boundary
+                CROWDSEC_PROFILE,
+                gateway_public_key,
+            )
+            from apps.provisioning.virtualmin_security import selected_profile  # noqa: PLC0415 -- profile boundary
+
+            profile = selected_profile(registered)
+            vars_dict["ssh_crowdsec_gateway_enabled"] = profile == CROWDSEC_PROFILE
+            vars_dict["security_policy_version"] = profile
+            if profile == CROWDSEC_PROFILE:
+                vars_dict["crowdsec_gateway_public_key"] = gateway_public_key()
+                vars_dict["security_configuration_digest"] = registered.security_configuration_digest
+
         return vars_dict
 
     def _parse_stats(self, stdout: str) -> dict[str, Any]:

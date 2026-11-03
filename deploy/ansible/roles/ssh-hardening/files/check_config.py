@@ -62,7 +62,14 @@ Match User praho-webmin-tunnel
     GatewayPorts no
 Match all
 # END PRAHO WEBMIN TUNNEL"""
-    source = config.read_text().replace(managed_tunnel, "")
+    managed_gateway = """# BEGIN PRAHO CROWDSEC GATEWAY
+Match User praho-crowdsec
+    ForceCommand sudo -n /usr/local/libexec/praho-crowdsec-gateway
+    DisableForwarding yes
+    PermitTTY no
+Match all
+# END PRAHO CROWDSEC GATEWAY"""
+    source = config.read_text().replace(managed_tunnel, "").replace(managed_gateway, "")
     for raw in source.splitlines():
         words = shlex.split(raw, comments=True)
         if not words:

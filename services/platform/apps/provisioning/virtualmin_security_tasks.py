@@ -11,8 +11,15 @@ from django.utils.translation import gettext as _
 from apps.infrastructure.ansible_service import AnsibleService, node_admin_allowed_cidrs
 from apps.infrastructure.permissions import can_deploy_nodes
 
+from .crowdsec_policy import EXPECTED_ARTIFACT_LOCK_SHA256, EXPECTED_HELPER_SHA256
 from .virtualmin_models import VirtualminServer
-from .virtualmin_security import MAX_EVIDENCE_BYTES, acknowledge_source, connection_identity, record_inspection
+from .virtualmin_security import (
+    MAX_EVIDENCE_BYTES,
+    acknowledge_source,
+    connection_identity,
+    record_inspection,
+    selected_profile,
+)
 from .virtualmin_security_apply import apply_hardening, dedicated_username
 from .virtualmin_security_execution import (
     claim_hardening,
@@ -21,13 +28,21 @@ from .virtualmin_security_execution import (
     park_hardening,
 )
 from .virtualmin_security_models import NodeSecurityExecution, NodeSecurityReview
-from .virtualmin_security_policy import network_preparation
+from .virtualmin_security_policy import selected_network_preparation
 
 
 def collect_inspection(server: VirtualminServer) -> dict[str, object]:
     identity = connection_identity(server)
     result = AnsibleService().run_server_playbook(
-        server, "virtualmin_security_read.yml", {"security_identity": identity}, timeout_seconds=120
+        server,
+        "virtualmin_security_read.yml",
+        {
+            "security_identity": identity,
+            "security_policy_version": selected_profile(server),
+            "security_crowdsec_helper_sha256": EXPECTED_HELPER_SHA256,
+            "security_crowdsec_lock_sha256": EXPECTED_ARTIFACT_LOCK_SHA256,
+        },
+        timeout_seconds=120,
     )
     if result.is_err() or not result.unwrap().success:
         raise ValidationError(
@@ -50,7 +65,11 @@ def collect_inspection(server: VirtualminServer) -> dict[str, object]:
     proposals.append(
         "Rotate the dedicated API password; preserve the separate root rescue login for local operator access."
     )
-    proposals.extend(network_preparation(cast("list[str]", evidence.get("firewall", []))))
+    proposals.extend(
+        selected_network_preparation(
+            evidence, selected_profile(server), server.security_configuration_digest, node_admin_allowed_cidrs()
+        )
+    )
     try:
         operator_keys = AnsibleService.operator_public_keys()
     except (OSError, ValueError):

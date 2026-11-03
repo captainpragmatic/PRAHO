@@ -504,6 +504,7 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 # Visit: /app/settings/dashboard/ → Provisioning & Infrastructure
 # Credentials are stored in the encrypted credential vault.
 PRAHO_SSH_KNOWN_HOSTS_PATH = os.environ.get("PRAHO_SSH_KNOWN_HOSTS_PATH", "")
+PRAHO_CROWDSEC_SSH_PUBLIC_KEY_PATH = os.environ.get("PRAHO_CROWDSEC_SSH_PUBLIC_KEY_PATH", "")
 VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH = os.environ.get("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH", "")
 
 # e-Factura API settings
