@@ -8,6 +8,7 @@ import importlib.util
 import shutil
 import subprocess
 import sys
+import textwrap
 from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
@@ -397,9 +398,87 @@ def test_literal_percentage_prose_is_not_a_format_placeholder(checker, project: 
     change_po(project, percentage, recompile=True)
     (project / TREES[0] / "messages.html").unlink()
     (project / TREES[0] / "messages.py").write_text(
-        'from django.utils.translation import gettext as _\n_("Use 10% for ten percent off.")\n'
+        "from django.utils.translation import gettext as _\n"
+        "# xgettext:no-python-format\n"
+        '_("Use 10% for ten percent off.")\n'
     )
     checker.check_catalogs(project)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "One threshold and discount per line, separated by a colon. Use 10000:10% for ten percent from 10000 cents, or 5:500 for 500 cents from five items. The highest qualifying tier applies.",
+        "Use threshold:percentage% or threshold:amount on each line.",
+    ],
+    ids=["percent-for", "percent-or"],
+)
+def test_literal_percent_production_annotations_survive_real_extraction(
+    checker, project: Path, monkeypatch, message: str
+) -> None:
+    """Exercise the real comment placement, including earlier argument strings."""
+    source = (ROOT / "services/platform/apps/promotions/forms.py").read_text()
+    tree = ast.parse(source)
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and node.args[0].value == message
+    ]
+    assert len(calls) == 1
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    statement: ast.AST = calls[0]
+    while not isinstance(statement, ast.stmt):
+        statement = parents[statement]
+    assert statement.end_lineno is not None
+    lines = source.splitlines(keepends=True)
+    start = statement.lineno - 1
+    while start > 0 and lines[start - 1].lstrip().startswith("#"):
+        start -= 1
+    snippet = textwrap.dedent("".join(lines[start : statement.end_lineno]))
+    messages = {
+        node.args[0].value
+        for node in ast.walk(ast.parse(snippet))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+    }
+    originals = polib.pofile(str(ROOT / TREES[0] / CATALOG))
+
+    def prepare(po: polib.POFile) -> None:
+        po.clear()
+        for msgid in sorted(messages):
+            original = originals.find(msgid)
+            assert original is not None and original.translated()
+            po.append(polib.POEntry(msgid=msgid, msgstr=original.msgstr))
+
+    change_po(project, prepare, recompile=True)
+    (project / TREES[0] / "messages.html").unlink()
+    (project / TREES[0] / "messages.py").write_text(snippet)
+    run = subprocess.run
+
+    def inspect_extraction(args, **kwargs):
+        result = run(args, **kwargs)
+        if "i18n-extract" in args:
+            extracted = polib.pofile(str(Path(kwargs["cwd"]) / TREES[0] / CATALOG))
+            entry = extracted.find(message)
+            assert entry is not None
+            assert "no-python-format" in entry.flags, f"Literal percent annotation was not applied: {message!r}"
+            assert "python-format" not in entry.flags
+            assert "fuzzy" not in entry.flags
+        return result
+
+    monkeypatch.setattr(subprocess, "run", inspect_extraction)
+    before = files(project)
+    checker.check_catalogs(project)
+    assert files(project) == before
 
 
 def test_non_runtime_compiled_metadata_differences_are_accepted(checker, project: Path) -> None:

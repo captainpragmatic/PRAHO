@@ -58,6 +58,11 @@ compares fresh extraction semantically; timestamps, references, comments and ord
 not cause drift failures. Gettext versions can infer different format-marker flags;
 these do not change runtime messages and are ignored in extraction comparisons.
 Placeholder content, GNU format checks and fuzzy status are validated independently.
+For literal percent examples, put `# xgettext:no-python-format` immediately before
+the first translated string literal: inside a multiline gettext call, or before
+a call whose literal is on the same line. Earlier assignments or string arguments
+can consume the comment. This prevents older gettext releases from treating text
+such as `% or` as a format placeholder.
 Missing tools, incomplete or fuzzy translations, format errors,
 guard failures and inputs changing during inspection fail with diagnostics. Repository
 files remain unchanged on success and failure; the check has no repair mode.
