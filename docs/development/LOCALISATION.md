@@ -73,6 +73,9 @@ changes, repeat extraction, review and compilation. `make test-i18n-guards` runs
 borrowed-message and catalog-markup guards; `make test-i18n` adds checker fixtures and
 translation-tool tests. The checker invokes the guards alone to avoid recursion, with
 pytest coverage and cache output disabled.
+The snapshot also includes every language catalog inspected by the existing markup
+guard, including English. Completeness and compiled-content checks apply to the three
+Romanian catalog pairs; other languages retain the existing markup checks.
 
 ## Preferences and compatibility
 

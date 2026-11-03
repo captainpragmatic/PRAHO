@@ -81,6 +81,40 @@ def project(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture()
+def real_markup_project(project: Path) -> Path:
+    """Use the repository's actual markup guard without unrelated template fixtures."""
+    guard = Path("tests/integration/test_translation_catalog_markup.py")
+    (project / guard).parent.mkdir(parents=True)
+    (project / guard).write_bytes((ROOT / guard).read_bytes())
+    (project / "pytest.ini").write_text("[pytest]\naddopts =\n")
+    makefile = project / "Makefile"
+    makefile.write_text(
+        makefile.read_text().replace(
+            "\t@test ! -f guard-failure\n",
+            "\t@$(VENV_DIR)/bin/python -m pytest -c pytest.ini --rootdir=. --confcutdir=. "
+            "-o addopts= --no-cov -p no:cacheprovider "
+            f"-k test_no_translation_adds_markup {guard} -q\n",
+        )
+    )
+    return project
+
+
+def english_catalog(project: Path, relative: str, *, unsafe: bool = False) -> Path:
+    path = project / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    po = polib.POFile()
+    po.metadata = {
+        "Content-Type": "text/plain; charset=UTF-8",
+        "Language": "en",
+        "Plural-Forms": "nplurals=2; plural=(n != 1);",
+    }
+    po.append(polib.POEntry(msgid="Invoice", msgstr="<b>Invoice</b>" if unsafe else ""))
+    po.append(polib.POEntry(msgid="File", msgid_plural="Files", msgstr_plural={0: "File", 1: ""}))
+    po.save(str(path))
+    return path
+
+
 def files(root: Path) -> dict[str, bytes]:
     return {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*") if p.is_file()}
 
@@ -108,6 +142,87 @@ def test_clean_catalogs_are_read_only(checker, project: Path, monkeypatch) -> No
     monkeypatch.chdir(project.parent)
     checker.check_catalogs(project)
     assert files(project) == before
+
+
+@pytest.mark.parametrize(
+    "relative",
+    [
+        "services/platform/locale/en/LC_MESSAGES/django.po",
+        "extras/locale/en/LC_MESSAGES/django.po",
+        ".catalog-fixtures/locale/en/LC_MESSAGES/django.po",
+        "services/platform/media/locale/en/LC_MESSAGES/django.po",
+    ],
+)
+def test_snapshot_preserves_the_real_markup_guards_catalog_scope(
+    checker, real_markup_project: Path, relative: str
+) -> None:
+    english_catalog(real_markup_project, relative, unsafe=True)
+    before = files(real_markup_project)
+    env = dict(checker.os.environ, PYTHONDONTWRITEBYTECODE="1", PRAHO_SKIP_DOTENV="1")
+    # Establish that this is a real English markup violation, rather than a broken fixture.
+    with pytest.raises(checker.CatalogCheckError, match="guards failed") as original_error:
+        checker._run_catalog_step(["make", "test-i18n-guards"], real_markup_project, env, "guards")
+    assert relative in str(original_error.value)
+    assert "Invoice" in str(original_error.value) and "tags" in str(original_error.value)
+    assert files(real_markup_project) == before
+    error = rejects(checker, real_markup_project, "guards failed")
+    assert relative in error and "Invoice" in error and "tags" in error
+
+
+def test_other_languages_do_not_require_complete_translations_or_compiled_catalogs(
+    checker, real_markup_project: Path
+) -> None:
+    path = english_catalog(real_markup_project, "services/platform/locale/en/LC_MESSAGES/django.po")
+    assert not path.with_suffix(".mo").exists()
+    assert polib.pofile(str(path)).untranslated_entries()
+    before = files(real_markup_project)
+    checker.check_catalogs(real_markup_project)
+    assert files(real_markup_project) == before
+
+
+@pytest.mark.parametrize("directory", [".venv-extra", "node_modules/package"])
+def test_guard_catalog_exclusions_are_not_captured(checker, real_markup_project: Path, directory: str) -> None:
+    relative = f"{directory}/locale/en/LC_MESSAGES/django.po"
+    english_catalog(real_markup_project, relative, unsafe=True)
+    assert Path(relative) not in checker._capture_catalog_inputs(real_markup_project)
+    before = files(real_markup_project)
+    checker.check_catalogs(real_markup_project)
+    assert files(real_markup_project) == before
+
+
+@pytest.mark.parametrize("mutation", ["modify", "remove", "add"])
+def test_other_language_inputs_are_frozen_and_rechecked(
+    checker, real_markup_project: Path, monkeypatch, mutation: str
+) -> None:
+    relative = "services/platform/locale/en/LC_MESSAGES/django.po"
+    path = english_catalog(real_markup_project, relative)
+    captured = path.read_bytes()
+    target = real_markup_project / "english-input.po"
+    path.rename(target)
+    path.symlink_to(target)
+    changed = "extras/locale/fr/LC_MESSAGES/django.po" if mutation == "add" else relative
+    run = subprocess.run
+
+    def mutate_during_guards(args, **kwargs):
+        if "test-i18n-guards" in args:
+            staged = Path(kwargs["cwd"]) / relative
+            assert staged.is_file() and not staged.is_symlink()
+            assert staged.read_bytes() == captured
+            if mutation == "modify":
+                english_catalog(real_markup_project, relative, unsafe=True)
+            elif mutation == "remove":
+                path.unlink()
+            else:
+                english_catalog(real_markup_project, changed, unsafe=True)
+        result = run(args, **kwargs)
+        if "test-i18n-guards" in args:
+            assert result.returncode == 0, result.stdout + result.stderr
+        return result
+
+    monkeypatch.setattr(subprocess, "run", mutate_during_guards)
+    with pytest.raises(checker.CatalogCheckError, match="inputs changed") as error:
+        checker.check_catalogs(real_markup_project)
+    assert changed in str(error.value)
 
 
 @pytest.mark.parametrize("defect", ["untranslated", "fuzzy", "incomplete plural", "duplicate"])

@@ -1673,6 +1673,15 @@ def _capture_catalog_inputs(root: Path, *, require_catalogs: bool = True) -> dic
                     )
                 continue
             inputs[path.relative_to(root)] = path.read_bytes()
+    # Preserve the existing markup guard's repository-wide catalog scope. Other
+    # languages receive markup checks only; completeness and MO validation stay
+    # limited to the three Romanian pairs above. Never reread a captured RO file.
+    for path in root.glob("**/locale/*/LC_MESSAGES/django.po"):
+        if any(part.startswith(".venv") or part == "node_modules" for part in path.parts):
+            continue
+        relative = path.relative_to(root)
+        if relative not in inputs:
+            inputs[relative] = path.read_bytes()
     for name in _GUARD_INPUTS:
         path = root / name
         if path.is_file():
