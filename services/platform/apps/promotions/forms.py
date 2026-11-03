@@ -112,6 +112,7 @@ class OfferConfigurationForm(forms.ModelForm):
         widget=forms.Textarea,
         label=_("Discount tiers"),
         help_text=_(
+            # xgettext:no-python-format  # noqa: ERA001 -- GNU gettext directive
             "One threshold and discount per line, separated by a colon. Use 10000:10% for ten percent from 10000 cents, or 5:500 for 500 cents from five items. The highest qualifying tier applies."
         ),
     )
@@ -188,7 +189,11 @@ class OfferConfigurationForm(forms.ModelForm):
                     tier["amount_cents"] = int(value)
                 tiers.append(tier)
             except (ValueError, ArithmeticError):
-                self.add_error("tier_values", _("Use threshold:percentage% or threshold:amount on each line."))
+                self.add_error(
+                    "tier_values",
+                    # xgettext:no-python-format  # noqa: ERA001 -- GNU gettext directive
+                    _("Use threshold:percentage% or threshold:amount on each line."),
+                )
                 break
         try:
             validate_tiers(tiers, data.get("discount_type", ""))

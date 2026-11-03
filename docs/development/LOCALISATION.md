@@ -17,6 +17,66 @@ data and timezones use the installed IANA database. Date settings accept only
 DD.MM.YYYY, YYYY-MM-DD, DD/MM/YYYY, and MM/DD/YYYY. Times use a 24-hour clock;
 operational timestamps retain seconds where they were previously displayed.
 
+## Romanian catalog workflow
+
+A PR that adds or changes translatable strings must include their reviewed Romanian
+translations and compiled catalogs. The three catalog pairs are:
+
+- `services/platform/locale/ro/LC_MESSAGES/django.po` and `.mo`
+- `services/portal/locale/ro/LC_MESSAGES/django.po` and `.mo`
+- `shared/ui/locale/ro/LC_MESSAGES/django.po` and `.mo`
+
+Install GNU gettext before using extraction, full lint or translation tests. On macOS,
+run `brew install gettext` and ensure its binaries are on `PATH`; on Debian/Ubuntu,
+run `sudo apt-get install gettext`. The existing virtual environment from `make install`
+supplies Django, polib and the test dependencies.
+
+```sh
+make i18n-extract
+make translate TRANSLATE_ARGS=--include-fuzzy
+# Review i18n-review-*.yaml: edit msgstr_suggested and set reviewed entries to status: approved.
+make translate-diff
+make translate-apply
+make i18n-compile
+make i18n-check
+make test-i18n
+```
+
+Generation supplies suggestions for review; approve only translations checked against
+the current source and context. Keep the catalog's terminology and formal address,
+every placeholder and markup fragment, and all three Romanian plural forms. Do not
+replace an existing non-fuzzy translation merely because extraction moved its references.
+The apply tool patches entries in place and protects existing translations. Review files
+are local working files; include the resulting `.po` and `.mo` changes in the PR.
+
+`make i18n-check` calls `scripts/translate_po.py check`, the read-only gate also run by full
+`make lint`. It captures the current working tree, including untracked source files, and
+runs compilation, extraction and guards in a unique temporary directory. It validates the
+captured originals first, so stale `.mo` files fail before temporary compilation can mask
+them. It checks messages, contexts, translations, plural forms and `Plural-Forms`, then
+compares fresh extraction semantically; timestamps, references, comments and ordering do
+not cause drift failures. Gettext versions can infer different format-marker flags;
+these do not change runtime messages and are ignored in extraction comparisons.
+Placeholder content, GNU format checks and fuzzy status are validated independently.
+For literal percent examples, put `# xgettext:no-python-format` immediately before
+the first translated string literal: inside a multiline gettext call, or before
+a call whose literal is on the same line. Earlier assignments or string arguments
+can consume the comment. This prevents older gettext releases from treating text
+such as `% or` as a format placeholder.
+Missing tools, incomplete or fuzzy translations, format errors,
+guard failures and inputs changing during inspection fail with diagnostics. Repository
+files remain unchanged on success and failure; the check has no repair mode.
+
+Use the reported catalog, context, msgid and references to repair the source or reviewed
+translation, then compile explicitly and rerun the gate. After incorporating new source
+changes, repeat extraction, review and compilation. `make test-i18n-guards` runs only the
+borrowed-message and catalog-markup guards; `make test-i18n` adds checker fixtures and
+translation-tool tests. The checker invokes the guards alone to avoid recursion, with
+pytest coverage and cache output disabled.
+The snapshot also includes every language catalog inspected by the existing markup
+guard, including English. Completeness and compiled-content checks apply to the three
+Romanian catalog pairs; other languages retain the existing markup checks.
+
 ## Preferences and compatibility
 
 Existing profile values are preserved. New profiles store empty language,
