@@ -16,7 +16,9 @@ try:
         or re.fullmatch(r"praho_native_[a-z0-9_]+", os.environ.get("DB_NAME", "")) is None
     ):
         raise ValueError("Explicit native lab mode and isolated praho_native_ PostgreSQL database are required")
-    _native = native_authority(Path(os.environ["NATIVE_VM_MANIFEST"]))
+    _native = native_authority(
+        Path(os.environ["NATIVE_VM_MANIFEST"]), cleanup=os.environ.get("PRAHO_NATIVE_CLEANUP_ONLY") == "1"
+    )
 except (KeyError, OSError, ValueError, TypeError) as error:
     raise ImproperlyConfigured(
         "A current private owned native VM manifest and isolated native database are required"

@@ -181,6 +181,7 @@ def frozen_parent_application(job: VirtualminProvisioningJob) -> HostingLimitApp
 
 def mark_parent_limits_issued(job: VirtualminProvisioningJob) -> bool:  # noqa: PLR0911 -- Explicit scope, nonce, lease and installed-node refusals.
     """Commit exact resource dispatch authority immediately before native mutation."""
+    from .hosting_limit_execution import _commercial_refusal  # noqa: PLC0415  # Runtime cycle.
     from .hosting_node_policy import current_quota_identity  # noqa: PLC0415
     from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer  # noqa: PLC0415
 
@@ -197,7 +198,7 @@ def mark_parent_limits_issued(job: VirtualminProvisioningJob) -> bool:  # noqa: 
             .order_by("pk")
         )
         current = VirtualminProvisioningJob.objects.select_for_update(of=("self",)).get(pk=job.pk)
-        frozen_parent_application(current)
+        application = frozen_parent_application(current)
         if (
             current.status != "running"
             or current.started_at is None
@@ -207,6 +208,16 @@ def mark_parent_limits_issued(job: VirtualminProvisioningJob) -> bool:  # noqa: 
             return False
         if current.operation == "restore_domain" and (
             current.execution_deadline is None or current.execution_deadline <= timezone.now()
+        ):
+            return False
+        if _commercial_refusal(
+            application,
+            {
+                "job_id": str(current.pk),
+                "token": str(current.execution_token or ""),
+                "account_server_id": str(account.server_id),
+                "native_server_id": str(current.server_id),
+            },
         ):
             return False
         native = current_quota_identity(current.server)

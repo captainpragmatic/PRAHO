@@ -358,7 +358,11 @@ def _build_quote(  # noqa: PLR0913 -- Locked scope plus explicit submission/revi
             "catalog_profile": profile,
             "tax_quote": taxes,
             "next_recurring": recurring,
-            "labels": {"from": subscription.product.name, "to": target.name},
+            "labels": {
+                "from": subscription.product.name,
+                "to": target.name,
+                "to_sku": Product.objects.get(pk=target.product_id).slug,
+            },
         },
     )
     by_id = {part.evidence_id: part for part in coverage.intervals}

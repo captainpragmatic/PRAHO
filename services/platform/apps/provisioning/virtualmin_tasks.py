@@ -2201,6 +2201,26 @@ def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
     )
     tasks_created["hosting_limits"] = "created" if created else "updated"
     _, created = ScheduleModel.objects.update_or_create(
+        name="hosting-safety-observations",
+        defaults={
+            "func": "apps.provisioning.hosting_safety_observation.dispatch_hosting_safety_observations",
+            "schedule_type": "I",
+            "minutes": 1,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["hosting_safety"] = "created" if created else "updated"
+    _, created = ScheduleModel.objects.update_or_create(
+        name="hosting-limits-dispatch",
+        defaults={
+            "func": "apps.provisioning.hosting_limit_tasks.dispatch_hosting_limits",
+            "schedule_type": "I",
+            "minutes": 5,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["hosting_limits"] = "created" if created else "updated"
+    _, created = ScheduleModel.objects.update_or_create(
         name="virtualmin-usage-sync",
         defaults={
             "func": "apps.provisioning.virtualmin_usage_tasks.dispatch_usage_sync",

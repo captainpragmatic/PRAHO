@@ -21,6 +21,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.virtualmin_lab.native.hosting_playbook_contract import (
+    HOSTING_ROUTES,
+    assert_hosting_route,
+    assert_installed_hosting_helpers,
+)
+
 pytestmark = pytest.mark.integration
 
 REPO = Path(__file__).resolve().parents[2]
@@ -294,6 +300,10 @@ class TestScannerSeesTheRealCode:
         assert ("provisioning/virtualmin_service.py", "_execute_revoked_create_off", "disable-domain") in {
             (site.path, site.function, site.program) for site in sites
         }
+        assert {
+            ("provisioning/hosting_limit_transport.py", "probe_account_quota", "list-domains"),
+            ("infrastructure/native_workflow_scenarios.py", "_node_enabled", "list-domains"),
+        } <= {(site.path, site.function, site.program) for site in sites}
         # Disabling account-name previews removed _home() and its direct list-domains call.
         assert not any(
             site.path == "provisioning/account_hostname_service.py" and site.function == "_home" for site in sites
@@ -306,7 +316,7 @@ class TestScannerSeesTheRealCode:
             and site.program == "delete-domain"
             for site in sites
         )
-        assert len([site for site in sites if site.program]) == 50, (
+        assert len([site for site in sites if site.program]) == 52, (
             "call sites changed: review them, then update this count"
         )
 
@@ -349,14 +359,34 @@ class TestEveryActionIsCovered:
 
     def test_every_node_playbook_is_named_by_a_lab_test(self) -> None:
         playbooks = [path.name for path in PLAYBOOKS.glob("virtualmin_*.yml")] + ["virtualmin.yml"]
-        assert len(playbooks) == 24, "a new playbook: it needs a lab test, then update this count"
+        assert len(playbooks) == 29, "a new playbook: it needs a lab test, then update this count"
         assert "virtualmin_account_name_neutral.yml" in playbooks
         assert {"virtualmin_firewall.yml", "virtualmin_security_read.yml", "virtualmin_security_enroll.yml"} <= set(
             playbooks
         )
         assert "virtualmin_component.yml" in playbooks
         assert "virtualmin_component_bridge.yml" in playbooks
+        assert {
+            "virtualmin_hosting_prepare.yml",
+            "virtualmin_hosting_read.yml",
+            "virtualmin_hosting_policy.yml",
+            "virtualmin_hosting_tasks.yml",
+            "virtualmin_quota.yml",
+        } <= set(playbooks)
         assert unreferenced_playbooks(playbooks, lab_test_sources()) == []
+
+
+class TestNativeHostingControllerContracts:
+    """The ordinary integration Make target executes these; no native VM execution is claimed."""
+
+    @pytest.mark.parametrize(("family", "action", "playbook", "marker", "timeout"), HOSTING_ROUTES)
+    def test_native_workflow_transport_reaches_the_expected_playbook(
+        self, family: str, action: str, playbook: str, marker: str, timeout: int
+    ) -> None:
+        assert_hosting_route(family, action, playbook, marker, timeout)
+
+    def test_fresh_install_and_reviewed_preparation_ship_the_same_exact_helpers(self) -> None:
+        assert_installed_hosting_helpers()
 
 
 # ------------------------------------------------- each check on a planted violation

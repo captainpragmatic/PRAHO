@@ -330,6 +330,16 @@ def _lock_context(execution: HostingLimitExecution) -> tuple[VirtualminAccount, 
     return account, server, service
 
 
+def _commercial_refusal(application: HostingLimitApplication, parent: dict[str, Any]) -> str | None:
+    if application.authority.get("kind") not in {"paid_plan_change", "zero_due_plan_change", "scheduled_plan_change"}:
+        return None
+    from apps.billing.plan_change_financial import (  # noqa: PLC0415 -- Optional source-specific authority.
+        plan_change_native_refusal,
+    )
+
+    return plan_change_native_refusal(application, parent=parent)
+
+
 def _authority_refusal(  # noqa: C901, PLR0911, PLR0912 -- Independent owner, base/overlay, native-lane, provider and adopted-policy refusals.
     execution: HostingLimitExecution, account: VirtualminAccount, server: VirtualminServer, service: Service
 ) -> str | None:
@@ -387,7 +397,9 @@ def _authority_refusal(  # noqa: C901, PLR0911, PLR0912 -- Independent owner, ba
 
     if job.parameters.get("quota_provider") and job.parameters["quota_provider"] != provider_binding(server):
         return "The original provider deployment or resource authority changed."
-    return None
+    # A financial change cannot discard the terminal receipt of an issued
+    # command or prove that an uncertain command stopped.
+    return _commercial_refusal(_application(job), parent) if execution.phase == "prepared" else None
 
 
 def _parent_requalification_transfer(  # noqa: PLR0911 -- Closed original review, never-issued journal and native identity guards.
@@ -568,6 +580,9 @@ def admit_application(  # noqa: C901, PLR0911, PLR0912 -- Explicit stale, duplic
         if existing is not None:
             if not parent and existing.job.parameters.get("quota_parent") and existing.phase != "completed":
                 return None
+            if existing.phase == "prepared" and (refusal := _commercial_refusal(application, parent or {})):
+                _fail_unissued(existing.pk, refusal)
+                existing.refresh_from_db()
             return existing
         failed = (
             HostingLimitExecution.objects.filter(
@@ -600,6 +615,8 @@ def admit_application(  # noqa: C901, PLR0911, PLR0912 -- Explicit stale, duplic
             return None
         if application.disk_allowance_mib is None or application.bandwidth_allowance_mib is None:
             return None
+        if refusal := _commercial_refusal(application, parent or {}):
+            raise ValidationError(refusal)
         account.quota_generation += 1
         account.save(update_fields=["quota_generation", "updated_at"])
         now, token = timezone.now(), uuid4()

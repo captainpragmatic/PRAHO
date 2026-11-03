@@ -101,6 +101,7 @@ class PlanChange(ConcurrentTransitionMixin, models.Model):
     )
     committed_at = models.DateTimeField(null=True)
     applied_at = models.DateTimeField(null=True)
+    next_reconcile_at = models.DateTimeField(null=True, db_index=True)
     review_reason = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -167,7 +168,7 @@ class PlanChange(ConcurrentTransitionMixin, models.Model):
             if any(getattr(self, field) != original[field] for field in self.QUOTE_FIELDS):
                 raise ValidationError(_("A commercial quote cannot be rewritten; request a fresh quote."))
             selected = set(kwargs["update_fields"]) if kwargs.get("update_fields") is not None else None
-            if selected is not None and self.confirmed_at is not None:
+            if selected is not None and self.confirmed_at is not None and original["confirmed_at"] is None:
                 selected.add("confirmed_at")
                 kwargs["update_fields"] = selected
             if any(
@@ -177,6 +178,15 @@ class PlanChange(ConcurrentTransitionMixin, models.Model):
                 for field in bindings
             ):
                 raise ValidationError(_("Accepted commercial document and authority bindings cannot be replaced."))
+        fields = kwargs.get("update_fields")
+        if self._state.adding or fields is None or "status" in fields:
+            active = self.status in {"applying_limits", "limits_attention"}
+            if active and self.next_reconcile_at is None:
+                self.next_reconcile_at = timezone.now()
+            elif not active:
+                self.next_reconcile_at = None
+            if fields is not None:
+                kwargs["update_fields"] = {*fields, "next_reconcile_at"}
         kwargs["using"] = using
         super().save(*args, **kwargs)
 

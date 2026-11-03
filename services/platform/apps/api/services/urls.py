@@ -31,12 +31,39 @@ urlpatterns = [
     path("<int:service_id>/dns-status/recheck/", service_dns_recheck_api, name="service_dns_recheck"),
     path("<int:service_id>/actions/", service_request_api, name="request_service_action"),
     path("<int:service_id>/plan-changes/<uuid:change_id>/status/", plan_change_status_api, name="plan_change_status"),
-    path("<int:service_id>/plan-changes/options/", plan_change_action_api,
-         {"operation": "options"}, name="plan_change_options"),
-    path("<int:service_id>/plan-changes/quote/", plan_change_action_api,
-         {"operation": "quote"}, name="plan_change_quote"),
-    path("<int:service_id>/plan-changes/<uuid:change_id>/confirm/", plan_change_action_api,
-         {"operation": "confirm"}, name="plan_change_confirm"),
+    path(
+        "<int:service_id>/plan-changes/options/",
+        plan_change_action_api,
+        {"operation": "options"},
+        name="plan_change_options",
+    ),
+    path(
+        "<int:service_id>/plan-changes/quote/", plan_change_action_api, {"operation": "quote"}, name="plan_change_quote"
+    ),
+    path(
+        "<int:service_id>/plan-changes/<uuid:change_id>/confirm/",
+        plan_change_action_api,
+        {"operation": "confirm"},
+        name="plan_change_confirm",
+    ),
+    path(
+        "<int:service_id>/plan-changes/<uuid:change_id>/payment-intent/",
+        plan_change_action_api,
+        {"operation": "payment-intent"},
+        name="plan_change_payment_intent",
+    ),
+    path(
+        "<int:service_id>/plan-changes/<uuid:change_id>/cancel/",
+        plan_change_action_api,
+        {"operation": "cancel"},
+        name="plan_change_cancel",
+    ),
+    path(
+        "<int:service_id>/plan-changes/safety-refresh/",
+        plan_change_action_api,
+        {"operation": "safety-refresh"},
+        name="plan_change_safety_refresh",
+    ),
     path("<int:service_id>/auto-renew/", update_service_auto_renew_api, name="update_service_auto_renew"),
     path("<int:service_id>/usage/", service_usage_stats_api, name="service_usage_stats"),
 ]

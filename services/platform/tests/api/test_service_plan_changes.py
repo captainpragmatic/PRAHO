@@ -7,6 +7,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.provisioning.models import Service
+from apps.settings.services import SettingsService
 from apps.users.models import CustomerMembership, PortalSession
 from tests.billing.test_plan_change_settlement import _PlanChangeSettlementFixture
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
@@ -17,6 +18,7 @@ from tests.helpers.portal_session import BoundSessionMixin, bound_fields, fresh_
 class ServicePlanChangeAPITests(BoundSessionMixin, HMACTestMixin, _PlanChangeSettlementFixture, TestCase):
     def setUp(self) -> None:
         super().setUp()
+        self.assertTrue(SettingsService.update_setting("billing.hosting_plan_changes_enabled", False).is_ok())
         self.membership = CustomerMembership.objects.create(
             user=self.actor,
             customer=self.customer,
@@ -77,3 +79,10 @@ class ServicePlanChangeAPITests(BoundSessionMixin, HMACTestMixin, _PlanChangeSet
         self.assertEqual(response.json()["data"]["total_cents"], 6000)
         self.accepted.refresh_from_db()
         self.assertEqual(self.accepted.total_cents, 6000)
+
+    def test_service_detail_keeps_accepted_checkout_reachable_with_new_acceptance_disabled(self) -> None:
+        response = self.portal_post(f"/api/services/{self.service.pk}/", self.body)
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()["data"]["service"]
+        self.assertEqual(data.get("plan_change"), {"id": str(self.accepted.pk), "status": "awaiting_payment"})
+        self.assertIs(data.get("plan_changes_enabled"), False)

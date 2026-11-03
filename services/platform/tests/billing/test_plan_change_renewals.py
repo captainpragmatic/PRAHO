@@ -4,40 +4,71 @@ from decimal import Decimal
 
 from django.test import TestCase
 
-from apps.billing.models import BillingCycle, PriceGrandfathering, Subscription
 from apps.billing.metering_models import UsageAggregation, UsageMeter
 from apps.billing.metering_service import RatingEngine
-from apps.billing.subscription_models import SubscriptionItem
+from apps.billing.models import BillingCycle, PriceGrandfathering, Subscription
 from apps.billing.proforma_service import ProformaPaymentService
 from apps.billing.recurring_billing import RecurringBillingOrchestrator, fixed_renewal_schedule
-from apps.provisioning.models import Service
+from apps.billing.subscription_models import SubscriptionItem
 from apps.provisioning.hosting_limit_models import ServiceHostingLimits
+from apps.provisioning.models import Service
 from tests.billing.test_plan_change_settlement import _PlanChangeSettlementFixture
 
 
 class PlanChangeRenewalTermsTests(_PlanChangeSettlementFixture, TestCase):
     def test_catalog_allowance_edit_cannot_charge_inside_the_accepted_bandwidth(self) -> None:
+        aggregation = self.rated_bandwidth()
+        self.assertEqual(
+            (aggregation.included_allowance, aggregation.overage_value, aggregation.charge_cents),
+            (Decimal("100"), Decimal("0"), 0),
+        )
+
+    def test_explicit_item_allowance_still_precedes_the_pinned_plan_default(self) -> None:
+        aggregation = self.rated_bandwidth(explicit_allowance="25")
+        self.assertEqual(
+            (aggregation.included_allowance, aggregation.overage_value, aggregation.charge_cents),
+            (Decimal("25"), Decimal("25"), 2500),
+        )
+
+    def rated_bandwidth(self, explicit_allowance: str | None = None) -> UsageAggregation:
         _, product, plan = self.paid_change()
         original = self.subscription.billing_cycles.get(period_start=self.subscription.current_period_start)
         frozen = original.pricing_snapshot
         meter = UsageMeter.objects.create(
-            name="bandwidth_gb", display_name="Bandwidth", category="bandwidth", unit="gb",
-            aggregation_type="sum", rounding_mode="none",
+            name="bandwidth_gb",
+            display_name="Bandwidth",
+            category="bandwidth",
+            unit="gb",
+            aggregation_type="sum",
+            rounding_mode="none",
         )
+        metadata = {"meter_name": meter.name}
+        if explicit_allowance is not None:
+            metadata["included_allowance"] = explicit_allowance
         SubscriptionItem.objects.create(
-            subscription=self.subscription, product=product, currency=self.currency,
-            unit_price_cents=100, meta={"meter_name": meter.name},
+            subscription=self.subscription,
+            product=product,
+            currency=self.currency,
+            unit_price_cents=100,
+            meta=metadata,
         )
         plan.bandwidth_gb = 1
         plan.save(update_fields=["bandwidth_gb"])
         prepared = RecurringBillingOrchestrator.prepare_due_proformas(as_of=self.subscription.next_proforma_at)
         self.assertEqual(prepared["errors"], [])
         self.assertEqual(prepared["proformas_created"], 1)
-        cycle = BillingCycle.objects.get(subscription=self.subscription, period_start=self.subscription.current_period_end)
+        cycle = BillingCycle.objects.get(
+            subscription=self.subscription, period_start=self.subscription.current_period_end
+        )
         aggregation = UsageAggregation.objects.create(
-            meter=meter, customer=self.customer, subscription=self.subscription, billing_cycle=cycle,
-            period_start=cycle.period_start, period_end=cycle.period_end,
-            total_value=Decimal("50"), status="pending_rating",
+            meter=meter,
+            customer=self.customer,
+            subscription=self.subscription,
+            billing_cycle=cycle,
+            period_start=cycle.period_start,
+            period_end=cycle.period_end,
+            total_value=Decimal("50"),
+            status="pending_rating",
         )
         rated = RatingEngine().rate_aggregation(str(aggregation.pk))
         self.assertTrue(rated.is_ok(), rated)
@@ -45,8 +76,7 @@ class PlanChangeRenewalTermsTests(_PlanChangeSettlementFixture, TestCase):
         original.refresh_from_db()
         self.assertEqual(original.pricing_snapshot, frozen)
         self.assertEqual(ServiceHostingLimits.objects.get(service=self.service).bandwidth_allowance_mib, 102400)
-        self.assertEqual((aggregation.included_allowance, aggregation.overage_value, aggregation.charge_cents),
-                         (Decimal("100"), Decimal("0"), 0))
+        return aggregation
 
     def paid_change(self):
         change, proforma, product, plan = self.payable_change()

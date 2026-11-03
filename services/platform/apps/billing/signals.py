@@ -1701,6 +1701,10 @@ def _invoice_email_context(invoice: Invoice) -> dict[str, object]:
 
 def _send_invoice_created_email(invoice: Invoice) -> None:
     """Send invoice created notification"""
+    from .plan_change_notices import plan_change_for_document
+
+    if plan_change_for_document(invoice_id=invoice.pk) is not None:
+        return  # This standalone checkout publishes its one legal invoice-issued phase.
     with best_effort_atomic(logger=logger, scope="Invoice", message="Failed to send created email"):
         from apps.notifications.services import EmailService
 
@@ -1713,6 +1717,10 @@ def _send_invoice_created_email(invoice: Invoice) -> None:
 
 def _send_invoice_issued_email(invoice: Invoice) -> None:
     """Send invoice issued notification"""
+    from .plan_change_notices import publish_document_notice
+
+    if publish_document_notice(invoice_id=invoice.pk, phase="invoice_issued"):
+        return
     with best_effort_atomic(logger=logger, scope="Invoice", message="Failed to send issued email"):
         from apps.notifications.services import EmailService
 
@@ -1726,6 +1734,10 @@ def _send_invoice_issued_email(invoice: Invoice) -> None:
 
 def _send_payment_received_email(invoice: Invoice) -> None:
     """Send payment received confirmation"""
+    from .plan_change_notices import publish_document_notice
+
+    if publish_document_notice(invoice_id=invoice.pk, phase="payment_received"):
+        return
     with best_effort_atomic(logger=logger, scope="Invoice", message="Failed to send payment received email"):
         from apps.notifications.services import EmailService
 
@@ -1766,6 +1778,10 @@ def _send_invoice_voided_email(invoice: Invoice) -> None:
 
 def _send_payment_success_email(payment: Payment) -> None:
     """Send payment success notification"""
+    from .plan_change_notices import plan_change_for_document
+
+    if plan_change_for_document(proforma_id=payment.proforma_id, invoice_id=payment.invoice_id) is not None:
+        return  # Its paid invoice owns the single durable payment-received message.
     with best_effort_atomic(logger=logger, scope="Payment Email", message="Failed to send notification"):
         from apps.notifications.services import EmailService
 

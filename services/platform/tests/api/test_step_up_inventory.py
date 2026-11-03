@@ -43,6 +43,12 @@ GUARDED: dict[str, str] = {
     "api/dns/zones/<uuid:zone_id>/records/<uuid:record_id>/": "changes or deletes a record",
     "api/services/<int:service_id>/actions/": "asks staff to upgrade, downgrade, suspend or cancel the service",
     "api/services/<int:service_id>/plan-changes/<uuid:change_id>/status/": "shows an accepted sensitive plan checkout; current billing authority and identity check are required",
+    "api/services/<int:service_id>/plan-changes/options/": "shows eligible commercial changes after a recent identity check",
+    "api/services/<int:service_id>/plan-changes/quote/": "pins a commercial plan change quote",
+    "api/services/<int:service_id>/plan-changes/<uuid:change_id>/confirm/": "accepts the quoted billing terms",
+    "api/services/<int:service_id>/plan-changes/<uuid:change_id>/payment-intent/": "opens card checkout for the accepted quote",
+    "api/services/<int:service_id>/plan-changes/<uuid:change_id>/cancel/": "cancels the accepted commercial change and its original charge authority",
+    "api/services/<int:service_id>/plan-changes/safety-refresh/": "requests an owner-bound usage safety observation for plan eligibility",
 }
 
 EXEMPT: dict[str, str] = {
@@ -165,6 +171,12 @@ PROVEN_BY: dict[str, str] = {
     "api/dns/zones/<uuid:zone_id>/records/<uuid:record_id>/": _DNS,
     "api/services/<int:service_id>/actions/": "tests.api.test_service_action_requests.ServiceActionRequestTests.test_a_request_needs_a_recent_identity_check",
     "api/services/<int:service_id>/plan-changes/<uuid:change_id>/status/": "tests.api.test_service_plan_changes.ServicePlanChangeAPITests.test_an_old_identity_check_cannot_inspect_the_sensitive_checkout",
+    "api/services/<int:service_id>/plan-changes/options/": "tests.api.test_service_plan_checkout.ServicePlanCheckoutAPITests.test_each_checkout_step_requires_a_recent_identity_check",
+    "api/services/<int:service_id>/plan-changes/quote/": "tests.api.test_service_plan_checkout.ServicePlanCheckoutAPITests.test_each_checkout_step_requires_a_recent_identity_check",
+    "api/services/<int:service_id>/plan-changes/<uuid:change_id>/confirm/": "tests.api.test_service_plan_checkout.ServicePlanCheckoutAPITests.test_each_checkout_step_requires_a_recent_identity_check",
+    "api/services/<int:service_id>/plan-changes/<uuid:change_id>/payment-intent/": "tests.api.test_service_plan_checkout.ServicePlanCheckoutAPITests.test_each_checkout_step_requires_a_recent_identity_check",
+    "api/services/<int:service_id>/plan-changes/<uuid:change_id>/cancel/": "tests.api.test_service_plan_checkout.ServicePlanCheckoutAPITests.test_cancellation_requires_a_recent_identity_check",
+    "api/services/<int:service_id>/plan-changes/safety-refresh/": "tests.api.test_service_plan_checkout.ServicePlanCheckoutAPITests.test_each_checkout_step_requires_a_recent_identity_check",
 }
 
 
@@ -205,7 +217,7 @@ class StepUpInventoryTests(SimpleTestCase):
         tested = {"api/" + action.path: EVERY_ACTION for action in ACTIONS} | PROVEN_BY
         self.assertEqual(sorted(set(GUARDED) - set(tested)), [])
         self.assertEqual(sorted(set(tested) - set(GUARDED)), [])
-        self.assertEqual(len(GUARDED), 25)
+        self.assertEqual(len(GUARDED), 31)
         for route, test in tested.items():
             with self.subTest(route=route):
                 # The named test must exist: renaming or deleting it fails here, not silently.

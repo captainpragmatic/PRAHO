@@ -1,16 +1,19 @@
 """Actual paid coverage and signed dispute events without importing TestCase modules."""
 
+from datetime import datetime
 from unittest.mock import patch
 
-from apps.billing.models import Payment
+from apps.billing.models import BillingCycle, Invoice, InvoiceLine, Payment
 from apps.billing.payment_convergence import PaymentSuccessService
 from tests.billing.test_plan_change_intervals import _PlanChangeCoverageFixture
 from tests.helpers.plan_change_checkout import VerifiedPlanChangeCheckoutFixture
 
 
 class StripeCoverageFixture(VerifiedPlanChangeCheckoutFixture):
-    def cycle(self, **kwargs):
-        cycle, invoice, line = _PlanChangeCoverageFixture.cycle(self, paid=False, **kwargs)
+    def cycle(
+        self, *, start: datetime | None = None, end: datetime | None = None, amount: int = 8000
+    ) -> tuple[BillingCycle, Invoice, InvoiceLine]:
+        cycle, invoice, line = _PlanChangeCoverageFixture.cycle(self, paid=False, start=start, end=end, amount=amount)
         Payment.objects.create(
             customer=self.customer,
             invoice=invoice,
@@ -29,7 +32,7 @@ class StripeCoverageFixture(VerifiedPlanChangeCheckoutFixture):
         self.assertEqual(invoice.status, "paid")
         return cycle, invoice, line
 
-    def dispute(self, intent_id, *, amount):
+    def dispute(self, intent_id: str, *, amount: int) -> None:
         with patch("apps.notifications.services.NotificationService.send_admin_alert", return_value=True):
             accepted, message, event = self.deliver_signed_payload(
                 {

@@ -45,10 +45,12 @@ class NativeAuthority:
     public_key: str = field(repr=False)
 
 
-def native_authority(path: Path) -> NativeAuthority:
+def native_authority(path: Path, *, cleanup: bool = False) -> NativeAuthority:
     driver = native_driver()
     manifest = driver.read_manifest(path)
-    if datetime.now(UTC) >= datetime.fromisoformat(manifest["expires_at"]) or manifest.get("phase") == "destroyed":
+    if not cleanup and (
+        datetime.now(UTC) >= datetime.fromisoformat(manifest["expires_at"]) or manifest.get("phase") == "destroyed"
+    ):
         raise ValueError("The native VM authority has expired or was destroyed")
     key_path, _trust = driver.paths(path, manifest)
     info = key_path.lstat()

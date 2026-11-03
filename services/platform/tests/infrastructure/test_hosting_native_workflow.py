@@ -21,7 +21,9 @@ from django.test import SimpleTestCase, TestCase
 from apps.common.credential_vault import get_credential_vault
 from apps.infrastructure.models import NodeDeployment
 from apps.infrastructure.native_lab import native_authority, native_run_lock
-from apps.infrastructure.native_workflow import bind_native_fixture
+from apps.infrastructure.native_workflow import bind_native_fixture, native_fixture_actor
+from apps.infrastructure.permissions import can_deploy_nodes, can_destroy_nodes
+from apps.users.models import User
 
 
 class NativeWorkflowBoundaryTests(SimpleTestCase):
@@ -96,6 +98,23 @@ class NativeWorkflowBoundaryTests(SimpleTestCase):
 
 
 class NativeWorkflowFixtureTests(TestCase):
+    def test_fixture_replay_never_restores_revoked_or_preexisting_actor_authority(self):
+        run = uuid4()
+        actor = native_fixture_actor(run, create=True)
+        actor.user_permissions.clear()
+        with self.assertRaisesRegex(ValueError, "permission"):
+            native_fixture_actor(run, create=True)
+        actor.refresh_from_db()
+        self.assertFalse(actor.is_superuser)
+        self.assertEqual(actor.user_permissions.count(), 0)
+        other = uuid4()
+        unprivileged = User.objects.create_user(email="native-" + str(other) + "@example.invalid", staff_role="support")
+        with self.assertRaisesRegex(ValueError, "permission"):
+            native_fixture_actor(other, create=True)
+        unprivileged.refresh_from_db()
+        self.assertEqual(unprivileged.staff_role, "support")
+        self.assertEqual(unprivileged.user_permissions.count(), 0)
+
     def test_fixture_is_idempotent_encrypted_and_refuses_provider_retarget(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -130,6 +149,10 @@ class NativeWorkflowFixtureTests(TestCase):
             path.write_text(json.dumps(contents))
             path.chmod(0o600)
             first = bind_native_fixture(native_authority(path), dns_zone="example.com")
+            actor = User.objects.get(email="native-" + run + "@example.invalid")
+            self.assertFalse(actor.is_superuser)
+            self.assertTrue(can_deploy_nodes(actor), "The real node-review entrypoint would refuse this fixture actor")
+            self.assertTrue(can_destroy_nodes(actor), "Exact public cleanup needs its actual Django permission")
             with (
                 native_run_lock(native_authority(path)),
                 self.assertRaisesRegex(ValueError, "Another controller"),

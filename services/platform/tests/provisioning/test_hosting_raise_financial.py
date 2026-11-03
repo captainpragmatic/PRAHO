@@ -28,6 +28,7 @@ class CommercialRaiseFixture(StripeCoverageFixture):
 
     def setUp(self):
         super().setUp()
+        self.account.refresh_from_db()
         self.assertTrue(SettingsService.update_setting("provisioning.hosting_raises_enabled", True).is_ok())
 
     def settled_topup(self):
@@ -35,6 +36,7 @@ class CommercialRaiseFixture(StripeCoverageFixture):
         accepted, message, _event = self.signed_delivery(sdk.PaymentIntent.create.call_args.kwargs["metadata"])
         self.assertTrue(accepted, message)
         change.refresh_from_db()
+        attempt.refresh_from_db()
         self.assertEqual(change.status, "applying_limits")
         return change, attempt
 
@@ -46,8 +48,16 @@ class HostingRaiseFinancialTests(CommercialRaiseFixture, TransactionTestCase):
         raised = self.grant()
         self.dispute(attempt.gateway_intent_id, amount=change.total_cents)
         with (
-            patch("apps.provisioning.hosting_limit_transport.probe_account_quota", return_value=self.receipt(cap=22528, available=100 * 1024**3)) as probe,
-            patch("apps.provisioning.hosting_limit_transport.run_quota_operation", side_effect=lambda server, action, request: self.receipt(cap=request["disk_limit_kib"] // 1024, request=request)) as native,
+            patch(
+                "apps.provisioning.hosting_limit_transport.probe_account_quota",
+                return_value=self.receipt(cap=22528, available=100 * 1024**3),
+            ) as probe,
+            patch(
+                "apps.provisioning.hosting_limit_transport.run_quota_operation",
+                side_effect=lambda server, action, request: self.receipt(
+                    cap=request["disk_limit_kib"] // 1024, request=request
+                ),
+            ) as native,
         ):
             apply_hosting_limits(raised.pk)
         probe.assert_not_called()
@@ -59,7 +69,10 @@ class HostingRaiseFinancialTests(CommercialRaiseFixture, TransactionTestCase):
         self.assertEqual(self.apply(raised), "completed")
         change, attempt = self.settled_topup()
         self.dispute(attempt.gateway_intent_id, amount=change.total_cents)
-        with patch("apps.provisioning.hosting_raise_service.timezone.now", return_value=raised.overlay_expires_at + timedelta(seconds=1)):
+        with patch(
+            "apps.provisioning.hosting_raise_service.timezone.now",
+            return_value=raised.overlay_expires_at + timedelta(seconds=1),
+        ):
             with patch("apps.provisioning.hosting_limit_tasks.async_task"):
                 cleanup = expire_hosting_raise(self.service.pk)
             self.assertIsNotNone(cleanup)
@@ -70,8 +83,16 @@ class HostingRaiseFinancialTests(CommercialRaiseFixture, TransactionTestCase):
             self.assertEqual(pending.revision, change.limit_application.revision)
             self.assertEqual(pending.overlay_extra_mib, 0)
             with (
-                patch("apps.provisioning.hosting_limit_transport.probe_account_quota", return_value=self.receipt(cap=5632, available=100 * 1024**3)) as probe,
-                patch("apps.provisioning.hosting_limit_transport.run_quota_operation", side_effect=lambda server, action, request: self.receipt(cap=request["disk_limit_kib"] // 1024, request=request)) as native,
+                patch(
+                    "apps.provisioning.hosting_limit_transport.probe_account_quota",
+                    return_value=self.receipt(cap=5632, available=100 * 1024**3),
+                ) as probe,
+                patch(
+                    "apps.provisioning.hosting_limit_transport.run_quota_operation",
+                    side_effect=lambda server, action, request: self.receipt(
+                        cap=request["disk_limit_kib"] // 1024, request=request
+                    ),
+                ) as native,
             ):
                 apply_hosting_limits(pending.pk)
         probe.assert_not_called()

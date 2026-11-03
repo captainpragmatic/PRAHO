@@ -208,7 +208,9 @@ class GDPRErasureCNPTests(TestCase):
             {event.metadata.get("proforma_id") for event in cleared if "proforma_id" in event.metadata},
             {proforma.pk for proforma in proformas},
         )
-        self.assertEqual([event.metadata["invoice_id"] for event in cleared if "invoice_id" in event.metadata], [draft.pk])
+        self.assertEqual(
+            [event.metadata["invoice_id"] for event in cleared if "invoice_id" in event.metadata], [draft.pk]
+        )
 
     def test_an_unreadable_cnp_does_not_block_the_erasure(self) -> None:
         proforma = self.proforma(self.customer)

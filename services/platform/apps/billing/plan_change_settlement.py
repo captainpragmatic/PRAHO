@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -77,28 +78,37 @@ def _validate_current_terms(change: PlanChange, subscription: Subscription, serv
         raise ValidationError(_("The accepted interval allocations do not match the settled amount."))
 
 
-def _commit_accepted_terms(
+def _commit_accepted_terms(  # noqa: PLR0913 -- Invoice, scheduled authority and native refusal remain explicit.
     change: PlanChange,
     subscription: Subscription,
     service: Service,
     *,
     invoice: Invoice | None = None,
+    scheduled: bool = False,
+    native_refusal: str | None = None,
 ) -> None:
     """One assignment writer serves settled money and explicit no-charge acceptance."""
     from apps.promotions.models import RenewalBenefit  # noqa: PLC0415
 
     accepted = HostingAssignmentTerms.from_snapshot(change.quote_snapshot.get("accepted_limits"))
-    authority = {"kind": "paid_plan_change" if invoice else "zero_due_plan_change", "plan_change_id": str(change.pk)}
+    authority = {
+        "kind": "scheduled_plan_change" if scheduled else "paid_plan_change" if invoice else "zero_due_plan_change",
+        "plan_change_id": str(change.pk),
+    }
     if invoice is not None:
         authority["invoice_id"] = str(invoice.pk)
-    application = request_service_plan_change(
-        service=service,
-        target_plan_id=change.to_plan_id,
-        expected_revision=change.expected_limit_revision,
-        submission_id=change.submission_id,
-        reason="Accepted paid hosting plan change",
-        authority=authority,
-        accepted_terms=accepted,
+    application = (
+        request_service_plan_change(
+            service=service,
+            target_plan_id=change.to_plan_id,
+            expected_revision=change.expected_limit_revision,
+            submission_id=change.submission_id,
+            reason="Accepted scheduled hosting plan change" if scheduled else "Accepted paid hosting plan change",
+            authority=authority,
+            accepted_terms=accepted,
+        )
+        if native_refusal is None
+        else None
     )
     subscription.product_id = change.to_product_id
     subscription.unit_price_cents = change.target_period_price_cents
@@ -125,7 +135,120 @@ def _commit_accepted_terms(
     change.limit_application = application
     change.committed_at = timezone.now()
     change.commit_limits()
-    change.save(update_fields=["invoice", "limit_application", "committed_at", "status", "updated_at"])
+    fields = ["invoice", "limit_application", "committed_at", "status", "updated_at"]
+    if native_refusal is not None:
+        change.review_reason = native_refusal[:255]
+        change.limits_failed()
+        fields.append("review_reason")
+    change.save(update_fields=fields)
+
+
+def commit_scheduled_plan_change(change: PlanChange, *, at: datetime | None = None) -> None:
+    """Honor accepted renewal prices at the date; native drift never authorizes stale limits."""
+    from apps.customers.models import Customer  # noqa: PLC0415
+    from apps.provisioning.models import Service  # noqa: PLC0415
+
+    from .plan_change_financial import (  # noqa: PLC0415 -- Immediate disputed-source gate.
+        validate_preserved_plan_coverage,
+    )
+
+    if not transaction.get_connection(change._state.db).in_atomic_block:
+        raise RuntimeError("Scheduled plan activation requires its commercial-context transaction")
+    now = timezone.now() if at is None else at
+    if (
+        change.direction != "downgrade"
+        or change.status != "scheduled"
+        or change.confirmed_at is None
+        or now < change.effective_at
+        or change.proforma_id is not None
+        or change.invoice_id is not None
+        or hasattr(change, "payment_attempt")
+    ):
+        raise ValidationError(_("Only an accepted scheduled downgrade can activate at its recorded renewal date."))
+    customer = Customer.all_objects.get(pk=change.customer_id)
+    subscription = Subscription.objects.get(pk=change.subscription_id)
+    service = Service.objects.get(pk=change.service_id)
+    validate_preserved_plan_coverage(change)
+    if (
+        customer.deleted_at is not None
+        or customer.anonymized_at is not None
+        or customer.status not in {"active", "suspended"}
+        or subscription.customer_id != customer.pk
+        or service.customer_id != customer.pk
+        or subscription.service_id != service.pk
+        or subscription.product_id != change.from_product_id
+        or subscription.currency_id != change.currency_id
+        or service.currency_id != change.currency_id
+        or subscription.quantity != 1
+        or subscription.billing_cycle != change.quote_snapshot.get("billing_cycle")
+        or subscription.status not in {"active", "past_due", "paused"}
+        or subscription.cancel_at_period_end
+        or service.status not in {"active", "suspended"}
+    ):
+        raise ValidationError(_("The scheduled downgrade's current owner or billing lifecycle requires review."))
+    resource_refusal = _scheduled_resource_refusal(change, service)
+    _commit_accepted_terms(change, subscription, service, scheduled=True, native_refusal=resource_refusal)
+
+
+def _scheduled_resource_refusal(change: PlanChange, service: Service) -> str | None:
+    from apps.products.models import Product  # noqa: PLC0415
+    from apps.provisioning.hosting_limit_models import ServiceHostingLimits  # noqa: PLC0415
+    from apps.provisioning.models import ServicePlan  # noqa: PLC0415
+
+    from .plan_change_quote_service import _profile  # noqa: PLC0415 -- Frozen configuration, not live pricing.
+
+    products = {
+        product.pk: product
+        for product in Product.objects.select_for_update(of=("self",), no_key=True)
+        .filter(pk__in=(change.from_product_id, change.to_product_id))
+        .order_by("pk")
+    }
+    plan = ServicePlan.objects.select_for_update(of=("self",), no_key=True).get(pk=change.to_plan_id)
+    limits = ServiceHostingLimits.objects.select_for_update(of=("self",)).get(service_id=service.pk)
+    resource_refusal = None
+    if limits.revision != change.expected_limit_revision or service.service_plan_id != change.from_plan_id:
+        resource_refusal = _("Another resource assignment superseded the accepted downgrade; review its limits.")
+    elif (
+        not plan.is_active
+        or products[change.to_product_id].default_service_plan_id != change.to_plan_id
+        or {"source": _profile(change.from_product_id), "target": _profile(change.to_product_id)}
+        != change.quote_snapshot.get("catalog_profile")
+    ):
+        resource_refusal = _("The accepted hosting profile changed; the lower price remains and limits need review.")
+    return resource_refusal
+
+
+def resume_scheduled_plan_limits(change: PlanChange, subscription: Subscription, service: Service) -> bool:
+    """Retry only an unissued accepted resource intent after its profile is repaired."""
+    if (
+        change.direction != "downgrade"
+        or change.status != "limits_attention"
+        or change.committed_at is None
+        or change.limit_application_id is not None
+        or subscription.customer_id != change.customer_id
+        or service.customer_id != change.customer_id
+        or subscription.service_id != service.pk
+        or subscription.product_id != change.to_product_id
+        or subscription.unit_price_cents != change.target_period_price_cents
+        or subscription.currency_id != change.currency_id
+        or service.currency_id != change.currency_id
+        or _scheduled_resource_refusal(change, service) is not None
+    ):
+        return False
+    accepted = HostingAssignmentTerms.from_snapshot(change.quote_snapshot.get("accepted_limits"))
+    application = request_service_plan_change(
+        service=service,
+        target_plan_id=change.to_plan_id,
+        expected_revision=change.expected_limit_revision,
+        submission_id=change.submission_id,
+        reason="Accepted scheduled hosting plan change",
+        authority={"kind": "scheduled_plan_change", "plan_change_id": str(change.pk)},
+        accepted_terms=accepted,
+    )
+    change.limit_application = application
+    change.review_reason = _("Your agreed plan is waiting for resource verification.")
+    change.save(update_fields=["limit_application", "review_reason", "updated_at"])
+    return True
 
 
 def _apply_paid_quote(change: PlanChange, invoice: Invoice) -> None:

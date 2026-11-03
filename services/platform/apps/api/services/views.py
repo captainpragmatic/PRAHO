@@ -212,7 +212,22 @@ def customer_service_detail_api(request: HttpRequest, customer: Customer, servic
         if observations_apply(service):
             usage_trends = usage_history(service)
 
-        return Response({"success": True, "data": {"service": serializer.data, "usage_trends": usage_trends}})
+        from apps.billing.plan_change_models import PlanChange  # noqa: PLC0415 -- Accepted checkout navigation.
+        from apps.settings.services import SettingsService  # noqa: PLC0415 -- New acceptance rollout flag.
+
+        data = serializer.data
+        current = (
+            PlanChange.objects.filter(service=service, customer=customer)
+            .exclude(status__in=("cancelled", "expired"))
+            .order_by("-created_at", "-pk")
+            .values("id", "status")
+            .first()
+        )
+        data["plan_change"] = {"id": str(current["id"]), "status": current["status"]} if current else None
+        data["plan_changes_enabled"] = SettingsService.get_boolean_setting(
+            "billing.hosting_plan_changes_enabled", False
+        )
+        return Response({"success": True, "data": {"service": data, "usage_trends": usage_trends}})
 
     except Exception as e:
         logger.error(f"🔥 [Services API] Error fetching service detail {service_id}: {e}")

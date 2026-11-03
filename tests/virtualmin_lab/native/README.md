@@ -11,7 +11,46 @@ approved disposable-project `HCLOUD_TOKEN`, narrow `PRAHO_NATIVE_ADMIN_CIDR`,
 `NATIVE_DNS_ZONE`, and `DB_NAME=praho_native_workflow` with its dedicated local
 PostgreSQL connection. The database name must start with `praho_native_`.
 
-Run the phases sequentially:
+The complete fresh-deployment gate uses **one** VM created by the public Platform
+pipeline. Export `PRAHO_NATIVE_LOCATION` and `PRAHO_NATIVE_SERVER_TYPE` explicitly,
+plus the approved DNS authority references as `PRAHO_NATIVE_CLOUDFLARE_TOKEN` and
+`PRAHO_NATIVE_CLOUDFLARE_ZONE_ID`. Do not print or commit their values. The DNS zone
+argument must be the approved disposable zone/subzone inside that provider zone.
+Use an otherwise empty isolated native database, not the registration-resume fixture's
+database. Run these phases sequentially:
+
+1. `make native-vm-fresh-intent` records only private local intent and an original
+   SSH/vault identity. It creates no provider resources. Preserve this key after
+   interruption; replacing it would lose access to the encrypted native database.
+2. `make native-vm-migrate` initializes the isolated native database.
+3. `make native-vm-fresh-deploy` first reads the approved DNS zone and synchronizes
+   the real provider catalogue, then invokes `NodeDeploymentService.deploy_node()`
+   with the actual provider/DNS credentials and an exact-permission fixture actor.
+   The pipeline creates the VM, publishes owned DNS, runs production installation,
+   validates and registers it. No existing raw-provider VM or successful fake DNS
+   answer can satisfy this phase. Real create-response ownership, the billable
+   lifetime and the actual completed deployment result are required before its
+   exact VM/key receive lab labels. Host trust comes from the public deployment's
+   durable enrollment; its original client private key stays unchanged.
+4. `make native-vm-register` verifies activation and prepares reviewed inspection
+   helpers through the public node-policy operation.
+5. `make test-virtualmin-quotas` performs actual UID/PHP/database denial, neighbor
+   controls, provider-observed reboots, package update and isolated requalification.
+6. `make test-virtualmin-native-fresh-deployment` rechecks the original database
+   intent, creator credential, immutable create records, live provider identity,
+   owned DNS, public SSH/port/API/TLS validation and current native quota evidence.
+   An all-true manifest JSON is never deployment proof.
+7. Create/verify the owned storage and mail fixtures, then run the public lifecycle
+   workflow described below on this same VM. This does not create a second VM.
+8. Use `make native-vm-fresh-destroy` for public exact-resource approval/teardown,
+   including after authority expiry. Cleanup-only mode permits only that action.
+   Workload protection remains active: remove only this run's disposable accounts
+   through public lifecycle operations first. A refusal or uncertain outcome retains
+   the manifest, original key and provider IDs for public reconciliation.
+
+The older raw-provider **registration-resume** control is independent and must not
+be represented as fresh provider creation. For that control, use a different run
+and database and follow this sequence:
 
 1. `make native-vm-create` records exact provider IDs/labels and generated host-key trust.
 2. `make native-vm-migrate` initializes only the isolated native database.
@@ -39,11 +78,11 @@ Run the phases sequentially:
     cleanup uses `make native-s3-destroy`, the mail fixture's destroy target, and
     `make native-vm-destroy`. Expiry never authorizes cleanup of an unlabelled resource.
 
-The fixture installer plus public **registration-resume** is an explicit boundary.
-It does not prove the full fresh `NodeDeploymentService.deploy_node()` provider-create
-and DNS-publication pipeline. That independent gate still requires approved disposable
-provider and DNS write authority. `platform_workflow.fresh_deploy_dns` remains `false`.
-The PR1 workflow also does not claim a paid upgrade; commercial acceptance belongs to #840.
+The raw fixture installer plus public **registration-resume** does not prove the
+fresh provider-create/DNS path. Its `platform_workflow.fresh_deploy_dns` remains
+`false`. The separate intent-first gate above still requires actual approved
+provider/DNS authority and native execution. The PR1 workflow does not claim a
+paid upgrade; commercial acceptance belongs to #840.
 
 PostgreSQL unit controls exercise encrypted/idempotent fixture binding, changed-resource
 refusal and command isolation. Their mocked provider/SSH boundaries are not native proof.

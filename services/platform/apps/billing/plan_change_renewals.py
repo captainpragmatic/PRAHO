@@ -13,7 +13,7 @@ from django.utils.translation import gettext as _
 
 from apps.provisioning.hosting_limit_policy import HostingAssignmentTerms
 
-from .cycle_terms import build_terms_snapshot
+from .cycle_terms import CycleTerms, build_terms_snapshot
 from .plan_change_models import PlanChange
 from .subscription_models import Subscription
 
@@ -62,6 +62,11 @@ def accepted_plan_terms(subscription: Subscription, period_start: datetime) -> d
         )
     staged = copy(subscription)
     staged.product = change.to_product
+    labels = change.quote_snapshot.get("labels")
+    if not isinstance(labels, dict) or any(
+        not isinstance(labels.get(field), str) or not labels[field] for field in ("to", "to_sku")
+    ):
+        raise ValidationError(_("The accepted plan's document identity requires review."))
     accepted = HostingAssignmentTerms.from_snapshot(change.quote_snapshot.get("accepted_limits"))
     snapshot = build_terms_snapshot(
         staged,
@@ -81,5 +86,19 @@ def accepted_plan_terms(subscription: Subscription, period_start: datetime) -> d
         "product_id": str(change.to_product_id),
         "plan_id": change.to_plan_id,
         "accepted_limits": change.quote_snapshot["accepted_limits"],
+        "product_name": labels["to"],
+        "seller_item_id": labels["to_sku"],
     }
     return snapshot
+
+
+def renewal_product_identity(terms: CycleTerms, subscription: Subscription) -> tuple[str, str]:
+    """A scheduled plan is the future document's identity before live activation."""
+    accepted = terms.snapshot.get("plan_change")
+    if accepted is None:
+        return subscription.product.name, subscription.product.slug
+    if not isinstance(accepted, dict) or any(
+        not isinstance(accepted.get(field), str) or not accepted[field] for field in ("product_name", "seller_item_id")
+    ):
+        raise ValidationError(_("The frozen renewal's accepted document identity requires review."))
+    return accepted["product_name"], accepted["seller_item_id"]

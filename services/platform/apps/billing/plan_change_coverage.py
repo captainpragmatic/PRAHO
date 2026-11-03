@@ -18,10 +18,14 @@ from .metering_models import BillingCycle
 from .plan_change_models import PlanChange
 from .plan_change_pricing import CoveredInterval
 from .proforma_models import ProformaInvoice, ProformaLine
+from .refund_models import refunds_for_invoice
 from .subscription_models import Subscription
 
 if TYPE_CHECKING:
     from apps.orders.models import OrderItem
+    from apps.promotions.models import PromotionApplication
+
+PROMOTION_QUOTE_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -40,7 +44,7 @@ def invoice_has_paid_coverage(invoice: Invoice) -> bool:
     # immediately, including when an old invoice projection still says 'paid'.
     if invoice.payments.filter(status__in=["disputed", "refunded", "partially_refunded"]).exists():
         raise _refuse("disputed or refunded payment evidence")
-    if invoice.refunds.exclude(status__in=["cancelled", "rejected", "failed"]).exists():
+    if refunds_for_invoice(invoice).exclude(status__in=["cancelled", "rejected", "failed"]).exists():
         raise _refuse("a refund requires an explicit interval allocation")
     return invoice.status == "paid" and invoice.get_remaining_amount() == 0
 
@@ -183,7 +187,7 @@ def _initial_period_net(item: OrderItem) -> int:
     service, setup = item.unit_price_cents, item.setup_cents
     if not item.order.discount_cents:
         return int(service)
-    applications = list(item.order.promotion_applications.order_by("created_at", "pk"))
+    applications = _ordered_initial_applications(item)
     if sum(app.discount_cents for app in applications) != item.order.discount_cents:
         raise _refuse("the initial discount has no complete allocation evidence")
     for application in applications:
@@ -206,6 +210,40 @@ def _initial_period_net(item: OrderItem) -> int:
         else:
             raise _refuse("unknown historical promotion allocation")
     return int(service)
+
+
+def _ordered_initial_applications(item: OrderItem) -> list[PromotionApplication]:
+    """Only the accepted checkout payload establishes the order of its offers."""
+    quote = (item.order.meta or {}).get("promotion_quote")
+    if (
+        not isinstance(quote, dict)
+        or quote.get("version") != PROMOTION_QUOTE_VERSION
+        or not isinstance(quote.get("offers"), list)
+    ):
+        raise _refuse("the initial discount has no frozen offer order")
+    applications = list(item.order.promotion_applications.all())
+    indexed = {
+        ("coupon" if app.coupon_id is not None else "rule", str(app.coupon_id or app.rule_id)): app
+        for app in applications
+    }
+    ordered = []
+    seen = set()
+    for offer in quote["offers"]:
+        if (
+            not isinstance(offer, dict)
+            or not isinstance(offer.get("source"), str)
+            or not isinstance(offer.get("key"), str)
+        ):
+            raise _refuse("the initial discount's ordered offer is malformed")
+        key = (offer["source"], offer["key"])
+        application = indexed.get(key)
+        if key in seen or application is None or application.snapshot != offer:
+            raise _refuse("the initial discount's ordered application is unproven")
+        seen.add(key)
+        ordered.append(application)
+    if len(ordered) != len(applications):
+        raise _refuse("the initial discount's ordered applications are incomplete")
+    return ordered
 
 
 def _committed_supplements(subscription: Subscription) -> list[PlanChange]:

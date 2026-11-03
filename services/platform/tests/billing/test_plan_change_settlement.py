@@ -41,6 +41,7 @@ class _PlanChangeSettlementFixture(_PlanChangeCoverageFixture):
                 "version": 1,
                 "billing_cycle": self.subscription.billing_cycle,
                 "quantity": 1,
+                "labels": {"from": self.product.name, "to": product.name, "to_sku": product.slug},
                 "accepted_limits": assignment_terms_for_plan(plan).as_snapshot(),
                 "coverage": load_plan_coverage(self.subscription, at=self.now).evidence,
             },

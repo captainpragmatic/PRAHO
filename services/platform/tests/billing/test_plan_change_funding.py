@@ -19,6 +19,7 @@ from apps.billing.recurring_authorization_service import RecurringPaymentAuthori
 from apps.billing.recurring_models import RecurringPaymentAuthorization
 from apps.customers.models import CustomerPaymentMethod
 from apps.promotions.models import GiftCard
+from apps.settings.services import SettingsService
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
 from tests.helpers.plan_change_checkout import VerifiedPlanChangeCheckoutFixture
 
@@ -27,6 +28,7 @@ from tests.helpers.plan_change_checkout import VerifiedPlanChangeCheckoutFixture
 class PlanChangeFundingTests(VerifiedPlanChangeCheckoutFixture, HMACTestMixin, TransactionTestCase):
     def test_existing_off_session_helper_refuses_even_with_a_real_saved_mandate(self):
         change = self.confirm(self.quote())
+        self.assertTrue(SettingsService.update_setting("billing.recurring_auto_collection_enabled", True).is_ok())
         method = CustomerPaymentMethod.objects.create(
             customer=self.customer,
             method_type="stripe_card",
@@ -51,8 +53,8 @@ class PlanChangeFundingTests(VerifiedPlanChangeCheckoutFixture, HMACTestMixin, T
             result = PaymentService.create_payment_intent_for_proforma(
                 change.proforma_id, method.stripe_payment_method_id
             )
-        self.assertFalse(result.success)
-        self.assertIn("no billing cycles", result.error)
+        self.assertFalse(result["success"])
+        self.assertIn("no billing cycles", result["error"])
         gateways.assert_not_called()
         self.assertFalse(change.proforma.payments.exists())
 

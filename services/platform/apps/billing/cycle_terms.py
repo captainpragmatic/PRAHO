@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -43,7 +43,10 @@ class CycleTerms:
 
 
 def _meter_snapshot(
-    subscription: Subscription, meter: UsageMeter, currency_code: str, at: datetime,
+    subscription: Subscription,
+    meter: UsageMeter,
+    currency_code: str,
+    at: datetime,
     resource_allowances: Mapping[str, Decimal] | None = None,
 ) -> dict[str, Any]:
     from .metering_service import (  # noqa: PLC0415  # Rating engine and snapshot builder share validation.
@@ -57,8 +60,10 @@ def _meter_snapshot(
     included = _get_allowance_from_subscription_item(item)
     if included <= 0:
         pinned = resource_allowances.get(meter.category) if resource_allowances is not None else None
-        included = pinned if pinned is not None else _get_allowance_from_service_plan(
-            meter, getattr(subscription.product, "default_service_plan", None)
+        included = (
+            pinned
+            if pinned is not None
+            else _get_allowance_from_service_plan(meter, getattr(subscription.product, "default_service_plan", None))
         )
     snapshot: dict[str, Any] = {
         "meter_id": str(meter.pk),
@@ -106,7 +111,10 @@ def build_terms_snapshot(
     """Read current configured terms only when making a new period or offer."""
     if resource_allowances is not None and (
         set(resource_allowances) - {"storage", "bandwidth"}
-        or any(not isinstance(value, Decimal) or not value.is_finite() or value < 0 for value in resource_allowances.values())
+        or any(
+            not isinstance(value, Decimal) or not value.is_finite() or value < 0
+            for value in resource_allowances.values()
+        )
     ):
         raise ValidationError(_("Pinned resource allowances require known nonnegative decimal quantities."))
     currency_code = currency_code or subscription.currency_id

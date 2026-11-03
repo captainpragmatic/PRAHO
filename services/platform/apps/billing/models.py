@@ -50,7 +50,9 @@ from .payment_models import (
     RecurringPaymentSubmission,
 )
 from .plan_change_models import PlanChange, PlanChangeInterval
+from .plan_change_notice_models import PlanChangeNotice
 from .plan_change_payment_models import PlanChangePaymentAttempt
+from .plan_change_review_models import PlanChangeReviewEvent
 from .proforma_models import ProformaInvoice, ProformaLine, ProformaSequence
 from .recurring_models import RecurringPaymentAuthorization
 from .refund_models import Refund, RefundNote, RefundStatusHistory
@@ -134,7 +136,9 @@ __all__ = [  # noqa: RUF022  # Grouped by billing domain for discoverability
     "PaymentRetryPolicy",
     "PlanChange",
     "PlanChangeInterval",
+    "PlanChangeNotice",
     "PlanChangePaymentAttempt",
+    "PlanChangeReviewEvent",
     "RecurringPaymentSubmission",
     # Subscription Models
     "PriceGrandfathering",

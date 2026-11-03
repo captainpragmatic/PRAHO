@@ -11,7 +11,6 @@ import argparse
 import ipaddress
 import json
 import os
-import re
 import shutil
 import stat
 import subprocess
@@ -547,9 +546,13 @@ def main() -> None:
     arguments = parser.parse_args()
     if arguments.action == "prepare":
         parser.error("Use make native-vm-prepare to bind the exact Platform deployment and encrypted credential")
-    {"create": create, "fresh-intent": fresh_intent, "verify": verify, "fresh-proof": fresh_deployment_proof, "destroy": destroy}[arguments.action](
-        arguments.manifest.absolute()
-    )
+    {
+        "create": create,
+        "fresh-intent": fresh_intent,
+        "verify": verify,
+        "fresh-proof": fresh_deployment_proof,
+        "destroy": destroy,
+    }[arguments.action](arguments.manifest.absolute())
 
 
 if __name__ == "__main__":

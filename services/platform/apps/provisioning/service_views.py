@@ -385,8 +385,10 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
             else:
                 messages.error(
                     request,
-                    _("A failed service can't be activated here. "
-                      "Review its provisioning history and native state before any repair."),
+                    _(
+                        "A failed service can't be activated here. "
+                        "Review its provisioning history and native state before any repair."
+                    ),
                 )
             return _back_to_service(request, pk)
         try:

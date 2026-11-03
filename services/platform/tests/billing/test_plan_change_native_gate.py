@@ -8,8 +8,6 @@ from django.test import TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 
 from apps.audit.services import GDPRDeletionService
-from apps.billing.models import Payment
-from apps.billing.payment_convergence import PaymentSuccessService
 from apps.billing.plan_change_financial import (
     commercial_source_refusal,
     plan_change_native_refusal,
@@ -24,8 +22,6 @@ from apps.provisioning.hosting_parent_limits import held_parent_cap_repair_issue
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
 from apps.users.models import CustomerMembership
 from tests.billing import test_plan_change_lifecycle as lifecycle_tests
-from tests.billing.test_plan_change_intervals import _PlanChangeCoverageFixture
-from tests.helpers.plan_change_checkout import VerifiedPlanChangeCheckoutFixture
 from tests.helpers.plan_change_financial import StripeCoverageFixture
 from tests.provisioning.test_hosting_safety_observation import HostingSafetyObservationFixture
 

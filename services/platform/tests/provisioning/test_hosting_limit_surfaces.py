@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -60,6 +60,19 @@ class HostingLimitSurfaceTests(TestCase):
         self.admin = User.objects.create_user(
             email="hosting-admin@example.com", password="testpass", staff_role="admin"
         )
+
+    def test_resource_override_form_has_a_working_csrf_boundary(self) -> None:
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.admin)
+        path = reverse("provisioning:service_resource_override", args=[self.service.pk])
+        page = client.get(path)
+        self.assertContains(page, 'name="csrfmiddlewaretoken"')
+        refused = client.post(path, {})
+        self.assertEqual(refused.status_code, 403)
+        accepted = client.post(path, {"csrfmiddlewaretoken": client.cookies["csrftoken"].value})
+        self.assertEqual(accepted.status_code, 400)
+        self.assertContains(accepted, "This field is required", status_code=400)
+        self.assertEqual(self.service.limit_applications.count(), 0)
 
     def test_catalog_edits_do_not_change_serialized_allowance_or_percentage(self) -> None:
         ServicePlan.objects.filter(pk=self.plan.pk).update(disk_space_gb=99, bandwidth_gb=999)

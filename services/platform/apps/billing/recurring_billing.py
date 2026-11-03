@@ -20,6 +20,7 @@ from apps.settings.services import SettingsService
 
 from .config import FIXED_RENEWAL_COLLECTION_LEAD_DAYS, get_invoice_generation_lead_days
 from .fiscal_identity import billing_country_code, get_customer_fiscal_identity
+from .plan_change_renewals import renewal_product_identity
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +135,8 @@ class RecurringCollectionGate:
 
     @staticmethod
     def _validate_fixed_renewal_lifecycle(subscription: Any) -> str | None:
+        from .plan_change_holds import unsettled_plan_change_reason  # noqa: PLC0415 -- Shared charge boundary.
+
         if subscription.status not in RecurringCollectionGate._FIXED_RENEWAL_STATUSES:
             return (
                 f"Subscription {subscription.subscription_number} status "
@@ -151,7 +154,7 @@ class RecurringCollectionGate:
             )
         if not service.auto_renew:
             return f"Subscription {subscription.subscription_number} has automatic renewal disabled"
-        return None
+        return unsettled_plan_change_reason(subscription)
 
     @staticmethod
     def authorize_invoice(  # noqa: PLR0911  # Preserve distinct fail-closed rejection reasons
@@ -351,6 +354,7 @@ class RecurringBillingOrchestrator:
 
         from .currency_policy import get_selling_currency_policy  # noqa: PLC0415
         from .currency_transitions import commit_prepared_offer, terms_for_preparation  # noqa: PLC0415
+        from .plan_change_holds import unsettled_plan_change_reason  # noqa: PLC0415 -- Shared financial hold.
         from .proforma_models import ProformaInvoice, ProformaLine, ProformaSequence  # noqa: PLC0415
         from .services import _build_customer_vat_info  # noqa: PLC0415
         from .subscription_models import Subscription  # noqa: PLC0415
@@ -425,6 +429,9 @@ class RecurringBillingOrchestrator:
                 cycle_terms: dict[object, CycleTerms] = {}
                 cycle_offers: dict[object, SubscriptionCurrencyTransition | None] = {}
                 for subscription in candidate_subscriptions:
+                    if reason := unsettled_plan_change_reason(subscription, at=run_at):
+                        result["errors"].append(f"Subscription {subscription.subscription_number}: {reason}")
+                        continue
                     due_cycle = _resolve_due_unprepared_cycle(
                         subscription,
                         run_at=run_at,
@@ -512,13 +519,14 @@ class RecurringBillingOrchestrator:
 
                             for sort_order, (subscription, cycle, _period_end) in enumerate(grouped_items, start=1):
                                 terms = cycle_terms[cycle.pk]
+                                product_name, seller_item_id = renewal_product_identity(terms, subscription)
                                 line = ProformaLine(
                                     proforma=proforma,
                                     kind="service",
                                     service=subscription.service,
                                     billing_cycle=cycle,
                                     description=(
-                                        f"{subscription.product.name} - {subscription.billing_cycle.replace('_', ' ').title()} "
+                                        f"{product_name} - {subscription.billing_cycle.replace('_', ' ').title()} "
                                         f"({operator_local_date(cycle.period_start)} to {operator_local_date(cycle.period_end)})"
                                     ),
                                     quantity=Decimal(terms.quantity),
@@ -531,7 +539,7 @@ class RecurringBillingOrchestrator:
                                     period_end=operator_local_date(cycle.period_end),
                                     unit_code="C62",
                                     tax_category_code=tax_category,
-                                    seller_item_id=subscription.product.slug,
+                                    seller_item_id=seller_item_id,
                                     sort_order=sort_order,
                                 )
                                 line.calculate_totals()
@@ -716,8 +724,7 @@ class RecurringBillingOrchestrator:
                             # the definitive failure from mark_overdue_renewals and corrupts
                             # the attempt state. The webhook's word is final.
                             collection_status__in=["prepared", "processing"],
-                        )
-                        .order_by("subscription_id", "id")
+                        ).order_by("subscription_id", "id")
                     )
                     for cycle in cycles:
                         if cycle.collection_status == "processing":
@@ -782,8 +789,7 @@ class RecurringBillingOrchestrator:
                     id__in=overdue_cycle_ids,
                     collection_status__in=["prepared", "past_due"],
                     subscription__status="active",
-                )
-                .order_by("subscription_id", "id")
+                ).order_by("subscription_id", "id")
             )
             for cycle in cycles:
                 subscription = subscriptions.get(cycle.subscription_id)

@@ -157,7 +157,8 @@ class PlanChangeCheckoutTests(_PlanChangeCheckoutFixture, TransactionTestCase):
     def test_signed_cancellation_callback_loss_recovers_without_another_provider_call(self):
         change, attempt, sdk = self.ready_attempt()
         with patch(
-            "apps.billing.plan_change_payment_service._close_cancelled_change", side_effect=RuntimeError("callback lost")
+            "apps.billing.plan_change_payment_service._close_cancelled_change",
+            side_effect=RuntimeError("callback lost"),
         ):
             accepted, message, event = self.signed_delivery(
                 sdk.PaymentIntent.create.call_args.kwargs["metadata"], status="canceled"
@@ -196,7 +197,10 @@ class PlanChangeCheckoutTests(_PlanChangeCheckoutFixture, TransactionTestCase):
             patch("apps.billing.plan_change_payment_service._gateway") as gateway,
             database_worker(cancellation) as (owner, cancelled),
         ):
-            gateway.return_value.cancel_on_session_document_intent.return_value = {"success": False, "status": "unknown"}
+            gateway.return_value.cancel_on_session_document_intent.return_value = {
+                "success": False,
+                "status": "unknown",
+            }
             try:
                 self.assertTrue(entered.wait(10))
                 with database_worker(delivery) as (pid, delivered):
@@ -230,7 +234,9 @@ class PlanChangeCheckoutTests(_PlanChangeCheckoutFixture, TransactionTestCase):
             gateway.assert_not_called()
         change.refresh_from_db()
         self.assertEqual(change.status, "applying_limits" if status == "succeeded" else "cancelled")
-        self.assertEqual(Payment.objects.get(pk=attempt.payment_id).status, "succeeded" if status == "succeeded" else "failed")
+        self.assertEqual(
+            Payment.objects.get(pk=attempt.payment_id).status, "succeeded" if status == "succeeded" else "failed"
+        )
         if status != "succeeded":
             return
         self.customer.refresh_from_db()

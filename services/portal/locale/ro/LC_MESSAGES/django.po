@@ -4487,9 +4487,8 @@ msgstr "Înapoi la coș"
 msgid "Continue to Payment"
 msgstr "Continuați la Plată"
 
-#: templates/orders/checkout.html:237
-msgid "Processing..."
-msgstr "Se procesează..."
+#~ msgid "Processing..."
+#~ msgstr "Se procesează..."
 
 #: templates/orders/checkout.html:241
 msgid "Create order"
@@ -5239,9 +5238,8 @@ msgstr "Conturi de e-mail"
 msgid "Current"
 msgstr "Curent"
 
-#: templates/services/partials/usage_chart.html:83
-msgid "active accounts"
-msgstr "conturi active"
+#~ msgid "active accounts"
+#~ msgstr "conturi active"
 
 #: templates/services/partials/usage_chart.html:105 templates/services/service_detail.html:368 templates/services/service_detail.html:500
 msgid "Databases"
@@ -5251,41 +5249,33 @@ msgstr "Baze de date"
 msgid "databases"
 msgstr "Baze de date"
 
-#: templates/services/partials/usage_chart.html:139
-msgid "Usage Trends"
-msgstr "Tendințe de utilizare"
+#~ msgid "Usage Trends"
+#~ msgstr "Tendințe de utilizare"
 
-#: templates/services/partials/usage_chart.html:145
-msgid "Historical Charts"
-msgstr "Grafice istorice"
+#~ msgid "Historical Charts"
+#~ msgstr "Grafice istorice"
 
-#: templates/services/partials/usage_chart.html:146
-msgid "Coming Soon - Interactive usage trends"
-msgstr "În curând - Tendințe interactive de utilizare"
+#~ msgid "Coming Soon - Interactive usage trends"
+#~ msgstr "În curând - Tendințe interactive de utilizare"
 
-#: templates/services/partials/usage_chart.html:148
-msgid "Period:"
-msgstr "Perioadă:"
+#~ msgid "Period:"
+#~ msgstr "Perioadă:"
 
 #: templates/services/partials/usage_chart.html:148
 msgid "Last Updated:"
 msgstr "Ultima actualizare:"
 
-#: templates/services/partials/usage_chart.html:158
-msgid "Service Uptime"
-msgstr "Disponibilitate serviciu"
+#~ msgid "Service Uptime"
+#~ msgstr "Disponibilitate serviciu"
 
-#: templates/services/partials/usage_chart.html:161
-msgid "Online"
-msgstr "Online"
+#~ msgid "Online"
+#~ msgstr "Online"
 
-#: templates/services/partials/usage_chart.html:167
-msgid "uptime for"
-msgstr "timp de activitate pentru"
+#~ msgid "uptime for"
+#~ msgstr "timp de activitate pentru"
 
-#: templates/services/partials/usage_chart.html:186
-msgid "uptime"
-msgstr "timp de activitate"
+#~ msgid "uptime"
+#~ msgstr "timp de activitate"
 
 #: templates/services/plans_list.html:4
 msgid "Service Plans"
@@ -5415,9 +5405,8 @@ msgstr "Starea serviciului"
 msgid "Current status overview"
 msgstr "Prezentare generală a stării curente"
 
-#: templates/services/service_detail.html:188
-msgid "Uptime"
-msgstr "Disponibilitate"
+#~ msgid "Uptime"
+#~ msgstr "Disponibilitate"
 
 #: templates/services/service_detail.html:209
 msgid "Access Details"
@@ -5523,21 +5512,15 @@ msgstr "Serviciu creat"
 msgid "Current Usage"
 msgstr "Utilizarea curentă"
 
-#: templates/services/service_detail.html:456
-msgid "Disk Space"
-msgstr "Spațiu pe disc"
-
-#: templates/services/service_detail.html:514
-msgid "Usage History"
-msgstr "Istoric utilizare"
+#~ msgid "Disk Space"
+#~ msgstr "Spațiu pe disc"
 
 #: templates/services/service_detail.html:515
 msgid "Usage history period"
 msgstr "Perioada istoricului de utilizare"
 
-#: templates/services/service_detail.html:523
-msgid "Usage charts will be available soon"
-msgstr "Graficele de utilizare vor fi disponibile în curând"
+#~ msgid "Usage charts will be available soon"
+#~ msgstr "Graficele de utilizare vor fi disponibile în curând"
 
 #: templates/services/service_detail.html:543
 msgid "Current Bill"
@@ -5991,9 +5974,8 @@ msgstr "Detalii tichet"
 msgid "Back to Tickets"
 msgstr "Înapoi la tichete"
 
-#: templates/tickets/ticket_detail.html:212
-msgid "Sending..."
-msgstr "Se trimite..."
+#~ msgid "Sending..."
+#~ msgstr "Se trimite..."
 
 #: templates/users/change_password.html:10
 msgid "Update your account password securely"
@@ -7495,8 +7477,9 @@ msgstr "Înapoi la consola personalului"
 #~ msgid "Please select a reason..."
 #~ msgstr "Selectați un motiv..."
 
-#~ msgid "Details"
-#~ msgstr "Detalii"
+#: apps/common/account_health.py:194
+msgid "Details"
+msgstr "Detalii"
 
 #~ msgid "Please provide details about your refund request. The more information you provide, the faster we can process your request."
 #~ msgstr "Furnizați detalii despre cererea dvs. de rambursare. Cu cât oferiți mai multe informații, cu atât mai repede vă putem procesa cererea."
@@ -8290,17 +8273,14 @@ msgstr "%(start)s - %(end)s (%(zone)s)"
 msgid "%(heading)s: %(period)s."
 msgstr "%(heading)s: %(period)s."
 
-#. Customer maintenance windows (#780).
-msgid "A restart of the server your site runs on"
-msgstr "O repornire a serverului pe care rulează site-ul tău"
+#~ msgid "A restart of the server your site runs on"
+#~ msgstr "O repornire a serverului pe care rulează site-ul tău"
 
-#. Customer maintenance windows (#780).
-msgid "Updates to the server your site runs on"
-msgstr "Actualizări ale serverului pe care rulează site-ul tău"
+#~ msgid "Updates to the server your site runs on"
+#~ msgstr "Actualizări ale serverului pe care rulează site-ul tău"
 
-#. Customer maintenance windows (#780).
-msgid "Emergency work on the server your site runs on"
-msgstr "Lucrări de urgență la serverul pe care rulează site-ul tău"
+#~ msgid "Emergency work on the server your site runs on"
+#~ msgstr "Lucrări de urgență la serverul pe care rulează site-ul tău"
 
 #. Customer maintenance windows (#780).
 msgid "Brief unavailability may occur."
@@ -8326,6 +8306,7 @@ msgstr "Lucrările au durat mai mult decât s-a estimat."
 #. Customer maintenance windows (#780).
 msgid "Maintenance information is temporarily unavailable. Please check again shortly."
 msgstr "Informațiile despre mentenanță sunt temporar indisponibile. Te rugăm să revii în scurt timp."
+
 # Retained-source maintenance can affect mail/DNS independently of website placement.
 msgid "A restart of a server supporting your hosting services"
 msgstr "Repornirea unui server care susține serviciile dumneavoastră de găzduire"
@@ -8335,3 +8316,149 @@ msgstr "Actualizări pe un server care susține serviciile dumneavoastră de gă
 
 msgid "Emergency work on a server supporting your hosting services"
 msgstr "Lucrări urgente pe un server care susține serviciile dumneavoastră de găzduire"
+
+#: apps/common/context_processors.py:41
+msgid "Only owners and billing members can open billing."
+msgstr "Doar proprietarii și membrii responsabili de facturare pot deschide secțiunea de facturare."
+
+#: templates/services/partials/usage_history.html:3
+#| msgid "Usage History"
+msgid "Disk Usage History"
+msgstr "Istoricul utilizării discului"
+
+#: templates/services/partials/usage_history.html:5
+#| msgid "Disk Usage"
+msgid "Disk usage over time"
+msgstr "Utilizarea discului în timp"
+
+#: templates/services/partials/usage_history.html:8
+msgid "Measured disk usage over the selected period."
+msgstr "Utilizarea măsurată a discului în perioada selectată."
+
+#: templates/services/partials/usage_history.html:10
+#| msgid "No consent history available"
+msgid "No disk usage history is available yet."
+msgstr "Nu este disponibil încă un istoric al utilizării discului."
+
+#: templates/services/partials/usage_resources.html:16
+msgid "Files:"
+msgstr "Fișiere:"
+
+#: templates/services/partials/usage_resources.html:17
+#| msgid "Databases"
+msgid "Databases:"
+msgstr "Baze de date:"
+
+#: templates/services/partials/usage_resources.html:21
+#: templates/services/partials/usage_resources.html:38
+#: templates/services/partials/usage_resources.html:54
+#: templates/services/partials/usage_resources.html:69
+#| msgid "No data available."
+msgid "Not available"
+msgstr "Indisponibil"
+
+#: templates/services/partials/usage_timestamp.html:4
+msgid "Stale reading"
+msgstr "Măsurătoare învechită"
+
+#: templates/services/partials/usage_timestamp.html:6
+msgid "Monthly bandwidth is incomplete."
+msgstr "Traficul lunar este incomplet."
+
+#: templates/services/partials/usage_timestamp.html:9
+msgid "As of"
+msgstr "La data de"
+
+#: templates/services/partials/usage_timestamp.html:11
+msgid "Less than 1 hour ago"
+msgstr "Acum mai puțin de 1 oră"
+
+#: templates/services/partials/usage_timestamp.html:11
+#, python-format
+msgid "%(hours)s hour ago"
+msgid_plural "%(hours)s hours ago"
+msgstr[0] "Acum %(hours)s oră"
+msgstr[1] "Acum %(hours)s ore"
+msgstr[2] "Acum %(hours)s de ore"
+
+#: templates/services/plans_list.html:154
+msgid "Coming soon: upgrade from the portal. To change plans now, open a ticket."
+msgstr "În curând: upgrade din portal. Pentru a schimba planul acum, deschideți un tichet."
+
+#: templates/services/partials/hosting_limits.html:3
+#| msgid "Hosting name"
+msgid "Hosting allowances"
+msgstr "Limite incluse în găzduire"
+
+#: templates/services/partials/hosting_limits.html:4
+msgid "Operational allowance"
+msgstr "Limită inclusă în vigoare"
+
+#: templates/services/partials/hosting_limits.html:6
+#: templates/services/partials/hosting_limits.html:16
+#: templates/services/partials/hosting_limits.html:27
+#: templates/services/partials/hosting_limits_summary.html:4
+msgid "Disk:"
+msgstr "Disc:"
+
+#: templates/services/partials/hosting_limits.html:7
+#: templates/services/partials/hosting_limits.html:9
+#: templates/services/partials/hosting_limits.html:16
+#: templates/services/partials/hosting_limits.html:17
+#: templates/services/partials/hosting_limits.html:27
+#: templates/services/partials/hosting_limits.html:28
+#: templates/services/partials/hosting_limits_summary.html:4
+msgid "Unknown"
+msgstr "Necunoscut"
+
+#: templates/services/partials/hosting_limits.html:7
+#: templates/services/partials/hosting_limits.html:9
+#: templates/services/partials/hosting_limits.html:16
+#: templates/services/partials/hosting_limits.html:17
+#: templates/services/partials/hosting_limits.html:27
+#: templates/services/partials/hosting_limits.html:28
+#: templates/services/partials/hosting_limits_summary.html:4
+msgid "Unlimited"
+msgstr "Nelimitat"
+
+#: templates/services/partials/hosting_limits.html:8
+#: templates/services/partials/hosting_limits.html:17
+#: templates/services/partials/hosting_limits.html:28
+#| msgid "Monthly bandwidth is incomplete."
+msgid "Monthly bandwidth:"
+msgstr "Trafic lunar:"
+
+#: templates/services/partials/hosting_limits.html:12
+msgid "This account has not been adopted for managed native quotas. Recorded allowances do not prove native enforcement."
+msgstr "Acest cont nu a fost preluat pentru gestionarea cotelor native. Limitele înregistrate nu confirmă aplicarea lor efectivă la nivelul sistemului."
+
+#: templates/services/partials/hosting_limits.html:15
+#| msgid "Request failed"
+msgid "Requested allowance"
+msgstr "Limită inclusă solicitată"
+
+#: templates/services/partials/hosting_limits.html:19
+msgid "The requested limits are not yet verified. Usage percentages still use the operational allowance."
+msgstr "Limitele solicitate nu sunt încă verificate. Procentele de utilizare se raportează în continuare la limita inclusă în vigoare."
+
+#: templates/services/partials/hosting_limits.html:21
+msgid "Native limits verified. Writes may fail when the enforced disk cap is reached."
+msgstr "Limitele de la nivelul sistemului sunt verificate. Scrierile pot eșua când este atins plafonul aplicat spațiului pe disc."
+
+#: templates/services/partials/hosting_limits.html:23
+msgid "Native limits are not yet verified. Reaching the allowance means usage needs review."
+msgstr "Limitele de la nivelul sistemului nu sunt încă verificate. Atingerea limitei incluse impune verificarea utilizării."
+
+#: templates/services/partials/hosting_limits.html:26
+msgid "Last verified allowance"
+msgstr "Ultima limită inclusă verificată"
+
+#: templates/services/partials/hosting_limits_summary.html:5
+#| msgid "Import pending"
+msgid "Limits pending"
+msgstr "Limite în așteptare"
+
+#: templates/services/partials/hosting_limits_summary.html:5
+#| msgid "Not specified"
+msgid "Not yet verified"
+msgstr "Încă neverificate"

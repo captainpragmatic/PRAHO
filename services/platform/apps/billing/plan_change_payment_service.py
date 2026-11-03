@@ -377,7 +377,14 @@ def observe_plan_change_intent(gateway_intent_id: str, intent: Mapping[str, Any]
             elif attempt.state not in {"review", "cancelled", "refused"}:
                 attempt.state = "ready"
             attempt.save(
-                update_fields=["state", "provider_status", "last_error", "lease_token", "lease_expires_at", "updated_at"]
+                update_fields=[
+                    "state",
+                    "provider_status",
+                    "last_error",
+                    "lease_token",
+                    "lease_expires_at",
+                    "updated_at",
+                ]
             )
         return Ok(payment)
 
@@ -514,7 +521,56 @@ def _converge_recovered_success(
         return _result(attempt, change)
 
 
-def recover_plan_change_payment(attempt_id: UUID | str) -> PlanPaymentResult:  # noqa: PLR0911, PLR0912 -- Reconcile each definitive/uncertain provider outcome.
+def _recover_paid_document(attempt_id: UUID | str, payment: Payment) -> PlanPaymentResult:
+    """Retry fiscal conversion after facts and reversible credit already committed."""
+    from .proforma_service import ProformaPaymentService  # noqa: PLC0415
+
+    converted = ProformaPaymentService.record_payment_and_convert(
+        str(payment.proforma_id), payment.amount_cents, "stripe", existing_payment=payment
+    )
+    with _locked_attempt(attempt_id) as (attempt, _payment, change):
+        attempt.state = "succeeded" if converted.is_ok() else "review"
+        attempt.last_error = "" if converted.is_ok() else "Payment received; original document conversion pending"
+        attempt.lease_token = attempt.lease_expires_at = None
+        attempt.save()
+        return _result(attempt, change)
+
+
+def _store_recovered_status(attempt_id: UUID | str, token: UUID, facts: Mapping[str, Any]) -> PlanPaymentResult:
+    """Recheck the exact lease after the read-only gateway status request."""
+    with _locked_attempt(attempt_id) as (attempt, payment, change):
+        if attempt.lease_token != token:
+            return _result(attempt, change)
+        status = facts.get("status")
+        if (
+            facts.get("success")
+            and _facts_match(payment, facts)
+            and status
+            in {
+                "requires_payment_method",
+                "requires_confirmation",
+                "requires_action",
+                "processing",
+                "canceled",
+            }
+        ):
+            attempt.provider_status = str(status)
+            if status == "canceled":
+                _finish_cancelled(
+                    attempt, payment, change, not_submitted=False, expired=timezone.now() >= change.authority_expires_at
+                )
+                return _result(attempt, change)
+            attempt.state = "ready"
+        else:
+            attempt.state, attempt.last_error = "unknown", "Original provider status remains uncertain"
+        attempt.lease_token = attempt.lease_expires_at = None
+        attempt.save()
+        result = _result(attempt, change)
+        authority_expired = timezone.now() >= change.authority_expires_at
+    return cancel_plan_change_payment(attempt_id, expired=True) if authority_expired else result
+
+
+def recover_plan_change_payment(attempt_id: UUID | str) -> PlanPaymentResult:  # noqa: PLR0911 -- Reconcile each definitive/uncertain provider outcome.
     """Read a bound PI indefinitely; replay an unbound create only inside its original window."""
     _autocommit()
     with _locked_attempt(attempt_id) as (attempt, payment, change):
@@ -548,20 +604,7 @@ def recover_plan_change_payment(attempt_id: UUID | str) -> PlanPaymentResult:  #
     if paid:
         # Gateway facts already committed. Retry real fiscal conversion rather
         # than silently declaring a paid-but-unfulfilled proforma complete.
-        from .proforma_service import ProformaPaymentService  # noqa: PLC0415
-
-        converted = ProformaPaymentService.record_payment_and_convert(
-            str(payment.proforma_id),
-            payment.amount_cents,
-            "stripe",
-            existing_payment=payment,
-        )
-        with _locked_attempt(attempt_id) as (attempt, _payment, change):
-            attempt.state = "succeeded" if converted.is_ok() else "review"
-            attempt.last_error = "" if converted.is_ok() else "Payment received; original document conversion pending"
-            attempt.lease_token = attempt.lease_expires_at = None
-            attempt.save()
-            return _result(attempt, change)
+        return _recover_paid_document(attempt_id, payment)
     if replay:
         return submit_plan_change_payment(attempt_id)
     try:
@@ -570,36 +613,7 @@ def recover_plan_change_payment(attempt_id: UUID | str) -> PlanPaymentResult:  #
         facts = {"success": False, "status": "unknown", "error": None}
     if facts.get("success") and facts.get("status") == "succeeded":
         return _converge_recovered_success(attempt_id, intent_id, facts)
-    with _locked_attempt(attempt_id) as (attempt, payment, change):
-        if attempt.lease_token != token:
-            return _result(attempt, change)
-        status = facts.get("status")
-        if (
-            facts.get("success")
-            and _facts_match(payment, facts)
-            and status
-            in {
-                "requires_payment_method",
-                "requires_confirmation",
-                "requires_action",
-                "processing",
-                "canceled",
-            }
-        ):
-            attempt.provider_status = str(status)
-            if status == "canceled":
-                _finish_cancelled(
-                    attempt, payment, change, not_submitted=False, expired=timezone.now() >= change.authority_expires_at
-                )
-                return _result(attempt, change)
-            attempt.state = "ready"
-        else:
-            attempt.state, attempt.last_error = "unknown", "Original provider status remains uncertain"
-        attempt.lease_token = attempt.lease_expires_at = None
-        attempt.save()
-        result = _result(attempt, change)
-        authority_expired = timezone.now() >= change.authority_expires_at
-    return cancel_plan_change_payment(attempt_id, expired=True) if authority_expired else result
+    return _store_recovered_status(attempt_id, token, facts)
 
 
 def recover_plan_change_payments(*, limit: int = 50) -> dict[str, int]:

@@ -7,11 +7,10 @@ from django.core.cache import cache
 from django.db import connection, transaction
 from django.test import TransactionTestCase
 
-from apps.billing.models import BillingCycle, Currency, Invoice, Payment, Subscription
+from apps.audit.services import GDPRDeletionService
+from apps.billing.models import BillingCycle, Currency, Invoice, Payment, ProformaInvoice, Subscription
 from apps.billing.payment_convergence import PaymentSuccessService
 from apps.billing.proforma_service import ProformaPaymentService
-from apps.audit.services import GDPRDeletionService
-from apps.billing.models import ProformaInvoice
 from apps.billing.recurring_billing import RecurringBillingOrchestrator, fixed_renewal_schedule
 from apps.promotions.locking import lock_document_context
 from apps.users.models import CustomerMembership
@@ -145,7 +144,15 @@ class RenewalCustomerBoundaryTests(_FinancialPostgresFixture, _PlanChangeCoverag
         self.subscription.next_proforma_at = proforma_at
         self.subscription.next_billing_date = proforma_at
         self.subscription.next_charge_at = charge_at
-        self.subscription.save(update_fields=["current_period_start", "current_period_end", "next_proforma_at", "next_billing_date", "next_charge_at"])
+        self.subscription.save(
+            update_fields=[
+                "current_period_start",
+                "current_period_end",
+                "next_proforma_at",
+                "next_billing_date",
+                "next_charge_at",
+            ]
+        )
         self.cycle()
         request = GDPRDeletionService.create_deletion_request(user=self.actor)
         self.assertTrue(request.is_ok(), request)
@@ -168,10 +175,17 @@ class RenewalCustomerBoundaryTests(_FinancialPostgresFixture, _PlanChangeCoverag
         with database_worker(erase) as (eraser_pid, erasure):
             try:
                 self.assertTrue(locked.wait(10), "Public erasure did not lock its owned customer")
-                with database_worker(lambda: RecurringBillingOrchestrator.prepare_due_proformas(as_of=proforma_at)) as (reader_pid, preparation):
+                with database_worker(lambda: RecurringBillingOrchestrator.prepare_due_proformas(as_of=proforma_at)) as (
+                    reader_pid,
+                    preparation,
+                ):
                     try:
                         waiting = wait_for_blocker(reader_pid, eraser_pid, preparation, table="", operation="")
-                        self.assertTrue(waiting.lstrip().startswith("COMMIT") or ('FROM "customers"' in waiting and waiting.lstrip().startswith("SELECT")), waiting)
+                        self.assertTrue(
+                            waiting.lstrip().startswith("COMMIT")
+                            or ('FROM "customers"' in waiting and waiting.lstrip().startswith("SELECT")),
+                            waiting,
+                        )
                     finally:
                         release.set()
                     result = preparation.result(timeout=15)

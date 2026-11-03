@@ -13,6 +13,9 @@ from .plan_change_models import PlanChange, PlanChangeInterval
 
 @receiver(post_save, sender=PlanChange)
 def audit_plan_change(sender: type[PlanChange], instance: PlanChange, created: bool, **kwargs: Any) -> None:
+    fields = kwargs.get("update_fields")
+    if not created and fields and set(fields) <= {"next_reconcile_at", "updated_at"}:
+        return  # Technical reconciliation scheduling does not repeat the commercial acceptance audit.
     if not audit_signals_disabled():
         AuditService.log_simple_event(
             "create" if created else "update",
