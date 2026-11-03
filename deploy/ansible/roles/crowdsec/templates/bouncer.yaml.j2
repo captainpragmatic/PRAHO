@@ -1,0 +1,32 @@
+mode: nftables
+update_frequency: 10s
+log_mode: file
+log_dir: /var/log/
+log_level: info
+api_url: http://127.0.0.1:8080/
+insecure_skip_verify: false
+disable_ipv6: false
+deny_action: DROP
+deny_log: false
+supported_decisions_types:
+  - ban
+blacklists_ipv4: bans
+blacklists_ipv6: bans
+nftables:
+  set_only_intervals: true
+  ipv4:
+    enabled: true
+    set-only: true
+    table: praho_crowdsec4
+    chain: input
+    priority: -10
+  ipv6:
+    enabled: true
+    set-only: true
+    table: praho_crowdsec6
+    chain: input
+    priority: -10
+nftables_hooks:
+  - input
+prometheus:
+  enabled: false
