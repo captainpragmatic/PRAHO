@@ -57,6 +57,7 @@ class ResourceExecutionTests(TestCase):
         self.client.inventory.side_effect = lambda _ids: Ok(list(self.resources))
         self.client.read_exact.side_effect = self.read
         self.client.delete_exact.side_effect = self.delete
+        self.client.confirm_absent.side_effect = self.confirm_absent
         self.patch = patch("apps.infrastructure.cloud_destroy_service.get_cloud_gateway")
         self.factory = self.patch.start()
         self.factory.return_value.resource_client.return_value = self.client
@@ -69,6 +70,10 @@ class ResourceExecutionTests(TestCase):
     def delete(self, kind, resource_id):
         self.resources[:] = [row for row in self.resources if (row.kind, row.resource_id) != (kind, resource_id)]
         return Ok(True)
+
+    def confirm_absent(self, kind, resource_id):
+        present = any(row.kind == kind and row.resource_id == resource_id for row in self.resources)
+        return Err("still present") if present else Ok(True)
 
     def execution(self, policy="keep"):
         preview = inspect_destroy(self.deployment, "token")
@@ -83,6 +88,78 @@ class ResourceExecutionTests(TestCase):
         ).unwrap()
         self.deployment.refresh_from_db()
         return ResourceDestroyExecution(self.deployment, self.lease, self.plan, self.client, "token")
+
+    def test_owned_auto_delete_primary_ip_disappears_with_server_without_explicit_delete(self):
+        self.resources.append(CloudResource("primary_ip", "ip", attached_to=("vm",), auto_delete=True))
+        record_resource_ownership(self.deployment, "primary_ip", "ip", "create_response")
+
+        def delete_server_with_primary_ips(kind, resource_id):
+            result = self.delete(kind, resource_id)
+            if (kind, resource_id) == ("server", "vm"):
+                self.resources[:] = [
+                    row for row in self.resources if not (row.kind == "primary_ip" and "vm" in row.attached_to)
+                ]
+            return result
+
+        self.client.delete_exact.side_effect = delete_server_with_primary_ips
+        execution = self.execution("delete")
+        decision = next(row for row in self.plan.decisions if (row["kind"], row["resource_id"]) == ("primary_ip", "ip"))
+        self.assertEqual(decision["action"], "parent_delete")
+        self.assertTrue(execution.prepare().is_ok())
+        self.assertIsNotNone(self.read("primary_ip", "ip"))
+        result = execution.delete_resources()
+        self.assertTrue(result.is_ok(), result)
+        self.assertIsNone(self.read("primary_ip", "ip"))
+        self.assertEqual([call.args for call in self.client.delete_exact.call_args_list], [("server", "vm")])
+        self.assertEqual(
+            CloudResourceCleanup.objects.get(plan=self.plan, kind="primary_ip", resource_id="ip").state, "deleted"
+        )
+
+    def test_owned_auto_delete_primary_ip_still_present_is_unresolved_after_server_absence(self):
+        self.resources.append(CloudResource("primary_ip", "ip", attached_to=("vm",), auto_delete=True))
+        record_resource_ownership(self.deployment, "primary_ip", "ip", "create_response")
+        lifetime = NodeServerLifetime.objects.create(
+            deployment=self.deployment,
+            correlation_id=self.deployment.correlation_id,
+            server_id="vm",
+            node_size=self.deployment.node_size,
+            monthly_cost_eur=3,
+            started_at=timezone.now(),
+        )
+        execution = self.execution("delete")
+        self.assertTrue(execution.prepare().is_ok())
+        result = execution.delete_resources()
+        self.assertTrue(result.is_err(), result)
+        self.assertIn(
+            "Provider resource primary_ip:ip is still present after its server was deleted: still present",
+            result.unwrap_err(),
+        )
+        self.assertEqual(
+            CloudResourceCleanup.objects.get(plan=self.plan, kind="primary_ip", resource_id="ip").state, "unresolved"
+        )
+        self.client.confirm_absent.assert_called_once_with("primary_ip", "ip")
+        self.assertEqual([call.args for call in self.client.delete_exact.call_args_list], [("server", "vm")])
+        self.assertIsNone(self.read("server", "vm"))
+        self.assertIsNotNone(self.read("primary_ip", "ip"))
+        lifetime.refresh_from_db()
+        self.assertIsNotNone(lifetime.ended_at)
+
+    def test_parent_deleted_backup_still_present_is_awaiting_verified_expiry(self):
+        self.resources.append(CloudResource("backup", "b", source_ids=("vm",), state="available"))
+        execution = self.execution("delete")
+        decision = next(row for row in self.plan.decisions if (row["kind"], row["resource_id"]) == ("backup", "b"))
+        self.assertEqual(decision["action"], "parent_delete")
+        self.assertTrue(execution.prepare().is_ok())
+        result = execution.delete_resources()
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("awaiting verified expiry", result.unwrap_err())
+        self.assertEqual(
+            CloudResourceCleanup.objects.get(plan=self.plan, kind="backup", resource_id="b").state, "awaiting_expiry"
+        )
+        self.client.confirm_absent.assert_called_once_with("backup", "b")
+        self.assertEqual([call.args for call in self.client.delete_exact.call_args_list], [("server", "vm")])
+        self.assertIsNone(self.read("server", "vm"))
+        self.assertIsNotNone(self.read("backup", "b"))
 
     def test_failed_backup_conversion_blocks_all_provider_deletion(self):
         self.resources.append(CloudResource("backup", "b", source_ids=("vm",), state="available"))

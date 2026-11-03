@@ -9,7 +9,7 @@ from apps.common.row_locks import lock_one_and_load
 from apps.common.types import Err, Ok, Result
 
 from .cloud_destroy_models import CloudResourceCleanup, NodeDestroyPlan
-from .cloud_destroy_policy import DestroyDecision, build_destroy_decisions
+from .cloud_destroy_policy import RESTORE_POINT_KINDS, DestroyDecision, build_destroy_decisions
 from .cloud_destroy_service import assert_resource_cleanup_owner, protect_retained_resource, resource_ownership
 from .cloud_resource_inventory import CloudResource, CloudResourceClient, ResourceKind
 from .deployment_lifecycle import OperationLease, OperationOwnershipLostError, provider_token_fingerprint
@@ -227,6 +227,16 @@ class ResourceDestroyExecution:
         if row is None:
             self._record(decision, "deleted")
             return True
+        if decision.action == "parent_delete":
+            result = self.client.confirm_absent(decision.kind, decision.resource_id)
+            if result.is_ok():
+                self._record(decision, "deleted")
+                return True
+            if decision.kind not in RESTORE_POINT_KINDS:
+                err = result.unwrap_err()
+                raise ValueError(
+                    f"Provider resource {decision.key} is still present after its server was deleted: {err}"
+                )
         if decision.action == "delete":
             result = self.client.delete_exact(decision.kind, decision.resource_id)
             if result.is_err() or result.unwrap() is not True:

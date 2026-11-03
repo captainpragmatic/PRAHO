@@ -26,6 +26,32 @@ def reply(status, payload):
 
 class SDKResourceTransportTests(SimpleTestCase):
     @patch("requests.Session.request")
+    def test_hcloud_locked_primary_ip_delete_keeps_sdk_error_code(self, http):
+        http.side_effect = [
+            reply(423, {"error": {"code": "locked", "message": "Primary IP is locked", "details": {}}}),
+            reply(
+                200,
+                {
+                    "primary_ip": {
+                        "id": 7,
+                        "type": "ipv4",
+                        "ip": "192.0.2.7",
+                        "assignee_type": "server",
+                        "assignee_id": None,
+                        "auto_delete": True,
+                    }
+                },
+            ),
+        ]
+        result = HcloudService(token="fixture-token").resource_client().delete_exact("primary_ip", "7")
+        self.assertTrue(result.is_err(), result)
+        self.assertIn("APIException (locked)", result.unwrap_err())
+        self.assertEqual(
+            [(call.kwargs["method"], urlsplit(call.kwargs["url"]).path) for call in http.call_args_list],
+            [("DELETE", "/v1/primary_ips/7"), ("GET", "/v1/primary_ips/7")],
+        )
+
+    @patch("requests.Session.request")
     def test_hcloud_uses_its_authenticated_sdk_and_native_structured_absence(self, http):
         http.side_effect = [
             reply(200, {"image": {"id": 123, "type": "snapshot", "status": "available"}}),
