@@ -41,6 +41,11 @@ class SharedCloudTeardownTests(TestCase):
             if any(row.kind == kind and row.resource_id == rid for row in self.resources)
             else None
         )
+        self.client.confirm_absent.side_effect = lambda kind, rid: (
+            Err("resource still present")
+            if any(row.kind == kind and row.resource_id == rid for row in self.resources)
+            else Ok(True)
+        )
         self.gateway = Mock()
         self.gateway.resource_client.return_value = self.client
         self.gateway.find_servers_by_label.return_value = Ok([])
