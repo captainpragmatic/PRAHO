@@ -34,7 +34,7 @@ class HostingLimitPostgresConcurrencyTests(TransactionTestCase):
                 authority={"kind": "staff_resource_override"},
             ).revision
 
-    def test_creation_reads_the_plan_version_after_an_observed_configuration_wait(self):
+    def test_creation_pins_committed_plan_snapshot_without_waiting_for_catalog_edit(self):
         self.plan.disk_space_gb = 5
         self.plan.save(update_fields=["disk_space_gb", "updated_at"])
         cached_plan = ServicePlan.objects.get(pk=self.plan.pk)
@@ -47,7 +47,7 @@ class HostingLimitPostgresConcurrencyTests(TransactionTestCase):
                 customer=self.customer,
                 service_plan=cached_plan,
                 currency=self.currency,
-                service_name="Waiting plan snapshot",
+                service_name="Committed plan snapshot",
                 username="waiting_plan",
                 price=10,
             )
@@ -60,8 +60,30 @@ class HostingLimitPostgresConcurrencyTests(TransactionTestCase):
                 self.plan.save(update_fields=["disk_space_gb", "updated_at"])
                 self.assertEqual(cached_plan.disk_space_gb, 5)
                 start.set()
-                wait_for_blocker(pid, writer, pending, table="provisioning_service_plans")
-            self.assertEqual(pending.result(timeout=10), 20480)
+                try:
+                    allowance = pending.result(timeout=2)
+                except TimeoutError:
+                    wait_for_blocker(pid, writer, pending, table="provisioning_service_plans")
+                    self.fail("Initial snapshot blocks an unrelated Service insertion on a shared catalog row")
+                self.assertEqual(allowance, 5120)
+            # The later catalog commit applies only to future snapshots.
+            self.assertEqual(pending.result(timeout=10), 5120)
+
+    def test_creation_uses_a_fresh_committed_plan_read_instead_of_cached_relation(self):
+        self.plan.disk_space_gb = 5
+        self.plan.save(update_fields=["disk_space_gb", "updated_at"])
+        cached_plan = ServicePlan.objects.get(pk=self.plan.pk)
+        ServicePlan.objects.filter(pk=self.plan.pk).update(disk_space_gb=20)
+        service = Service.objects.create(
+            customer=self.customer,
+            service_plan=cached_plan,
+            currency=self.currency,
+            service_name="Fresh plan snapshot",
+            username="fresh_plan",
+            price=10,
+        )
+        self.assertEqual(cached_plan.disk_space_gb, 5)
+        self.assertEqual(ServiceHostingLimits.objects.get(service=service).disk_allowance_mib, 20480)
 
     def test_owner_transfer_is_rechecked_after_an_observed_service_wait(self):
         other = Customer.objects.create(name="New owner", customer_type="company", status="active")

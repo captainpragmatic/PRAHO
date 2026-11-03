@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime
@@ -41,7 +42,13 @@ class CycleTerms:
         return self.quantity * self.unit_price_cents
 
 
-def _meter_snapshot(subscription: Subscription, meter: UsageMeter, currency_code: str, at: datetime) -> dict[str, Any]:
+def _meter_snapshot(
+    subscription: Subscription,
+    meter: UsageMeter,
+    currency_code: str,
+    at: datetime,
+    resource_allowances: Mapping[str, Decimal] | None = None,
+) -> dict[str, Any]:
     from .metering_service import (  # noqa: PLC0415  # Rating engine and snapshot builder share validation.
         RatingEngine,
         _get_allowance_from_service_plan,
@@ -52,7 +59,12 @@ def _meter_snapshot(subscription: Subscription, meter: UsageMeter, currency_code
     item = _get_subscription_item_for_meter(subscription, meter)
     included = _get_allowance_from_subscription_item(item)
     if included <= 0:
-        included = _get_allowance_from_service_plan(meter, getattr(subscription.product, "default_service_plan", None))
+        pinned = resource_allowances.get(meter.category) if resource_allowances is not None else None
+        included = (
+            pinned
+            if pinned is not None
+            else _get_allowance_from_service_plan(meter, getattr(subscription.product, "default_service_plan", None))
+        )
     snapshot: dict[str, Any] = {
         "meter_id": str(meter.pk),
         "name": meter.name,
@@ -94,8 +106,17 @@ def build_terms_snapshot(
     effective_at: datetime,
     currency_code: str | None = None,
     unit_price_cents: int | None = None,
+    resource_allowances: Mapping[str, Decimal] | None = None,
 ) -> dict[str, Any]:
     """Read current configured terms only when making a new period or offer."""
+    if resource_allowances is not None and (
+        set(resource_allowances) - {"storage", "bandwidth"}
+        or any(
+            not isinstance(value, Decimal) or not value.is_finite() or value < 0
+            for value in resource_allowances.values()
+        )
+    ):
+        raise ValidationError(_("Pinned resource allowances require known nonnegative decimal quantities."))
     currency_code = currency_code or subscription.currency_id
     if unit_price_cents is None:
         protected = subscription.locked_price_cents is not None and (
@@ -110,7 +131,7 @@ def build_terms_snapshot(
         "billing_cycle": subscription.billing_cycle,
         "custom_cycle_days": subscription.custom_cycle_days,
         "meters": {
-            str(meter.pk): _meter_snapshot(subscription, meter, currency_code, effective_at)
+            str(meter.pk): _meter_snapshot(subscription, meter, currency_code, effective_at, resource_allowances)
             for meter in UsageMeter.objects.filter(is_active=True).order_by("id")
         },
     }

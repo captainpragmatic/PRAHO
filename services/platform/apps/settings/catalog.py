@@ -727,6 +727,19 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 1, "max": 5000},
     ),
     SettingDef(
+        key="billing.hosting_plan_changes_enabled",
+        data_type="boolean",
+        default=False,
+        group="billing",
+        section=_("Hosting plan changes"),
+        label=_("Allow new paid hosting plan changes"),
+        input_kind="toggle",
+        critical=True,
+        help_text=_(
+            "Enable new acceptance only after native qualification. Existing payment recovery and fulfilment remain active when disabled."
+        ),
+    ),
+    SettingDef(
         key="billing.recurring_auto_collection_enabled",
         data_type="boolean",
         default=False,
@@ -3185,6 +3198,20 @@ CATALOG: tuple[SettingDef, ...] = (
         section=_("Quotas"),
         label=_("Domain quota default"),
         unit="MB",
+        input_kind="number",
+        validation={"min": 0},
+    ),
+    SettingDef(
+        key="virtualmin.disk_free_reserve_mb",
+        data_type="integer",
+        default=1024,
+        group="virtualmin",
+        section=_("Quotas"),
+        label=_("Node free-space reserve"),
+        help_text=_(
+            "Keep this much free space outside pending native quota reservations before accepting a positive cap change."
+        ),
+        unit="MiB",
         input_kind="number",
         validation={"min": 0},
     ),

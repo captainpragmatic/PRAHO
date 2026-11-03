@@ -3,6 +3,7 @@
 import importlib.util
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from django.conf import settings
 from django.test import SimpleTestCase
@@ -33,6 +34,44 @@ class QuotaDatabaseStorageTests(SimpleTestCase):
             "space_name": "tenant/wp_posts",
             "path": str(self.data),
         }
+
+    def test_only_local_native_absent_or_empty_bandwidth_is_unlimited(self):
+        self.assertEqual(self.native._configured_bandwidth({}), 0)
+        self.assertEqual(self.native._configured_bandwidth({"bw_limit": ""}), 0)
+        self.assertEqual(self.native._configured_bandwidth({"bw_limit": "0"}), 0)
+        self.assertEqual(self.native._configured_bandwidth({"bw_limit": "1048576"}), 1048576)
+        with self.assertRaises(ValueError):
+            self.native._configured_bandwidth({"bw_limit": "unknown"})
+        for key in ("quota", "uquota"):
+            self.assertEqual(self.native._configured_limit({}, key), 0)
+            self.assertEqual(self.native._configured_limit({key: ""}, key), 0)
+            with self.assertRaises(ValueError):
+                self.native._configured_limit({key: "unknown"}, key)
+
+    def test_probe_budget_stops_before_spawning_another_native_command(self):
+        token = self.native._PROBE_DEADLINE.set(10.0)
+        self.addCleanup(self.native._PROBE_DEADLINE.reset, token)
+        with (
+            patch.object(self.native.time, "monotonic", return_value=11.0),
+            patch.object(
+                self.native.subprocess,
+                "run",
+            ) as runner,
+            self.assertRaises(TimeoutError),
+        ):
+            self.native._run(["/usr/bin/true"])
+        runner.assert_not_called()
+
+    def test_bandwidth_safety_reads_actual_global_and_domain_controls(self):
+        domain = {"bw_no_disable": "1"}
+        self.assertTrue(self.native._bandwidth_actions_safe(domain, {}))
+        self.assertTrue(self.native._bandwidth_actions_safe(domain, {"bw_disable": "0", "bw_enable": ""}))
+        for key in ("bw_disable", "bw_enable"):
+            for value in ("1", "false", "00"):
+                with self.subTest(key=key, value=value):
+                    self.assertFalse(self.native._bandwidth_actions_safe(domain, {key: value}))
+        for value in (None, "", "0"):
+            self.assertFalse(self.native._bandwidth_actions_safe({"bw_no_disable": value}, {}))
 
     def qualify(self, rows):
         return self.native.qualify_table_storage(

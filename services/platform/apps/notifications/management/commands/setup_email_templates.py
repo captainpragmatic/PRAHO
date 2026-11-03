@@ -55,7 +55,7 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("🏗️ Setting up email templates for PRAHO Platform..."))
 
         # Email templates to create
-        templates = [
+        templates: list[dict[str, Any]] = [
             # ===============================================================================
             # BILLING TEMPLATES
             # ===============================================================================
@@ -1612,12 +1612,21 @@ class Command(BaseCommand):
             },
         ]
 
+        from apps.billing.plan_change_email_templates import (  # noqa: PLC0415  # Versioned feature-owned copy.
+            financial_plan_change_block,
+            operational_plan_change_templates,
+        )
+
+        templates.extend(operational_plan_change_templates())
         created_count = 0
         updated_count = 0
 
         for template_data in templates:
             key = template_data["key"]
             locale = template_data["locale"]
+            original_seed = template_data.get("body_html", "")
+            if key in {"invoice_issued", "payment_received"}:
+                template_data["body_html"] = original_seed + financial_plan_change_block(locale)
 
             # Check if template already exists
             try:
@@ -1630,6 +1639,12 @@ class Command(BaseCommand):
                     template.save()
                     updated_count += 1
                     self.stdout.write(f"📝 Updated: {key} ({locale})")
+                elif template.body_html == original_seed and key in {"invoice_issued", "payment_received"}:
+                    # Only an exact shipped body is upgraded; operator-edited templates keep their wording.
+                    template.body_html = template_data["body_html"]
+                    template.version += 1
+                    template.save(update_fields=["body_html", "version"])
+                    updated_count += 1
                 elif self._repair_stale_seeded_body(template):
                     updated_count += 1
                     self.stdout.write(f"🔧 Repaired: {key} ({locale}) - stale seeded text corrected")

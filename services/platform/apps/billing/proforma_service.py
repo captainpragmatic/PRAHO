@@ -44,6 +44,7 @@ def _period_delta(billing_period: str) -> timedelta:
 
 
 if TYPE_CHECKING:
+    from apps.notifications.services import EmailResult
     from apps.orders.models import Order
     from apps.users.models import User
 
@@ -72,24 +73,39 @@ def generate_proforma_pdf(proforma: Any) -> bytes:  # ProformaInvoice type would
     return _generate_pdf(proforma)
 
 
+def queue_proforma_message(proforma: Any, email: str, *, customer: Any = None, context: dict[str, Any] | None = None) -> EmailResult:
+    """The existing proforma PDF pipeline, with durable async-only storage when source-bound."""
+    from apps.notifications.attachments import AttachmentRef  # noqa: PLC0415
+    from apps.notifications.services import EmailService  # noqa: PLC0415
+
+    body = gettext("Please find attached proforma invoice %(number)s.") % {"number": proforma.number}
+    if context:
+        body += "\n" + str(context["target_plan_name"]) + ": " + str(context["disk_allowance"])
+    return EmailService.send_email(
+        to=email,
+        subject=gettext("Proforma Invoice %(number)s") % {"number": proforma.number},
+        body_text=body,
+        attachments=[AttachmentRef("proforma_pdf", str(proforma.pk))],
+        customer=customer,
+        template_key="proforma" if context else "",
+        require_async=bool(context),
+    )
+
+
 def send_proforma_email(
     proforma: Any, recipient_email: str | None = None
 ) -> bool:  # ProformaInvoice type would create circular import
     """Send proforma invoice via email with PDF attachment."""
-    from apps.notifications.services import EmailService  # noqa: PLC0415  # Deferred: avoids circular import
-
     email = recipient_email or proforma.customer.primary_email
     logger.info(f"📧 [Email] Sending proforma {proforma.number} to {email}")
     try:
-        from apps.notifications.attachments import AttachmentRef  # noqa: PLC0415  # Deferred: avoids circular import
+        from .plan_change_notices import plan_change_for_document, publish_plan_change_notice  # noqa: PLC0415
 
-        # By reference: every send (and any retry) makes the PDF again and checks it is the one first sent.
-        email_result = EmailService.send_email(
-            to=email,
-            subject=gettext("Proforma Invoice %(number)s") % {"number": proforma.number},
-            body_text=gettext("Please find attached proforma invoice %(number)s.") % {"number": proforma.number},
-            attachments=[AttachmentRef("proforma_pdf", str(proforma.pk))],
-        )
+        change = plan_change_for_document(proforma_id=proforma.pk)
+        if change is not None:
+            publish_plan_change_notice(change, "proforma")
+            return True
+        email_result = queue_proforma_message(proforma, email)
         if not email_result.success:
             logger.error(f"🔥 [Email] Proforma {proforma.number} send failed: {email_result.error}")
             return False

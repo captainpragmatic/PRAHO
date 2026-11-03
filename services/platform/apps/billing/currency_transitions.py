@@ -27,6 +27,7 @@ from .cycle_terms import (
     transition_price_blockers,
 )
 from .metering_models import BillingCycle
+from .plan_change_renewals import accepted_plan_terms
 from .subscription_currency_models import SubscriptionCurrencyTransition
 from .subscription_models import PriceGrandfathering, Subscription
 
@@ -41,13 +42,18 @@ def protected_terms_reason(subscription: Subscription, period_start: datetime, c
         subscription.locked_price_expires_at is None or period_start < subscription.locked_price_expires_at
     ):
         return str(_("The subscription has a protected original price"))
-    if PriceGrandfathering.objects.filter(
-        Q(currency_id=currency_code) | Q(currency_id=None),
-        Q(expires_at=None) | Q(expires_at__gt=period_start),
-        customer=subscription.customer,
-        product=subscription.product,
-        is_active=True,
-    ).exists():
+    # Accepted per-service plan terms supersede only the shared catalog promise.
+    # Other services still use that promise; explicit item/credit holds below remain.
+    if (
+        accepted_plan_terms(subscription, period_start) is None
+        and PriceGrandfathering.objects.filter(
+            Q(currency_id=currency_code) | Q(currency_id=None),
+            Q(expires_at=None) | Q(expires_at__gt=period_start),
+            customer=subscription.customer,
+            product=subscription.product,
+            is_active=True,
+        ).exists()
+    ):
         return str(_("An original or unresolved grandfathered price remains protected"))
     if subscription.items.filter(locked_price_cents__isnull=False).exists():
         return str(_("A subscription item has an indefinite original price guarantee"))
@@ -60,6 +66,8 @@ def protected_terms_reason(subscription: Subscription, period_start: datetime, c
 
 
 def _baseline_terms(subscription: Subscription, period_start: datetime) -> dict[str, Any]:
+    if accepted := accepted_plan_terms(subscription, period_start):
+        return accepted
     prepared = (
         subscription.billing_cycles.filter(
             terms_frozen_at__isnull=False,

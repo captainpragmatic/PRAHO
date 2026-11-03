@@ -704,6 +704,12 @@ class EmailService:
 
             if not maintenance_dispatch_allowed(str(email_log.id), email_log.claim_token):
                 raise RuntimeError("Maintenance delivery is no longer permitted")
+            from apps.billing.plan_change_delivery import (  # noqa: PLC0415  # Source-specific final policy.
+                plan_change_dispatch_allowed,
+            )
+
+            if not plan_change_dispatch_allowed(str(email_log.id), email_log.claim_token):
+                raise RuntimeError("Plan-change delivery is no longer permitted")
             msg.send(fail_silently=False)
             reserved = False
 

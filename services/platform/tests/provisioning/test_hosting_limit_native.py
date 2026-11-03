@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from django.test import SimpleTestCase
 
-from apps.provisioning.hosting_limit_native import verify_quota_receipt
+from apps.provisioning.hosting_limit_native import current_verified_binding, verify_quota_receipt
 
 
 class NativeQuotaReceiptTests(SimpleTestCase):
@@ -44,7 +44,7 @@ class NativeQuotaReceiptTests(SimpleTestCase):
             "configured_bandwidth_bytes": 20 * 1024**3,
         }
 
-    def verify(self, receipt):
+    def verify(self, receipt, *, current=False):
         return verify_quota_receipt(
             receipt,
             identity=self.identity,
@@ -53,7 +53,41 @@ class NativeQuotaReceiptTests(SimpleTestCase):
             disk_limit_mib=5632,
             bandwidth_limit_mib=20480,
             now=self.now,
+            require_bandwidth_actions_safe=current,
         )
+
+    def test_current_application_requires_bandwidth_safety_while_history_stays_readable(self) -> None:
+        self.verify(self.receipt)
+        self.verify({**self.receipt, "bandwidth_actions_safe": True}, current=True)
+        for extra in ({}, {"bandwidth_actions_safe": False}, {"bandwidth_actions_safe": 1}):
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                self.verify({**self.receipt, **extra}, current=True)
+
+    def test_historical_receipt_cannot_be_presented_as_current_bandwidth_protection(self) -> None:
+        receipt = {**self.receipt, "bandwidth_actions_safe": True}
+        record = {
+            "phase": "completed",
+            "service_id": 1,
+            "owner_id": 2,
+            "service_revision": 3,
+            "server_id": "current-server",
+            "connection_identity": "current-connection",
+            "identity": self.identity,
+            "receipt": receipt,
+            "account_epoch": 3,
+            "token": self.token,
+        }
+        authority = {
+            "service_id": 1,
+            "owner_id": 2,
+            "revision": 3,
+            "server_id": "current-server",
+            "connection_identity": "current-connection",
+            "node_identity": {key: self.identity[key] for key in ("installation", "filesystem_uuid", "boot_id")},
+        }
+        self.assertTrue(current_verified_binding(record=record, **authority))
+        receipt.pop("bandwidth_actions_safe")
+        self.assertFalse(current_verified_binding(record=record, **authority))
 
     def test_matching_configured_and_kernel_limits_are_required(self) -> None:
         result = self.verify(self.receipt)
@@ -88,5 +122,14 @@ class NativeQuotaReceiptTests(SimpleTestCase):
         changed["identity"]["uid"] = 1002
         with self.assertRaises(ValueError):
             self.verify(changed)
+
+    def test_canonical_observation_is_separate_and_never_certifies_kernel_enforcement(self) -> None:
+        good = {"files_bytes": 8192, "database_bytes": 4096, "total_bytes": 12288}
+        self.assertEqual(self.verify({**self.receipt, "observation": good}).safety_used_bytes, 2048)
+        for observation in ({}, {**good, "total_bytes": 0}, {**good, "files_bytes": True}, {**good, "extra": 0}):
+            with self.subTest(observation=observation), self.assertRaises(ValueError):
+                self.verify({**self.receipt, "observation": observation})
+        with self.assertRaises(ValueError):
+            self.verify({**self.receipt, "observation": good, "uid_enforced": False})
         with self.assertRaises(ValueError):
             self.verify({**self.receipt, "database_password": "must never leave the node"})

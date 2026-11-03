@@ -1,0 +1,25 @@
+---
+- name: Inspect hosting policy without adopting quotas or changing native warnings
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Check installed notification adapter
+      ansible.builtin.stat:
+        path: /usr/local/lib/praho/praho-notification-policy.pl
+      register: hosting_adapter
+    - name: Require explicitly prepared native transport
+      ansible.builtin.assert:
+        that: hosting_adapter.stat.exists
+        fail_msg: Prepare the read-only hosting inspection adapter before reviewing this node.
+    - name: Read native hosting inventory
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/praho/praho_hosting_node.py, inspect]
+        stdin: "{{ hosting_request | to_json }}"
+        stdin_add_newline: false
+      register: hosting_result
+      changed_when: false
+      no_log: true
+    - name: Return bounded hosting inventory
+      ansible.builtin.debug:
+        msg: "PRAHO_HOSTING_RESULT={{ hosting_result.stdout | trim | b64encode }}"

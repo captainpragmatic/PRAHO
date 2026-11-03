@@ -204,7 +204,19 @@ class BillingScheduleContractTestCase(TestCase):
             "apps.billing.tasks.reconcile_recurring_payment_submissions",
         )
         self.assertEqual(recurring_reconciliation.cron, "*/10 * * * *")
+        plan_payments = Schedule.objects.get(name="billing-plan-change-payments")
+        self.assertEqual(plan_payments.func, "apps.billing.plan_change_payment_service.recover_plan_change_payments")
+        self.assertEqual(plan_payments.cron, "*/5 * * * *")
+        scheduled_plans = Schedule.objects.get(name="billing-scheduled-plan-changes")
+        self.assertEqual(scheduled_plans.func, "apps.billing.plan_change_lifecycle.activate_scheduled_plan_changes")
+        self.assertEqual(scheduled_plans.cron, "*/5 * * * *")
+        financial_review = Schedule.objects.get(name="billing-plan-change-financial-review")
+        self.assertEqual(financial_review.func, "apps.billing.plan_change_review_service.sweep_financial_reviews")
+        self.assertEqual(financial_review.cron, "*/5 * * * *")
+        fulfilment = Schedule.objects.get(name="billing-plan-change-fulfilment")
+        self.assertEqual(fulfilment.func, "apps.billing.plan_change_operations.sweep_plan_change_fulfilment")
+        self.assertEqual(fulfilment.cron, "*/5 * * * *")
         # Counted, not just spot-checked: a schedule that is defined but never
         # registered is dead code that looks alive. Includes durable currency-notice repair.
-        self.assertEqual(len(result), 13)
+        self.assertEqual(len(result), 17)
         register_usage.assert_called_once_with()

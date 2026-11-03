@@ -70,6 +70,15 @@
 
             <!-- Service Plan -->
             <div>
+              {% if is_edit %}
+              <p class="block text-sm font-medium text-slate-300 mb-1">{% trans 'Resource plan' %}</p>
+              <p class="text-white">{{ service.service_plan.name }}</p>
+              <p class="mt-1 text-sm text-slate-400">{% trans 'Ordinary edits keep the assigned resource plan and billing unchanged.' %}</p>
+              {% if can_override_resources %}
+                {% url 'provisioning:service_resource_override' service.pk as override_url %}
+                {% trans 'Grant a resource-only exception' as override_label %}{% button override_label href=override_url variant="secondary" size="sm" %}
+              {% endif %}
+              {% else %}
               <label for="plan_id" class="block text-sm font-medium text-slate-300 mb-1">
                 {% icon "orders" %} {% trans 'Service Plan' %}
               </label>
@@ -80,6 +89,7 @@
                 <option value="{{ plan.id }}" {% if is_edit and service.service_plan_id == plan.id %}selected{% endif %}>{{ plan.name }} ({{ plan.price }} {{ plan.currency }}/{% trans "month" %})</option>
                 {% endfor %}
               </select>
+              {% endif %}
             </div>
 
             <!-- Domain -->

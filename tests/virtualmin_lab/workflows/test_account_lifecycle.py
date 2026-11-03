@@ -17,6 +17,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 
 from apps.provisioning.models import Service, ServicePlan
@@ -111,14 +112,8 @@ def test_staff_suspend_then_activate_go_through_the_service(hosted: Hosted) -> N
     assert unsuspend_job.status == "completed", (unsuspend_job.status, unsuspend_job.status_message)
 
 
-def test_changing_the_plan_leaves_the_domain_alone(hosted: Hosted) -> None:
-    """A plan change is a Service edit; no PRAHO path pushes quotas to the node (see the report).
-
-    The staff service form saves `service_plan` and nothing more, and "Unsupported automated plan changes
-    remain unavailable" (docs/domain/CUSTOMER_RECOVERY_AND_SERVICE_REQUESTS.md). What the workflow has to
-    guarantee is that the edit does not disturb hosting: the reconcile it triggers finds nothing to change,
-    and the node keeps the quotas the account was created with.
-    """
+def test_direct_plan_mutation_is_refused_and_leaves_the_native_domain_alone(hosted: Hosted) -> None:
+    """Resource assignments require the explicit audited workflow; imports stay observational."""
     bench, account = hosted.bench, hosted.refresh()
     quota_before = hosted.lab.domain_values(DOMAIN)
     plan = ServicePlan.objects.create(
@@ -127,19 +122,17 @@ def test_changing_the_plan_leaves_the_domain_alone(hosted: Hosted) -> None:
     try:
         bench.clear_queue()
         service = hosted.service
+        original_plan_id = service.service_plan_id
         service.service_plan = plan
-        service.save()  # what the staff service form does
-        runs = bench.run_queue()
-        assert [run.name for run in runs] == ["reconcile_virtualmin_service_state"], runs
-        assert runs[0].result["action"] == "noop", runs[0].result
-        assert not bench.jobs(account, "modify_domain"), "no modify-domain job exists for a plan change"
+        with pytest.raises(ValidationError):
+            service.save()
+        service.refresh_from_db()
+        assert service.service_plan_id == original_plan_id
+        assert bench.run_queue() == []
+        assert not bench.jobs(account, "modify_domain")
         assert hosted.node_enabled() is True
         assert hosted.lab.domain_values(DOMAIN) == quota_before
     finally:
-        service = hosted.service
-        service.service_plan = ServicePlan.objects.get(name="Virtualmin lab hosting")
-        service.save()
-        bench.run_queue()
         plan.delete()
 
 

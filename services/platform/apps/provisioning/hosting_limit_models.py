@@ -34,6 +34,11 @@ class ServiceHostingLimits(models.Model):
     bandwidth_allowance_mib = models.PositiveBigIntegerField(null=True)
     disk_source = models.CharField(max_length=24)
     bandwidth_source = models.CharField(max_length=24)
+    # Keep the operational allowance while a newer paid/explicit assignment is
+    # pending. Native verification is represented separately below.
+    operational_revision = models.PositiveBigIntegerField(null=True)
+    operational_disk_allowance_mib = models.PositiveBigIntegerField(null=True)
+    operational_bandwidth_allowance_mib = models.PositiveBigIntegerField(null=True)
     # Last verified state is deliberately separate from desired state. A successful
     # metadata write or a catalog change must not certify kernel enforcement.
     applied_revision = models.PositiveBigIntegerField(null=True)

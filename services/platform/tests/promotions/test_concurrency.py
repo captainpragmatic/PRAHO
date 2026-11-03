@@ -179,7 +179,11 @@ class RenewalPaymentConcurrencyTests(_SubscriptionInvoicePaymentFixture, Transac
 
         def interleave(execute, sql, params, many, context):
             result = execute(sql, params, many, context)
-            if not locked.is_set() and '"billing_subscriptions"' in sql and "FOR UPDATE" in sql:
+            if (
+                not locked.is_set()
+                and '"billing_subscriptions"' in sql
+                and ("FOR UPDATE" in sql or "FOR NO KEY UPDATE" in sql)
+            ):
                 locked.set()
                 deadline = monotonic() + 10
                 while True:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable, Iterable
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
@@ -12,13 +14,14 @@ from django.db import router, transaction
 from django.utils.translation import gettext_lazy as _
 
 from .hosting_limit_models import HostingLimitApplication, ServiceHostingLimits
-from .hosting_limit_policy import POLICY_VERSION, resolve_allowance
+from .hosting_limit_policy import POLICY_VERSION, HostingAssignmentTerms, resolve_allowance
 
 if TYPE_CHECKING:
     from .service_models import Service, ServicePlan
 
 _ASSIGNMENT_WRITE = ContextVar("hosting_assignment_write", default=False)
 _LOADED_PLAN = "_hosting_loaded_plan_id"
+_LOADED_PRICE = "_hosting_loaded_price"
 _PLAN_FIELDS = frozenset({"service_plan", "service_plan_id"})
 
 
@@ -31,6 +34,11 @@ def remember_plan(instance: Service) -> None:
         instance.__dict__[_LOADED_PLAN] = instance.service_plan_id
 
 
+def remember_price(instance: Service) -> None:
+    if "price" in instance.__dict__:
+        instance.__dict__[_LOADED_PRICE] = instance.price
+
+
 def _defaults() -> tuple[object, object]:
     from apps.settings.services import SettingsService  # noqa: PLC0415 -- Cross-app settings boundary.
 
@@ -40,18 +48,43 @@ def _defaults() -> tuple[object, object]:
     )
 
 
-def _snapshot(service: Service, plan: ServicePlan, defaults: tuple[object, object]) -> ServiceHostingLimits:
+def assignment_terms_for_plan(
+    plan: ServicePlan,
+    *,
+    stored_defaults: tuple[object, object] | None = None,
+) -> HostingAssignmentTerms:
+    """Resolve a quote's target once; commercial callers freeze the returned terms."""
+    defaults = stored_defaults if stored_defaults is not None else _defaults()
     disk = resolve_allowance(plan.disk_space_gb, defaults[0])
     bandwidth = resolve_allowance(plan.bandwidth_gb, defaults[1])
+    if disk.mib is None or bandwidth.mib is None:
+        raise ValueError("A newly accepted allowance cannot be unknown")
+    return HostingAssignmentTerms(plan.pk, disk.mib, bandwidth.mib, disk.source, bandwidth.source)
+
+
+def assignment_terms_for_plans(plans: Iterable[ServicePlan]) -> dict[int, HostingAssignmentTerms]:
+    """Resolve a catalog batch using one shared default-settings snapshot."""
+    defaults = _defaults()
+    return {plan.pk: assignment_terms_for_plan(plan, stored_defaults=defaults) for plan in plans}
+
+
+def _terms_snapshot(service: Service, terms: HostingAssignmentTerms) -> ServiceHostingLimits:
     return ServiceHostingLimits(
         service_id=service.pk,
-        assigned_plan_id=plan.pk,
-        disk_allowance_mib=disk.mib,
-        bandwidth_allowance_mib=bandwidth.mib,
-        disk_source=disk.source,
-        bandwidth_source=bandwidth.source,
-        policy_version=POLICY_VERSION,
+        assigned_plan_id=terms.plan_id,
+        disk_allowance_mib=terms.disk_allowance_mib,
+        bandwidth_allowance_mib=terms.bandwidth_allowance_mib,
+        disk_source=terms.disk_source,
+        bandwidth_source=terms.bandwidth_source,
+        policy_version=terms.policy_version,
+        operational_revision=1,
+        operational_disk_allowance_mib=terms.disk_allowance_mib,
+        operational_bandwidth_allowance_mib=terms.bandwidth_allowance_mib,
     )
+
+
+def _snapshot(service: Service, plan: ServicePlan, defaults: tuple[object, object]) -> ServiceHostingLimits:
+    return _terms_snapshot(service, assignment_terms_for_plan(plan, stored_defaults=defaults))
 
 
 def capture_initial_limits(services: Iterable[Service], *, using: str) -> None:
@@ -63,12 +96,15 @@ def capture_initial_limits(services: Iterable[Service], *, using: str) -> None:
         return
     if not transaction.get_connection(using).in_atomic_block:
         raise RuntimeError("Initial hosting allowances must be captured atomically with their Service")
+    # Pin one statement-visible committed catalog snapshot. The new Service and
+    # allowance still commit atomically; later catalog edits cannot rewrite it.
+    # Taking NO KEY UPDATE here serializes unrelated Service insertions with
+    # provisioning's configuration read lock, beyond the FK's KEY SHARE check.
     plans = {
         plan.pk: plan
         for plan in ServicePlan.objects.using(using)
         .filter(pk__in={service.service_plan_id for service in records})
         .order_by("pk")
-        .select_for_update(of=("self",), no_key=True)
     }
     defaults = _defaults()
     snapshots = ServiceHostingLimits.objects.using(using).bulk_create(
@@ -79,6 +115,22 @@ def capture_initial_limits(services: Iterable[Service], *, using: str) -> None:
     audit_initial_limits(snapshots)
     for service in records:
         remember_plan(service)
+        remember_price(service)
+
+
+def _preserve_unedited_price(instance: Service, fields: set[str] | None, options: dict[str, Any]) -> None:
+    if fields is not None or _LOADED_PRICE not in instance.__dict__:
+        return
+    if instance.__dict__.get("price") != instance.__dict__[_LOADED_PRICE]:
+        return
+    selected = options.get("update_fields")
+    if selected is None:
+        selected = {
+            field.name
+            for field in instance._meta.concrete_fields
+            if not field.primary_key and field.attname not in instance.get_deferred_fields()
+        }
+    options["update_fields"] = set(selected) - {"price"}
 
 
 def save_service_with_limits(
@@ -133,8 +185,10 @@ def save_service_with_limits(
             }
         )
         options["update_fields"] = selected - _PLAN_FIELDS
+    _preserve_unedited_price(instance, fields, options)
     save_with_ownership(instance, "service", save, (), options, caller_intent=original_intent)
     remember_plan(instance)
+    remember_price(instance)
 
 
 def plan_change_refusal(service: Service) -> str | None:
@@ -154,6 +208,7 @@ def request_service_plan_change(  # noqa: PLR0913 -- Explicit revision and idemp
     submission_id: UUID,
     reason: str,
     authority: dict[str, str],
+    accepted_terms: HostingAssignmentTerms | None = None,
 ) -> HostingLimitApplication:
     """Accept one assignment and durable application intent without locking any native row.
 
@@ -167,6 +222,8 @@ def request_service_plan_change(  # noqa: PLR0913 -- Explicit revision and idemp
         raise RuntimeError("Plan assignments require an existing transaction")
     if not reason.strip() or not authority:
         raise ValidationError(_("An explicit reason and authority are required for a resource assignment."))
+    if accepted_terms is not None and accepted_terms.plan_id != target_plan_id:
+        raise ValueError("The accepted hosting terms belong to another target plan")
     expected_customer = service.__dict__.get("customer_id")
     if type(expected_customer) is not int:
         raise ValidationError(_("Load and authorize the service's current owner before assigning resources."))
@@ -174,6 +231,10 @@ def request_service_plan_change(  # noqa: PLR0913 -- Explicit revision and idemp
     if locked.customer_id != expected_customer:
         raise ValidationError(_("The service's owner changed. Reload and authorize the current owner."))
     recorded_authority = {**authority, "customer_id": str(expected_customer)}
+    if accepted_terms is not None:
+        recorded_authority["accepted_terms_hash"] = hashlib.sha256(
+            json.dumps(accepted_terms.as_snapshot(), sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
     previous = HostingLimitApplication.objects.using(using).filter(service=locked, submission_id=submission_id).first()
     if previous is not None:
         if (
@@ -181,6 +242,14 @@ def request_service_plan_change(  # noqa: PLR0913 -- Explicit revision and idemp
             or previous.reason != reason
             or previous.authority != recorded_authority
             or previous.revision != expected_revision + 1
+            or (
+                accepted_terms is not None
+                and (
+                    previous.disk_allowance_mib != accepted_terms.disk_allowance_mib
+                    or previous.bandwidth_allowance_mib != accepted_terms.bandwidth_allowance_mib
+                    or previous.policy_version != accepted_terms.policy_version
+                )
+            )
         ):
             raise ValidationError(_("This submission identity was already used for different assignment terms."))
         return previous
@@ -193,7 +262,9 @@ def request_service_plan_change(  # noqa: PLR0913 -- Explicit revision and idemp
     plan = ServicePlan.objects.using(using).select_for_update(of=("self",), no_key=True).get(pk=target_plan_id)
     if not plan.is_active:
         raise ValidationError(_("The target hosting plan is inactive."))
-    target = _snapshot(locked, plan, _defaults())
+    target = (
+        _terms_snapshot(locked, accepted_terms) if accepted_terms is not None else _snapshot(locked, plan, _defaults())
+    )
     application = HostingLimitApplication.objects.using(using).create(
         service=locked,
         revision=limits.revision + 1,

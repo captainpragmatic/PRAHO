@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% load i18n static ui_components formatting localisation_tags %}
+
+{% block title %}{% trans "Change hosting plan" %} - {{ company.brand_name }}{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-8 space-y-6">
+  <h1 class="text-2xl font-semibold text-white">{% trans "Change hosting plan" %}</h1>
+  <a class="inline-flex min-h-11 items-center text-blue-300 underline" href="{% url 'services:detail' service_id=service_id %}">{% trans "Back to service" %}</a>
+  {% if error %}{% alert error variant="warning" %}{% endif %}
+  {% if options %}
+    <form method="post" class="space-y-3">
+      {% csrf_token %}<input type="hidden" name="action" value="refresh-usage">
+      <p class="text-sm text-slate-300">{% trans "A lower plan requires a fresh usage check. Refresh the check, then reload the available plans." %}</p>
+      {% trans "Refresh usage check" as refresh_usage_label %}{% button refresh_usage_label type="submit" variant="secondary" %}
+    </form>
+  {% endif %}
+  {% for option in options %}
+    <section id="plan-{{ option.product_id }}" class="rounded-xl border border-slate-700 bg-slate-800 p-6 space-y-4">
+      <h2 class="text-xl font-semibold text-white">{{ option.name }}</h2>
+      <p class="text-slate-200">{% trans "Next recurring total, including VAT" %}: {{ option.next_recurring_total_cents|cents_to_currency|romanian_currency:option.currency }}</p>
+      <p class="text-sm text-slate-300">{% trans "Effective date" %}: {% localised_date option.effective_at "datetime" %}</p>
+      {% if option.available %}
+        <form method="post" class="space-y-4">
+          {% csrf_token %}{{ option.form }}
+          {% trans "Review exact quote" as quote_label %}{% button quote_label type="submit" variant="primary" %}
+        </form>
+      {% else %}
+        <p class="text-amber-300">{% trans "This plan currently needs a usage or eligibility review. Contact support." %}</p>
+      {% endif %}
+    </section>
+  {% empty %}
+    {% if not change and not error %}<p class="text-slate-300">{% trans "No compatible plan changes are currently available." %}</p>{% endif %}
+  {% endfor %}
+  {% if change %}
+    <section class="rounded-xl border border-slate-700 bg-slate-800 p-6 space-y-4">
+      <h2 class="text-xl font-semibold text-white">{{ phase }}</h2>
+      <dl class="grid grid-cols-1 sm:grid-cols-2 gap-4 text-slate-200">
+        <div><dt>{% trans "Change amount before VAT" %}</dt><dd>{{ change.net_cents|cents_to_currency|romanian_currency:change.currency }}</dd></div>
+        <div><dt>{% trans "VAT" %}</dt><dd>{{ change.tax_cents|cents_to_currency|romanian_currency:change.currency }}</dd></div>
+        <div><dt>{% trans "Total due now" %}</dt><dd class="text-xl font-semibold">{{ change.total_cents|cents_to_currency|romanian_currency:change.currency }}</dd></div>
+        <div><dt>{% trans "Next recurring total, including VAT" %}</dt><dd>{% if change.next_recurring_total_cents != None %}{{ change.next_recurring_total_cents|cents_to_currency|romanian_currency:change.currency }}{% else %}{% trans "Renewal total needs review" %}{% endif %}</dd></div>
+        <div><dt>{% trans "Proposed disk allowance" %}</dt><dd>{{ change.proposed_limits.disk_mib }} MiB</dd></div>
+        <div><dt>{% trans "Proposed bandwidth allowance" %}</dt><dd>{{ change.proposed_limits.bandwidth_mib }} MiB</dd></div>
+        <div><dt>{% trans "Effective date" %}</dt><dd>{% localised_date change.effective_at "datetime" %}</dd></div>
+        <div><dt>{% trans "Quote expires" %}</dt><dd>{% localised_date change.expires_at "datetime" %}</dd></div>
+      </dl>
+      {% for period in change.periods %}
+        <div class="rounded-lg border border-slate-600 p-3 text-sm text-slate-300">
+          <p>{% if period.current %}{% trans "Current paid period" %}{% else %}{% trans "Already committed future period supplement" %}{% endif %}</p>
+          <p>{% localised_date period.start "date" %} – {% localised_date period.end "date" %}</p>
+          <p>{{ period.net_cents|cents_to_currency|romanian_currency:change.currency }} {% trans "before VAT" %}</p>
+        </div>
+      {% endfor %}
+      {% if change.direction == 'downgrade' %}<p class="text-slate-300">{% trans "Your lower recurring terms start at the agreed renewal boundary. There is no immediate refund." %}</p>{% endif %}
+      {% if can_accept %}
+        <form method="post" action="{% url 'services:plan_change_action' service_id=service_id change_id=change.id action='confirm' %}" class="space-y-4">
+          {% csrf_token %}<input type="hidden" name="quote_fingerprint" value="{{ change.quote_fingerprint }}">
+          {% if change.total_cents == 0 and change.direction == 'upgrade' %}<label class="flex min-h-11 items-center gap-3 text-slate-200"><input type="checkbox" name="accept_zero_due" required>{% trans "I accept this plan change without a payment." %}</label>{% endif %}
+          {% trans "Accept quoted terms" as confirm_label %}{% button confirm_label type="submit" variant="primary" %}
+        </form>
+      {% endif %}
+      {% if can_pay and not payment %}
+        <form method="post" action="{% url 'services:plan_change_action' service_id=service_id change_id=change.id action='payment-intent' %}">
+          {% csrf_token %}<input type="hidden" name="quote_fingerprint" value="{{ change.quote_fingerprint }}">
+          {% trans "Pay by card" as pay_label %}{% button pay_label type="submit" variant="primary" %}
+        </form>
+      {% endif %}
+      {% if payment %}
+        <form method="post" id="hosting-plan-payment-form" action="{% url 'services:plan_change_action' service_id=service_id change_id=change.id action='refresh' %}" class="space-y-4" data-return-url="{% url 'services:plan_change_detail' service_id=service_id change_id=change.id %}" data-payment-error="{% trans 'Payment could not be confirmed. Refresh its status before trying again.' %}">
+          {% csrf_token %}<div id="hosting-plan-payment-element"></div><p id="hosting-plan-payment-error" class="text-amber-300" role="alert" hidden></p>
+          {% trans "Confirm card payment" as card_label %}{% button card_label type="submit" variant="primary" %}
+        </form>
+      {% endif %}
+      <form method="post" id="hosting-plan-refresh-form" action="{% url 'services:plan_change_action' service_id=service_id change_id=change.id action='refresh' %}">
+        {% csrf_token %}{% trans "Refresh status" as refresh_label %}{% button refresh_label type="submit" variant="secondary" %}
+      </form>
+      {% if can_cancel %}
+        <form method="post" action="{% url 'services:plan_change_action' service_id=service_id change_id=change.id action='cancel' %}">
+          {% csrf_token %}<input type="hidden" name="quote_fingerprint" value="{{ change.quote_fingerprint }}">
+          {% trans "Cancel this change" as cancel_label %}{% button cancel_label type="submit" variant="secondary" %}
+        </form>
+      {% endif %}
+      {% if change.status == 'completed' or change.status == 'cancelled' or change.status == 'expired' %}
+        <a class="inline-flex min-h-11 items-center text-blue-300 underline" href="{% url 'services:change_plan' service_id=service_id %}">{% trans "Review another plan" %}</a>
+      {% endif %}
+    </section>
+  {% endif %}
+  <a class="inline-flex min-h-11 items-center text-blue-300 underline" href="{% url 'tickets:create' %}?service_id={{ service_id }}">{% trans "Ask support about an exceptional change" %}</a>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if payment %}{{ payment|json_script:"hosting-plan-payment-config" }}<script src="https://js.stripe.com/v3/" defer></script><script src="{% static 'js/hosting-plan-checkout.js' %}" defer></script>{% endif %}
+{% endblock %}

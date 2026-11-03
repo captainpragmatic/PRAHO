@@ -49,6 +49,7 @@ class RestoreFailClosedTests(TestCase):
         )
         self.service = VirtualminBackupService(self.server)
         self.account = MagicMock()
+        self.account.quota_managed = False
         self.account.domain = "example.com"
         self.account.service_id = 42
         self.account.virtualmin_username = "owner"

@@ -92,8 +92,17 @@ def begin_account_job(
                     current.account_id,
                     current.server_id,
                     current.operation,
+                    current.execution_token,
                 )
-                != (job.status, job.claimed_at, job.started_at, job.account_id, job.server_id, job.operation)
+                != (
+                    job.status,
+                    job.claimed_at,
+                    job.started_at,
+                    job.account_id,
+                    job.server_id,
+                    job.operation,
+                    job.execution_token,
+                )
             ):
                 return "The account operation no longer owns its recorded running claim."
         if job.operation != "create_domain" and locked.server_id != job.server_id:
@@ -101,10 +110,44 @@ def begin_account_job(
         for node in nodes:
             if refusal := maintenance_refusal(node.pk):
                 return refusal
+        if refusal := native_account_observation_refusal(locked.pk):
+            return refusal
+        if (
+            job.operation != "apply_hosting_limits"
+            and VirtualminProvisioningJob.objects.filter(
+                account_id=locked.pk, operation="apply_hosting_limits", status__in=ACTIVE_ACCOUNT_JOBS
+            )
+            .exclude(pk=job.pk)
+            .exclude(
+                parameters__quota_parent__job_id=str(job.pk),
+                parameters__quota_parent__token=str(job.execution_token or ""),
+            )
+            .exists()
+        ):
+            return "A hosting quota operation is pending, running, or requires reconciliation."
         if not preserve_claim:
             if job._state.adding:
                 job.save()
             job.mark_started()
+    return None
+
+
+def native_account_observation_refusal(account_id: UUID) -> str | None:
+    """Native writers call under Account→Servers; queued reads hold no native lane.
+
+    This is deliberately separate from ownership and commercial busy predicates.
+    A running probe can hold the native account lock longer than a writer's lock
+    budget, so the writer waits at admission instead of creating an uncertain write.
+    """
+    from apps.provisioning.virtualmin_models import (  # noqa: PLC0415 -- Shared native admission.
+        SAFETY_OBSERVATION_OPERATION,
+        VirtualminProvisioningJob,
+    )
+
+    if VirtualminProvisioningJob.objects.filter(
+        account_id=account_id, operation=SAFETY_OBSERVATION_OPERATION, status="running"
+    ).exists():
+        return str(_("A native safety observation is running. Retry after it finishes."))
     return None
 
 
@@ -115,6 +158,10 @@ def maintenance_refusal(node_id: UUID, *, execution_token: UUID | None = None) -
     )
 
     node = VirtualminServer.objects.filter(pk=node_id).first()
+    from apps.provisioning.hosting_node_execution import hosting_operation_refusal  # noqa: PLC0415
+
+    if refusal := hosting_operation_refusal(node_id):
+        return refusal
     # A later hardening schema adds this durable owner. Reuse it when present;
     # older installations have no such field and retain their current behavior.
     if node is not None and getattr(node, "security_operation", None) is not None:
@@ -169,6 +216,11 @@ def competing_operation_refusal(node_id: UUID, *, owned_drift_request_id: int | 
         .exists()
     ):
         return str(_("A migration, retained bridge or recovery operation owns this server."))
+    return node_configuration_refusal(node_id, owned_drift_request_id=owned_drift_request_id)
+
+
+def node_configuration_refusal(node_id: UUID, *, owned_drift_request_id: int | None = None) -> str | None:
+    """Configuration-changing deployment/drift work also excludes isolated requalification."""
     from apps.infrastructure.models import (  # noqa: PLC0415  # Model registration
         DriftRemediationRequest,
         NodeDeployment,

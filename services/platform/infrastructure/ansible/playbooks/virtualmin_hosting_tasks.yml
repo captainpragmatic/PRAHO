@@ -1,0 +1,28 @@
+---
+- name: Create protected native hosting helper directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: /usr/local/lib/praho, mode: '0700'}
+    - {path: /var/lib/praho/hosting, mode: '0700'}
+    - {path: /var/lib/praho/quotas, mode: '0700'}
+    - {path: /run/praho, mode: '0700'}
+
+- name: Install fixed synchronous native quota and notification adapters
+  ansible.builtin.copy:
+    src: "files/{{ item }}"
+    dest: "/usr/local/lib/praho/{{ item }}"
+    owner: root
+    group: root
+    mode: '0700'
+  loop:
+    - praho_quota.py
+    - praho_quota_native.py
+    - praho_usage.py
+    - praho-quota-metadata.pl
+    - praho_hosting_node.py
+    - praho-notification-policy.pl

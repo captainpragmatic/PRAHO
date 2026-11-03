@@ -349,6 +349,15 @@ def reserve_value(  # noqa: PLR0913  # Signed actor supplements the immutable re
         ):
             raise ValidationError(_("This payment request already has different details."))
         return existing
+    from apps.billing.plan_change_models import PlanChange  # noqa: PLC0415 -- Standalone checkout owns new funding.
+
+    change_scope = {"invoice_id" if invoice else "proforma_id": document.pk}
+    if PlanChange.objects.filter(**change_scope).exists() or (
+        invoice
+        and document.converted_from_proforma_id
+        and PlanChange.objects.filter(proforma_id=document.converted_from_proforma_id).exists()
+    ):
+        raise ValidationError(_("Use the plan-change checkout to pay for this change."))
     if invoice:
         if document.status not in {"issued", "overdue"}:
             raise ValidationError(_("This invoice cannot accept payment."))

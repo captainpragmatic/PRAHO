@@ -18,6 +18,7 @@ from apps.billing.invoice_models import DOCUMENT_KIND_CREDIT_NOTE, DOCUMENT_KIND
 from apps.billing.models import (
     CreditLedger,
     Currency,
+    InvoiceSequence,
     OAuthToken,
     Payment,
     PaymentRetryAttempt,
@@ -682,6 +683,7 @@ class TestInvoiceNumberGeneration(TestCase):
     def setUp(self):
         self.customer = CustomerFactory()
         self.currency = _get_or_create_currency()
+        InvoiceSequence.objects.get_or_create(scope="default", defaults={"prefix": "INV"})
 
     @patch("apps.billing.signals.AuditService")
     @patch("apps.billing.signals.InvoiceNumberingService" if False else "apps.billing.services.InvoiceNumberingService")

@@ -24,7 +24,7 @@ from django.utils import timezone
 
 from apps.audit.models import AuditEvent
 from apps.audit.services import GDPRDeletionService, gdpr_deletion_service
-from apps.billing.invoice_models import Invoice
+from apps.billing.invoice_models import Invoice, InvoiceSequence
 from apps.billing.invoice_querysets import InvoiceQuerySet
 from apps.billing.proforma_models import ProformaInvoice, ProformaLine
 from apps.billing.services import ProformaConversionService
@@ -120,6 +120,7 @@ class StaffCustomerListCNPTests(TestCase):
 
 class GDPRErasureCNPTests(TestCase):
     def setUp(self) -> None:
+        InvoiceSequence.objects.get_or_create(scope="default", defaults={"prefix": "INV"})
         self.user = User.objects.create_user(email="erase-me@example.test", password="pass12345")
         self.customer, self.profile = individual("Erase Me")
         CustomerMembership.objects.create(user=self.user, customer=self.customer, role="owner", is_primary=True)

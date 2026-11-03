@@ -1,4 +1,4 @@
-"""The public fulfiller uses a staff plan edit committed during its actual PostgreSQL lock wait."""
+"""Explicit resource overrides serialize with fulfilment; template changes are refused."""
 
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -21,8 +21,9 @@ from apps.customers.models import Customer
 from apps.orders.hosting_fulfilment import complete_line_for_staff, fulfil_hosting_line
 from apps.orders.models import Order, OrderItem
 from apps.products.models import Product
+from apps.provisioning.hosting_limit_override_views import service_resource_override
 from apps.provisioning.models import Service, ServicePlan
-from apps.provisioning.service_views import service_edit
+from apps.tickets.models import Ticket
 from apps.users.models import User
 from tests.helpers.fsm_helpers import force_status
 
@@ -37,7 +38,9 @@ class HostingPlanLockConcurrencyTests(TransactionTestCase):
         self.addCleanup(cache.clear)
         self.enterContext(patch("django_q.tasks.async_task"))
         self.currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
-        self.customer = Customer.objects.create(name="Plan Race Buyer", primary_email="plan-race@example.test")
+        self.customer = Customer.objects.create(
+            name="Plan Race Buyer", primary_email="plan-race@example.test", status="active"
+        )
         self.staff = User.objects.create_superuser(email="plan-editor@example.test", password="test-only")
         self.hosting_plan = ServicePlan.objects.create(
             name="Automatic hosting", plan_type="shared_hosting", price_monthly=Decimal("9")
@@ -45,6 +48,13 @@ class HostingPlanLockConcurrencyTests(TransactionTestCase):
         self.manual_plan = ServicePlan.objects.create(
             name="Staff-delivered email", plan_type="email", price_monthly=Decimal("9")
         )
+        self.larger_plan = ServicePlan.objects.create(
+            name="Larger automatic hosting",
+            plan_type="shared_hosting",
+            price_monthly=Decimal("20"),
+            disk_space_gb=20,
+        )
+        self.ticket = Ticket.objects.create(customer=self.customer, title="Resource override", description="Approved")
         product = Product.objects.create(
             slug="plan-race", name="Hosting", product_type="shared_hosting", default_service_plan=self.hosting_plan
         )
@@ -82,17 +92,24 @@ class HostingPlanLockConcurrencyTests(TransactionTestCase):
         )
 
     def _edit_plan(self, plan_id: int) -> int:
-        # The production view's unchanged-owner save is an autocommit UPDATE.
-        # Do not manufacture a surrounding application transaction for this proof.
+        # Exercise the production exception transaction, without a test-owned
+        # outer transaction or a bypass of its assignment fence.
         self.assertTrue(connection.get_autocommit())
         request = RequestFactory().post(
-            "/provisioning/services/edit/",
-            {"customer_id": self.customer.pk, "plan_id": plan_id, "domain": self.service.domain},
+            "/provisioning/services/resource-override/",
+            {
+                "target_plan": plan_id,
+                "ticket": self.ticket.pk,
+                "reason": "Approved resource exception",
+                "expected_revision": 1,
+                "submission_id": str(uuid4()),
+                "billing_unchanged": "on",
+            },
         )
         request.user = User.objects.get(pk=self.staff.pk)
         request.session = {}
         request._messages = FallbackStorage(request)
-        return service_edit(request, self.service.pk).status_code
+        return service_resource_override(request, self.service.pk).status_code
 
     def _worker(self, action: Callable[[], _T], ready: Event, pids: list[int]) -> _T:
         close_old_connections()
@@ -159,7 +176,9 @@ class HostingPlanLockConcurrencyTests(TransactionTestCase):
                     self._wait_for_lock(writer_pids[0], observer_pid, writer, f"UPDATE {table}")
                     reader = executor.submit(self._worker, action, reader_ready, reader_pids)
                     self.assertTrue(reader_ready.wait(10), "Fulfilment connection did not start")
-                    self._wait_for_lock(reader_pids[0], writer_pids[0], reader, table)
+                    # The explicit override now protects Customer before Service;
+                    # fulfilment serializes at that earlier production boundary.
+                    self._wait_for_lock(reader_pids[0], writer_pids[0], reader, Customer._meta.db_table)
                 finally:
                     with connection.cursor() as cursor:
                         cursor.execute("SELECT pg_advisory_unlock(%s)", [key])
@@ -181,17 +200,36 @@ class HostingPlanLockConcurrencyTests(TransactionTestCase):
         self.assertEqual(self.service.customer_id, self.customer.pk)
         self.assertEqual(fulfil_hosting_line(self.line.pk).unwrap(), expected)
 
-    def test_hosting_changed_to_manual_during_wait_is_left_for_staff(self) -> None:
-        self._assert_classification(self.manual_plan, "left_for_staff")
+    def test_resource_override_refuses_hosting_to_manual_template_change(self) -> None:
+        self.assertEqual(self._edit_plan(self.manual_plan.pk), 400)
+        self.service.refresh_from_db()
+        self.assertEqual(self.service.service_plan_id, self.hosting_plan.pk)
+        self.assertEqual(fulfil_hosting_line(self.line.pk).unwrap(), "in_progress")
 
-    def test_manual_changed_to_hosting_during_wait_uses_automatic_fulfilment(self) -> None:
-        self.service.service_plan = self.manual_plan
-        self.service.save(update_fields=["service_plan"])
-        self._assert_classification(self.hosting_plan, "in_progress")
+    def test_resource_override_refuses_manual_to_hosting_template_change(self) -> None:
+        self.service = Service.objects.create(
+            customer=self.customer,
+            service_plan=self.manual_plan,
+            currency=self.currency,
+            service_name="Manual service",
+            domain="manual.example.test",
+            username="manualrace",
+            price=9,
+            status="active",
+        )
+        self.line.service = self.service
+        self.line.save(update_fields=["service"])
+        self.assertEqual(self._edit_plan(self.hosting_plan.pk), 400)
+        self.service.refresh_from_db()
+        self.assertEqual(self.service.service_plan_id, self.manual_plan.pk)
+        self.assertEqual(fulfil_hosting_line(self.line.pk).unwrap(), "left_for_staff")
+
+    def test_fulfilment_serializes_with_a_compatible_resource_override(self) -> None:
+        self._assert_classification(self.larger_plan, "in_progress")
 
     def test_staff_completion_survives_a_plan_change_during_its_wait(self) -> None:
         result = self._after_plan_edit(
-            self.manual_plan,
+            self.larger_plan,
             lambda: complete_line_for_staff(self.line.pk, actor=self.staff, activate_service=False),
         )
         self.assertEqual(result.unwrap(), "completed")

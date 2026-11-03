@@ -20,7 +20,7 @@ from django.utils import timezone
 from django.utils.translation import override
 
 from apps.audit.services import BusinessEventData
-from apps.billing.models import Currency, Invoice, Payment
+from apps.billing.models import Currency, Invoice, InvoiceSequence, Payment
 from apps.billing.payment_convergence import PaymentSuccessService
 from apps.billing.proforma_models import ProformaInvoice
 from apps.billing.proforma_service import ProformaService, send_proforma_email
@@ -46,6 +46,7 @@ def prepare_case(case: TestCase | TransactionTestCase) -> tuple[Customer, Curren
     quiet_task_queue(case)
     cache.clear()
     case.addCleanup(cache.clear)
+    InvoiceSequence.objects.get_or_create(scope="default", defaults={"prefix": "INV"})
     customer = Customer.objects.create(name="Order isolation", primary_email="order-isolation@example.com")
     currency, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
     return customer, currency

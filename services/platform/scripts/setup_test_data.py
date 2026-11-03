@@ -38,6 +38,7 @@ from apps.products.models import (  # After django.setup()
     ProductPrice,
     ProductRelationship,
 )
+from apps.products.upgrade_paths import ensure_upgrade_path  # After django.setup()
 from apps.provisioning.models import Service, ServicePlan  # After django.setup()
 from apps.tickets.models import SupportCategory, Ticket, TicketComment  # After django.setup()
 from apps.users.models import CustomerMembership  # After django.setup()
@@ -294,7 +295,7 @@ def create_test_data() -> (  # Complexity: multi-step business logic
         create_billing_data_if_missing(customer)
 
         # 8. Create products
-        create_products_if_missing()
+        create_products_if_missing(superuser)
 
         # 9. Create orders
         create_orders_if_missing(customer, customer_user)
@@ -351,7 +352,41 @@ def create_service_if_missing(customer: Any) -> None:
         print(f"⚠️  Service creation failed: {e}")
 
 
-def create_products_if_missing() -> (  # Complexity: multi-step business logic
+def seed_product_relationships(products: dict[str, Any], actor: Any) -> int:
+    """Create only missing fixture relationships, preserving existing operator configuration."""
+    if actor is None:
+        raise ValueError("An existing catalog administrator is required to seed upgrade paths")
+    relationships_data = [
+        ("web-hosting-basic", "domain-registration", "requires"),
+        ("web-hosting-premium", "domain-registration", "requires"),
+        ("web-hosting-basic", "web-hosting-premium", "upgrades_to"),
+        ("web-hosting-basic", "ssl-certificate", "cross_sell"),
+        ("web-hosting-premium", "ssl-certificate", "cross_sell"),
+        ("web-hosting-basic", "email-hosting", "cross_sell"),
+        ("web-hosting-premium", "email-hosting", "cross_sell"),
+    ]
+    count = 0
+    for source, target, kind in relationships_data:
+        if kind == "upgrades_to":
+            _relationship, created = ensure_upgrade_path(
+                actor=actor,
+                source_product_id=products[source].pk,
+                target_product_id=products[target].pk,
+            )
+        else:
+            _relationship, created = ProductRelationship.objects.get_or_create(
+                source_product=products[source],
+                target_product=products[target],
+                relationship_type=kind,
+                defaults={"is_active": True, "sort_order": 0},
+            )
+        count += int(created)
+    return count
+
+
+def create_products_if_missing(
+    catalog_actor: Any = None,
+) -> (  # Complexity: multi-step business logic
     None
 ):  # Complexity: test data generation  # Complexity: multi-step business logic
     """Create comprehensive product catalog with all related models."""
@@ -629,37 +664,7 @@ def create_products_if_missing() -> (  # Complexity: multi-step business logic
         # 3. CREATE PRODUCT RELATIONSHIPS
         # ===============================================================================
 
-        relationships_data = [
-            # Basic hosting requires domain
-            {"source": "web-hosting-basic", "target": "domain-registration", "type": "requires"},
-            # Premium hosting requires domain
-            {"source": "web-hosting-premium", "target": "domain-registration", "type": "requires"},
-            # Basic can upgrade to Premium
-            {"source": "web-hosting-basic", "target": "web-hosting-premium", "type": "upgrades_to"},
-            # SSL cross-sell with hosting
-            {"source": "web-hosting-basic", "target": "ssl-certificate", "type": "cross_sell"},
-            {"source": "web-hosting-premium", "target": "ssl-certificate", "type": "cross_sell"},
-            # Email hosting cross-sell
-            {"source": "web-hosting-basic", "target": "email-hosting", "type": "cross_sell"},
-            {"source": "web-hosting-premium", "target": "email-hosting", "type": "cross_sell"},
-        ]
-
-        relationships_created = 0
-        for rel_data in relationships_data:
-            source_product = created_products[rel_data["source"]]
-            target_product = created_products[rel_data["target"]]
-
-            _relationship, created = ProductRelationship.objects.get_or_create(
-                source_product=source_product,
-                target_product=target_product,
-                relationship_type=rel_data["type"],
-                defaults={
-                    "is_active": True,
-                    "sort_order": 0,
-                },
-            )
-            if created:
-                relationships_created += 1
+        relationships_created = seed_product_relationships(created_products, catalog_actor)
 
         if relationships_created > 0:
             print(f"✅ Created {relationships_created} product relationships")
@@ -1272,7 +1277,7 @@ def main() -> (  # Complexity: multi-step business logic
             # Always try to create missing service data
             if customer:
                 try:
-                    create_products_if_missing()
+                    create_products_if_missing(superuser)
                     create_orders_if_missing(customer, customer_user)
                     create_service_if_missing(customer)
                     create_billing_data_if_missing(customer)

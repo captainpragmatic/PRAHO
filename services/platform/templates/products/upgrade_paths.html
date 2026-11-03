@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Upgrade paths" %} - {{ product.name }}{% endblock %}
+{% block content %}
+<div class="max-w-5xl mx-auto px-4 py-6 space-y-6">
+  <div class="flex flex-wrap justify-between gap-4">
+    <div><h1 class="text-2xl font-semibold text-white">{% trans "Upgrade paths" %}</h1><p class="text-slate-300">{{ product.name }}</p></div>
+    <div class="flex gap-3">
+      {% url 'products:product_detail' product.slug as detail_url %}
+      {% trans "Product details" as details_label %}{% button details_label href=detail_url variant="secondary" %}
+      {% if can_manage_catalog %}
+        {% url 'products:upgrade_path_create' product.slug as create_url %}
+        {% trans "Add upgrade path" as add_label %}{% button add_label href=create_url variant="primary" %}
+      {% endif %}
+    </div>
+  </div>
+  <p class="text-slate-300">{% trans "Forward links curate upgrades; the same links in reverse curate downgrades. A quote also checks current availability, price, resources and compatibility." %}</p>
+  {% if not can_manage_catalog %}
+    {% trans "Only administrators can change the product catalog." as catalog_lock %}{% alert catalog_lock variant="info" %}
+  {% endif %}
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-5">
+    <h2 class="text-lg font-medium text-white mb-4">{% trans "Upgrade targets" %}</h2>
+    <ul class="space-y-3">
+      {% for edge in forward_paths %}
+        <li class="flex flex-wrap items-center justify-between gap-3 rounded bg-slate-700 p-3">
+          <div>{% url 'products:product_detail' edge.target_product.slug as target_url %}{% button edge.target_product.name href=target_url variant="link" size="sm" %}
+            {% if edge.is_active %}{% trans "Active" as state_label %}{% badge state_label variant="success" %}{% else %}{% trans "Inactive" as state_label %}{% badge state_label variant="secondary" %}{% endif %}
+            <span class="text-sm text-slate-300">{% trans "Order:" %} {{ edge.sort_order }}</span>
+          </div>
+          {% if can_manage_catalog %}
+          <div class="flex items-center gap-3">
+            {% url 'products:upgrade_path_edit' product.slug edge.pk as edit_url %}
+            {% trans "Edit" as edit_label %}{% button edit_label href=edit_url variant="secondary" size="sm" %}
+            <form method="post" action="{% url 'products:upgrade_path_remove' product.slug edge.pk %}">
+              {% csrf_token %}{% trans "Remove link" as remove_label %}{% button remove_label type="submit" variant="danger" size="sm" %}
+            </form>
+          </div>
+          {% endif %}
+        </li>
+      {% empty %}<li class="text-slate-400">{% trans "No upgrade targets configured." %}</li>{% endfor %}
+    </ul>
+  </section>
+  <section class="rounded-lg border border-slate-700 bg-slate-800 p-5">
+    <h2 class="text-lg font-medium text-white mb-4">{% trans "Downgrade paths" %}</h2>
+    <ul class="space-y-2">
+      {% for edge in reverse_paths %}
+        <li class="text-slate-300">
+          {% url 'products:upgrade_paths' edge.source_product.slug as source_url %}{% button edge.source_product.name href=source_url variant="link" size="sm" %}
+          {% if not edge.is_active %}{% trans "Inactive" as inactive_label %}{% badge inactive_label variant="secondary" %}{% endif %}
+          <span class="text-sm text-slate-400">{% trans "Managed from the source product's upgrade paths." %}</span>
+        </li>
+      {% empty %}<li class="text-slate-400">{% trans "No reverse paths configured." %}</li>{% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}

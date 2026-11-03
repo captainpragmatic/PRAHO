@@ -29,6 +29,8 @@
       {% trans "Edit" as bt1 %}{% button bt1 variant="secondary" href=edit_url disabled=catalog_lock title=catalog_lock %}
       {% url 'products:product_prices' slug=product.slug as prices_url %}
       {% trans "Pricing" as bt2 %}{% button bt2 variant="primary" href=prices_url %}
+      {% url 'products:upgrade_paths' slug=product.slug as paths_url %}
+      {% trans "Upgrade paths" as paths_label %}{% button paths_label variant="secondary" href=paths_url %}
     </div>
   </div>
 
