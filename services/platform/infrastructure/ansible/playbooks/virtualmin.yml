@@ -30,14 +30,6 @@
       - mysql
 
   tasks:
-    - name: Require the managed Ubuntu and PHP baseline
-      ansible.builtin.assert:
-        that:
-          - ansible_distribution == 'Ubuntu'
-          - ansible_distribution_version == '26.04'
-          - php_default_version == '8.5'
-          - deployment_id is defined
-        fail_msg: Managed hosting installation requires Ubuntu 26.04 and distribution PHP 8.5.
     # The installer and Let's Encrypt need the node's fully qualified name, which the
     # short inventory_hostname is not. PRAHO passes it as node_fqdn (-e from a vars file).
     - name: Refuse a missing node FQDN
@@ -46,6 +38,15 @@
           - node_fqdn is defined
           - node_fqdn | length > 0
         fail_msg: "node_fqdn is required: pass the node's fully qualified domain name"
+
+    - name: Require the managed Ubuntu and PHP baseline
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version == '26.04'
+          - php_default_version == '8.5'
+          - deployment_id is defined
+        fail_msg: Managed hosting installation requires Ubuntu 26.04 and distribution PHP 8.5.
 
     - name: Check if Virtualmin is already installed
       ansible.builtin.stat:

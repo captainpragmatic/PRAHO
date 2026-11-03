@@ -5,6 +5,18 @@ import uuid
 import django.db.models.deletion
 from django.db import migrations, models
 
+from apps.common.db_triggers import restore_sqlite_context_immutability_trigger
+
+
+def restore_account_guard(apps, schema_editor):
+    account = apps.get_model("provisioning", "VirtualminAccount")
+    restore_sqlite_context_immutability_trigger(
+        schema_editor,
+        table=account._meta.db_table,
+        column=account._meta.pk.column,
+        name="secret_ctx_provisioning_virtualminaccount",
+    )
+
 
 class Migration(migrations.Migration):
     dependencies = [
@@ -12,6 +24,8 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # Reverse execution restores the guard after removing the new fields.
+        migrations.RunPython(migrations.RunPython.noop, restore_account_guard),
         migrations.AddField(
             model_name="virtualminaccount",
             name="quota_generation",
@@ -105,4 +119,5 @@ class Migration(migrations.Migration):
                 ],
             },
         ),
+        migrations.RunPython(restore_account_guard, migrations.RunPython.noop),
     ]

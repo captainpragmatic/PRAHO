@@ -12,6 +12,7 @@ from typing import Any
 
 from django import template
 from django.utils import timezone
+from django.utils.formats import number_format
 
 from apps.common.constants import (
     ROMANIAN_IBAN_LENGTH,
@@ -32,6 +33,18 @@ register = template.Library()
 
 # Type alias for common template filter numeric inputs
 TemplateNumeric = int | float | Decimal | None
+
+
+@register.filter
+def compact_number(value: TemplateNumeric) -> str:
+    """Retain fractional allowances while omitting insignificant decimal zeros."""
+    try:
+        number = Decimal(str(value))
+    except (ValueError, TypeError, decimal.InvalidOperation):
+        return ""
+    if not number.is_finite():
+        return ""
+    return number_format(number.normalize(), use_l10n=True)
 
 
 def validate_template_numeric(value: TemplateNumeric, default_message: str = "0,00") -> tuple[bool, str]:

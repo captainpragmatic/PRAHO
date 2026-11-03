@@ -2,8 +2,9 @@
 
 import fcntl
 import importlib.util
-import multiprocessing
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -90,30 +91,49 @@ class QuotaCoordinatorTests(SimpleTestCase):
             "while not Path(sys.argv[2]).exists(): time.sleep(0.01)\n"
             "Path(sys.argv[3]).write_text('old mutation completed')\n"
         )
-        run = self.native._run
-
-        class Backend:
-            def apply(self, request, *, lock_fd=None):
-                options = {} if lock_fd is None else {"lock_fd": lock_fd}
-                run([sys.executable, str(helper), str(ready), str(release), str(written)], timeout=15, **options)
-
-            def probe(self, request):
-                return {}
-
-        def act():
-            self.module.QuotaCoordinator(self.root, Backend()).perform("apply", self.request)
-
-        process = multiprocessing.get_context("fork").Process(target=act)
-        process.start()
+        # Django's parallel runner uses daemon processes, which cannot start a
+        # multiprocessing child. A real independent interpreter also avoids
+        # inheriting the runner's database/thread state into this native proof.
+        runner = self.root / "coordinator.py"
+        runner.write_text(
+            "import importlib.util, json, sys\nfrom pathlib import Path\n"
+            "def load(name, path):\n"
+            " spec = importlib.util.spec_from_file_location(name, path)\n"
+            " module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); return module\n"
+            "coordinator = load('coordinator', sys.argv[1])\n"
+            "native = load('native', sys.argv[2])\n"
+            "class Backend:\n"
+            " def apply(self, request, *, lock_fd=None):\n"
+            "  options = {} if lock_fd is None else {'lock_fd': lock_fd}\n"
+            "  native._run([sys.executable, *sys.argv[5:]], timeout=15, **options)\n"
+            " def probe(self, request): return {}\n"
+            "coordinator.QuotaCoordinator(Path(sys.argv[3]), Backend()).perform('apply', json.loads(sys.argv[4]))\n"
+        )
+        process = subprocess.Popen(  # noqa: S603 -- Fixed interpreter and repository-owned native modules in a private fixture.
+            [
+                sys.executable,
+                str(runner),
+                str(self.module.__file__),
+                str(self.native.__file__),
+                str(self.root),
+                json.dumps(self.request),
+                str(helper),
+                str(ready),
+                str(release),
+                str(written),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         poll = Event()
         try:
             deadline = monotonic() + 10
-            while not ready.exists() and monotonic() < deadline and process.is_alive():
+            while not ready.exists() and monotonic() < deadline and process.poll() is None:
                 poll.wait(0.01)
             self.assertTrue(ready.exists(), "The native writer never reached its mutation boundary")
             process.kill()
-            process.join(timeout=5)
-            self.assertFalse(process.is_alive())
+            process.wait(timeout=5)
+            self.assertIsNotNone(process.poll())
             descriptor = os.open(self.root / "locks/chain-12345.lock", os.O_WRONLY)
             try:
                 with self.assertRaises(BlockingIOError, msg="Fencing would run while the old writer is still alive"):
@@ -122,9 +142,9 @@ class QuotaCoordinatorTests(SimpleTestCase):
                 os.close(descriptor)
         finally:
             release.touch()
-            if process.is_alive():
+            if process.poll() is None:
                 process.kill()
-                process.join(timeout=5)
+                process.wait(timeout=5)
             deadline = monotonic() + 5
             while ready.exists() and not written.exists() and monotonic() < deadline:
                 poll.wait(0.01)
