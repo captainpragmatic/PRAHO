@@ -13,6 +13,7 @@ from apps.billing.payment_models import Payment
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.users.models import CustomerMembership, User
+from services.platform.tests.helpers.task_queue import quiet_task_queue
 
 
 class OrderPaymentMethodIntegrationTests(TestCase):
@@ -104,12 +105,13 @@ class OrderPaymentMethodIntegrationTests(TestCase):
             currency="ron",
         )
 
-        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway), \
-             patch("apps.api.orders.views._provision_confirmed_order_item"):
+        quiet_task_queue(self)
+        with patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway):
             response = confirm_order(request, str(order.id))
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.data["success"])
+        self.assertEqual(response.data["provisioning"], [])
 
         order.refresh_from_db()
         # Phase A: confirm_order does paid→provisioning (below review threshold)
