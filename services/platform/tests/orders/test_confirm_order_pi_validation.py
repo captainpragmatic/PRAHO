@@ -18,6 +18,7 @@ from apps.billing.payment_models import Payment
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.users.models import User
+from tests.helpers.task_queue import quiet_task_queue
 
 
 def _make_user(email: str = "pi-test@pragmatichost.com") -> User:
@@ -138,8 +139,8 @@ class ConfirmOrderPaymentIntentValidationTest(TestCase):
             currency="ron",
         )
 
+        quiet_task_queue(self)
         with patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)), \
-             patch("apps.api.orders.views._provision_confirmed_order_item"), \
              patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway):
             response = confirm_order(request, str(order.id))
 
@@ -241,9 +242,9 @@ class ConfirmOrderAmountVerificationTest(TestCase):
             "currency": "ron",
         }
 
+        quiet_task_queue(self)
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
         ):
             response = confirm_order(request, str(order.id))

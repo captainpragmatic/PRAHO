@@ -11707,6 +11707,23 @@ msgstr "Servere"
 msgid "Provisioning Failed"
 msgstr "Aprovizionare eșuată"
 
+#: apps/provisioning/service_views.py
+msgid "A failed service can't be activated here; review its order line."
+msgstr "Un serviciu cu provizionarea eșuată nu poate fi activat aici; verificați linia sa din comandă."
+
+#: apps/provisioning/service_views.py
+msgid "A failed service can't be activated here. Review its provisioning history and native state before any repair."
+msgstr "Un serviciu cu provizionarea eșuată nu poate fi activat aici. Verificați istoricul provizionării și starea de pe server înainte de orice remediere."
+
+#: templates/provisioning/service_detail.html
+msgid "Review its provisioning history and native state before any repair."
+msgstr "Verificați istoricul provizionării și starea de pe server înainte de orice remediere."
+
+#: templates/provisioning/service_detail.html
+#, python-format
+msgid "Review this service's failed provisioning on order %(number)s. Its line shows whether retry is available or manual review is required."
+msgstr "Verificați provizionarea eșuată a acestui serviciu în comanda %(number)s. Linia sa arată dacă reîncercarea este disponibilă sau dacă este necesară o verificare manuală."
+
 #: apps/provisioning/service_models.py:360 apps/provisioning/virtualmin_models.py:299 templates/provisioning/partials/services_list.html:137 templates/provisioning/partials/services_list.html:201 templates/provisioning/service_list.html:62
 msgid "Terminated"
 msgstr "Terminat"

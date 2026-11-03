@@ -29,6 +29,7 @@ from apps.products.models import Product
 from apps.provisioning.models import ServicePlan
 from apps.users.models import User
 from tests.helpers.fsm_helpers import force_status
+from tests.helpers.task_queue import quiet_task_queue
 
 # ===============================================================================
 # SHARED TEST BASE
@@ -388,10 +389,10 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
 
         request = self._make_confirm_request({"payment_intent_id": "pi_testConfirmPfm53abcd"})
 
+        quiet_task_queue(self)
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
         ):
             response = confirm_order(request, str(order.id))
 
@@ -543,10 +544,10 @@ class TestConfirmOrderConvertsProformaBeforeWebhook(CardProformaTestBase):
 
         request = self._make_confirm_request({"payment_intent_id": "pi_testInvLink53bdefgh"})
 
+        quiet_task_queue(self)
         with (
             patch("apps.api.secure_auth.get_authenticated_customer", return_value=(self.customer, None)),
             patch("apps.billing.gateways.base.PaymentGatewayFactory.create_gateway", return_value=mock_gateway),
-            patch("apps.api.orders.views._provision_confirmed_order_item"),
         ):
             response = confirm_order(request, str(order.id))
 

@@ -136,6 +136,27 @@ Both payment methods converge at `ProformaPaymentService.record_payment_and_conv
 
 All three paths emit `proforma_payment_received` which triggers `OrderPaymentConfirmationService.confirm_order()`.
 
+### Provisioning ownership after confirmation
+
+Card confirmation delegates to `OrderPaymentConfirmationService.confirm_order()` just as
+webhook and bank-transfer confirmation do. Canonical confirmation reuses or creates each
+service line's linked `OrderItem.service`, retains its purchased billing period and amount,
+and enrolls recurring billing before queueing `apps.orders.tasks.provision_order_item`.
+Domain lines remain with their registrar. Review-gated orders wait for staff approval.
+Repeated confirmation or line delivery preserves the same Service and native account.
+
+The API does not create another Service or dispatch the generic provisioning worker. Its
+legacy `provisioning` response list is empty; the order detail shows line progress.
+The `apps.provisioning.tasks.provision_service_task` callable remains available for stored
+legacy queue payloads.
+
+A historical failed Service without a retryable order line requires manual review of its
+provisioning history, ownership and actual native state. A failed status does not establish
+that a native account was never created. This change does not attach, retry, activate,
+delete or refund historical orphaned Services based on JSON order identifiers. Linked
+failures are reviewed on their order line; the existing policy decides whether retry is
+safe, including refusal when a create job has an uncertain outcome (`attention`).
+
 ## FSM Implementation Notes
 
 - **Protected field**: `FSMField(protected=True)` — direct `order.status = "xxx"` raises `AttributeError`

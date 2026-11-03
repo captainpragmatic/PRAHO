@@ -3,7 +3,7 @@ Regression tests for PR #112 order flow bug fixes.
 
 Tests two platform-side fixes:
 1. Preflight rejects unsupported currencies
-2. Null server guard returns error instead of creating ghost Service
+2. Confirmation without a generic server retains the canonical linked Service
 
 Portal quantity validation tests are in services/portal/tests/.
 """
@@ -11,16 +11,20 @@ Portal quantity validation tests are in services/portal/tests/.
 from __future__ import annotations
 
 import json
-from decimal import Decimal
 from unittest.mock import patch
 
-from django.test import RequestFactory, TestCase
+from django.test import RequestFactory, TestCase, override_settings
 
 from apps.billing.models import Currency
 from apps.customers.models import Customer, CustomerAddress, CustomerTaxProfile
-from apps.orders.models import Order, OrderItem
 from apps.products.models import Product, ProductPrice
-from apps.provisioning.models import ServicePlan
+from apps.provisioning.models import Server, Service
+from apps.users.models import CustomerMembership, User
+from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
+from tests.helpers.portal_session import BoundSessionMixin
+from tests.helpers.task_queue import quiet_task_queue
+from tests.orders import test_confirm_order_service_identity as identity
+from tests.orders._hosting_workflow_case import HostingWorkflowCase
 
 # ---------------------------------------------------------------------------
 # 1. Preflight currency validation
@@ -137,51 +141,23 @@ class PreflightCurrencyValidationTests(TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 2. Null server guard
+# 2. Confirmation without a generic provisioning server
 # ---------------------------------------------------------------------------
 
 
-class NullServerGuardTests(TestCase):
-    """Verify _provision_confirmed_order_item returns error when no server available."""
-
-    def test_no_server_returns_error_dict(self) -> None:
-        """When _get_server_for_product_type returns None, provisioning returns error."""
-        from apps.api.orders.views import _provision_confirmed_order_item  # noqa: PLC0415
-
-        currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})[0]
-        customer = Customer.objects.create(
-            name="Server Test SRL",
-            company_name="Server Test SRL",
-            customer_type="company",
-            primary_email="server@example.ro",
-            status="active",
-        )
-        plan = ServicePlan.objects.create(
-            name="Basic Plan", plan_type="shared_hosting", is_active=True,
-            price_monthly=Decimal("25.00"), price_quarterly=Decimal("70.00"),
-            price_annual=Decimal("250.00"),
-        )
-        product = Product.objects.create(
-            slug="hosting-basic",
-            name="Basic Hosting",
-            product_type="shared_hosting",
-            is_active=True,
-            default_service_plan=plan,
-        )
-        order = Order.objects.create(customer=customer, currency=currency)
-        item = OrderItem.objects.create(
-            order=order,
-            product=product,
-            product_name="Basic Hosting",
-            quantity=1,
-            unit_price_cents=2500,
-            setup_cents=0,
-            tax_rate=Decimal("0.2100"),  # 21% VAT as decimal fraction
-            billing_period="monthly",
-        )
-
-        with patch("apps.api.orders.views._get_server_for_product_type", return_value=(None, False)):
-            result = _provision_confirmed_order_item(item, customer, order)
-
-        self.assertIn("error", result)
-        self.assertIn("No provisioning server", result["error"])
+@override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
+class NullServerGuardTests(BoundSessionMixin, HMACTestMixin, HostingWorkflowCase):
+    def test_no_server_confirms_only_the_linked_service(self) -> None:
+        quiet_task_queue(self)
+        self.assertFalse(Server.objects.exists())
+        self.owner = User.objects.create_user(email="no-server-owner@example.test")
+        CustomerMembership.objects.create(customer=self.customer, user=self.owner, role="owner", is_primary=True)
+        order = self.create_order()
+        service_id = order.items.get().service_id
+        identity.ConfirmOrderServiceIdentityTests.prepare_payment(self, order)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = identity.ConfirmOrderServiceIdentityTests.request_confirmation(self, order)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["provisioning"], [])
+        self.assertEqual(list(Service.objects.values_list("pk", flat=True)), [service_id])
+        self.assertEqual(order.items.get().service_id, service_id)

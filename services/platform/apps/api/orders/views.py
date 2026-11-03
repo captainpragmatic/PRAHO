@@ -52,9 +52,6 @@ from apps.orders.services import OrderCreateData, OrderService, StatusChangeData
 from apps.orders.vat_rules import CustomerVATInfo, OrderVATCalculator
 from apps.products.models import Product, ProductPrice
 from apps.promotions.engine import preview_cart
-from apps.provisioning.models import Service
-from apps.provisioning.service_models import Server
-from apps.provisioning.tasks import queue_service_provisioning
 
 from .serializers import (
     CartCalculationInputSerializer,
@@ -1193,75 +1190,6 @@ def order_detail(request: Request, customer: Customer, order_id: str) -> Respons
         return Response({"error": "Failed to load order"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-def _get_server_for_product_type(product_type: str, server_model: Any) -> tuple[Any | None, bool]:
-    """Resolve the best active provisioning server for a product type."""
-    server_type_map = {
-        "shared_hosting": "shared_hosting",
-        "vps": "vps_host",
-    }
-    mapped_server_type = server_type_map.get(product_type)
-    if mapped_server_type:
-        server = server_model.objects.filter(server_type=mapped_server_type, status="active").first()
-        if server:
-            return server, False
-
-    fallback_server = server_model.objects.filter(status="active").first()
-    return fallback_server, fallback_server is not None
-
-
-def _provision_confirmed_order_item(item: Any, customer: Any, order: Any) -> dict[str, Any]:
-    """Provision one confirmed order item and return API-safe result data."""
-    try:
-        if not item.product.default_service_plan:
-            logger.error(f"❌ Product {item.product.name} has no default_service_plan configured")
-            return {
-                "product": item.product.name,
-                "error": "Product has no default service plan configured",
-            }
-
-        username_suffix = str(uuid.uuid4()).replace("-", "")[:8]
-        username = f"{customer.id}_{username_suffix}"
-
-        server, used_fallback = _get_server_for_product_type(item.product.product_type, Server)
-        if server is None:
-            logger.error("No active provisioning server for %s", item.product.product_type)
-            return {"product": item.product.name, "error": "No provisioning server available"}
-        if used_fallback:
-            logger.warning("Using fallback server %s for %s", server.name, item.product_name)
-
-        service = Service.objects.create(
-            customer=customer,
-            service_plan=item.product.default_service_plan,
-            currency=order.currency,
-            status="pending",
-            service_name=item.product_name,
-            domain=item.domain_name or "",
-            username=username,
-            billing_cycle="monthly",
-            price=Decimal(item.unit_price_cents) / Decimal(100),
-            setup_fee_paid=item.setup_cents > 0,
-            server=server,
-            provisioning_data={
-                "order_id": str(order.id),
-                "order_number": order.order_number,
-                "order_item_id": str(item.id),
-                "config": item.config or {},
-            },
-        )
-
-        task_id = queue_service_provisioning(service)
-        logger.info(f"🚀 Service provisioning initiated for {item.product.name}")
-        return {
-            "product": item.product.name,
-            "service_id": str(service.id),
-            "status": "queued",
-            "task_id": task_id,
-        }
-    except Exception as e:
-        logger.error(f"❌ Failed to provision service for {item.product.name}: {e}")
-        return {"product": item.product.name, "error": "Provisioning failed"}
-
-
 @api_view(["POST"])
 @authentication_classes([])  # No DRF authentication - HMAC handled by middleware + secure_auth
 @permission_classes([AllowAny])
@@ -1583,29 +1511,13 @@ def confirm_order(request: Request, customer: Customer, order_id: str) -> Respon
                 verified_stripe_status,
             )
 
-            # Collect provisionable items inside the atomic block, but dispatch outside.
-            # C1 fix: Only collect items when status is "provisioning". High-value orders
-            # that land in "in_review" must NOT be provisioned until admin approves.
-            if order.status == "provisioning":
-                provisionable_items = [
-                    item
-                    for item in order.items.all()
-                    if item.product.product_type in {"shared_hosting", "vps", "dedicated_server"}
-                ]
-            else:
-                provisionable_items = []
-
-        # Trigger service provisioning AFTER the transaction commits
-        # to avoid dispatching work that references uncommitted data.
-        provisioning_results = [_provision_confirmed_order_item(item, customer, order) for item in provisionable_items]
-
         return Response(
             {
                 "success": True,
                 "order_id": str(order.id),
                 "order_number": order.order_number,
                 "status": order.status,
-                "provisioning": provisioning_results,
+                "provisioning": [],  # Canonical confirmation owns line fulfilment; detail exposes its progress.
             }
         )
 

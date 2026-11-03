@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Card order confirmation uses the order line's existing Service and canonical fulfilment (#839), preventing duplicate unlinked Services and generic provisioning jobs when a webhook is delayed. Failed-Service pages direct staff to review the order line or native provisioning history, including when diagnostics are empty.
 - **Node deploys get past their first playbook on native hosts.** The Platform and worker units hide `/home` (`ProtectHome=yes`), and Ansible's SSH control-path directory defaults to `~/.ansible/cp` whatever `ANSIBLE_HOME` says, so every playbook failed before reaching the node. The directory now lives under `ANSIBLE_HOME`. A failed SSH transition also records Ansible's own error line instead of only a generic message.
 - **The deployment page follows a queued operation.** After Re-deploy, Retry or Destroy, the page keeps refreshing and shows "Queued: <operation>" until the worker starts it (for at most 15 minutes), instead of showing the old status until a manual reload.
 - **A failed deploy no longer keeps a deleted server's id and addresses.** When cleanup deletes the server it just created, the deployment's server id and IP addresses are cleared with it, as teardown already did.

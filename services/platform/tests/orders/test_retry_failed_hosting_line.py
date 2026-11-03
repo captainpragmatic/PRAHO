@@ -236,12 +236,13 @@ class ServiceActivateRefusesFailedTests(RetryFailedLineCase):
 
     def test_activate_does_not_revive_a_failed_service_and_points_to_its_line(self) -> None:
         """service_activate accepted failed (the FSM allows it) with no cancellation or suspension check."""
-        self.assertEqual(self.activate(), ["A failed service can't be activated here; retry its order line instead."])
+        self.assertEqual(self.activate(), ["A failed service can't be activated here; review its order line."])
 
     def test_a_failed_service_with_no_failed_line_is_not_sent_to_one(self) -> None:
         """The legacy API confirm path fails a Service with no failed line behind it."""
         OrderItem.objects.filter(pk=self.line.pk).update(provisioning_status="completed")
-        self.assertEqual(self.activate(), ["A failed service can't be activated; it was never set up."])
+        self.assertEqual(self.activate(), ["A failed service can't be activated here. "
+                                           "Review its provisioning history and native state before any repair."])
 
 
 class RetryOnTheOrderPageTests(RetryFailedLineCase):
@@ -306,6 +307,17 @@ class ServicePageShowsTheWayTests(RetryFailedLineCase):
         self.assertIn("Provisioning failed", html)
         self.assertIn(reverse("orders:order_detail", kwargs={"pk": self.order.pk}), html)
         self.assertNotIn("Add Admin Notes", html)
+
+    def test_unknown_native_outcome_points_to_review_without_promising_retry(self) -> None:
+        self.job.mark_attention("lost the node's answer")
+        self.assertEqual(VirtualminProvisioningJob.objects.get(pk=self.job.pk).status, "attention")
+        html = self.page()
+        self.assertIn("Review this service's failed provisioning on order", html)
+        self.assertNotIn("account for this service was not created", html)
+        self.assertNotIn("Retry it from its line", html)
+        self.assertIn(reverse("orders:order_detail", kwargs={"pk": self.order.pk}), html)
+        self.assertTrue(retry_line_for_staff(self.line.pk, actor=self.manager).is_err())
+        self.assertEqual(VirtualminProvisioningJob.objects.get(pk=self.job.pk).status, "attention")
 
     def test_a_service_failed_by_cancellation_says_so_and_offers_no_retry(self) -> None:
         Order.objects.filter(pk=self.order.pk).update(status="cancelled")
