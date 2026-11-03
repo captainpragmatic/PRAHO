@@ -385,6 +385,9 @@ class VirtualminAccount(models.Model):
 
     # Resource limits
     disk_quota_mb = models.PositiveIntegerField(null=True, blank=True, verbose_name=_("Disk Quota (MB)"))
+    effective_disk_quota_mb = models.PositiveIntegerField(
+        null=True, blank=True, help_text=_("Desired native cap including headroom; not proof of kernel enforcement")
+    )
     bandwidth_quota_mb = models.IntegerField(
         null=True, blank=True, verbose_name=_("Bandwidth Quota (MB)"), help_text=_("Use -1 for unlimited bandwidth")
     )

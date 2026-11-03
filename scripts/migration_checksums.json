@@ -129,6 +129,8 @@
     "services/platform/apps/provisioning/migrations/0026_retained_source_release.py": "08622e8139b34679ce06f9ddc57405d6d5aefcc54a879708506d69397e0a9262",
     "services/platform/apps/provisioning/migrations/0027_component_migration_review.py": "e2991347e4235a8acc4f37421f897e6e24547bd98259203eb04faae003215332",
     "services/platform/apps/provisioning/migrations/0028_component_migration_authority.py": "477a3bb24bf95c8496b282671db788e68c51cf1407851783af4861d61385ea49",
+    "services/platform/apps/provisioning/migrations/0029_virtualminaccount_effective_disk_quota_mb_and_more.py": "2280fc082868bb58acbb9c7bb1b70bf1692b75bcdbf950fbf4e64aeb8a45e6d5",
+    "services/platform/apps/provisioning/migrations/0030_legacy_assigned_hosting_limits.py": "7d6ed777ac1431f78ba32fff23648aef3cff6e3f0a669ec9494660ebec34a21f",
     "services/platform/apps/settings/migrations/0001_initial.py": "871979fab3cd12b6043a52acee99bef62a7007e2bf90ed6430411d6082cb2f24",
     "services/platform/apps/settings/migrations/0002_seed_selling_currency.py": "77f062e980f5edc970631b944dd0f0561c9fa059611c3f11f7c803c53a6bc16a",
     "services/platform/apps/settings/migrations/0003_setting_activation.py": "495c17809a3fb388e088f7c03cf4fc80508d38fde6040b963c92496dfe6d034c",

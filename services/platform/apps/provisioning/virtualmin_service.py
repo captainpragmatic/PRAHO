@@ -136,6 +136,7 @@ def create_domain_params(  # noqa: PLR0913  # One keyword per remote.cgi paramet
         "template": template,
         # The recovery seed, as the server description (8.x has no --comment).
         "desc": recovery_seed,
+        "no-email": "",
         # Explicit flags prevent mutable templates/defaults from introducing
         # customer Webmin, mail/DNS or additional plugins on a web destination.
         **dict.fromkeys(WEB_ONLY_VIRTUALMIN_FEATURES, ""),
@@ -614,7 +615,11 @@ class VirtualminProvisioningService:
                 password=account.get_password(),
                 template=account.template_name,
                 recovery_seed=account.get_recovery_seed(),
-                disk_quota_mb=account.disk_quota_mb,
+                disk_quota_mb=(
+                    account.effective_disk_quota_mb
+                    if account.effective_disk_quota_mb is not None
+                    else account.disk_quota_mb
+                ),
                 bandwidth_quota_mb=account.bandwidth_quota_mb,
             )
 
@@ -723,20 +728,28 @@ class VirtualminProvisioningService:
             return Err(str(e))
 
     def _apply_default_quotas(self, account: VirtualminAccount) -> None:
-        """Pin stored defaults; absent rows preserve Virtualmin's existing limits."""
-        from apps.settings.services import SettingsService  # noqa: PLC0415  # Cross-app: avoids circular imports
+        """Load the creation-time assignment; never resolve a live catalog/default here."""
+        from .hosting_limit_models import ServiceHostingLimits  # noqa: PLC0415 -- Policy boundary.
+        from .hosting_limit_policy import effective_disk_limit  # noqa: PLC0415 -- Policy boundary.
 
+        limits = ServiceHostingLimits.objects.using(account._state.db).filter(service_id=account.service_id).first()
+        if limits is None:
+            # Imported historical accounts have no authority to change their native caps.
+            return
         fields: list[str] = []
         if account.disk_quota_mb is None:
-            disk_default = SettingsService.get_stored_setting("virtualmin.domain_quota_default_mb")
-            if isinstance(disk_default, int) and not isinstance(disk_default, bool):
-                account.disk_quota_mb = disk_default
-                fields.append("disk_quota_mb")
+            account.disk_quota_mb = limits.disk_allowance_mib
+            fields.append("disk_quota_mb")
+        if account.effective_disk_quota_mb is None:
+            account.effective_disk_quota_mb = (
+                effective_disk_limit(account.disk_quota_mb)
+                if account.disk_quota_mb == limits.disk_allowance_mib
+                else account.disk_quota_mb
+            )
+            fields.append("effective_disk_quota_mb")
         if account.bandwidth_quota_mb is None:
-            bandwidth_default = SettingsService.get_stored_setting("virtualmin.bandwidth_quota_default_mb")
-            if isinstance(bandwidth_default, int) and not isinstance(bandwidth_default, bool):
-                account.bandwidth_quota_mb = bandwidth_default
-                fields.append("bandwidth_quota_mb")
+            account.bandwidth_quota_mb = limits.bandwidth_allowance_mib
+            fields.append("bandwidth_quota_mb")
         if fields:
             account.save(update_fields=[*fields, "updated_at"])
 
@@ -767,7 +780,10 @@ class VirtualminProvisioningService:
             )
 
         # Check disk space if quota specified
-        if account.disk_quota_mb and health_result.is_ok():
+        requested_mb = (
+            account.effective_disk_quota_mb if account.effective_disk_quota_mb is not None else account.disk_quota_mb
+        )
+        if requested_mb and health_result.is_ok():
             server_info = health_result.unwrap()
             # test_connection() wraps the info response under "data".
             server_data = server_info.get("data", server_info)
@@ -777,10 +793,10 @@ class VirtualminProvisioningService:
                     "⚠️ [VirtualminService] Server %s free disk space is unknown; skipping disk capacity check",
                     account.server.hostname,
                 )
-            elif available_mb < account.disk_quota_mb:
+            elif available_mb < requested_mb:
                 return Err(
                     _("Insufficient disk space: %(available)sMB available, %(requested)sMB requested")
-                    % {"available": available_mb, "requested": account.disk_quota_mb}
+                    % {"available": available_mb, "requested": requested_mb}
                 )
 
         return Ok(None)

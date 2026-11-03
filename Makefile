@@ -1395,6 +1395,10 @@ test-virtualmin-contract:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_contract.sh
 
+.PHONY: test-virtualmin-quota-sql
+test-virtualmin-quota-sql:
+	@$(PYTHON_SHARED) -m pytest -c /dev/null --rootdir="$(PWD)" -p no:django tests/virtualmin_lab/native/test_quota_sql.py -q
+
 test-virtualmin-workflows:
 	@echo "🧪 [Virtualmin lab] Workflow suite: PRAHO's services, jobs and tasks against the real nodes (needs make virtualmin-lab-up)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
