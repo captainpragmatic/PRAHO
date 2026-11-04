@@ -27,7 +27,12 @@ from django.utils import timezone
 from django.utils.translation import gettext
 
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
-from apps.infrastructure.ansible_service import AnsibleResult, get_ansible_service, node_admin_allowed_cidrs
+from apps.infrastructure.ansible_service import (
+    AnsibleResult,
+    get_ansible_service,
+    node_admin_allowed_cidrs,
+    uncovered_platform_egress,
+)
 from apps.infrastructure.audit_service import InfrastructureAuditContext, InfrastructureAuditService
 from apps.infrastructure.cloud_destroy_service import record_resource_ownership
 from apps.infrastructure.cloud_gateway import (
@@ -401,7 +406,7 @@ class NodeDeploymentService:
                 NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            getattr(logger, level)(f"[Deployment:{deployment.hostname}] {message}")
+            getattr(logger, level.lower())(f"[Deployment:{deployment.hostname}] {message}")
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
                 level=level.upper(),
@@ -439,6 +444,15 @@ class NodeDeploymentService:
                 InfrastructureAuditService.log_deployment_started(deployment, audit_ctx)
             except Exception:
                 logger.warning(f"[Deployment:{deployment.hostname}] Failed to log audit: deployment started")
+
+            if uncovered := uncovered_platform_egress():
+                warning = (
+                    f"Platform source addresses {', '.join(uncovered)} are missing from the node admin allowlist. "
+                    "The node firewall drops Platform's connections from these addresses, so a deploy that connects "
+                    "from one of them fails at hardening."
+                )
+                log_deployment("WARNING", warning)
+                logger.warning("⚠️ [Deployment] %s", warning)
 
             # Validate DNS config presence BEFORE any paid/external resource is created, so a
             # missing token/zone fails before the VM (#347 GAP 3; codex C2). Runs after the

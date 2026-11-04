@@ -1,6 +1,7 @@
 """An approved preview authorizes one fenced attempt, never an automatic replay."""
 
 import base64
+from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -8,9 +9,14 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
 
 from apps.common.credential_vault import CredentialData, get_credential_vault
-from apps.common.types import Ok
+from apps.common.types import Err, Ok
 from apps.infrastructure.node_teardown import close_node_admission
-from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from apps.provisioning.virtualmin_gateway import (
+    VirtualminAuthError,
+    VirtualminConfig,
+    VirtualminGateway,
+    VirtualminTransientError,
+)
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_security import connection_identity, record_inspection
 from apps.provisioning.virtualmin_security_execution import (
@@ -213,8 +219,10 @@ class SecurityExecutionTests(TestCase):
                 return_value=ADMIN_NETWORKS,
             ),
             patch(
-                "apps.provisioning.virtualmin_gateway.VirtualminGateway.test_connection",
-                return_value=Ok({"healthy": True}),
+                "apps.provisioning.virtualmin_gateway.VirtualminGateway.call",
+                return_value=Ok(
+                    SimpleNamespace(success=True, data={}, execution_time=0, server_hostname=self.server.hostname)
+                ),
             ),
         ):
             review = complete_hardening(run.pk, evidence)
@@ -237,8 +245,10 @@ class SecurityExecutionTests(TestCase):
                 return_value=ADMIN_NETWORKS,
             ),
             patch(
-                "apps.provisioning.virtualmin_gateway.VirtualminGateway.test_connection",
-                return_value=Ok({"healthy": True}),
+                "apps.provisioning.virtualmin_gateway.VirtualminGateway.call",
+                return_value=Ok(
+                    SimpleNamespace(success=True, data={}, execution_time=0, server_hostname=self.server.hostname)
+                ),
             ),
         ):
             review = complete_hardening(
@@ -248,39 +258,55 @@ class SecurityExecutionTests(TestCase):
         self.assertEqual(decision.action, "verify_policy")
         self.assertEqual(decision.actor, reviewer)
 
-    def test_failed_api_proof_does_not_release_exclusion_or_grant_verification(self):
+    def _api_failure_message(self, error):
         run = self.claim()
         evidence = self.hardened_evidence()
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.security_operation, run.pk)
+        stored = get_credential_vault().get_credential(
+            service_type="virtualmin", service_identifier=self.server.hostname, reason="Check test prerequisite"
+        )
+        self.assertTrue(stored.is_ok(), stored)
+        self.assertEqual(stored.unwrap()[0], self.server.api_username)
         with (
             patch(
                 "apps.provisioning.virtualmin_security_execution.node_admin_allowed_cidrs",
                 return_value=ADMIN_NETWORKS,
             ),
-            patch(
-                "apps.provisioning.virtualmin_gateway.VirtualminGateway.test_connection",
-                return_value=Ok({"healthy": False}),
-            ),
-            self.assertRaises(ValidationError),
+            patch("apps.provisioning.virtualmin_gateway.VirtualminGateway.call", return_value=Err(error)) as call,
+            self.assertRaises(ValidationError) as caught,
         ):
             complete_hardening(run.pk, evidence)
+        self.assertEqual(call.call_args.args, ("info",))
         self.server.refresh_from_db()
         self.assertEqual(self.server.security_operation, run.pk)
         self.assertEqual(self.server.security_state, "unreviewed")
+        self.assertIsNone(self.server.verified_security_review_id)
+        return caught.exception.messages[0]
+
+    def test_failed_api_proof_does_not_release_exclusion_or_grant_verification(self):
+        message = self._api_failure_message(VirtualminAuthError("HTTP 401"))
+        self.assertEqual(message, "The dedicated API identity did not authenticate after hardening.")
+
+    def test_unreachable_panel_is_not_reported_as_bad_credentials(self):
+        message = self._api_failure_message(VirtualminTransientError("IPv6 connect timed out"))
+        self.assertEqual(message, "The panel could not be reached after hardening (IPv6 connect timed out).")
+        self.assertNotIn("did not authenticate", message)
 
     def test_changed_identity_during_api_proof_cannot_attest_old_target(self):
         run = self.claim()
         evidence = self.hardened_evidence()
 
-        def changed():
+        def changed(*_args, **_kwargs):
             VirtualminServer.objects.filter(pk=self.server.pk).update(api_port=10001)
-            return Ok({"healthy": True})
+            return Ok(SimpleNamespace(success=True, data={}, execution_time=0, server_hostname=self.server.hostname))
 
         with (
             patch(
                 "apps.provisioning.virtualmin_security_execution.node_admin_allowed_cidrs",
                 return_value=ADMIN_NETWORKS,
             ),
-            patch("apps.provisioning.virtualmin_gateway.VirtualminGateway.test_connection", side_effect=changed),
+            patch("apps.provisioning.virtualmin_gateway.VirtualminGateway.call", side_effect=changed),
             self.assertRaises(ValidationError),
         ):
             complete_hardening(run.pk, evidence)

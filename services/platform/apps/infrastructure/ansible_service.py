@@ -105,6 +105,45 @@ def node_admin_allowed_cidrs() -> list[str]:
     return networks
 
 
+def platform_source_addresses() -> list[str]:
+    """Discover global source addresses selected by each family's routing table."""
+    addresses: list[str] = []
+    for family, destination in (
+        (socket.AF_INET, "1.1.1.1"),
+        (socket.AF_INET6, "2606:4700:4700::1111"),
+    ):
+        try:
+            with contextlib.closing(socket.socket(family, socket.SOCK_DGRAM)) as connection:
+                connection.connect((destination, 53))
+                address = ipaddress.ip_address(connection.getsockname()[0])
+                if address.is_global:
+                    addresses.append(str(address))
+        except OSError:
+            continue
+    return addresses
+
+
+def uncovered_platform_egress() -> list[str]:
+    """Warn about likely firewall drops; prerequisite validation owns invalid policy."""
+    if getattr(settings, "NODE_ADMIN_EGRESS_CHECK", True) is False:
+        return []
+    try:
+        allowed = node_admin_allowed_cidrs()
+    except ValueError:
+        return []
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for entry in allowed:
+        try:
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            continue
+    return [
+        address
+        for address in platform_source_addresses()
+        if not any(ipaddress.ip_address(address) in network for network in networks)
+    ]
+
+
 def find_ansible_playbook() -> str | None:
     """The ansible-playbook to run, or None.
 

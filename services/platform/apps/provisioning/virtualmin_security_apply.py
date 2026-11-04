@@ -15,7 +15,7 @@ from apps.common.ssh import parse_ssh_host_keys
 from apps.infrastructure.ansible_service import AnsibleService
 from apps.infrastructure.imported_backup_transport import imported_identity
 
-from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
+from .virtualmin_gateway import PanelCheckFailure, VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminServer
 from .virtualmin_security import connection_identity
 from .virtualmin_security_execution import complete_hardening, owns_hardening
@@ -92,6 +92,25 @@ def _reviewed_firewall_hooks(run: NodeSecurityExecution) -> dict[str, str]:
     return hooks
 
 
+def _panel_check_error(failure: PanelCheckFailure, server: VirtualminServer) -> ValidationError:
+    if failure.kind == "unreachable":
+        return ValidationError(
+            _(
+                "The panel at %(host)s:%(port)s could not be reached (%(detail)s); "
+                "interactive access has not been restricted"
+            )
+            % {"host": server.hostname, "port": server.api_port, "detail": failure.detail}
+        )
+    if failure.kind == "rejected":
+        return ValidationError(_("Dedicated API authentication failed; interactive access has not been restricted."))
+    if failure.kind == "refused":
+        return ValidationError(_("The panel refused the API check; interactive access has not been restricted"))
+    return ValidationError(
+        _("The panel check failed (%(detail)s); interactive access has not been restricted")
+        % {"detail": failure.detail}
+    )
+
+
 def apply_hardening(run: NodeSecurityExecution) -> NodeSecurityReview:
     from .virtualmin_security_tasks import collect_inspection  # noqa: PLC0415 -- collection and execution boundaries
 
@@ -145,9 +164,9 @@ def apply_hardening(run: NodeSecurityExecution) -> NodeSecurityReview:
         verify_ssl=False,
         cert_fingerprint=fingerprints[0],
     )
-    api = VirtualminGateway(config).test_connection()
-    if api.is_err() or api.unwrap().get("healthy") is not True:
-        raise ValidationError(_("Dedicated API authentication failed; interactive access has not been restricted."))
+    api = VirtualminGateway(config).check_api()
+    if api.is_err():
+        raise _panel_check_error(api.unwrap_err(), server)
     with transaction.atomic():
         locked = VirtualminServer.objects.select_for_update().get(pk=server.pk)
         if locked.security_operation != run.pk or connection_identity(locked) != run.expected_identity:

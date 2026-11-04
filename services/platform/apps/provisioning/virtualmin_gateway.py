@@ -7,6 +7,7 @@ Secure API integration for Virtualmin server management with multi-path authenti
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import logging
 import math
@@ -20,7 +21,8 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache, wraps
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
+from urllib.parse import urlsplit
 
 import requests
 from django.conf import settings
@@ -307,6 +309,25 @@ HTTP_BAD_REQUEST = 400
 # Response size limits (DoS protection)
 MAX_RESPONSE_SIZE_MB = 50
 MAX_RESPONSE_SIZE_BYTES = MAX_RESPONSE_SIZE_MB * 1024 * 1024
+
+
+@dataclass(frozen=True)
+class PanelCheckFailure:
+    """Preserve the reason a panel check could not prove API access."""
+
+    kind: Literal["unreachable", "rejected", "refused", "failed"]
+    detail: str
+
+
+def _transport_address_suffix(error: requests.exceptions.RequestException) -> str:
+    """Report the pinned IP from the failed request without resolving DNS again."""
+    request = getattr(error, "request", None)
+    try:
+        host = urlsplit(getattr(request, "url", None) or "").hostname
+        address = ipaddress.ip_address(host or "")
+    except ValueError:
+        return ""
+    return f" ({address}, IPv{address.version})"
 
 
 @dataclass(frozen=True)
@@ -1120,12 +1141,14 @@ class VirtualminGateway:
 
         except requests.exceptions.ConnectTimeout as e:
             raise VirtualminTransientError(
-                f"Connection timeout to {self.server.hostname}",
+                f"Connection timeout to {self.server.hostname}{_transport_address_suffix(e)}",
                 self.server.hostname,
                 retriability=Retriability.RETRIABLE,
             ) from e
         except requests.exceptions.ReadTimeout as e:
-            raise VirtualminTransientError(f"Read timeout from {self.server.hostname}", self.server.hostname) from e
+            raise VirtualminTransientError(
+                f"Read timeout from {self.server.hostname}{_transport_address_suffix(e)}", self.server.hostname
+            ) from e
         except requests.exceptions.SSLError as e:
             # SSLError subclasses ConnectionError, so it MUST be caught first —
             # otherwise a TLS/cert failure is misread as a transient connection
@@ -1138,7 +1161,7 @@ class VirtualminGateway:
             ) from e
         except requests.exceptions.ConnectionError as e:
             raise VirtualminTransientError(
-                f"Connection error to {self.server.hostname}: {e}", self.server.hostname
+                f"Connection error to {self.server.hostname}: {e}{_transport_address_suffix(e)}", self.server.hostname
             ) from e
         except OutboundSecurityError as e:
             raise VirtualminAPIError(
@@ -1262,6 +1285,28 @@ class VirtualminGateway:
             raise VirtualminAPIError(
                 f"Client error: HTTP {response.status_code}", self.server.hostname, http_status=response.status_code
             )
+
+    def check_api(self) -> Result[None, PanelCheckFailure]:
+        """Require affirmative API success while retaining the failure category."""
+        try:
+            result = self.call("info", correlation_id=f"health_check_{int(time.time())}")
+            if result.is_err():
+                error = result.unwrap_err()
+                kind: Literal["unreachable", "rejected", "refused", "failed"]
+                if isinstance(error, VirtualminTransientError):
+                    kind = "unreachable"
+                elif isinstance(error, VirtualminAuthError):
+                    kind = "rejected"
+                else:
+                    kind = "failed"
+                return Err(PanelCheckFailure(kind, str(error)), retriability=retriability_of(result))
+            response = result.unwrap()
+            if response.success is not True:
+                detail = str(response.data.get("error") or "API check was not successful")
+                return Err(PanelCheckFailure("refused", detail))
+            return Ok(None)
+        except Exception as error:
+            return Err(PanelCheckFailure("failed", str(error)))
 
     def test_connection(self) -> Result[dict[str, Any], str]:
         """

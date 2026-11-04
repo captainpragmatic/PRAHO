@@ -215,9 +215,18 @@ def complete_hardening(
     credentials = gateway._get_credentials(reason="Verify dedicated identity after node hardening")
     if credentials.is_err() or credentials.unwrap()[0] != server.api_username:
         raise ValidationError(_("The durable API credential does not match the reviewed dedicated identity."))
-    api = gateway.test_connection()
-    if api.is_err() or api.unwrap().get("healthy") is not True:
-        raise ValidationError(_("The dedicated API identity did not authenticate after hardening."))
+    api = gateway.check_api()
+    if api.is_err():
+        failure = api.unwrap_err()
+        if failure.kind == "unreachable":
+            raise ValidationError(
+                _("The panel could not be reached after hardening (%(detail)s).") % {"detail": failure.detail}
+            )
+        if failure.kind == "rejected":
+            raise ValidationError(_("The dedicated API identity did not authenticate after hardening."))
+        if failure.kind == "refused":
+            raise ValidationError(_("The panel refused the API check after hardening."))
+        raise ValidationError(_("The panel check failed after hardening (%(detail)s).") % {"detail": failure.detail})
     with transaction.atomic():
         server = VirtualminServer.objects.select_for_update().get(pk=server.pk)
         if server.security_operation != token or evidence["identity"] != connection_identity(server):

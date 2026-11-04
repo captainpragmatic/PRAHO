@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from apps.common.credential_vault import CredentialAccessLog, CredentialData, CredentialVault
 from apps.common.outbound_http import OutboundPolicy, OutboundSecurityError
-from apps.common.types import Err, Retriability, retriability_of
+from apps.common.types import Err, Ok, Retriability, retriability_of
 from apps.provisioning.virtualmin_gateway import (
     MAX_RESPONSE_SIZE_BYTES,
     VirtualminAPIError,
@@ -22,6 +22,7 @@ from apps.provisioning.virtualmin_gateway import (
     VirtualminConfig,
     VirtualminGateway,
     VirtualminRateLimitedError,
+    VirtualminResponse,
     VirtualminTransientError,
     explicit_rejection,
     get_virtualmin_timeouts,
@@ -49,6 +50,73 @@ class VirtualminGatewayTransportCoverageTests(TestCase):
         self.addCleanup(sleeper.stop)
         result = SettingsService.update_setting("virtualmin.max_retries", 2)
         self.assertTrue(result.is_ok(), result)
+
+    def test_transport_errors_include_only_literal_pinned_addresses(self) -> None:
+        for exception_type, prefix, signal in (
+            (requests.exceptions.ConnectTimeout, "Connection timeout to", Retriability.RETRIABLE),
+            (requests.exceptions.ReadTimeout, "Read timeout from", Retriability.UNKNOWN),
+            (requests.exceptions.ConnectionError, "Connection error to", Retriability.UNKNOWN),
+        ):
+            for host, suffix in (
+                ("[2001:db8::1]", " (2001:db8::1, IPv6)"),
+                ("192.0.2.10", " (192.0.2.10, IPv4)"),
+                ("node.example.test", ""),
+            ):
+                with self.subTest(exception=exception_type.__name__, host=host):
+                    prepared = requests.Request("GET", f"https://{host}:10000/virtual-server/remote.cgi").prepare()
+                    failure = exception_type("fixture", request=prepared)
+                    with (
+                        patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=failure),
+                        self.assertRaises(VirtualminTransientError) as caught,
+                    ):
+                        self.gateway._make_request({"program": "info"}, 1)
+                    detail = ": fixture" if exception_type is requests.exceptions.ConnectionError else ""
+                    self.assertEqual(str(caught.exception), f"{prefix} {self.gateway.server.hostname}{detail}{suffix}")
+                    self.assertEqual(caught.exception.retriability, signal)
+
+    def test_check_api_preserves_typed_failures(self) -> None:
+        for error, kind in (
+            (VirtualminTransientError("connect timed out"), "unreachable"),
+            (VirtualminAuthError("HTTP 401"), "rejected"),
+            (VirtualminAuthorizationError("HTTP 403"), "rejected"),
+            (VirtualminAPIError("panel policy failed"), "failed"),
+            (VirtualminAPIError("Virtualmin call deadline exceeded"), "failed"),
+        ):
+            with self.subTest(error=error), patch.object(self.gateway, "call", return_value=Err(error)) as call:
+                result = self.gateway.check_api()
+                self.assertTrue(result.is_err())
+                self.assertEqual(result.unwrap_err().kind, kind)
+                self.assertEqual(result.unwrap_err().detail, str(error))
+                self.assertEqual(call.call_args.args, ("info",))
+                self.assertTrue(call.call_args.kwargs["correlation_id"].startswith("health_check_"))
+
+    def test_check_api_requires_affirmative_success(self) -> None:
+        for success in (True, False):
+            response = VirtualminResponse(
+                success=success,
+                data={"error": "policy refusal"} if not success else {},
+                raw_response="",
+                http_status=200,
+                execution_time=0.0,
+                program="info",
+                server_hostname=self.gateway.server.hostname,
+            )
+            with self.subTest(success=success), patch.object(self.gateway, "call", return_value=Ok(response)):
+                result = self.gateway.check_api()
+                if success:
+                    self.assertTrue(result.is_ok())
+                    self.assertIsNone(result.unwrap())
+                else:
+                    self.assertTrue(result.is_err())
+                    self.assertEqual(result.unwrap_err().kind, "refused")
+                    self.assertEqual(result.unwrap_err().detail, "policy refusal")
+
+    def test_check_api_unexpected_exception_is_failed(self) -> None:
+        with patch.object(self.gateway, "call", side_effect=RuntimeError("unexpected transport failure")):
+            result = self.gateway.check_api()
+        self.assertTrue(result.is_err())
+        self.assertEqual(result.unwrap_err().kind, "failed")
+        self.assertEqual(result.unwrap_err().detail, "unexpected transport failure")
 
     def test_dispatch_carries_credentials_parameters_and_per_call_timeout(self) -> None:
         sent: list[dict[str, object]] = []

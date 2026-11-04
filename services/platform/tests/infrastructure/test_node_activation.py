@@ -16,10 +16,48 @@ from django.test import TestCase
 
 from apps.common.types import Err, Ok
 from apps.infrastructure.registration_service import NodeRegistrationService
+from apps.provisioning.virtualmin_gateway import VirtualminAuthError, VirtualminTransientError
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_security import connection_identity
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment
 from tests.provisioning.test_node_security_policy import ADMIN_NETWORKS, OPERATOR_KEY, node_policy_evidence
+
+
+class ProvisionedAPIFailureTests(TestCase):
+    def _failure_message(self, error):
+        deployment = _create_deployment("pending")
+        service = NodeRegistrationService()
+        stored = Ok(("praho-api", "durable-fixture-password", {}))
+        fingerprint = Ok("a" * 64)
+        self.assertEqual(stored.unwrap()[:2], ("praho-api", "durable-fixture-password"))
+        self.assertEqual(len(fingerprint.unwrap()), 64)
+        with (
+            patch("apps.common.credential_vault.get_credential_vault") as vault,
+            patch.object(service, "_trusted_certificate_fingerprint", return_value=fingerprint) as pin,
+            patch("apps.provisioning.virtualmin_gateway.VirtualminGateway.call", return_value=Err(error)) as call,
+        ):
+            vault.return_value.get_credential.return_value = stored
+            result = service.verify_provisioned_api(deployment)
+        pin.assert_called_once_with(deployment)
+        self.assertEqual(call.call_args.args, ("info",))
+        self.assertTrue(result.is_err())
+        return deployment, result.unwrap_err()
+
+    def test_unreachable_panel_is_not_reported_as_bad_credentials(self):
+        deployment, message = self._failure_message(VirtualminTransientError("IPv6 connect timed out"))
+        self.assertEqual(
+            message,
+            f"The panel at {deployment.fqdn}:10000 could not be reached "
+            "(IPv6 connect timed out); root access has not been restricted",
+        )
+        self.assertNotIn("did not authenticate", message)
+
+    def test_rejected_panel_keeps_the_existing_authentication_message(self):
+        _, message = self._failure_message(VirtualminAuthError("HTTP 401"))
+        self.assertEqual(
+            message,
+            "The durable dedicated API credential did not authenticate; root access has not been restricted",
+        )
 
 
 class GeneratedNodeActivationTests(TestCase):

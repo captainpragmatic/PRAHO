@@ -86,9 +86,21 @@ class NodeRegistrationService:
             cert_fingerprint=fingerprint.unwrap(),
             timeout=get_virtualmin_config()["timeout"],
         )
-        result = VirtualminGateway(config).test_connection()
-        if result.is_err() or result.unwrap().get("healthy") is not True:
-            return Err("The durable dedicated API credential did not authenticate; root access has not been restricted")
+        result = VirtualminGateway(config).check_api()
+        if result.is_err():
+            failure = result.unwrap_err()
+            failure_messages = {
+                "unreachable": (
+                    f"The panel at {config.server.hostname}:{config.server.api_port} could not be reached "
+                    f"({failure.detail}); root access has not been restricted"
+                ),
+                "rejected": (
+                    "The durable dedicated API credential did not authenticate; root access has not been restricted"
+                ),
+                "refused": "The panel refused the API check; root access has not been restricted",
+                "failed": f"The panel check failed ({failure.detail}); root access has not been restricted",
+            }
+            return Err(failure_messages[failure.kind])
         return Ok(True)
 
     @staticmethod

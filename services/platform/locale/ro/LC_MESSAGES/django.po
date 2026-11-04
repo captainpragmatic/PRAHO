@@ -32200,3 +32200,36 @@ msgstr "Conturile așteptate de Platform lipseau din snapshot-ul nodului."
 #: templates/settings/system_status.html:35
 msgid "The node reported accounts that are not assigned in Platform. Review account discovery."
 msgstr "Nodul a raportat conturi care nu sunt atribuite în Platform. Verificați descoperirea conturilor."
+
+#: apps/provisioning/virtualmin_security_apply.py
+#, python-format
+msgid "The panel at %(host)s:%(port)s could not be reached (%(detail)s); interactive access has not been restricted"
+msgstr "Panoul de la %(host)s:%(port)s nu a putut fi contactat (%(detail)s); accesul interactiv nu a fost restricționat"
+
+#: apps/provisioning/virtualmin_security_apply.py
+msgid "The panel refused the API check; interactive access has not been restricted"
+msgstr "Panoul a refuzat verificarea API; accesul interactiv nu a fost restricționat"
+
+#: apps/provisioning/virtualmin_security_apply.py
+#, python-format
+msgid "The panel check failed (%(detail)s); interactive access has not been restricted"
+msgstr "Verificarea panoului a eșuat (%(detail)s); accesul interactiv nu a fost restricționat"
+
+#: apps/provisioning/virtualmin_security_execution.py
+#, python-format
+msgid "The panel could not be reached after hardening (%(detail)s)."
+msgstr "Panoul nu a putut fi contactat după securizare (%(detail)s)."
+
+#: apps/provisioning/virtualmin_security_execution.py
+msgid "The panel refused the API check after hardening."
+msgstr "Panoul a refuzat verificarea API după securizare."
+
+#: apps/provisioning/virtualmin_security_execution.py
+#, python-format
+msgid "The panel check failed after hardening (%(detail)s)."
+msgstr "Verificarea panoului a eșuat după securizare (%(detail)s)."
+
+#: apps/infrastructure/views.py
+#, python-format
+msgid "Platform source addresses %(addresses)s are missing from the node admin allowlist. The node firewall drops Platform's connections from these addresses, so a deploy that connects from one of them fails at hardening."
+msgstr "Adresele sursă ale Platform %(addresses)s lipsesc din lista de acces administrativ pentru noduri. Firewall-ul nodului blochează conexiunile Platform de la aceste adrese, așa că o instalare care se conectează de la una dintre ele eșuează la etapa de securizare."
