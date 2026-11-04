@@ -385,6 +385,19 @@ def test_full_hosting_checkout_is_a_required_browser_dependency() -> None:
     assert "if" not in guard
 
 
+def test_hosting_warning_browser_matrix_is_a_required_step() -> None:
+    steps = load_workflow(WORKFLOWS / "browser.yml")["jobs"]["browser-e2e"]["steps"]
+    matches = [step for step in steps if step.get("run") == "make test-portal-hosting-warnings-browser"]
+    assert len(matches) == 1
+    assert "if" not in matches[0] and not matches[0].get("continue-on-error")
+    makefile = (REPO / "Makefile").read_text()
+    assert "test-portal-hosting-warnings-browser: build-css" in makefile
+    assert "tests/browser/test_hosting_warning_surfaces.py $(HOSTING_WARNING_BROWSER_ARGS)" in makefile
+    uploads = [step for step in steps if str(step.get("uses", "")).startswith("actions/upload-artifact@")]
+    assert len(uploads) == 1
+    assert "output/playwright/hosting-warning-boundary/" in uploads[0]["with"]["path"]
+
+
 @pytest.mark.parametrize("upstream", ["success", "failure", "cancelled", "skipped"])
 def test_required_browser_guard_rejects_every_unsuccessful_full_checkout(upstream: str) -> None:
     guard = load_workflow(WORKFLOWS / "browser.yml")["jobs"]["browser-e2e"]["steps"][0]

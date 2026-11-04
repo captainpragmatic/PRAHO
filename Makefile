@@ -73,6 +73,7 @@ help:
 	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
 	@echo "  make test-portal-checkout-browser - Opt-in Chromium checkout boundary acceptance (Platform/Stripe doubled)"
+	@echo "  make test-portal-hosting-warnings-browser - English/Romanian warning, relief and preference browser checks"
 	@echo "  make test-hosting-plan-checkout-full - Real Portal/Platform payment journey (isolated PostgreSQL, synthetic provider)"
 	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp-bg)"
 	@echo "  make test-e2e-orm      - ORM E2E subset (requires the healthy owned stack)"
@@ -380,6 +381,11 @@ test-portal-server:
 CHECKOUT_BROWSER_ARGS ?=
 test-portal-checkout-browser: build-css
 	@$(PYTHON_PORTAL) -m pytest -o addopts= -m browser --no-cov -v tests/browser/test_plan_change_checkout.py $(CHECKOUT_BROWSER_ARGS)
+
+.PHONY: test-portal-hosting-warnings-browser
+HOSTING_WARNING_BROWSER_ARGS ?=
+test-portal-hosting-warnings-browser: build-css
+	@$(PYTHON_PORTAL) -m pytest -o addopts= -m browser --no-cov -v tests/browser/test_hosting_warning_surfaces.py $(HOSTING_WARNING_BROWSER_ARGS)
 
 # Real Portal password/session/HMAC + Platform/finance/webhook, synthetic provider only.
 # This target can create/drop only hosting_browser/test_hosting_browser on loopback PostgreSQL.

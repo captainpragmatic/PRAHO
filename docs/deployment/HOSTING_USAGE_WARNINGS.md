@@ -30,6 +30,14 @@ the boundary, held create/restore/migration during expiry, later credential
 readoption and disputed commercial authority. New archive work must not use an
 expiry-reduction exception.
 
+Run `make test-portal-hosting-warnings-browser` for the English/Romanian warning,
+raise and preference matrix at mobile, tablet and desktop widths. That gate uses
+real Portal views, forms, CSRF and templates with Platform response doubles.
+`make test-hosting-plan-checkout-full` exercises real Portal login, signed Platform
+APIs, webhook verification and settlement on an isolated local PostgreSQL fixture;
+Stripe/provider and initial native qualification remain explicit doubles. Both
+browser gates are required in CI and complement the actual native acceptance above.
+
 Confirm the hourly `virtualmin-usage-sync` publisher and five-minute
 `hosting-warning-deliveries` delivery schedule are registered by the existing
 scheduled-task setup. Confirm both active English and Romanian warning templates,
