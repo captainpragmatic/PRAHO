@@ -15,6 +15,7 @@ from django.utils.translation import gettext as _
 from django.views.decorators.http import require_GET
 
 from .addresses import address_bounds
+from .customer_matches import with_customer_matches
 from .forms import SecurityFilterForm
 from .models import SecurityAlert, SecurityDecision, SecuritySource
 from .permissions import can_manage_security, can_revoke_security, can_view_security
@@ -38,6 +39,8 @@ def _decision_rows(form: SecurityFilterForm) -> QuerySet[SecurityDecision]:
         rows = rows.filter(source=source)
     if scenario := form.cleaned_data.get("scenario"):
         rows = rows.filter(scenario__icontains=scenario)
+    if origin := form.cleaned_data.get("origin"):
+        rows = rows.filter(origin=origin)
     if scope := form.cleaned_data.get("scope"):
         rows = rows.filter(scope=scope)
     if address := form.cleaned_data.get("address"):
@@ -47,7 +50,9 @@ def _decision_rows(form: SecurityFilterForm) -> QuerySet[SecurityDecision]:
             network_start__lte=bounds.network_end,
             network_end__gte=bounds.network_start,
         )
-    return rows.order_by("expires_at", "source__hostname", "remote_id")
+    return with_customer_matches(rows, now).order_by(
+        "-recent_customer_match", "expires_at", "source__hostname", "remote_id"
+    )
 
 
 def _alert_rows(form: SecurityFilterForm) -> QuerySet[SecurityAlert]:
@@ -84,6 +89,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     form = SecurityFilterForm(parameters)
     kind = "alerts" if request.GET.get("kind") == "alerts" else "decisions"
     form.fields.pop("state" if kind == "alerts" else "simulated")
+    if kind == "alerts":
+        form.fields.pop("origin")
     rows = _alert_rows(form) if kind == "alerts" else _decision_rows(form)
     page = Paginator(rows, 25).get_page(request.GET.get("page"))
     parameters.pop("page", None)

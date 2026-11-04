@@ -20,9 +20,15 @@ class SecuritySourceManagementViewTests(TestCase):
 
     def data(self) -> dict[str, str]:
         return {
-            "kind": "portal", "transport": "local", "hostname": "localhost", "port": "0", "host_keys": "",
-            "installation_id": str(uuid4()), "configuration_digest": "b" * 64,
-            "sync_enabled": "on", "reason": "Enroll the independently qualified staging Portal installation",
+            "kind": "portal",
+            "transport": "local",
+            "hostname": "localhost",
+            "port": "0",
+            "host_keys": "",
+            "installation_id": str(uuid4()),
+            "configuration_digest": "b" * 64,
+            "sync_enabled": "on",
+            "reason": "Enroll the independently qualified staging Portal installation",
         }
 
     def test_enroll_and_edit_source_locally_without_a_host_call(self) -> None:
@@ -71,7 +77,9 @@ class SecuritySourceManagementViewTests(TestCase):
         self.assertEqual(self.client.get(url).status_code, 405)
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.admin)
-        self.assertEqual(client.post(url, {"generation": "1", "reason": "Replace physical installation"}).status_code, 403)
+        self.assertEqual(
+            client.post(url, {"generation": "1", "reason": "Replace physical installation"}).status_code, 403
+        )
         response = self.client.post(url, {"generation": "1", "reason": "Replace physical installation"})
         self.assertEqual(response.status_code, 302)
         source.refresh_from_db()

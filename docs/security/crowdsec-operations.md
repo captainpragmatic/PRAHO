@@ -1,9 +1,10 @@
-# CrowdSec foundation operations
+# CrowdSec operations and qualification
 
 Use when qualifying the opt-in host role from [ADR-0067](../ADRs/ADR-0067-crowdsec-independent-host-protection.md).
-This procedure prepares independent local detection and the read-only gateway.
-The Platform mirror, Security page, mutation receipts and replication are later
-deliveries in [the ledger](crowdsec-implementation.md).
+This procedure prepares independent local detection, restricted host management,
+the Platform mirror and Portal instrumentation. The
+[ledger](crowdsec-implementation.md) separates verified implementation from
+actual-host rollout acceptance.
 
 ## Prepare a reviewed host policy
 
@@ -100,7 +101,116 @@ An explicitly shared staging host may use `crowdsec_host_kind: portal`,
 `crowdsec_staging_local_source: true` and `crowdsec_local_reader_user` naming its
 existing nonroot Platform service account. This grants only no-argument execution
 of the same fixed helper through sudo. Node qualification refuses this local grant.
-Registering the source and Portal authentication instrumentation are later work.
+Register the source explicitly using the workflow below.
+
+The Portal service must already run as its isolated nonroot identity with private
+`/var/log/praho/portal` (0700). The role creates `portal-auth.jsonl` for that user
+(0600); rotation and its lock sidecar also stay private. Keep DNS records DNS-only
+and serve direct HTTPS. Caddy overwrites forwarding headers and strips incoming
+Cloudflare client-IP headers; Portal trusts only the enrolled proxy CIDRs.
+
+## Enable Platform reads and Portal instrumentation
+
+Enable each facility explicitly in the appropriate service environment. Values
+below are examples to enable a qualified staging installation; they are disabled
+by default. Paths name separately enrolled operator-owned key files, never keys
+in the repository.
+
+```dotenv
+# Platform only
+PRAHO_CROWDSEC_SYNC_ENABLED=true
+PRAHO_CROWDSEC_LOCAL_SOURCE_ENABLED=true
+PRAHO_CROWDSEC_SSH_PUBLIC_KEY_PATH=/etc/praho/keys/crowdsec.pub
+PRAHO_CROWDSEC_SSH_PRIVATE_KEY_PATH=/etc/praho/keys/crowdsec
+CROWDSEC_CUSTOMER_IP_OBSERVATIONS_ENABLED=true
+```
+
+The selected Django **staging** settings module authorizes local transport; an
+environment variable named `ENVIRONMENT` cannot authorize it in production.
+For staging, open `/security/` as an administrator, select **Enroll source**, use
+kind Portal, local transport, hostname `localhost`, port `0`, no SSH host keys,
+and the installation UUID/configuration digest emitted by the role. Leave the
+Virtualmin binding empty. In production use strictly enrolled SSH and keep local
+transport disabled. Node sources also require the matching persistent CrowdSec
+Virtualmin profile. No enrollment request connects to a host.
+
+The existing native deployment registers the task catalog. For an existing
+database, its `setup_scheduled_tasks --security-only` management command uses the
+normal deployment environment and registers all four host-security schedules.
+Minute work is claimed before queueing; restarting workers cannot create
+unlimited overlapping reads. Confirm decision freshness separately from alert
+catch-up. A three-minute stale report is visible on Security; a failed poll
+retains the last snapshot and reports degradation.
+
+Portal-only environment:
+
+```dotenv
+CROWDSEC_AUTH_EVENTS_ENABLED=true
+CROWDSEC_AUTH_LOG_PATH=/var/log/praho/portal/portal-auth.jsonl
+```
+
+Provision an independent `CROWDSEC_AUTH_PSEUDONYM_KEY` through the existing secret
+store. If absent, the writer uses a strongly domain-separated daily HMAC derived
+from Portal's Django secret. Never paste that key into a note, command output or
+proof document. Native environment filtering passes the Portal key to Portal;
+Platform node keys and business database credentials stay out of `.portal.env`.
+Native enablement refuses an alternate log path because acquisition is fixed.
+
+Exercise actual wrong-password, wrong-MFA and continued throttled requests, plus
+reset throttles. Check the private log contains only the six documented event
+fields and that the host produces local simulated alerts. Infrastructure/MFA
+store failures must produce unavailable responses without attack categories.
+Successful complete authentication records the signed client IP for all active
+memberships. Check export and anonymization against the observation table.
+Observation or log-write failures report degraded recording and preserve a valid
+login. Portal `/status/` exposes per-worker last-recording observations; it does
+not prove every worker or the complete detection/enforcement pipeline is ready.
+
+## Audited actions and scenario sharing
+
+After qualification, enable `PRAHO_CROWDSEC_ACTIONS_ENABLED=true` on Platform.
+Admins can create finite manual bans, replace the complete staff allowlist,
+manage sources and approve coverage. Support/managers can view and revoke;
+billing has no access. **Action history** links to each request's target results.
+New bans require fresh canonical enforcing health and qualified clocks. Simulation
+still permits repair/revocation; it refuses new manual and replicated bans.
+
+A timeout after dispatch is **unknown**. Keep the original request identity and
+read its receipt; never submit another ban just because its first response was
+lost. Missing receipts prove nothing. Earlier unresolved creates prevent claiming
+complete revoke/allowlist repair, even when no decision is visible yet. Per-target
+results distinguish verified, rejected, superseded, expired and unknown work.
+API removal and kernel removal are separate observations. An allowlist addition
+can remove an overlapping broader CIDR ban; inspect the affected decision IDs.
+
+Sharing additionally requires `PRAHO_CROWDSEC_REPLICATION_ENABLED=true` and an
+explicit current **Scenario sharing** approval on the source. Prepare bounded
+native proof JSON with these exact keys: `schema`, `installation_id`, `policy`,
+`acquisition_sha256`, `administrative_ssh`, `ssh_journal_unit`,
+`ssh_listener_port`, `http_listener_port`, `portal_http_qualified`,
+`qualification_sha256`, `ssh_exclusive_administrative`, `customer_sftp_excluded`.
+Use the role's complete canonical policy, hash the whole typed document with the
+contract's canonical JSON rules, and enter that SHA-256 as the evidence digest.
+No event samples, credentials or raw account identifiers belong in this document.
+`qualification_sha256` names independently retained actual-host qualification
+evidence, not a claimed package-install success.
+
+For administrative SSH, prove the exact journal unit/listener and that customer
+SFTP is excluded; both exclusion facts must be true. A journal/listener name alone
+does not prove that separation. Node approval also binds the current native
+security review and its physical installation UUID. Portal HTTP sharing needs its
+own qualified ingress evidence. Only the fixed SSH/CVE candidates may be selected;
+probing, Portal/Webmin authentication and customer SFTP remain local. Coverage
+withdrawal serializes with admission and stops queued copies. Configuration,
+generation, connection or review changes invalidate old authority.
+
+Original expiry remains fixed. Portal copies are capped at five minutes from
+their first Platform admission and never renewed. Copying is suspended when
+clocks are unqualified. A CRITICAL customer-IP warning prioritizes review without
+revoking the recorded ban. Revoke before retiring a source when removal is needed;
+retirement preserves independent host protection and history.
+
+## Console recovery
 
 For enforcement recovery, use the console to apply the reviewed simulation policy.
 The role stops the bouncer, removes its start permission and clears only owned ban
@@ -123,8 +233,11 @@ Repair the reviewed configuration and converge simulation before requalifying
 enforcement. An interrupted or failed simulation transition is not completed
 simulation; old kernel timers can remain until expiry or explicit recovery.
 
-Database identity is bound to a generated installation marker and the database's
-device/inode. Replacement or restore fails closed. Preserve the retired source's
-history and explicitly reenroll a new installation after inspection; the role
-does not regenerate identity during convergence. Do not delete identity files to
-make a mismatch disappear. No automatic reenrollment or fleet rollout is included.
+Database identity is bound to a generated installation marker and device/inode.
+A changed witness fails closed. Every replacement or restore requires source
+retirement and fresh installation enrollment, including VM/filesystem rollback
+that preserves those metadata. Filesystem witnesses cannot detect every in-place
+rollback. Keep restored sources disabled until requalified; preserve retired
+history/receipts and resolve pending operations before replacing an installation.
+Routine convergence does not regenerate identity. Do not delete identity files
+to make a mismatch disappear. No automatic reenrollment or fleet rollout is included.

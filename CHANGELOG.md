@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Audited host-security actions and approved scenario sharing (#767): administrators can issue finite bans, reconcile staff allowlists and approve qualified detections for copying. Support and managers can revoke decisions and their PRAHO copies. Per-target receipts preserve uncertain outcomes after timeouts; copies keep their original expiry, capped at five minutes on Portal hosts.
+
+- Portal host protection (#770): private daily-pseudonymous authentication events include continued middleware throttles, while infrastructure failures stay out of attack counts. Successful complete authentication records seven-day customer-IP observations with export and erasure support. Matching active bans appear first as CRITICAL on Security and keep their fixed expiry. Instrumentation, synchronization, actions and sharing require explicit enablement.
+
 - Staff Security page (#767): administrators, support and managers can filter recorded decisions and simulated alerts, with separate source freshness, detection and enforcement reports. The page reads Platform's database and uses the same role policy in desktop and mobile navigation.
 
 - Opt-in CrowdSec host protection (#767): guarded pinned installation, simulation by default, restricted read-only SSH summaries and a persistent optional Virtualmin qualification profile. The release-derived bouncer handles IPv4/IPv6 ranges, fixed expiry and failure recovery. Existing base-qualified nodes retain their policy; production enforcement requires fresh host/kernel qualification. See [the operations procedure](docs/security/crowdsec-operations.md).

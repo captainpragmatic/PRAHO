@@ -28,11 +28,25 @@ def _admin(request: HttpRequest) -> User:
     return actor
 
 
-def _render(request: HttpRequest, form: SourceEnrollmentForm, source: SecuritySource | None, *, status: int = 200, retire_form: SourceReasonForm | None = None) -> HttpResponse:
-    return render(request, "security/source_form.html", {
-        "page_title": _("Security source"), "form": form, "source": source,
-        "retire_form": retire_form or SourceReasonForm(initial={"generation": source.generation if source else 1}),
-    }, status=status)
+def _render(
+    request: HttpRequest,
+    form: SourceEnrollmentForm,
+    source: SecuritySource | None,
+    *,
+    status: int = 200,
+    retire_form: SourceReasonForm | None = None,
+) -> HttpResponse:
+    return render(
+        request,
+        "security/source_form.html",
+        {
+            "page_title": _("Security source"),
+            "form": form,
+            "source": source,
+            "retire_form": retire_form or SourceReasonForm(initial={"generation": source.generation if source else 1}),
+        },
+        status=status,
+    )
 
 
 @login_required
@@ -48,7 +62,13 @@ def source_edit(request: HttpRequest, source_id: UUID | None = None) -> HttpResp
             if source is None:
                 enroll_source(config, actor, reason=reason)
             else:
-                reconfigure_source(source.pk, config, actor, reason=reason, expected_generation=cast("int", form.cleaned_data["generation"]))
+                reconfigure_source(
+                    source.pk,
+                    config,
+                    actor,
+                    reason=reason,
+                    expected_generation=cast("int", form.cleaned_data["generation"]),
+                )
             return redirect("security:dashboard")
         except ValidationError as error:
             form.add_error(None, "; ".join(error.messages))
@@ -63,7 +83,12 @@ def source_retire(request: HttpRequest, source_id: UUID) -> HttpResponse:
     form = SourceReasonForm(request.POST)
     if form.is_valid():
         try:
-            retire_source(source.pk, actor, reason=cast("str", form.cleaned_data["reason"]), expected_generation=cast("int", form.cleaned_data["generation"]))
+            retire_source(
+                source.pk,
+                actor,
+                reason=cast("str", form.cleaned_data["reason"]),
+                expected_generation=cast("int", form.cleaned_data["generation"]),
+            )
             return redirect("security:dashboard")
         except ValidationError as error:
             form.add_error(None, "; ".join(error.messages))

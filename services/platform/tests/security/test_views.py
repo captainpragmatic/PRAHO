@@ -212,3 +212,13 @@ class SecurityStoredDataViewTests(TestCase):
         network = self.client.get("/security/", {"address": "::ffff:c633:6408/125"})
         self.assertIn("decision-2", network.content.decode())
         self.assertNotIn("decision-1", network.content.decode())
+
+    def test_decision_origin_is_visible_and_filterable(self) -> None:
+        native = self.decision(1, "198.51.100.8")
+        manual = self.decision(2, "198.51.100.9")
+        manual.origin = "cscli"
+        manual.save(update_fields=["origin"])
+        response = self.client.get("/security/", {"origin": "cscli"})
+        self.assertEqual([row.pk for row in response.context["security_page"]], [manual.pk])
+        self.assertContains(response, "cscli")
+        self.assertNotContains(response, native.scenario)

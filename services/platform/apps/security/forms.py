@@ -18,6 +18,7 @@ class SecurityFilterForm(forms.Form):
     source = forms.ModelChoiceField(queryset=SecuritySource.objects.none(), required=False, label=_("Source"))
     address = forms.CharField(max_length=64, required=False, label=_("IP address or network"))
     scenario = forms.CharField(max_length=200, required=False, label=_("Scenario"))
+    origin = forms.CharField(max_length=200, required=False, label=_("Origin"))
     scope = forms.ChoiceField(
         required=False,
         choices=[("", _("All scopes")), ("ip", _("IP addresses")), ("range", _("Networks"))],

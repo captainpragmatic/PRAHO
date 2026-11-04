@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Security actions" %}{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 [&_a]:inline-flex [&_a]:min-h-11 [&_a]:min-w-11 [&_a]:items-center [&_a]:px-2 [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base [&_input]:min-h-11 [&_select]:min-h-11 [&_textarea]:min-h-11">
+  <header><h1 class="text-2xl font-semibold text-slate-100">{% trans "Security actions" %}</h1><p class="mt-2 text-sm text-slate-400">{% trans "Recorded staff requests and approved scenario copies, with per-target outcomes." %}</p></header>
+  <form method="get" class="flex flex-wrap items-end gap-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
+    <div><label class="block text-sm text-slate-300" for="{{ filters.state.id_for_label }}">{{ filters.state.label }}</label>{{ filters.state }}{{ filters.state.errors }}</div>
+    {% trans "Apply filters" as filter_label %}{% button filter_label type="submit" variant="secondary" %}
+  </form>
+  <div class="min-w-0 overflow-x-auto rounded-xl border border-slate-700" tabindex="0" role="region" aria-label="{% trans 'Recorded security actions' %}">
+    <table class="w-full text-left text-sm text-slate-200">
+      <thead class="bg-slate-800"><tr><th class="px-4 py-3" scope="col">{% trans "Operation" %}</th><th class="px-4 py-3" scope="col">{% trans "Result" %}</th><th class="min-w-64 px-4 py-3" scope="col">{% trans "Reason" %}</th><th class="px-4 py-3" scope="col">{% trans "Recorded" %}</th></tr></thead>
+      <tbody class="divide-y divide-slate-700">
+      {% for row in summaries %}
+        <tr><td class="px-4 py-3"><a href="{% url 'security:action-detail' action_id=row.action.pk %}" class="text-blue-300 hover:text-blue-200">{% if row.action.kind == "ban" %}{% trans "Manual ban" %}{% elif row.action.kind == "revoke" %}{% trans "Revocation" %}{% elif row.action.kind == "allowlist" %}{% trans "Staff allowlist" %}{% else %}{% trans "Scenario copy" %}{% endif %}</a></td><td class="px-4 py-3">{{ row.label }}</td><td class="break-words px-4 py-3">{{ row.action.reason }}</td><td class="whitespace-nowrap px-4 py-3">{{ row.action.created_at|date:"SHORT_DATETIME_FORMAT" }}</td></tr>
+      {% empty %}<tr><td class="px-4 py-8 text-slate-400" colspan="4">{% trans "No matching actions" %}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <nav class="flex flex-wrap justify-between gap-4 text-sm text-slate-300" aria-label="{% trans 'Security action pages' %}">
+    <span>{% blocktrans with number=action_page.number total=action_page.paginator.num_pages %}Page {{ number }} of {{ total }}{% endblocktrans %}</span>
+    {% if action_page.has_previous %}<a href="?state={{ state|urlencode }}&amp;page={{ action_page.previous_page_number }}">{% trans "Previous" %}</a>{% endif %}
+    {% if action_page.has_next %}<a href="?state={{ state|urlencode }}&amp;page={{ action_page.next_page_number }}">{% trans "Next" %}</a>{% endif %}
+  </nav>
+  <a href="{% url 'security:dashboard' %}" class="text-sm text-blue-300 hover:text-blue-200">{% trans "Back to Security" %}</a>
+</div>
+{% endblock %}
