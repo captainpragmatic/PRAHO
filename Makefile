@@ -531,7 +531,44 @@ coverage-portal-union:
 coverage: coverage-platform coverage-platform-packages coverage-portal
 	@echo "✅ Coverage measured for both services."
 
-.PHONY: test-deploy test-deploy-docker test-ssh test-ssh-docker ssh-harden
+.PHONY: test-deploy test-deploy-docker test-ssh test-ssh-docker test-crowdsec test-crowdsec-platform test-crowdsec-docker test-crowdsec-patch build-crowdsec-patched crowdsec-ssh crowdsec-adopt format-python ssh-harden
+export CROWDSEC_INVENTORY CROWDSEC_LIMIT CROWDSEC_POLICY
+
+crowdsec-ssh crowdsec-adopt:
+	@set -eu; \
+		: "$${CROWDSEC_INVENTORY:?Set CROWDSEC_INVENTORY to an explicit inventory file}"; \
+		: "$${CROWDSEC_LIMIT:?Set CROWDSEC_LIMIT to the reviewed host}"; \
+		: "$${CROWDSEC_POLICY:?Set CROWDSEC_POLICY to the reviewed YAML variables file}"; \
+		ANSIBLE_CONFIG=deploy/ansible/ansible.cfg $(VENV_DIR)/bin/ansible-playbook \
+			--inventory "$$CROWDSEC_INVENTORY" --limit "$$CROWDSEC_LIMIT" \
+			--extra-vars "@$$CROWDSEC_POLICY" deploy/ansible/playbooks/$(if $(filter crowdsec-ssh,$@),ssh-hardening,crowdsec).yml
+
+format-python:
+	@$(if $(FILE),$(VENV_DIR)/bin/ruff format $(FILE),$(error Provide FILE= with the Python paths to format))
+
+.PHONY: migration-checksums-extend
+migration-checksums-extend:
+	@$(PYTHON_SHARED) scripts/migration_checksums.py --base-ref "$(or $(BASE_REF),origin/master)" --extend
+
+test-crowdsec-platform:
+	@$(PYTHON_PLATFORM) -m pytest --nomigrations --ds=config.settings.test -o addopts= $(if $(FILE),$(FILE),tests/provisioning/test_crowdsec_qualification.py) -q
+
+test-crowdsec-patch:
+	@deploy/crowdsec/build-patched/build.sh test
+
+build-crowdsec-patched:
+	@deploy/crowdsec/build-patched/build.sh build
+
+test-crowdsec:
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_crowdsec*.py -m 'not docker' -q
+
+test-crowdsec-docker:
+	@if [ -z "$${CROWDSEC_BOUNCER_BINARY:-}" ] && [ "$${CROWDSEC_BOUNCER_REJECTED_PACKAGE:-0}" != 1 ] && \
+		{ [ ! -f build/crowdsec-patched/crowdsec-firewall-bouncer-amd64 ] || [ ! -f build/crowdsec-patched/crowdsec-firewall-bouncer-arm64 ]; }; then \
+		$(MAKE) build-crowdsec-patched; \
+	fi
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_crowdsec*_docker.py -m docker -q
+
 test-ssh:
 	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_ssh_hardening.py -q
 

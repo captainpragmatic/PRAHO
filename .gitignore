@@ -198,6 +198,8 @@ i18n-review-*.yaml
 # Deployment secrets (legacy — env files now live at project root)
 deploy/.env.*
 deploy/ansible/.env.*
+# Operator-reviewed inventories and policy files can contain private network data.
+/deploy/local/
 
 # QA session artifacts (logs, screenshots) are excluded; planning docs are tracked
 QA/logs/

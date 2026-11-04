@@ -1,0 +1,9 @@
+---
+- name: Read the installation-bound legacy protection selection
+  ansible.builtin.script: files/fail2ban_state.py inspect
+  register: praho_fail2ban_state_result
+  changed_when: false
+
+- name: Keep the persistent protection selection for this deployment
+  ansible.builtin.set_fact:
+    praho_fail2ban_state: "{{ praho_fail2ban_state_result.stdout | trim | from_json }}"

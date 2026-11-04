@@ -164,7 +164,7 @@ CACHES = {
 SESSION_ENGINE = "apps.common.session_store"  # DB sessions that merge concurrent writes (ADR-0055)
 
 # Structured JSON logging; files only when PORTAL_LOG_DIR is set (config/settings/logging_config.py)
-LOGGING = portal_logging(portal_log_dir())
+LOGGING = portal_logging(portal_log_dir(), auth_log_path=CROWDSEC_AUTH_LOG_PATH)
 
 PORTAL_HMAC_REQUIRE_ISOLATION = True
 # No default when deployed: an unset PORTAL_ID stops startup instead of signing as another portal.

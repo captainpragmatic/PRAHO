@@ -1,0 +1,18 @@
+type: leaky
+name: praho/portal-auth-throttle
+description: Continued Portal authentication requests refused by middleware
+filter: |
+  evt.Meta.log_type == 'praho_portal_auth' &&
+  evt.Meta.auth_event == 'throttle_refusal' &&
+  evt.Meta.auth_reason in ['login', 'mfa', 'reset']
+leakspeed: 10s
+capacity: 2
+groupby: evt.Meta.source_ip
+blackhole: 1m
+labels:
+  service: praho-portal
+  remediation: true
+  confidence: 3
+  spoofable: 0
+  behavior: http:bruteforce
+  label: Continued authentication throttling

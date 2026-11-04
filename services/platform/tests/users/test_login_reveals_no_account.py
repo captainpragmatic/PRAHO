@@ -25,7 +25,13 @@ from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestM
 
 PASSWORD = "Correct-horse-battery-9"
 WRONG = "Wrong-horse-battery-9"
-UNIFORM_API_REFUSAL = {"success": False, "error": "Invalid email or password"}
+# This signed API response remains identical for every credential refusal; Portal
+# keeps the fixed private category for detection and renders the same generic error.
+UNIFORM_API_REFUSAL = {
+    "success": False,
+    "error": "Invalid email or password",
+    "failure_category": "credentials",
+}
 UNIFORM_STAFF_REFUSAL = "Incorrect email or password."
 
 

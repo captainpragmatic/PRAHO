@@ -483,7 +483,15 @@ def _observed_peer(edge: str, trace: str) -> str:
 
 
 def _request(  # noqa: PLR0913  # Explicit transport, host, path and request data for routing checks.
-    container: str, address: str, host: str, path: str, method: str = "GET", headers: tuple[str, ...] = (), *, edge: str
+    container: str,
+    address: str,
+    host: str,
+    path: str,
+    method: str = "GET",
+    headers: tuple[str, ...] = (),
+    *,
+    edge: str,
+    scheme: str = "http",
 ) -> tuple[int, str, str]:
     trace = uuid4().hex
     args = [
@@ -500,11 +508,13 @@ def _request(  # noqa: PLR0913  # Explicit transport, host, path and request dat
         "--header",
         f"X-Test-Request: {trace}",
     ]
+    if scheme == "https":
+        args.append("--no-check-certificate")
     for header in headers:
         args.extend(("--header", header))
     if method == "POST":
         args.append("--post-data=probe")
-    result = _docker(*args, f"http://{address}{path}")
+    result = _docker(*args, f"{scheme}://{address}{path}")
     statuses = re.findall(r"HTTP/1\.[01] (\d+)", result.stderr)
     assert statuses, result.stdout + result.stderr
     return int(statuses[-1]), result.stdout.strip(), _observed_peer(edge, trace)
@@ -512,12 +522,36 @@ def _request(  # noqa: PLR0913  # Explicit transport, host, path and request dat
 
 @contextmanager
 def _running_edge(
-    name: str, tmp_path: Path, *, upstream_reads_body: bool = False, praho_env: str = "prod"
+    name: str,
+    tmp_path: Path,
+    *,
+    upstream_reads_body: bool = False,
+    praho_env: str = "prod",
+    forwarding_probe: bool = False,
 ) -> Iterator[tuple[str, str, str]]:
     suffix = uuid4().hex[:12]
     network, edge, peer = (f"routing-{suffix}-{part}" for part in ("net", "edge", "peer"))
     config = tmp_path / "Caddyfile"
     fixture = _http_fixture(_config(name, praho_env=praho_env))
+    if forwarding_probe:
+        for host in (PORTAL_HOST, PLATFORM_HOST):
+            fixture = fixture.replace("http://" + host + " {", "https://" + host + " {\n    tls internal")
+        placeholders = "|".join(
+            "{header." + name + "}"
+            for name in (
+                "X-Forwarded-For",
+                "X-Real-IP",
+                "X-Forwarded-Proto",
+                "X-Forwarded-Host",
+                "CF-Connecting-IP",
+                "CF-Connecting-IPv6",
+                "CF-Ray",
+                "True-Client-IP",
+                "Forwarded",
+                "X-Cluster-Client-IP",
+            )
+        )
+        fixture = fixture.replace('respond "portal {method} {uri}" 200', 'respond "' + placeholders + '" 200')
     if upstream_reads_body:
         # The default responder answers without reading the body, so the proxy never hits a
         # request_body cap. Django reads it; consuming it here is what makes the cap observable.
@@ -533,6 +567,8 @@ def _running_edge(
             edge,
             "--network",
             network,
+            "--network-alias",
+            PORTAL_HOST,
             "--publish",
             "0:80",
             "--add-host",
@@ -567,6 +603,16 @@ def _running_edge(
             time.sleep(0.2)
         else:
             raise AssertionError(_docker("logs", edge).stderr)
+        if forwarding_probe:
+            for _ in range(30):
+                tls_ready = _docker(
+                    "exec", peer, "wget", "--no-check-certificate", "-q", "-O", "-", f"https://{PORTAL_HOST}/status/"
+                )
+                if tls_ready.returncode == 0:
+                    break
+                time.sleep(0.2)
+            else:
+                raise AssertionError(_docker("logs", edge).stderr)
         port = _docker_ok("port", edge, "80/tcp").splitlines()[0].rsplit(":", 1)[1]
         yield edge, peer, f"host.docker.internal:{port}"
     finally:
@@ -578,7 +624,13 @@ def _running_edge(
 def test_staging_blocks_every_route_before_upstreams(tmp_path: Path, docker_daemon: None) -> None:
     with _running_edge("native", tmp_path, praho_env="staging") as (edge, peer, published):
         for host in (PORTAL_HOST, PLATFORM_HOST):
-            for path in ("/auth/login/", "/api/users/health/", "/status/", "/static/missing.css", "/integrations/webhooks/stripe/"):
+            for path in (
+                "/auth/login/",
+                "/api/users/health/",
+                "/status/",
+                "/static/missing.css",
+                "/integrations/webhooks/stripe/",
+            ):
                 denied, _, _ = _request(
                     peer, edge, host, path, headers=("X-Forwarded-For: 127.0.0.1", "X-Real-IP: 127.0.0.1"), edge=edge
                 )
@@ -783,3 +835,29 @@ def test_both_official_image_sources_failing_remains_a_test_failure(monkeypatch:
     with pytest.raises(AssertionError, match="registry unavailable"):
         _pull_once(IMAGE)
     assert not any(call[0] == "tag" for call in calls)
+
+
+@pytest.mark.docker
+@pytest.mark.parametrize("name", ["portal", "combined", "native"])
+def test_portal_forwarded_headers_over_real_https_are_owned_by_caddy(
+    name: str, tmp_path: Path, docker_daemon: None
+) -> None:
+    forged = (
+        "X-Forwarded-For: 203.0.113.55",
+        "X-Real-IP: 198.51.100.33",
+        "X-Forwarded-Proto: http",
+        "X-Forwarded-Host: attacker.invalid",
+        "CF-Connecting-IP: 203.0.113.77",
+        "CF-Connecting-IPv6: 2001:db8::bad",
+        "CF-Ray: forged-ray",
+        "True-Client-IP: 203.0.113.88",
+        "Forwarded: for=198.51.100.90;proto=http;host=attacker.invalid",
+        "X-Cluster-Client-IP: 203.0.113.99",
+    )
+    with _running_edge(name, tmp_path, forwarding_probe=True) as (edge, peer, _published):
+        for path in ("/login/", "/status/"):
+            status, body, remote = _request(
+                peer, PORTAL_HOST, PORTAL_HOST, path, headers=forged, edge=edge, scheme="https"
+            )
+            assert status == 200
+            assert body.split("|") == [remote, remote, "https", PORTAL_HOST, "", "", "", "", "", ""]

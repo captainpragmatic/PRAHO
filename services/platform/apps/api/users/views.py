@@ -71,6 +71,7 @@ from apps.users.credentials import check_password_locked, proof_passed
 from apps.users.mfa import (
     BrowserOrigin,
     MFAService,
+    MFAStoreUnavailable,
     staff_cannot_disable_mfa,
     staff_must_enrol,
     verify_login_second_factor,
@@ -144,6 +145,36 @@ def _charge_login_failure(forwarded_ip: str | None) -> None:
             logger.error("🔥 [Portal API Auth] Could not charge a failed login to its client budget")
 
 
+def _record_login_observation(user_id: int, forwarded_ip: str | None) -> dict[str, bool]:
+    state = {
+        "enabled": bool(getattr(settings, "CROWDSEC_CUSTOMER_IP_OBSERVATIONS_ENABLED", False)),
+        "recorded": False,
+        "degraded": False,
+    }
+    if not state["enabled"]:
+        return state
+    try:
+        from apps.security.customer_ips import (  # noqa: PLC0415  # Optional post-authentication boundary.
+            record_recent_customer_ip,
+        )
+
+        recorded = record_recent_customer_ip(user_id=user_id, ip=forwarded_ip)
+        state.update(recorded=recorded.customer_count > 0, degraded=not recorded.healthy)
+    except Exception:
+        logger.error("Customer IP observation recording is degraded")
+        state["degraded"] = True
+    return state
+
+
+def _portal_login_error(error: Exception) -> JsonResponse:
+    if isinstance(error, json.JSONDecodeError):
+        return JsonResponse({"success": False, "error": "Invalid JSON in request body"}, status=400)
+    if isinstance(error, MFAStoreUnavailable):
+        return store_unavailable_response()
+    logger.error("🔥 [Portal API Auth] Unexpected error (%s)", type(error).__name__)
+    return JsonResponse({"success": False, "error": "Authentication service error"}, status=500)
+
+
 @csrf_exempt  # nosemgrep: no-csrf-exempt — HMAC-authenticated inter-service endpoint
 @require_http_methods(["POST"])
 @require_portal_authentication
@@ -191,7 +222,9 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             _record_failed_attempt(email)
             logger.warning("⚠️ [Portal API Auth] Failed login — ip=%s", forwarded_ip or client_ip)
             _charge_login_failure(forwarded_ip)
-            return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
+            return JsonResponse(
+                {"success": False, "error": "Invalid email or password", "failure_category": "credentials"}, status=401
+            )
 
         # Every decision is re-read on the locked row, so a password change, lockout,
         # deactivation or 2FA enrolment that lands after authenticate() cannot be skipped,
@@ -228,6 +261,9 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         if refusal is not None:
             return _portal_login_refusal(request, user, refusal, forwarded_ip or client_ip, forwarded_ip)
 
+        # Own recording COMMIT after the successful session's transaction ended.
+        observation = _record_login_observation(user.pk, forwarded_ip)
+
         logger.info("✅ [Portal API Auth] User authenticated successfully — ip=%s", forwarded_ip or client_ip)
 
         # Return user data for portal service
@@ -246,6 +282,7 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
         return JsonResponse(
             {
                 "success": True,
+                "security_observation": observation,
                 "user": user_data,
                 "session_auth_hash": session_auth_hash,
                 **portal_sessions.deadlines(portal_session).as_payload(),
@@ -255,11 +292,8 @@ def portal_login_api(request: HttpRequest) -> JsonResponse:  # noqa: PLR0911 -- 
             }
         )
 
-    except json.JSONDecodeError:
-        return JsonResponse({"success": False, "error": "Invalid JSON in request body"}, status=400)
-    except Exception as e:
-        logger.error(f"🔥 [Portal API Auth] Unexpected error: {e}")
-        return JsonResponse({"success": False, "error": "Authentication service error"}, status=500)
+    except Exception as error:
+        return _portal_login_error(error)
 
 
 @public_api_endpoint
@@ -371,15 +405,21 @@ def _portal_login_refusal(
     """Answer a Portal login refused on the locked row, and charge it to the forwarded IP."""
     _charge_login_failure(forwarded_ip)
     if refusal == "second_factor":
-        return JsonResponse({"success": False, "error": "Invalid authentication code"}, status=401)
+        return JsonResponse(
+            {"success": False, "error": "Invalid authentication code", "failure_category": "second_factor"}, status=401
+        )
     if refusal == "mfa_not_enrolled":
         logger.warning("⚠️ [Portal API Auth] Login refused, staff account without 2FA — ip=%s", client_ip)
         _audit_refusal_after_correct_password(request, user, "mfa_not_enrolled", login_method="portal")
     else:
         reason = "locked" if user.is_account_locked() else "inactive or changed"
         logger.warning("⚠️ [Portal API Auth] Login rejected (%s) — ip=%s", reason, client_ip)
-    # The same answer as a wrong password: anything more specific would confirm the password.
-    return JsonResponse({"success": False, "error": "Invalid email or password"}, status=401)
+    # The browser always sees the same answer. Only the authenticated Portal
+    # consumes this fixed private category, so policy refusals never count as guesses.
+    category = "policy_refusal" if refusal == "mfa_not_enrolled" else "credentials"
+    return JsonResponse(
+        {"success": False, "error": "Invalid email or password", "failure_category": category}, status=401
+    )
 
 
 def _audit_refusal_after_correct_password(
@@ -889,16 +929,16 @@ def _identity_value(field: str, value: object) -> str:
 
 
 def _check_identity(locked: User, password: str, code: str, request: HttpRequest) -> str:
-    """The password, then the code when 2FA is on, checked as login checks them: passed, failed or throttled."""
+    """Return passed, throttled, or the privately verified failed factor."""
     if not check_password_locked(locked, password, source="step_up"):
-        return "failed"
+        return "credentials"
     if not locked.two_factor_enabled:
         return "passed"
     second = verify_login_second_factor(locked, code, request, source="step_up")
     if second.rate_limited:
         # The code was never checked, so this is no wrong answer; like login, it still counts.
         return "throttled"
-    return "passed" if second.accepted else "failed"
+    return "passed" if second.accepted else "second_factor"
 
 
 class _SessionGone(Exception):  # noqa: N818  # a control-flow signal, not an error condition
@@ -938,14 +978,14 @@ def portal_session_reauth_api(request: HttpRequest, user: User) -> Response:  # 
             if locked.is_account_locked():
                 return Response(_ACCOUNT_LOCKED, status=400)
             if locked.two_factor_enabled and not code:
-                return Response(_REAUTH_FAILED, status=400)
+                return Response({**_REAUTH_FAILED, "failure_category": "second_factor"}, status=400)
             outcome = _check_identity(locked, password, code, request)
             if outcome == "throttled":
                 return Response(_REAUTH_THROTTLED, status=429)
-            if outcome == "failed":
-                # Returned, not raised, so the failure count and this audit commit.
+            if outcome in {"credentials", "second_factor"}:
+                # This category stays inside the authenticated service response.
                 portal_sessions.record_step_up(session, confirmed=False)
-                return Response(_REAUTH_FAILED, status=400)
+                return Response({**_REAUTH_FAILED, "failure_category": outcome}, status=400)
             proof_passed(locked)
             if not portal_sessions.mark_reauth(session):
                 raise _SessionGone
@@ -1018,8 +1058,11 @@ def mfa_verify_api(request: HttpRequest, user: User) -> Response:
     )
     if result.status != "enabled" or result.user is None:
         code, message = _ENROLMENT_REFUSALS.get(result.status, _ENROLMENT_REFUSALS["incorrect"])
-        return Response({"success": False, "code": code, "error": str(message)}, status=status.HTTP_400_BAD_REQUEST)
-    logger.info(f"✅ [2FA] Two-factor authentication enabled for user: {result.user.email}")
+        answer = {"success": False, "code": code, "error": str(message)}
+        if result.failure_category is not None:
+            answer["failure_category"] = result.failure_category
+        return Response(answer, status=status.HTTP_400_BAD_REQUEST)
+    logger.info("✅ [2FA] Two-factor authentication enabled")
     return Response(
         {
             "success": True,
@@ -1062,7 +1105,9 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
             result["session_auth_hash"] = user.get_session_auth_hash()
             _keep_calling_session(request)(before, result["session_auth_hash"])
             return Response(result)
-        errors = serializer.errors
+        errors = dict(serializer.errors)
+        if serializer.failure_category is not None:
+            errors["failure_category"] = serializer.failure_category
     # Answered after the transaction ends, not raised inside it, so the failed attempt's audit
     # row is committed rather than rolled back with the change that did not happen.
     return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -1357,9 +1402,7 @@ def password_reset_confirm_api(request: HttpRequest) -> Response:
         try:
             result = serializer.save()
 
-            # Log successful password reset
-            user = serializer.validated_data["uid"]
-            logger.info(f"✅ [Password Reset] Password reset completed for user: {user.email}")
+            logger.info("✅ [Password Reset] Password reset completed")
 
             return Response(result)
 
@@ -1641,6 +1684,8 @@ def mfa_regenerate_backup_codes_api(request: HttpRequest, user: User) -> Respons
         if serializer.is_valid():
             codes = MFAService.generate_backup_codes(user, request, origin=_browser_origin(request))
             return Response({"success": True, "backup_codes": codes})
-        errors = serializer.errors
+        errors = dict(serializer.errors)
+        if serializer.failure_category is not None:
+            errors["failure_category"] = serializer.failure_category
     # As for disable: the refusal is answered outside the transaction so its audit row stays.
     return Response(errors, status=status.HTTP_400_BAD_REQUEST)

@@ -31,7 +31,9 @@ from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestM
 PASSWORD = "Original-secure123!"  # test fixture, not a credential
 WRONG = "Not-the-password-1!"  # test fixture, not a credential
 PATH = "/api/users/session/reauth/"
-FAILED = {"success": False, "code": "reauth_failed"}
+UNCLASSIFIED_FAILED = {"success": False, "code": "reauth_failed"}
+FAILED = {**UNCLASSIFIED_FAILED, "failure_category": "credentials"}
+FACTOR_FAILED = {**FAILED, "failure_category": "second_factor"}
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE, HMAC_ALLOW_LEGACY_SECRET=True)
@@ -96,14 +98,14 @@ class ReauthTests(HMACTestMixin, TestCase):
         for password in (PASSWORD, WRONG):
             with self.subTest(password=password):
                 response = self._confirm(password=password)
-                self.assertEqual((response.status_code, response.json()), (400, FAILED))
+                self.assertEqual((response.status_code, response.json()), (400, FACTOR_FAILED))
         self.assertEqual(self._failures(), 0)  # the password was never checked
         self.assertEqual(self._row().reauth_at, self.stale)
 
     def test_a_wrong_code_counts_and_answers_like_a_wrong_password(self) -> None:
         self._enrol()
         response = self._confirm(password=PASSWORD, mfa_code="000000")
-        self.assertEqual((response.status_code, response.json()), (400, FAILED))
+        self.assertEqual((response.status_code, response.json()), (400, FACTOR_FAILED))
         self.assertEqual(self._failures(), 1)
         self.assertEqual(self._row().reauth_at, self.stale)
 
@@ -128,7 +130,7 @@ class ReauthTests(HMACTestMixin, TestCase):
         code = self.backup_codes[0]
         self.assertEqual(self._confirm(password=PASSWORD, mfa_code=code).status_code, 200)
         PortalSession.objects.filter(pk=self.session.pk).update(reauth_at=self.stale)
-        self.assertEqual(self._confirm(password=PASSWORD, mfa_code=code).json(), FAILED)
+        self.assertEqual(self._confirm(password=PASSWORD, mfa_code=code).json(), FACTOR_FAILED)
 
     def test_a_session_ended_after_binding_opens_nothing_and_spends_no_code(self) -> None:
         self._enrol()
@@ -217,7 +219,7 @@ class ReauthTests(HMACTestMixin, TestCase):
     def test_a_malformed_password_is_refused_without_counting(self) -> None:
         for password in (None, 123, ["x"]):
             with self.subTest(password=password):
-                self.assertEqual(self._confirm(password=password).json(), FAILED)
+                self.assertEqual(self._confirm(password=password).json(), UNCLASSIFIED_FAILED)
         self.assertEqual(self._failures(), 0)
 
     def test_a_database_fault_is_an_outage_not_a_refusal(self) -> None:

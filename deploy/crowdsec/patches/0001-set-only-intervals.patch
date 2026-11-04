@@ -1,0 +1,504 @@
+--- a/cmd/root.go
++++ b/cmd/root.go
+@@ -261,6 +261,24 @@
+ 				if decisions == nil {
+ 					continue
+ 				}
++				if config.Mode == cfg.NftablesMode && config.Nftables.SetOnlyIntervals {
++					// Interval mode validates the entire stream frame before one
++					// atomic two-family commit. Deletions need only their ID;
++					// do not dereference optional display fields here.
++					for _, d := range decisions.Deleted {
++						backend.Delete(d)
++					}
++					for _, d := range decisions.New {
++						backend.Add(d)
++					}
++					if err := backend.Commit(); err != nil {
++						// LAPI already advanced its stream cursor. A nonzero exit
++						// forces a complete startup snapshot instead of losing
++						// this frame while falsely reporting a healthy consumer.
++						return fmt.Errorf("interval state needs startup resynchronization: %w", err)
++					}
++					continue
++				}
+ 
+ 				deleteDecisions(backend, decisions.Deleted, config)
+ 				addDecisions(backend, decisions.New, config)
+--- a/pkg/cfg/config.go
++++ b/pkg/cfg/config.go
+@@ -60,8 +60,9 @@
+ 	SupportedDecisionsTypes []string `yaml:"supported_decisions_types"`
+ 	// specific to nftables, following https://github.com/crowdsecurity/cs-firewall-bouncer/issues/74
+ 	Nftables struct {
+-		Ipv4 nftablesFamilyConfig `yaml:"ipv4"`
+-		Ipv6 nftablesFamilyConfig `yaml:"ipv6"`
++		SetOnlyIntervals bool                 `yaml:"set_only_intervals"`
++		Ipv4             nftablesFamilyConfig `yaml:"ipv4"`
++		Ipv6             nftablesFamilyConfig `yaml:"ipv6"`
+ 	} `yaml:"nftables"`
+ 	NftablesHooks []string `yaml:"nftables_hooks"`
+ 	PF            struct {
+--- a/pkg/nftables/nftables.go
++++ b/pkg/nftables/nftables.go
+@@ -31,6 +31,7 @@
+ 	DenyLog           bool
+ 	DenyLogPrefix     string
+ 	Hooks             []string
++	intervals         *intervalState
+ }
+ 
+ func NewNFTables(config *cfg.BouncerConfig) (*nft, error) {
+@@ -42,6 +43,14 @@
+ 		DenyLogPrefix: config.DenyLogPrefix,
+ 		Hooks:         config.NftablesHooks,
+ 	}
++	if config.Nftables.SetOnlyIntervals {
++		for _, ctx := range []*nftContext{ret.v4, ret.v6} {
++			if ctx.conn != nil && !ctx.setOnly {
++				return nil, fmt.Errorf("interval mode requires set-only ownership")
++			}
++		}
++		ret.intervals = newIntervalState()
++	}
+ 
+ 	return ret, nil
+ }
+@@ -252,6 +261,9 @@
+ 
+ func (n *nft) Commit() error {
+ 	defer n.reset()
++	if n.intervals != nil {
++		return n.commitIntervals()
++	}
+ 
+ 	if err := n.commitDeletedDecisions(); err != nil {
+ 		return err
+@@ -310,6 +322,12 @@
+ }
+ 
+ func (n *nft) ShutDown() error {
++	if n.intervals != nil {
++		// Keep kernel-enforced absolute timeouts across normal stops and
++		// failed-frame restarts. Simulation explicitly clears the owned
++		// sets after stopping; a fresh startup snapshot reconciles them.
++		return nil
++	}
+ 	if err := n.v4.shutDown(); err != nil {
+ 		return err
+ 	}
+--- a/pkg/nftables/nftables_context.go
++++ b/pkg/nftables/nftables_context.go
+@@ -42,6 +42,7 @@
+ 	chainName     string
+ 	tableName     string
+ 	setOnly       bool
++	intervalMode  bool
+ }
+ 
+ // convert a binary representation of an IP (4 or 16 bytes) to a string.
+@@ -69,6 +70,7 @@
+ 		chainName:     config.Nftables.Ipv4.Chain,
+ 		blacklists:    config.BlacklistsIpv4,
+ 		setOnly:       config.Nftables.Ipv4.SetOnly,
++		intervalMode:  config.Nftables.SetOnlyIntervals,
+ 		priority:      config.Nftables.Ipv4.Priority,
+ 		sets:          make(map[string]*nftables.Set),
+ 	}
+@@ -99,6 +101,7 @@
+ 		chainName:     config.Nftables.Ipv6.Chain,
+ 		blacklists:    config.BlacklistsIpv6,
+ 		setOnly:       config.Nftables.Ipv6.SetOnly,
++		intervalMode:  config.Nftables.SetOnlyIntervals,
+ 		priority:      config.Nftables.Ipv6.Priority,
+ 		sets:          make(map[string]*nftables.Set),
+ 	}
+@@ -141,6 +144,13 @@
+ 	}
+ 
+ 	set, err := c.conn.GetSetByName(c.table, c.blacklists)
++	if c.intervalMode {
++		if err != nil || !set.Interval || !set.HasTimeout || set.KeyType.Name != c.typeIPAddr.Name || set.IsMap || set.Dynamic || set.Constant || set.Anonymous {
++			return fmt.Errorf("interval mode requires existing address interval+timeout ban set")
++		}
++		c.sets[c.blacklists] = set
++		return nil
++	}
+ 	if err != nil {
+ 		log.Debugf("nftables: could not find ip%s blacklist '%s' in table '%s': creating...", c.version, c.blacklists, c.tableName)
+ 
+@@ -264,7 +274,7 @@
+ 	}
+ 
+ 	for _, t := range tables {
+-		if t.Name == c.tableName {
++		if t.Name == c.tableName && t.Family == c.tableFamily {
+ 			return t, nil
+ 		}
+ 	}
+--- /dev/null
++++ b/pkg/nftables/set_only_intervals.go
+@@ -0,0 +1,363 @@
++//go:build linux
++
++package nftables
++
++import (
++	"container/heap"
++	"fmt"
++	"net/netip"
++	"sort"
++	"strings"
++	"time"
++
++	"github.com/crowdsecurity/crowdsec/pkg/models"
++	"github.com/google/nftables"
++	"github.com/mdlayher/netlink"
++	"golang.org/x/sys/unix"
++)
++
++const maxIntervalActive = 10000
++
++type intervalDecision struct {
++	prefix                              netip.Prefix
++	until                               time.Time
++	origin, scenario, scope, kind, uuid string
++}
++
++type intervalSpan struct {
++	first, last netip.Addr
++	until       time.Time
++}
++
++type intervalState struct {
++	decisions map[int64]intervalDecision
++	retired   map[int64]time.Time
++}
++
++func newIntervalState() *intervalState {
++	return &intervalState{decisions: make(map[int64]intervalDecision), retired: make(map[int64]time.Time)}
++}
++
++func unsupportedInterval(d *models.Decision) bool {
++	if d == nil {
++		return false
++	}
++	if d.Type != nil && strings.ToLower(*d.Type) != "ban" {
++		return true
++	}
++	if d.Scope != nil {
++		scope := strings.ToLower(*d.Scope)
++		return scope != "ip" && scope != "range"
++	}
++	return false
++}
++
++func parseIntervalDecision(d *models.Decision, now time.Time) (intervalDecision, error) {
++	if d == nil || d.ID <= 0 || d.Value == nil || d.Duration == nil || d.Scope == nil || d.Type == nil {
++		return intervalDecision{}, fmt.Errorf("interval decision requires ID, address, duration, scope and type")
++	}
++	duration, err := time.ParseDuration(*d.Duration)
++	if err != nil {
++		return intervalDecision{}, fmt.Errorf("interval decision has invalid duration")
++	}
++	scope := strings.ToLower(*d.Scope)
++	if (scope != "ip" && scope != "range") || strings.ToLower(*d.Type) != "ban" {
++		return intervalDecision{}, fmt.Errorf("interval decision has unsupported scope or type")
++	}
++	var prefix netip.Prefix
++	if strings.Contains(*d.Value, "/") {
++		prefix, err = netip.ParsePrefix(*d.Value)
++		if err != nil || prefix != prefix.Masked() || prefix.Addr().Is4In6() || scope != "range" {
++			return intervalDecision{}, fmt.Errorf("interval decision requires canonical CIDR")
++		}
++	} else {
++		address, addressErr := netip.ParseAddr(*d.Value)
++		if addressErr != nil || address.Zone() != "" || scope != "ip" {
++			return intervalDecision{}, fmt.Errorf("interval decision has invalid IP")
++		}
++		address = address.Unmap()
++		prefix = netip.PrefixFrom(address, address.BitLen())
++	}
++	record := intervalDecision{prefix: prefix, until: now.Add(duration), scope: scope, kind: strings.ToLower(*d.Type), uuid: d.UUID}
++	if d.Origin != nil {
++		record.origin = *d.Origin
++	}
++	if d.Scenario != nil {
++		record.scenario = *d.Scenario
++	}
++	return record, nil
++}
++
++func sameIntervalPayload(a, b intervalDecision) bool {
++	a.until, b.until = time.Time{}, time.Time{}
++	return a == b
++}
++
++// prepare validates a whole batch and returns a new state. Neither caller state
++// nor firewall is changed on error. Deletions win over same-batch/delayed creates.
++func (s *intervalState) prepare(add, deleted []*models.Decision, now time.Time) (*intervalState, []intervalSpan, error) {
++	incoming := make(map[int64]intervalDecision)
++	for _, d := range add {
++		if unsupportedInterval(d) {
++			continue
++		}
++		record, err := parseIntervalDecision(d, now)
++		if err != nil {
++			return nil, nil, err
++		}
++		if original, exists := s.decisions[d.ID]; exists && !sameIntervalPayload(original, record) {
++			return nil, nil, fmt.Errorf("interval decision ID payload changed")
++		}
++		if original, exists := incoming[d.ID]; exists {
++			if !sameIntervalPayload(original, record) {
++				return nil, nil, fmt.Errorf("conflicting duplicate decision ID")
++			}
++			if original.until.Before(record.until) {
++				record.until = original.until
++			}
++		}
++		incoming[d.ID] = record
++	}
++	for _, d := range deleted {
++		if unsupportedInterval(d) {
++			continue
++		}
++		if d == nil || d.ID <= 0 {
++			return nil, nil, fmt.Errorf("interval deletion requires positive ID")
++		}
++	}
++	next := newIntervalState()
++	for id, record := range s.decisions {
++		if record.until.After(now) {
++			next.decisions[id] = record
++		}
++	}
++	for id, until := range s.retired {
++		if until.After(now) {
++			next.retired[id] = until
++		}
++	}
++	deletedIDs := make(map[int64]struct{})
++	for _, d := range deleted {
++		if unsupportedInterval(d) {
++			continue
++		}
++		// Known revocations are remembered only until their first admitted
++		// expiry. The real LAPI never reissues an expired/deleted decision ID.
++		// Unknown-ID deletions suppress same-batch creates without creating
++		// a permanent history or a new operator restart requirement.
++		record, known := next.decisions[d.ID]
++		if !known {
++			record, known = incoming[d.ID]
++		}
++		if known {
++			next.retired[d.ID] = record.until
++		}
++		delete(next.decisions, d.ID)
++		deletedIDs[d.ID] = struct{}{}
++	}
++	for id, record := range incoming {
++		// LAPI rounds remaining duration to a second and may serialize an
++		// active-query result after it elapsed. Such owners expire instead
++		// of discarding the other, still-valid decisions in this frame.
++		if !record.until.After(now) {
++			if original, exists := next.decisions[id]; exists {
++				next.retired[id] = original.until
++			}
++			delete(next.decisions, id)
++			continue
++		}
++		if _, deleted := deletedIDs[id]; deleted {
++			continue
++		}
++		if _, retired := next.retired[id]; retired {
++			continue
++		}
++		if original, exists := next.decisions[id]; exists {
++			// Durations shrink as LAPI's clock advances; a replay can shorten,
++			// but can never renew, the first admitted absolute expiry.
++			if original.until.Before(record.until) {
++				record.until = original.until
++			}
++		}
++		next.decisions[id] = record
++	}
++	if len(next.decisions) > maxIntervalActive {
++		return nil, nil, fmt.Errorf("interval active decision capacity reached")
++	}
++	return next, next.spans(), nil
++}
++
++type intervalEvent struct {
++	address netip.Addr // invalid is the exclusive boundary after the family's maximum
++	id      int64
++	start   bool
++	until   time.Time
++}
++
++type expiryOwner struct {
++	id    int64
++	until time.Time
++}
++type expiryHeap []expiryOwner
++
++func (h expiryHeap) Len() int                { return len(h) }
++func (h expiryHeap) Less(i, j int) bool      { return h[i].until.After(h[j].until) }
++func (h expiryHeap) Swap(i, j int)           { h[i], h[j] = h[j], h[i] }
++func (h *expiryHeap) Push(value interface{}) { *h = append(*h, value.(expiryOwner)) }
++func (h *expiryHeap) Pop() interface{} {
++	old := *h
++	value := old[len(old)-1]
++	*h = old[:len(old)-1]
++	return value
++}
++
++func prefixLast(prefix netip.Prefix) netip.Addr {
++	bytes := prefix.Addr().AsSlice()
++	for bit := prefix.Bits(); bit < len(bytes)*8; bit++ {
++		bytes[bit/8] |= 1 << (7 - bit%8)
++	}
++	last, _ := netip.AddrFromSlice(bytes)
++	return last
++}
++
++// spans is an endpoint sweep with a max-expiry heap: O(N log N), independent of
++// address-space size. Its output is disjoint and never spans an unowned address.
++func (s *intervalState) spans() []intervalSpan {
++	var result []intervalSpan
++	for _, ipv6 := range []bool{false, true} {
++		var events []intervalEvent
++		for id, record := range s.decisions {
++			if record.prefix.Addr().Is6() != ipv6 {
++				continue
++			}
++			events = append(events, intervalEvent{record.prefix.Addr(), id, true, record.until}, intervalEvent{prefixLast(record.prefix).Next(), id, false, record.until})
++		}
++		sort.Slice(events, func(i, j int) bool {
++			a, b := events[i].address, events[j].address
++			if !a.IsValid() {
++				return false
++			}
++			if !b.IsValid() {
++				return true
++			}
++			return a.Less(b)
++		})
++		active := make(map[int64]bool)
++		owners := &expiryHeap{}
++		for i := 0; i < len(events); {
++			first := events[i].address
++			j := i
++			for j < len(events) && events[j].address == first {
++				event := events[j]
++				active[event.id] = event.start
++				if event.start {
++					heap.Push(owners, expiryOwner{event.id, event.until})
++				}
++				j++
++			}
++			for owners.Len() > 0 && !active[(*owners)[0].id] {
++				heap.Pop(owners)
++			}
++			if first.IsValid() && owners.Len() > 0 && j < len(events) {
++				last := events[j].address.Prev()
++				if !events[j].address.IsValid() {
++					if ipv6 {
++						last = netip.MustParseAddr("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
++					} else {
++						last = netip.MustParseAddr("255.255.255.255")
++					}
++				}
++				until := (*owners)[0].until
++				if len(result) > 0 && result[len(result)-1].last.Next() == first && result[len(result)-1].until.Equal(until) {
++					result[len(result)-1].last = last
++				} else {
++					result = append(result, intervalSpan{first, last, until})
++				}
++			}
++			i = j
++		}
++	}
++	return result
++}
++
++func intervalElements(spans []intervalSpan, ipv6 bool, now time.Time) []nftables.SetElement {
++	var result []nftables.SetElement
++	for _, span := range spans {
++		if span.first.Is6() != ipv6 {
++			continue
++		}
++		timeout := span.until.Sub(now).Truncate(time.Millisecond)
++		// A zero nftables timeout means permanent. Omit the sub-millisecond
++		// remainder rather than rounding up and renewing an expired decision.
++		if timeout < time.Millisecond {
++			continue
++		}
++		end := make([]byte, span.last.BitLen()/8)
++		if next := span.last.Next(); next.IsValid() {
++			end = next.AsSlice()
++		}
++		result = append(result, nftables.SetElement{Key: span.first.AsSlice(), Timeout: timeout}, nftables.SetElement{Key: end, IntervalEnd: true})
++	}
++	return result
++}
++
++func (n *nft) commitIntervals() error {
++	next, spans, err := n.intervals.prepare(n.decisionsToAdd, n.decisionsToDelete, time.Now())
++	if err != nil {
++		return err
++	}
++	// A fresh connection holds the complete two-family transaction. Failed
++	// serialization cannot leave queued commands to leak into a later commit.
++	// At most 10,000 active owners produce fewer than 40,000 interval
++	// endpoints. The default ~212 KiB socket buffer cannot carry that bounded
++	// atomic batch. SetWriteBuffer uses SO_SNDBUFFORCE with CAP_NET_ADMIN,
++	// falling back to SO_SNDBUF; any setup/send failure exits for full resync.
++	conn, err := nftables.New(nftables.WithSockOptions(func(socket *netlink.Conn) error {
++		const bufferSize = 8 << 20
++		if err := socket.SetWriteBuffer(bufferSize); err != nil {
++			return err
++		}
++		raw, err := socket.SyscallConn()
++		if err != nil {
++			return err
++		}
++		var size int
++		var optionErr error
++		if err := raw.Control(func(fd uintptr) {
++			size, optionErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_SNDBUF)
++		}); err != nil {
++			return err
++		}
++		if optionErr != nil {
++			return optionErr
++		}
++		if size < bufferSize {
++			return fmt.Errorf("interval transaction send buffer below required %d bytes", bufferSize)
++		}
++		return nil
++	}))
++	if err != nil {
++		return fmt.Errorf("interval transaction socket setup failed: %w", err)
++	}
++	now := time.Now()
++	for _, ctx := range []*nftContext{n.v4, n.v6} {
++		if ctx.conn == nil {
++			continue
++		}
++		set := ctx.sets[ctx.blacklists]
++		conn.FlushSet(set)
++		elements := intervalElements(spans, ctx.tableFamily == nftables.TableFamilyIPv6, now)
++		for start := 0; start < len(elements); start += chunkSize {
++			end := min(start+chunkSize, len(elements))
++			if err := conn.SetAddElements(set, elements[start:end]); err != nil {
++				return err
++			}
++		}
++	}
++	if err := conn.Flush(); err != nil {
++		return fmt.Errorf("atomic interval-set replacement failed: %w", err)
++	}
++	n.intervals = next
++	return nil
++}

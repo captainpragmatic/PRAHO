@@ -594,6 +594,42 @@
     "cluster": "praho-cluster"
   },
   {
+    "name": "security-action-dispatch",
+    "func": "apps.security.action_tasks.dispatch_actions",
+    "schedule_type": "I",
+    "minutes": 1,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "security-history-retention",
+    "func": "apps.security.tasks.prune_security_history",
+    "schedule_type": "I",
+    "minutes": 60,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "security-replication-admission",
+    "func": "apps.security.replication.dispatch_replication",
+    "schedule_type": "I",
+    "minutes": 1,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "security-source-sync",
+    "func": "apps.security.tasks.dispatch_security_sync",
+    "schedule_type": "I",
+    "minutes": 1,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
     "name": "system_status_check",
     "func": "apps.common.tasks.system_status_check",
     "schedule_type": "I",

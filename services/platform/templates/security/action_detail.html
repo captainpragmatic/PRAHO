@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% trans "Security action result" %}{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 [&_a]:inline-flex [&_a]:min-h-11 [&_a]:min-w-11 [&_a]:items-center [&_a]:px-2 [&_summary]:min-h-11 [&_summary]:cursor-pointer [&_summary]:py-2">
+  <header>
+    <h1 class="text-2xl font-semibold text-slate-100">{% trans "Security action result" %}</h1>
+    <p class="mt-2 text-slate-200">{{ status_label }}</p>
+    <p class="mt-2 break-words text-sm text-slate-400">{{ action.reason }}</p>
+    {% if action.payload.payload.value %}<p class="mt-2 break-all font-mono text-slate-200">{{ action.payload.payload.value }}</p>{% endif %}
+    {% if action.decision %}<p class="mt-2 break-all font-mono text-slate-200">{{ action.decision.value }}</p>{% endif %}
+    <p class="mt-1 break-all font-mono text-xs text-slate-400">{{ action.pk }}</p>
+  </header>
+  {% if action.status == "unknown" %}<p class="text-amber-300" role="alert">{% trans "A dispatched operation may have applied. Read-only reconciliation is pending; an absent receipt does not prove that nothing happened." %}</p>{% endif %}
+  <div class="min-w-0 overflow-x-auto rounded-xl border border-slate-700" tabindex="0" role="region" aria-label="{% trans 'Per-target security action results' %}">
+    <table class="w-full text-left text-sm text-slate-200">
+      <thead class="bg-slate-800"><tr><th class="min-w-64 px-4 py-3" scope="col">{% trans "Source" %}</th><th class="min-w-64 px-4 py-3" scope="col">{% trans "Result" %}</th><th class="px-4 py-3" scope="col">{% trans "Expires" %}</th><th class="px-4 py-3" scope="col">{% trans "Recorded decision IDs" %}</th></tr></thead>
+      <tbody class="divide-y divide-slate-700">
+        {% for row in targets %}<tr><td class="break-all px-4 py-3">{{ row.target.source.hostname }}<span class="mt-1 block font-mono text-xs text-slate-400">{{ row.target.request_id }}</span></td><td class="px-4 py-3">{{ row.label }}<p class="mt-1 text-xs text-slate-400">{{ row.evidence_label }}</p></td><td class="whitespace-nowrap px-4 py-3">{{ row.target.expires_at|date:"SHORT_DATETIME_FORMAT"|default:"—" }}</td><td class="break-words px-4 py-3">{{ row.target.evidence.decision_ids|join:", "|default:"—" }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if action.payload.payload.cidrs %}
+  <details class="rounded-xl border border-slate-700 p-4"><summary class="text-slate-200">{% trans "Requested staff allowlist" %}</summary><ul class="mt-3 space-y-1 font-mono text-sm text-slate-300">{% for cidr in action.payload.payload.cidrs %}<li class="break-all">{{ cidr }}</li>{% endfor %}</ul></details>
+  {% endif %}
+  <p class="text-sm text-slate-400">{% trans "Verified removal refers to the local API. Packet-filter changes follow bouncer polling; detection and enforcement health are reported separately on Security." %}</p>
+  <a href="{% url 'security:dashboard' %}" class="text-sm text-blue-300 hover:text-blue-200">{% trans "Back to Security" %}</a>
+</div>
+{% endblock %}
