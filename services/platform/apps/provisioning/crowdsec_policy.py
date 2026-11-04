@@ -24,8 +24,8 @@ IPV6_VERSION = 6
 OWNED_SET_COUNT = 2
 TABLES = {"ip": "praho_crowdsec4", "ip6": "praho_crowdsec6"}
 # Shipped independently from the host facts; test_crowdsec_artifacts checks these bindings.
-EXPECTED_HELPER_SHA256 = "fbaa7c2bedb65199fa368bab91b4325ce2f0363f6d50b6ba5431a9a9105ea3ab"
-EXPECTED_ARTIFACT_LOCK_SHA256 = "9e6d084f14d8914833b6f933a3e8200532861e425303de60e274e4fbc527e46b"
+EXPECTED_HELPER_SHA256 = "a3e2e0ee01e29294ac52b04ad2ddd33134a9fdfaf6e0ebec31b20bb21d554704"
+EXPECTED_ARTIFACT_LOCK_SHA256 = "64ed5fc6cfa59cc056a2fcddec068742600545ae0e06ed897e800ff63ca8ab5a"
 EXPECTED_BOUNCER_SHA256 = {
     "amd64": "894c139f9477a0b614689011d4cf9b9da0be9f9a3e14a9cda4e92ac105a2caff",
     "arm64": "bd8f8466ba611ada38ace34bfcb46b4fe00a3f1666b5c7272ff9d0e7e3a62dc1",

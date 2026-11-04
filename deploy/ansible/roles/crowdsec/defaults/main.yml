@@ -9,6 +9,7 @@ crowdsec_gateway_public_key: ""
 crowdsec_expected_configuration_digest: ""
 crowdsec_local_reader_user: ""
 crowdsec_staging_local_source: false
+crowdsec_portal_user: "{{ portal_user | default('praho-portal') }}"
 crowdsec_ssh_acquisition: journalctl
 crowdsec_artifact_lock_path: "{{ role_path }}/../../../crowdsec/artifacts.lock.json"
 crowdsec_repository_root: "{{ role_path }}/../../../.."

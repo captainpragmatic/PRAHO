@@ -129,7 +129,7 @@
 
 - name: Refuse unreviewed acquisitions overrides fragments and Hub leaves
   ansible.builtin.script:
-    cmd: "files/preflight.py {{ crowdsec_hub_leaves | map(attribute='installed_path') | list | to_json | b64encode }}"
+    cmd: "files/preflight.py {{ ((crowdsec_hub_leaves | map(attribute='installed_path') | list) + (crowdsec_portal_rendered_files | map(attribute='path') | list if crowdsec_host_kind == 'portal' else [])) | to_json | b64encode }}"
     executable: /usr/bin/python3
   changed_when: false
   register: crowdsec_preflight
@@ -208,6 +208,54 @@
 - name: End the preview before any persistent host mutation
   ansible.builtin.meta: end_host
   when: crowdsec_policy_preview
+
+- name: Inspect the deployed Portal's private event directory
+  ansible.builtin.stat:
+    path: /var/log/praho/portal
+    follow: false
+  register: crowdsec_portal_log_directory
+  when: crowdsec_host_kind == 'portal'
+
+- name: Require the isolated Portal identity and its existing private directory
+  ansible.builtin.assert:
+    that:
+      - crowdsec_portal_log_directory.stat.isdir | default(false)
+      - not crowdsec_portal_log_directory.stat.islnk | default(false)
+      - crowdsec_portal_log_directory.stat.pw_name == crowdsec_portal_user
+      - crowdsec_portal_log_directory.stat.uid != 0
+      - crowdsec_portal_log_directory.stat.mode == '0700'
+    fail_msg: Deploy the isolated Portal service identity and private log directory before adopting Portal protection.
+  when: crowdsec_host_kind == 'portal'
+
+- name: Inspect an existing Portal authentication event file
+  ansible.builtin.stat:
+    path: /var/log/praho/portal/portal-auth.jsonl
+    follow: false
+  register: crowdsec_portal_event_file
+  when: crowdsec_host_kind == 'portal'
+
+- name: Refuse an unsafe existing Portal authentication event file
+  ansible.builtin.assert:
+    that:
+      - >-
+        not crowdsec_portal_event_file.stat.exists or
+        (crowdsec_portal_event_file.stat.isreg | default(false) and
+         not crowdsec_portal_event_file.stat.islnk | default(false) and
+         crowdsec_portal_event_file.stat.uid == crowdsec_portal_log_directory.stat.uid and
+         crowdsec_portal_event_file.stat.nlink == 1 and
+         crowdsec_portal_event_file.stat.mode == '0600')
+  when: crowdsec_host_kind == 'portal'
+
+- name: Create the Portal-owned bounded authentication event file
+  ansible.builtin.file:
+    path: /var/log/praho/portal/portal-auth.jsonl
+    state: touch
+    owner: "{{ crowdsec_portal_user }}"
+    group: "{{ crowdsec_portal_log_directory.stat.gid }}"
+    mode: '0600'
+    access_time: preserve
+    modification_time: preserve
+  when: crowdsec_host_kind == 'portal' and not crowdsec_portal_event_file.stat.exists
 
 - name: Freeze the previously applied runtime policy witnesses
   ansible.builtin.set_fact:

@@ -23,6 +23,13 @@ LEAF_COUNT = 14
 PARSER_COMPONENTS = 4
 SCENARIO_COMPONENTS = 3
 CLI_ARGUMENTS = 2
+PORTAL_FILES = frozenset(
+    {
+        "/etc/crowdsec/parsers/s01-parse/praho-portal-auth.yaml",
+        "/etc/crowdsec/scenarios/praho-portal-auth-bf.yaml",
+        "/etc/crowdsec/scenarios/praho-portal-auth-throttle.yaml",
+    }
+)
 
 
 class ArtifactVerificationError(ValueError):
@@ -224,11 +231,27 @@ def _verify_hub(hub: dict[str, object]) -> int:
     return len(leaves)
 
 
+def _verify_portal(root: Path, value: object) -> None:
+    block = _object(value)
+    files = block.get("files")
+    if set(block) != {"files"} or not isinstance(files, list) or len(files) != len(PORTAL_FILES):
+        _fail()
+    seen: set[str] = set()
+    for row in files:
+        item = _object(row)
+        path = _string(item.get("installed_path"))
+        if set(item) != {"installed_path", "sha256"} or path not in PORTAL_FILES or path in seen:
+            _fail()
+        _checked(root, "portal/" + Path(path).name, item["sha256"])
+        seen.add(path)
+
+
 def _verify(lock_path: Path) -> dict[str, object]:
     root = lock_path.resolve().parent
     lock = _object(json.loads(_bytes(lock_path), object_pairs_hook=_pairs))
     if type(lock.get("schema")) is not int or lock["schema"] != 1:
         _fail()
+    _verify_portal(root, lock["praho_portal"])
     package_count = _verify_repository(root, _object(lock["repository"]), _object(lock["packages"]))
     build = _object(lock["bouncer_build"])
     for field in ("patch", "recipe", "build_script"):

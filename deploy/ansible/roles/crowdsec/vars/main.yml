@@ -1,6 +1,17 @@
 ---
 # Render once on the controller, hash those exact bytes, and copy the same values.
-crowdsec_rendered_files:
+crowdsec_rendered_files: "{{ crowdsec_core_rendered_files + (crowdsec_portal_rendered_files if crowdsec_host_kind == 'portal' else []) }}"
+crowdsec_portal_rendered_files:
+  - path: /etc/crowdsec/parsers/s01-parse/praho-portal-auth.yaml
+    content: "{{ lookup('ansible.builtin.file', (crowdsec_artifact_lock_path | dirname) + '/portal/praho-portal-auth.yaml', rstrip=false) }}"
+    mode: '0644'
+  - path: /etc/crowdsec/scenarios/praho-portal-auth-bf.yaml
+    content: "{{ lookup('ansible.builtin.file', (crowdsec_artifact_lock_path | dirname) + '/portal/praho-portal-auth-bf.yaml', rstrip=false) }}"
+    mode: '0644'
+  - path: /etc/crowdsec/scenarios/praho-portal-auth-throttle.yaml
+    content: "{{ lookup('ansible.builtin.file', (crowdsec_artifact_lock_path | dirname) + '/portal/praho-portal-auth-throttle.yaml', rstrip=false) }}"
+    mode: '0644'
+crowdsec_core_rendered_files:
   - path: /etc/crowdsec/config.yaml
     content: "{{ lookup('ansible.builtin.template', role_path + '/templates/config.yaml.j2') }}"
     mode: '0644'

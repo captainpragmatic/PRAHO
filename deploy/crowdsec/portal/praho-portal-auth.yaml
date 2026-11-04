@@ -1,0 +1,24 @@
+name: praho/portal-auth
+description: Parse bounded Portal authentication events without account metadata
+filter: |
+  evt.Line.Labels.type == 'praho_portal_auth' &&
+  UnmarshalJSON(evt.Line.Raw, evt.Unmarshaled, 'praho') in ['', nil] &&
+  len(evt.Unmarshaled.praho) == 6 &&
+  evt.Unmarshaled.praho.schema == 1 &&
+  evt.Unmarshaled.praho.ip != nil &&
+  evt.Unmarshaled.praho.timestamp != nil &&
+  evt.Unmarshaled.praho.event in ['auth_failure', 'mfa_failure', 'password_reset_request', 'throttle_refusal', 'protection_degraded']
+onsuccess: next_stage
+statics:
+  - target: evt.StrTime
+    expression: evt.Unmarshaled.praho.timestamp
+  - meta: log_type
+    value: praho_portal_auth
+  - meta: service
+    value: praho-portal
+  - meta: source_ip
+    expression: evt.Unmarshaled.praho.ip
+  - meta: auth_event
+    expression: evt.Unmarshaled.praho.event
+  - meta: auth_reason
+    expression: evt.Unmarshaled.praho.reason

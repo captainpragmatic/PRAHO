@@ -1,7 +1,8 @@
-"""Bounded, read-only CrowdSec RPCs through one enrolled forced-command identity."""
+"""Bounded CrowdSec RPCs through one enrolled forced-command identity."""
 
 from __future__ import annotations
 
+import hashlib
 import ipaddress
 import json
 import math
@@ -13,7 +14,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import NoReturn, cast
 from uuid import UUID
 
@@ -31,6 +32,26 @@ SHA256_LENGTH = 64
 MAX_TIMESTAMP = 64
 WIRE_FIELDS = {"protocol", "request_id", "installation_id", "configuration_digest", "operation"}
 MAX_PENDING_RPCS = 16
+ACTION_OPERATIONS = {"ban_put", "revoke", "allowlist_replace"}
+MAX_STAFF_NETWORKS = 256
+ACTION_EVIDENCE = {
+    "succeeded": {"decision_present", "decision_absent", "allowlist_matches"},
+    "unknown": {"mutation_uncertain", "pending_create", "operation_pending", "reconciliation_unavailable"},
+    "superseded": {"revoked", "expired", "newer_revision", "decision_absent"},
+    "rejected": {
+        "simulation",
+        "protected_overlap",
+        "allowlisted_overlap",
+        "clock_unqualified",
+        "scenario_not_approved",
+        "source_loop",
+        "immutable_conflict",
+        "revision_conflict",
+        "allowlist_conflict",
+        "expired",
+        "capacity",
+    },
+}
 _PENDING = threading.BoundedSemaphore(MAX_PENDING_RPCS)
 
 
@@ -115,7 +136,203 @@ def _request_payload(operation: object, payload: dict[str, object]) -> None:
                 _fail()
         except ValueError as error:
             raise CrowdSecRPCError("CrowdSec RPC failed") from error
+    elif isinstance(operation, str) and operation in ACTION_OPERATIONS:
+        _action_payload(operation, payload)
     else:
+        _fail()
+
+
+def canonical_action_digest(operation: str, payload: dict[str, object]) -> str:
+    """Bind action identity independently from a later host configuration upgrade."""
+    _action_payload(operation, payload)
+    encoded = json.dumps(
+        {"operation": operation, "payload": payload},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _action_uuid(value: object) -> None:
+    try:
+        if not isinstance(value, str) or str(UUID(value)) != value:
+            _fail()
+    except ValueError as error:
+        raise CrowdSecRPCError("CrowdSec RPC failed") from error
+
+
+def _action_time(value: object) -> None:
+    _timestamp(value)
+    timestamp = cast("str", value)
+    try:
+        if datetime.fromisoformat(timestamp).astimezone(UTC).isoformat() != timestamp:
+            _fail()
+    except (ValueError, OverflowError) as error:
+        raise CrowdSecRPCError("CrowdSec RPC failed") from error
+
+
+def _action_address(scope: object, value: object, *, allow_mapped: bool = False) -> None:
+    if not isinstance(scope, str) or scope not in {"ip", "range"} or not isinstance(value, str) or "%" in value:
+        _fail()
+    try:
+        if scope == "range":
+            canonical = str(ipaddress.ip_network(value, strict=True))
+        else:
+            address = ipaddress.ip_address(value)
+            if not allow_mapped and isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+                _fail()
+            canonical = str(address)
+        if canonical != value:
+            _fail()
+    except ValueError as error:
+        raise CrowdSecRPCError("CrowdSec RPC failed") from error
+
+
+def _staff_payload(payload: dict[str, object]) -> None:
+    if set(payload) != {"revision", "cidrs"}:
+        _fail()
+    values = payload["cidrs"]
+    if not isinstance(values, list) or len(values) > MAX_STAFF_NETWORKS:
+        _fail()
+    if any(not isinstance(value, str) or "%" in value for value in values):
+        _fail()
+    try:
+        networks = [ipaddress.ip_network(cast("str", value), strict=True) for value in values]
+    except ValueError as error:
+        raise CrowdSecRPCError("CrowdSec RPC failed") from error
+    if values != sorted({str(network) for network in networks}) or any(network.prefixlen == 0 for network in networks):
+        _fail()
+
+
+def _action_payload(operation: str, payload: dict[str, object]) -> None:
+    if type(payload.get("revision")) is not int or not 0 < cast("int", payload["revision"]) < 2**63:
+        _fail()
+    if operation == "allowlist_replace":
+        _staff_payload(payload)
+        return
+    _action_uuid(payload.get("provenance_id"))
+    if operation == "revoke":
+        if set(payload) != {"revision", "provenance_id", "decision"}:
+            _fail()
+        decision = payload["decision"]
+        if decision is not None:
+            _summary_rows([decision], alerts=False)
+            mapping = cast("dict[str, object]", decision)
+            _action_address(mapping["scope"], mapping["value"], allow_mapped=True)
+            _action_time(mapping["created_at"])
+            _action_time(mapping["expires_at"])
+        return
+    if operation != "ban_put" or set(payload) != {
+        "revision",
+        "provenance_id",
+        "kind",
+        "scope",
+        "value",
+        "expires_at",
+        "source",
+    }:
+        _fail()
+    _action_address(payload["scope"], payload["value"])
+    _action_time(payload["expires_at"])
+    source = payload["source"]
+    if payload["kind"] == "manual":
+        if source is not None:
+            _fail()
+    elif payload["kind"] == "replica":
+        _replica_source(source)
+    else:
+        _fail()
+
+
+def _replica_source(source: object) -> None:
+    if not isinstance(source, dict) or set(source) != {
+        "installation_id",
+        "decision_id",
+        "scenario",
+        "configuration_digest",
+    }:
+        _fail()
+    _action_uuid(source["installation_id"])
+    if type(source["decision_id"]) is not int or not 0 < source["decision_id"] < 2**63:
+        _fail()
+    _label(source["scenario"])
+    digest = source["configuration_digest"]
+    if not isinstance(digest, str) or not re.fullmatch("[a-f0-9]{64}", digest):
+        _fail()
+
+
+def _validate_action_result(result: dict[str, object], request: dict[str, object]) -> None:
+    if set(result) != {
+        "status",
+        "evidence",
+        "request_id",
+        "operation",
+        "payload_digest",
+        "provenance_id",
+        "revision",
+        "decision_ids",
+        "expires_at",
+        "observed_at",
+    }:
+        _fail()
+    status, evidence = result["status"], result["evidence"]
+    if (
+        not isinstance(status, str)
+        or status not in ACTION_EVIDENCE
+        or not isinstance(evidence, str)
+        or evidence not in ACTION_EVIDENCE[status]
+    ):
+        _fail()
+    operation = result["operation"]
+    if not isinstance(operation, str) or operation not in ACTION_OPERATIONS:
+        _fail()
+    _action_uuid(result["request_id"])
+    if result["provenance_id"] is not None:
+        _action_uuid(result["provenance_id"])
+    if (operation == "allowlist_replace") != (result["provenance_id"] is None):
+        _fail()
+    if type(result["revision"]) is not int or not 0 < result["revision"] < 2**63:
+        _fail()
+    digest = result["payload_digest"]
+    if not isinstance(digest, str) or not re.fullmatch("[a-f0-9]{64}", digest):
+        _fail()
+    _action_identifiers(result["decision_ids"])
+    _action_time(result["observed_at"])
+    if result["expires_at"] is not None:
+        _action_time(result["expires_at"])
+    _action_result_binding(result, request, operation)
+
+
+def _action_identifiers(identifiers: object) -> None:
+    if not isinstance(identifiers, list) or len(identifiers) > MAX_DECISIONS:
+        _fail()
+    if any(type(value) is not int or not 0 < value < 2**63 for value in identifiers):
+        _fail()
+    if identifiers != sorted(set(identifiers)):
+        _fail()
+
+
+def _action_result_binding(result: dict[str, object], request: dict[str, object], operation: str) -> None:
+    payload = cast("dict[str, object]", request["payload"])
+    if request["operation"] == "receipt_get":
+        if result["request_id"] != payload["request_id"]:
+            _fail()
+    elif (
+        result["request_id"] != request["request_id"]
+        or operation != request["operation"]
+        or result["revision"] != payload["revision"]
+        or result["provenance_id"] != payload.get("provenance_id")
+        or result["payload_digest"] != canonical_action_digest(operation, payload)
+    ):
+        _fail()
+    if (
+        request["operation"] == "ban_put"
+        and result["expires_at"] is not None
+        and datetime.fromisoformat(cast("str", result["expires_at"]))
+        > datetime.fromisoformat(cast("str", payload["expires_at"]))
+    ):
         _fail()
 
 
@@ -270,7 +487,9 @@ def parse_response(raw: bytes, request_raw: bytes) -> dict[str, object]:
         _validate_snapshot(result, request)
     elif request["operation"] == "receipt_get":
         if result != {"status": "unknown", "evidence": "no_receipt"}:
-            _fail()
+            _validate_action_result(result, request)
+    elif request["operation"] in ACTION_OPERATIONS:
+        _validate_action_result(result, request)
     else:
         _validate_health(result)
     return response

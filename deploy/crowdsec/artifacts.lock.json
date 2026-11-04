@@ -54,7 +54,7 @@
   "verified_at": "2026-11-03",
   "gateway": {
     "file": "deploy/ansible/roles/crowdsec/files/gateway.py",
-    "sha256": "fbaa7c2bedb65199fa368bab91b4325ce2f0363f6d50b6ba5431a9a9105ea3ab",
+    "sha256": "a3e2e0ee01e29294ac52b04ad2ddd33134a9fdfaf6e0ebec31b20bb21d554704",
     "protocol": 1
   },
   "stock_units": {
@@ -135,6 +135,22 @@
         "size": 3882168
       }
     }
+  },
+  "praho_portal": {
+    "files": [
+      {
+        "installed_path": "/etc/crowdsec/parsers/s01-parse/praho-portal-auth.yaml",
+        "sha256": "e89bdd69e82a9cf4a41605ed99eab72b9efb286bf1260e7fc984ea7fe1ff5c7a"
+      },
+      {
+        "installed_path": "/etc/crowdsec/scenarios/praho-portal-auth-bf.yaml",
+        "sha256": "77be3c259305768a0343bb01ce67c459a2ddb338cf73232a1c7f3189c5c68219"
+      },
+      {
+        "installed_path": "/etc/crowdsec/scenarios/praho-portal-auth-throttle.yaml",
+        "sha256": "9e6af7ffc90a2c389e48080b499c100a5cfe62b86a201d3a97cd4e1d8e81dac0"
+      }
+    ]
   },
   "hub": {
     "repository": "https://github.com/crowdsecurity/hub",

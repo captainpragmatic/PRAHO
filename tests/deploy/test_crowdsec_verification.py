@@ -29,6 +29,17 @@ def test_actual_archived_repository_signature_and_all_locked_rows_verify(verifie
     assert result == {"verified": True, "package_count": 4, "hub_leaf_count": 14}
 
 
+def test_changed_portal_detector_is_refused_before_host_mutation(verifier: ModuleType, tmp_path: Path) -> None:
+    directory = tmp_path / "artifacts"
+    shutil.copytree(ROOT / "deploy/crowdsec", directory)
+    path = directory / "artifacts.lock.json"
+    lock = json.loads(path.read_text())
+    detector = lock["praho_portal"]["files"][0]
+    (directory / "portal" / Path(detector["installed_path"]).name).write_text("unreviewed detector\n")
+    with pytest.raises(verifier.ArtifactVerificationError, match="verification"):
+        verifier.verify(path)
+
+
 def test_actual_key_fingerprint_must_match_the_anchor_not_just_the_lock_label(
     verifier: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
