@@ -95,6 +95,14 @@ class ComponentMigrationWorker(VirtualminMigrationService):
         transfer_selected_archive(self, migration, token)
 
     def _restore(self, migration: VirtualminMigration, token: UUID) -> None:
+        self._move(migration, token, "restoring")
+        from .hosting_limit_execution import (  # noqa: PLC0415
+            reserve_managed_migration,
+        )
+
+        reserved = reserve_managed_migration(migration)
+        if reserved.is_err():
+            raise ValueError(reserved.unwrap_err())
         self._move(migration, token, "restoring", restore_issued=True)
         prepared = run_target_operation(migration, token, "target_prepare")
         self._state(migration, token, target_domain_id=prepared["target_domain_id"])
@@ -153,6 +161,13 @@ class ComponentMigrationWorker(VirtualminMigrationService):
         )
 
     def _activate(self, migration: VirtualminMigration, token: UUID) -> None:
+        from .hosting_limit_execution import (  # noqa: PLC0415 -- Current canonical-target policy completion barrier.
+            ensure_managed_limits,
+        )
+
+        limits = ensure_managed_limits(migration.account, migration=migration, native_server=migration.target_server)
+        if limits.is_err():
+            raise ValueError(limits.unwrap_err())
         with activation_guard(migration, token):
             if not migration.barrier_state.get("component_target_activation_issued"):
                 self._state(

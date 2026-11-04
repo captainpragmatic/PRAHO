@@ -39,10 +39,43 @@
           - node_fqdn | length > 0
         fail_msg: "node_fqdn is required: pass the node's fully qualified domain name"
 
+    - name: Require the managed Ubuntu and PHP baseline
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version == '26.04'
+          - php_default_version == '8.5'
+          - deployment_id is defined
+        fail_msg: Managed hosting installation requires Ubuntu 26.04 and distribution PHP 8.5.
+
     - name: Check if Virtualmin is already installed
       ansible.builtin.stat:
         path: /usr/share/webmin/virtual-server
       register: virtualmin_installed
+
+    - name: Require owned generated-node admission before first installation
+      ansible.builtin.assert:
+        that:
+          - praho_generated_node | default(false) | bool
+          - deployment_id | string is match('^[1-9][0-9]{0,18}$')
+      when: not virtualmin_installed.stat.exists
+
+    - name: Refuse occupied or ambiguous first-install nodes
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - |
+            from pathlib import Path
+            homes = Path('/home')
+            domains = Path('/etc/webmin/virtual-server/domains')
+            databases = Path('/var/lib/mysql')
+            assert not Path('/etc/praho-virtualmin-install').exists(), 'Prior installation requires explicit preparation'
+            assert not homes.exists() or not any(homes.iterdir()), 'Tenant or unknown homes exist'
+            assert not domains.exists() or not any(domains.iterdir()), 'Native domain inventory exists'
+            assert not databases.exists() or not any(databases.iterdir()), 'Database storage exists'
+      changed_when: false
+      when: not virtualmin_installed.stat.exists
 
     - name: Download Virtualmin install script
       ansible.builtin.get_url:
@@ -126,6 +159,70 @@
         path: /usr/share/webmin/virtual-server
       register: vmin_installed_check
 
+    - name: Install distribution PHP and classic quota tools
+      ansible.builtin.apt:
+        name: [php8.5-fpm, php8.5-cli, php8.5-mysql, quota]
+        state: present
+
+    - name: Install protected hosting policy adapters
+      ansible.builtin.import_tasks: virtualmin_hosting_tasks.yml
+
+    - name: Create database quota capability override directory
+      ansible.builtin.file:
+        path: /etc/systemd/system/mariadb.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+      when: not virtualmin_installed.stat.exists
+
+    - name: Exclude the database writer quota bypass capability
+      ansible.builtin.copy:
+        content: "[Service]\nCapabilityBoundingSet=~CAP_SYS_RESOURCE\n"
+        dest: /etc/systemd/system/mariadb.service.d/praho-quotas.conf
+        owner: root
+        group: root
+        mode: '0644'
+      when: not virtualmin_installed.stat.exists
+
+    - name: Apply database quota capability restrictions on the empty new node
+      ansible.builtin.systemd:
+        name: mariadb
+        daemon_reload: true
+        state: restarted
+      when: not virtualmin_installed.stat.exists
+
+    - name: Record ownership of an empty first-install attempt
+      ansible.builtin.copy:
+        content: "{{ {'deployment': deployment_id | string, 'owned_empty_first_install': true} | to_json }}"
+        dest: /var/lib/praho/hosting/new-install.json
+        owner: root
+        group: root
+        mode: '0600'
+        force: false
+      when: not virtualmin_installed.stat.exists
+
+    - name: Prepare classic quotas only for the owned empty first install
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/praho/praho_hosting_node.py, bootstrap]
+        stdin: "{{ {'identity': '0' * 64, 'deployment': deployment_id | string} | to_json }}"
+      when: not virtualmin_installed.stat.exists
+
+    # Native warning ownership is preserved here. Explicit Platform handover
+    # happens after registration and only when the real notifier is available.
+
+    - name: Preserve hard UID and group quotas and tenant database group ownership
+      ansible.builtin.lineinfile:
+        path: /etc/webmin/virtual-server/config
+        regexp: "^{{ item.key }}="
+        line: "{{ item.key }}={{ item.value }}"
+      loop:
+        - {key: hard_quotas, value: '1'}
+        - {key: mysql_chgrp, value: '1'}
+        - {key: bw_disable, value: '0'}
+        - {key: bw_enable, value: '0'}
+      when: not virtualmin_installed.stat.exists
+
     - name: Fail with installer output if Virtualmin did not install
       ansible.builtin.fail:
         msg: >-
@@ -165,10 +262,10 @@
         path: "/etc/php/{{ php_default_version }}/fpm/php.ini"
       register: php_fpm_ini
 
-    - name: Report a missing PHP-FPM configuration
-      ansible.builtin.debug:
-        msg: "PHP_DEFAULTS_SKIPPED /etc/php/{{ php_default_version }}/fpm/php.ini not found"
-      when: not php_fpm_ini.stat.exists
+    - name: Require the managed PHP-FPM configuration
+      ansible.builtin.assert:
+        that: php_fpm_ini.stat.exists
+        fail_msg: The managed PHP-FPM baseline was not installed.
 
     - name: Set PHP defaults
       ansible.builtin.lineinfile:
@@ -358,37 +455,8 @@
     # therefore creates a Webmin user whose ONLY Webmin module is virtual-server,
     # with Virtualmin master rights in it. On a re-deploy it resets the password
     # to the vault's, so node and vault converge.
-    - name: Install the PRAHO API user helper
-      ansible.builtin.copy:
-        src: files/praho-webmin-api-user.pl
-        dest: /usr/local/sbin/praho-webmin-api-user
-        owner: root
-        group: root
-        mode: '0700'
-      when: praho_api_user is defined and praho_api_password is defined
-
-    # The API user is a Virtualmin master administrator (ADR-0060), so it may
-    # log in only from the node admin allowlist: Platform's egress addresses
-    # plus the operators' admin networks. An empty list would leave the
-    # credential usable from anywhere, so the deploy stops instead.
-    - name: Refuse an empty node admin allowlist
-      ansible.builtin.assert:
-        that:
-          - node_admin_allowed_cidrs is defined
-          - node_admin_allowed_cidrs | length > 0
-        fail_msg: >-
-          infrastructure.node_admin_allowed_cidrs is empty; set Platform's egress
-          addresses and the admin networks before deploying a node.
-      when: praho_api_user is defined and praho_api_password is defined
-
-    - name: Create or update the PRAHO API user
-      ansible.builtin.command:
-        argv: "{{ ['/usr/local/sbin/praho-webmin-api-user', praho_api_user] + node_admin_allowed_cidrs }}"
-        stdin: "{{ praho_api_password }}"
-      when: praho_api_user is defined and praho_api_password is defined
-      no_log: true
-      register: praho_admin_result
-      changed_when: true
+    - name: Enroll the PRAHO API user through the shared installed-panel tasks
+      ansible.builtin.import_tasks: virtualmin_api_user_tasks.yml
 
     - name: Create PRAHO tracking file
       ansible.builtin.copy:

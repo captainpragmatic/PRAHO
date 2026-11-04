@@ -148,9 +148,12 @@ class SuspendedCustomerHoldTests(HostingWorkflowCase):
         from apps.orders.models import OrderItem  # noqa: PLC0415
         from apps.provisioning.models import ServicePlan  # noqa: PLC0415
 
-        manual, manual_service = self._started_line("manual-ssl.ro")
         ssl = ServicePlan.objects.create(name="SSL", plan_type="ssl", price_monthly=10)
-        Service.objects.filter(pk=manual_service.pk).update(service_plan=ssl)
+        self.product.default_service_plan = ssl
+        self.product.save(update_fields=["default_service_plan"])
+        manual, _manual_service = self._started_line("manual-ssl.ro")
+        self.product.default_service_plan = self.plan
+        self.product.save(update_fields=["default_service_plan"])
         hosting, hosting_service = self._started_line("recoverable.ro")
         old = timezone.now() - DISPATCH_LOST_AFTER - timedelta(minutes=1)
         OrderItem.objects.filter(pk=manual.pk).update(updated_at=old - timedelta(minutes=5))  # older: first in line

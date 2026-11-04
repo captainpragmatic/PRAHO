@@ -156,6 +156,13 @@ def restore_held_target(
     service: VirtualminMigrationService, migration: VirtualminMigration, token: UUID, archives: list[dict[str, Any]]
 ) -> None:
     """Create an empty disabled domain, restore under maintenance, and prove Unix stays locked."""
+    from .hosting_limit_execution import (  # noqa: PLC0415
+        reserve_managed_migration,
+    )
+
+    reserved = reserve_managed_migration(migration)
+    if reserved.is_err():
+        raise ValueError(reserved.unwrap_err())
     archives = _checked_archives(migration, archives)
     for archive in archives:
         prepare_restore_params(
@@ -181,7 +188,11 @@ def restore_held_target(
             password=generate_virtualmin_parameter_secret(lambda: secrets.token_urlsafe(48)),
             template=migration.account.template_name,
             recovery_seed=migration.account.get_recovery_seed(),
-            disk_quota_mb=migration.account.disk_quota_mb,
+            disk_quota_mb=(
+                migration.account.effective_disk_quota_mb
+                if migration.account.effective_disk_quota_mb is not None
+                else migration.account.disk_quota_mb
+            ),
             bandwidth_quota_mb=migration.account.bandwidth_quota_mb,
         )
         service._command(migration, migration.target_server, "create-domain", **params)

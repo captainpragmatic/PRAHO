@@ -64,10 +64,11 @@ help:
 	@echo "  make test-virtualmin-lab - Opt-in production-path backup/restore round trip against the lab (+ the contract suite)"
 	@echo "  make test-virtualmin-contract - Opt-in: every allowlisted Virtualmin program against the lab node"
 	@echo "  make test-virtualmin-workflows - Opt-in: provision, suspend, backup, restore, migrate, drain and recover through PRAHO's own services against the lab"
-	@echo "  make test-virtualmin-node-deploy - Nightly, opt-in: virtualmin.yml + virtualmin_harden.yml on the bare Debian node, then the contract smoke checks"
+	@echo "  make test-virtualmin-node-deploy - Explicit owned Ubuntu VM: fresh public deployment, kernel qualification and native lifecycle"
 	@echo "  make test-virtualmin-faults - Nightly, opt-in: stop Webmin, cut the network and time calls out while PRAHO backs up and restores"
 	@echo "  make test-virtualmin-e2e - Opt-in: Playwright smoke tests of the staff pages against the lab (starts and stops its own server; not part of make test-e2e)"
-	@echo "  make test-virtualmin-lab-full - Opt-in, long: test-virtualmin-lab + node-deploy + faults + the browser tests (the nightly run)"
+	@echo "  make test-virtualmin-lab-containers - Routine container suites, faults, browser and Maintenance Portal; no native qualification"
+	@echo "  make test-virtualmin-lab-full - Explicit native-inclusive run: lab + owned Ubuntu node-deploy + faults + browser"
 	@echo "  make test-virtualmin-drift - Opt-in: build the lab from the LATEST Virtualmin (replaces a running lab) and run the contract suite, recording nothing"
 	@echo "  VIRTUALMIN_LAB=1 make dev - Platform on :8700 against the Docker Virtualmin lab (starts and registers it if needed)"
 	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
@@ -1428,13 +1429,98 @@ test-virtualmin-contract:
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_contract.sh
 
+.PHONY: test-virtualmin-quota-sql
+test-virtualmin-quota-sql:
+	@$(PYTHON_SHARED) -m pytest -c /dev/null --rootdir="$(PWD)" -p no:django tests/virtualmin_lab/native/test_quota_sql.py -q
+
+# A provider-owned Ubuntu kernel is required for enforcement/reboot proof. This
+# private manifest is explicit so a typo cannot select a customer or fleet node.
+NATIVE_VM_MANIFEST ?=
+NATIVE_DNS_ZONE ?=
+export NATIVE_VM_MANIFEST NATIVE_DNS_ZONE NATIVE_S3_MANIFEST NATIVE_MAIL_MANIFEST
+
+# The Platform runner changes cwd. Export the absolute manifest as data before
+# entering it; shell expansion cannot execute metacharacters inside its value.
+define NATIVE_WORKFLOW_ENV
+case "$$NATIVE_VM_MANIFEST" in /*) ;; *) NATIVE_VM_MANIFEST="$$PWD/$$NATIVE_VM_MANIFEST" ;; esac; \
+export NATIVE_VM_MANIFEST PRAHO_NATIVE_LAB=1;
+endef
+
+.PHONY: native-vm-manifest native-dns-zone native-vm-create native-vm-migrate native-vm-prepare native-vm-register native-vm-destroy native-vm-fresh-intent native-vm-fresh-deploy native-vm-fresh-destroy test-virtualmin-quotas test-virtualmin-native-workflow test-virtualmin-native-fresh-deployment
+native-vm-manifest:
+	@test -n "$$NATIVE_VM_MANIFEST" || { echo 'Set NATIVE_VM_MANIFEST to the private disposable VM manifest path.' >&2; exit 2; }
+
+native-dns-zone:
+	@test -n "$$NATIVE_DNS_ZONE" || { echo 'Set NATIVE_DNS_ZONE to the approved disposable DNS zone.' >&2; exit 2; }
+
+native-vm-create: native-vm-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/provider_vm.py create --manifest "$$NATIVE_VM_MANIFEST"
+
+native-vm-fresh-intent: native-vm-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/provider_vm.py fresh-intent --manifest "$$NATIVE_VM_MANIFEST"
+
+native-vm-fresh-deploy: native-vm-manifest native-dns-zone
+	@$(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) hosting_native_workflow fresh-deploy --manifest "$$NATIVE_VM_MANIFEST" --dns-zone "$$NATIVE_DNS_ZONE" --settings=config.settings.native
+
+native-vm-fresh-destroy: native-vm-manifest
+	@export PRAHO_NATIVE_CLEANUP_ONLY=1; $(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) hosting_native_workflow fresh-destroy --manifest "$$NATIVE_VM_MANIFEST" --settings=config.settings.native
+
+native-vm-migrate: native-vm-manifest
+	@$(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) migrate --settings=config.settings.native --noinput
+
+native-vm-prepare: native-vm-manifest native-dns-zone
+	@$(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) hosting_native_workflow prepare --manifest "$$NATIVE_VM_MANIFEST" --dns-zone "$$NATIVE_DNS_ZONE" --settings=config.settings.native
+
+native-vm-register: native-vm-manifest
+	@$(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) hosting_native_workflow register --manifest "$$NATIVE_VM_MANIFEST" --settings=config.settings.native
+
+test-virtualmin-native-workflow: native-vm-manifest
+	@$(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) hosting_native_workflow workflow --manifest "$$NATIVE_VM_MANIFEST" --settings=config.settings.native
+
+test-virtualmin-native-fresh-deployment: native-vm-manifest
+	@$(NATIVE_WORKFLOW_ENV) $(PYTHON_PLATFORM_MANAGE) hosting_native_workflow fresh-proof --manifest "$$NATIVE_VM_MANIFEST" --settings=config.settings.native
+
+test-virtualmin-quotas: native-vm-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/provider_vm.py verify --manifest "$$NATIVE_VM_MANIFEST"
+
+native-vm-destroy: native-vm-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/provider_vm.py destroy --manifest "$$NATIVE_VM_MANIFEST"
+
+NATIVE_S3_MANIFEST ?=
+.PHONY: native-s3-manifest native-s3-create native-s3-verify native-s3-destroy
+native-s3-manifest:
+	@test -n "$$NATIVE_S3_MANIFEST" || { echo 'Set NATIVE_S3_MANIFEST to the private disposable storage manifest path.' >&2; exit 2; }
+
+native-s3-create: native-vm-manifest native-s3-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/storage_fixture.py create --manifest "$$NATIVE_S3_MANIFEST" --vm-manifest "$$NATIVE_VM_MANIFEST"
+
+native-s3-verify: native-s3-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/storage_fixture.py verify --manifest "$$NATIVE_S3_MANIFEST"
+
+native-s3-destroy: native-s3-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/storage_fixture.py destroy --manifest "$$NATIVE_S3_MANIFEST"
+
+NATIVE_MAIL_MANIFEST ?=
+.PHONY: native-mail-manifest native-mail-create test-virtualmin-notifications native-mail-destroy
+native-mail-manifest:
+	@test -n "$$NATIVE_MAIL_MANIFEST" || { echo 'Set NATIVE_MAIL_MANIFEST to the private disposable mail fixture manifest path.' >&2; exit 2; }
+
+native-mail-create: native-mail-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/mail_fixture.py create --manifest "$$NATIVE_MAIL_MANIFEST"
+
+test-virtualmin-notifications: native-mail-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/mail_fixture.py verify --manifest "$$NATIVE_MAIL_MANIFEST"
+
+native-mail-destroy: native-mail-manifest
+	@$(PYTHON_SHARED) tests/virtualmin_lab/native/mail_fixture.py destroy --manifest "$$NATIVE_MAIL_MANIFEST"
+
 test-virtualmin-workflows:
 	@echo "🧪 [Virtualmin lab] Workflow suite: PRAHO's services, jobs and tasks against the real nodes (needs make virtualmin-lab-up)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_workflows.sh $(WORKFLOW_ARGS)
 
-test-virtualmin-node-deploy:
-	@echo "🧪 [Virtualmin lab] Node deploy from scratch on the bare Debian node, then the contract smoke checks (needs make virtualmin-lab-up; takes a while)..."
+test-virtualmin-node-deploy: native-vm-manifest native-dns-zone
+	@echo "🧪 [Virtualmin lab] Managed Ubuntu VM deployment and lifecycle acceptance (requires owned native manifest and approved DNS)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_node_deploy.sh
 
@@ -1442,6 +1528,17 @@ test-virtualmin-faults:
 	@echo "🧪 [Virtualmin lab] Fault injection: Webmin stopped, network cut and calls timed out mid-operation (needs make virtualmin-lab-up)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_faults.sh $(FAULT_ARGS)
+
+.PHONY: test-virtualmin-lab-containers
+# Routine container evidence only. Native deployment/quota proof remains in the separate full gate below.
+test-virtualmin-lab-containers:
+	@echo "🧪 [Virtualmin lab] Container-only suites, faults, browser and maintenance Portal; no native qualification"
+	@failed=""; \
+	for leg in test-virtualmin-lab test-virtualmin-faults test-virtualmin-e2e test-virtualmin-maintenance-portal; do \
+		$(MAKE) --no-print-directory $$leg || failed="$$failed $$leg"; \
+	done; \
+	if [ -n "$$failed" ]; then echo "🔥 [Virtualmin container lab] Failed legs:$$failed"; exit 1; fi; \
+	echo "✅ [Virtualmin container lab] Every container leg passed; native acceptance remains separate"
 
 # The nightly run: every leg runs even when an earlier one fails, and the failed legs are named at the end.
 test-virtualmin-lab-full:

@@ -43,6 +43,7 @@
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
             <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
+            {% include "services/partials/hosting_limits_summary.html" with limits=service.hosting_limits %}
           </td>
           <td class="px-6 py-4 whitespace-nowrap">
             <div class="text-sm font-mono text-green-400">{% with cur=service.currency_code %}{{ service.monthly_price|romanian_currency:cur }}{% endwith %}/mo</div> {# tmpl-allow TMPL005: needs stat_tile value_class #}
@@ -80,6 +81,7 @@
       <div>
         <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Plan' %}</div>
         <div class="text-sm text-slate-300">{{ service.service_plan_name|default:service.service_plan_type_display }}</div>
+        {% include "services/partials/hosting_limits_summary.html" with limits=service.hosting_limits %}
       </div>
       <div class="text-right">
         <div class="text-xs text-slate-400 uppercase tracking-wide">{% trans 'Price' %}</div>

@@ -32,12 +32,12 @@ never touches the round-trip domain on vm-a. Each check fails the command:
    the fingerprint check, leaves the snapshot byte-identical and archives only
    the changed files; a stale fingerprint, a cancelled token and a held lock
    each refuse before any backup runs, and a refused differential archives nothing.
-5. Node deploy (virtualmin.yml post-install tasks on an installed node): the
-   play succeeds, and the API user it creates authenticates, can disable and
+5. Installed-panel API enrollment (virtualmin_security_enroll.yml, sharing the
+   fresh installer tasks): the API user authenticates, can disable and
    enable a domain, lists the templates, and runs PRAHO's own backup (with
    mkdir, which only a master administrator may) and restore parameters. (A
-   from-scratch install on praho-debian-node is the nightly drill, not part
-   of this gate.)
+   from-scratch Ubuntu install and host hardening remain the separate owned
+   native deployment gate.)
 6. Access lock (ADR-0060). Platform reaches the lab nodes from the compose
    network gateway, which is the lab's whole node admin allowlist; vm-a sits
    on the same network outside it, so it stands in for "any other host":
@@ -45,7 +45,7 @@ never touches the round-trip domain on vm-a. Each check fails the command:
      on remote.cgi and on every page behind a login-form session. With vm-a
      added to the user's allow list the same calls from vm-a succeed, so the
      refusal is the lock, not the network or the password;
-   - before virtualmin_harden.yml, vm-a reaches vm-b's port 10000; after it,
+   - before virtualmin_firewall.yml, vm-a reaches vm-b's port 10000; after it,
      it does not, while port 80 stays open and Platform still reaches both
      the API and SSH (the play runs twice).
 """
@@ -1339,14 +1339,18 @@ class Command(BaseCommand):
     # ------------------------------------------------------------- check 5
 
     def _check_node_deploy_playbook(self, server: Any) -> tuple[str, str, Any]:
-        """virtualmin.yml's post-install tasks succeed and its API user can provision."""
+        """Shared API enrollment succeeds on an installed panel and its user can provision."""
 
         from apps.provisioning.virtualmin_gateway import VirtualminConfig, VirtualminGateway  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminServer  # noqa: PLC0415
 
-        self.stdout.write("Check 5: node deploy (virtualmin.yml) and its API user")
+        self.stdout.write("Check 5: installed-panel API enrollment (virtualmin_security_enroll.yml)")
         user, password = server.api_username, server.get_api_password()
-        self._run_playbook(server, "virtualmin.yml", {"praho_api_user": user, "praho_api_password": password})
+        self._run_playbook(
+            server,
+            "virtualmin_security_enroll.yml",
+            {"security_hardening_approved": True, "praho_api_user": user, "praho_api_password": password},
+        )
         as_api_user = VirtualminServer.objects.get(pk=server.pk)  # unsaved credential swap
         as_api_user.api_username = user
         as_api_user.set_api_password(password)
@@ -1479,7 +1483,7 @@ class Command(BaseCommand):
         self._ok("taken off again, vm-a is refused again", again.startswith("api=403"), again)
 
     def _check_firewall(self, server: Any, node: LabNode, gateway: Any) -> None:
-        self.stdout.write("Check 6b: SSH and Webmin open only to the allowlist (virtualmin_harden.yml)")
+        self.stdout.write("Check 6b: SSH and Webmin open only to the allowlist (virtualmin_firewall.yml)")
         address = container_address(node.container)
 
         def reach(port: int, scheme: str) -> str:
@@ -1503,17 +1507,9 @@ class Command(BaseCommand):
         before = reach(10000, "https")
         self._ok("before the play, vm-a reaches vm-b:10000", before != "000", before)
         for run in (1, 2):
-            # The play itself runs over SSH from Platform: a second run proves
-            # port 22 is still open to Platform after the first.
-            self._run_playbook(
-                server,
-                "virtualmin_harden.yml",
-                {
-                    "security_hardening_approved": True,
-                    "praho_api_user": server.api_username,
-                },
-            )
-            self.stdout.write(f"    harden run {run} done")
+            # A second run proves the enrolled SSH connection remains usable.
+            self._run_playbook(server, "virtualmin_firewall.yml")
+            self.stdout.write(f"    firewall run {run} done")
         after = reach(10000, "https")
         self._ok("after the play, vm-a cannot reach vm-b:10000", after == "000", after)
         web = reach(80, "http")

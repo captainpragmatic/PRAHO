@@ -5,6 +5,7 @@
 from django.urls import include, path
 
 from . import views
+from .hosting_limit_override_views import service_resource_override
 from .virtualmin_urls import urlpatterns as virtualmin_urlpatterns
 
 app_name = "provisioning"
@@ -15,6 +16,7 @@ urlpatterns = [
     path("services/create/", views.service_create, name="service_create"),
     path("services/<int:pk>/", views.service_detail, name="service_detail"),
     path("services/<int:pk>/edit/", views.service_edit, name="service_edit"),
+    path("services/<int:pk>/resource-override/", service_resource_override, name="service_resource_override"),
     path("services/<int:pk>/suspend/", views.service_suspend, name="service_suspend"),
     path("services/<int:pk>/activate/", views.service_activate, name="service_activate"),
     path("plans/", views.plan_list, name="plans"),

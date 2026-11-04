@@ -305,6 +305,7 @@ class ComponentAdmissionTests(ComponentAdmissionTestBase):
         VirtualminMigration.objects.filter(pk=migration.pk).update(status="restoring", archive_sha256="b" * 64)
         migration.refresh_from_db()
         variables = target_operation_variables(migration, token, "target_prepare")
+        self.assertEqual(variables["component_operation"]["creation_params"].get("no-email"), "")
         self.assertIsNone(target_operation_refusal(self.target, variables))
         self.assertIsNotNone(target_operation_refusal(self.server, variables))
         variables["component_operation"]["archive_sha256"] = "c" * 64

@@ -322,6 +322,16 @@ class PairRestoreScriptTests(SimpleTestCase):
         self.assertEqual(len(self.restores()), 1)
         self.assertTrue(self.maint.exists())
 
+    def test_managed_single_restores_one_archive_and_leaves_the_domain_disabled(self) -> None:
+        result = self.step(PRAHO_SINGLE="1", PRAHO_DIFF_ARCHIVE="", PRAHO_DIFF_SHA="")
+        self.assertEqual(result.outcome, "ok")
+        self.assertEqual(len(self.restores()), 1)
+        self.assertFalse(self.maint.exists())
+        self.assertTrue(all(check.disabled for check in result.checkpoints))
+        replay = self.step(PRAHO_SINGLE="1", PRAHO_DIFF_ARCHIVE="", PRAHO_DIFF_SHA="")
+        self.assertEqual(replay.outcome, "refused")
+        self.assertEqual(len(self.restores()), 1)
+
     def test_held_cutover_accepts_only_its_own_migration_archive(self) -> None:
         archive = f"migration_{TOKEN}.tar.gz"
         (self.staging / archive).write_bytes(b"migration-bytes")

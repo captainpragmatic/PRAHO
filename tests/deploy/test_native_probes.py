@@ -4,10 +4,18 @@ import io
 import json
 from unittest.mock import patch
 
+import pytest
 from django.test import RequestFactory
 
 from apps.api.secure_auth import validate_portal_service_request
 from deploy.scripts import native_probe
+from tests.native_role_helpers import failed_ansible_task
+
+
+@pytest.mark.parametrize("failure", ["fatal: [platform]: FAILED!", "failed: [portal] (item=portal.native.test) =>"])
+def test_failure_phase_parser_handles_real_ansible_loop_failures(failure: str) -> None:
+    output = f"TASK [Verify trusted TLS] ********\n{failure} {{}}\nTASK [Reassert durable holds] ******\nok: [portal]\n"
+    assert failed_ansible_task(output) == "Verify trusted TLS"
 
 
 def test_non_json_maintenance_response_retains_its_status_without_logging_the_body() -> None:

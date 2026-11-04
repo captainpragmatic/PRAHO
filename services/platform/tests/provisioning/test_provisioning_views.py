@@ -86,6 +86,9 @@ def create_test_customer(name: str, admin_user: User, **kwargs) -> Customer:
 
 def create_test_service_plan(**kwargs) -> ServicePlan:
     """Helper to create test service plans"""
+    # The plan's legacy-price signal creates a RON price row. TransactionTestCase
+    # flushes migration seeds, so repeated PostgreSQL keepdb runs need this FK.
+    Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei", "decimals": 2})
     defaults = {
         'name': 'Test Hosting Plan',
         'plan_type': 'shared_hosting',

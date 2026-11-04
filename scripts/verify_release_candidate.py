@@ -16,9 +16,9 @@ when its own `changes` job succeeded in the same run and that run completed succ
 run also skips it). A commit with no merge_group run was merged around the queue (an owner bypass), and
 is refused.
 
-It also refuses unless the latest full Virtualmin lab on master passed (``latest_full_lab``): the
-candidate runs no lab of its own, since the queue ran the lab suites on it and the nightly full lab
-covers node deploy, fault injection and its browser tests.
+It also requires explicit native-inclusive full Virtualmin acceptance on this exact master SHA,
+including the actual successful native capability step. Routine container, drift or historical
+pre-native full success cannot qualify a candidate. A configured admission flag is never proof.
 
 Needs `gh` (authenticated).
 """
@@ -116,13 +116,15 @@ def verify(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> str:
         raise VerificationError(
             f"The merge queue did not pass every required check on {sha}:\n  " + "\n  ".join(problems)
         )
-    lab = latest_full_lab(repo, gh)
+    lab = latest_full_lab(repo, gh, sha=sha)
     return f"The merge queue passed every required check on the candidate itself ({sha}), and {lab}"
 
 
-# The nightly full lab: it runs on master every night master changed (virtualmin-lab.yml).
+# Container schedules and native acceptance have different scopes and job identities.
 NIGHTLY_LAB_WORKFLOW = "virtualmin-lab.yml"
-NIGHTLY_FULL_JOB = "nightly-full"
+NIGHTLY_FULL_JOB = "native-full"
+NATIVE_CAPABILITY_STEP = "Verify fresh Ubuntu native hosting capability"
+CONTAINER_JOB = "nightly-containers"
 
 
 NIGHTLY_ACTIVITY_JOB = "check-activity"
@@ -131,7 +133,7 @@ _MAX_PAGES = 20  # 600 runs: months of nightly and drift runs
 
 
 def _master_lab_runs(repo: str, gh: Callable[[str], Any]) -> Iterator[dict[str, Any]]:
-    """Completed nightly lab runs on master, newest first, page by page until the history ends."""
+    """Completed lab runs on master, newest first, page by page until the history ends."""
     for page in range(1, _MAX_PAGES + 1):
         listed = gh(
             f"repos/{repo}/actions/workflows/{NIGHTLY_LAB_WORKFLOW}/runs"
@@ -142,43 +144,64 @@ def _master_lab_runs(repo: str, gh: Callable[[str], Any]) -> Iterator[dict[str, 
         yield from sorted(listed, key=lambda run: int(run["id"]), reverse=True)
 
 
-def latest_full_lab(repo: str, gh: Callable[[str], Any] = _gh) -> str:
-    """The latest completed full Virtualmin lab run on master, which must have passed.
+def _routine_lab_run(jobs: dict[str, JSONObject], run: JSONObject) -> bool:
+    """Routine/drift/quiet evidence may be passed over, never accepted as native proof."""
+    drift = any(
+        name.startswith(NIGHTLY_DRIFT_JOB) and job.get("conclusion") not in (None, "skipped")
+        for name, job in jobs.items()
+    )
+    containers = jobs.get(CONTAINER_JOB, {}).get("conclusion") not in (None, "skipped")
+    quiet = (
+        CONTAINER_JOB in jobs
+        and jobs[CONTAINER_JOB].get("conclusion") == "skipped"
+        and jobs.get(NIGHTLY_ACTIVITY_JOB, {}).get("conclusion") == "success"
+        and run.get("conclusion") == "success"
+    )
+    return drift or containers or quiet
 
-    A run without the full lab is passed over in two cases only: a drift run (its drift job ran;
-    drift is informational, never a gate), or a quiet night (the activity check passed and the whole
-    run succeeded: nothing changed that day). Anything else without the full lab, a failed check or
-    a cancelled night, is an interrupted night and refuses. A run on any other branch never counts.
+
+def latest_full_lab(repo: str, gh: Callable[[str], Any] = _gh, *, sha: str) -> str:
+    """Explicit native-inclusive full acceptance on this exact master candidate.
+
+    Routine container, drift and genuine quiet runs cannot replace a native job or
+    capability step. Historical pre-native full jobs never supply physical proof.
+    A failed/canceled native attempt cannot fall back to an older success.
     """
     for run in _master_lab_runs(repo, gh):
         if run.get("head_branch") != "master":
             continue
         jobs = {
-            job["name"]: job.get("conclusion")
+            job["name"]: job
             for job in gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
         }
-        full = jobs.get(NIGHTLY_FULL_JOB)
-        if full is None or full == "skipped":
-            # Drift is a matrix: its jobs are named "nightly-drift (<runner>)".
-            drift_run = any(
-                name.startswith(NIGHTLY_DRIFT_JOB) and outcome not in (None, "skipped")
-                for name, outcome in jobs.items()
-            )
-            quiet = jobs.get(NIGHTLY_ACTIVITY_JOB) == "success" and run.get("conclusion") == "success"
-            if drift_run or quiet:
+        full = jobs.get(NIGHTLY_FULL_JOB, {})
+        if full.get("conclusion") in (None, "skipped"):
+            if _routine_lab_run(jobs, run):
                 continue
             raise VerificationError(
-                f"The nightly lab on master (run {run['id']}, {run.get('conclusion')}) was interrupted before "
-                f"it could run the full Virtualmin lab. Dispatch {NIGHTLY_LAB_WORKFLOW} with suite full first."
+                f"The full Virtualmin lab on master (run {run['id']}, {run.get('conclusion')}) has no completed native job. "
+                f"Configure the approved runner/authority, then dispatch {NIGHTLY_LAB_WORKFLOW} with suite full."
             )
-        if full != "success":
+        if run.get("head_sha") != sha:
+            continue
+        if full.get("conclusion") != "success" or run.get("conclusion") != "success":
             raise VerificationError(
-                f"The latest full Virtualmin lab on master (run {run['id']}) did not pass: {full}. "
-                f"Fix it, or dispatch {NIGHTLY_LAB_WORKFLOW} with suite full, first."
+                f"The latest full Virtualmin lab on master for {sha} (run {run['id']}) did not pass: "
+                f"{full.get('conclusion')}/{run.get('conclusion')}."
             )
-        return f"the latest full Virtualmin lab on master passed (run {run['id']})"
+        capability = [step for step in full.get("steps", []) if step.get("name") == NATIVE_CAPABILITY_STEP]
+        if (
+            run.get("event") != "workflow_dispatch"
+            or len(capability) != 1
+            or capability[0].get("conclusion") != "success"
+        ):
+            raise VerificationError(
+                f"The full Virtualmin lab on master (run {run['id']}) lacks explicit successful native capability evidence."
+            )
+        return f"the native-inclusive full Virtualmin lab on this master candidate passed (run {run['id']})"
     raise VerificationError(
-        f"No full Virtualmin lab run on master is on record. Dispatch {NIGHTLY_LAB_WORKFLOW} with suite full first."
+        f"No native-inclusive full Virtualmin lab on master qualifies {sha}. "
+        f"Configure the approved runner/authority, then dispatch {NIGHTLY_LAB_WORKFLOW} with suite full on that SHA."
     )
 
 

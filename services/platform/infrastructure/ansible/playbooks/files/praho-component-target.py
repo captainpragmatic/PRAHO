@@ -98,7 +98,9 @@ class TargetCoordinator:
         required = {"domain", "user", "template", "desc", *FEATURES}
         if (
             not required <= self.creation.keys()
-            or self.creation.keys() - required - {"quota", "bandwidth"}
+            or self.creation.keys() - required - {"quota", "uquota", "bandwidth", "no-email"}
+            or self.creation.get("no-email", "") != ""
+            or self.creation.get("quota") != self.creation.get("uquota")
             or self.creation["domain"] != self.domain
             or self.creation["user"] != self.owner
             or self.creation["template"] != "Default Settings"
@@ -107,11 +109,18 @@ class TargetCoordinator:
                 not isinstance(value, str) or len(value) > MAX_CREATION_VALUE or any(char in value for char in "\0\r\n")
                 for value in self.creation.values()
             )
-            or any(not self.creation[name].isdecimal() for name in ("quota", "bandwidth") if name in self.creation)
+            or any(
+                not self.creation[name].isdecimal()
+                for name in ("quota", "uquota", "bandwidth")
+                if name in self.creation
+            )
         ):
             raise ValueError(
                 "Review a qualified default target template, exact owner and explicit website-only creation scope"
             )
+        # Also suppress mail when resuming a historical reviewed operation whose
+        # immutable creation envelope predates notification ownership handover.
+        self.creation["no-email"] = ""
 
     def _state(self) -> dict[str, Any]:
         state = self.journal.read()

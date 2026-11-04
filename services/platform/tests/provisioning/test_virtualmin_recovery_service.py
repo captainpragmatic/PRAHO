@@ -57,7 +57,9 @@ class RecoveryGuardRetirementTests(BarrierCase):
         migration, token = self._held("needs_review", contract="recovery")
         self.events.clear()
         with (
-            patch("apps.provisioning.virtualmin_recovery_service.run_barrier", return_value=Ok(BarrierStep("ok", "idle"))),
+            patch(
+                "apps.provisioning.virtualmin_recovery_service.run_barrier", return_value=Ok(BarrierStep("ok", "idle"))
+            ),
             patch(
                 "apps.provisioning.account_hostname_service.retire_removed_node_name",
                 return_value=Err("private TLS cleanup unproved"),
@@ -77,7 +79,9 @@ class RecoveryGuardRetirementTests(BarrierCase):
         self.events.clear()
         steps = []
         with (
-            patch("apps.provisioning.virtualmin_recovery_service.run_barrier", return_value=Ok(BarrierStep("ok", "idle"))),
+            patch(
+                "apps.provisioning.virtualmin_recovery_service.run_barrier", return_value=Ok(BarrierStep("ok", "idle"))
+            ),
             patch(
                 "apps.provisioning.account_hostname_service.retire_removed_node_name",
                 side_effect=lambda *args: steps.append("retire") or Ok(None),
@@ -165,7 +169,9 @@ class RecoverySelectionTests(BarrierCase):
         commands = [event for event in self.events if event[1] == "modify-domain"]
         self.assertEqual(len(commands), 1)
         self.assertEqual(commands[0][0], "target")
-        self.assertEqual(commands[0][2], {"domain": self.account.domain, "quota": "2097152", "bw": "0"})
+        self.assertEqual(
+            commands[0][2], {"domain": self.account.domain, "quota": "2097152", "uquota": "2097152", "bw": "0"}
+        )
         migration.refresh_from_db()
         self.assertIsNotNone(migration.cutover_committed_at)
 

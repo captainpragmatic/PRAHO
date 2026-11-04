@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from requests import Response
 
 from apps.common.types import Retriability, retriability_of
+from apps.provisioning.service_models import Service
 from apps.provisioning.virtualmin_gateway import VirtualminGateway
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_service import VirtualminAccountCreationData, VirtualminProvisioningService
@@ -21,6 +24,20 @@ class VirtualminServiceCoverageCase(VirtualminCoverageCase):
         }
         super().setUp()
         self.provisioning = VirtualminProvisioningService(self.server, task_budget_seconds=777)
+
+    def _new_service_after_defaults(self) -> None:
+        """Runtime defaults are pinned when the purchased Service is inserted."""
+        previous = self.service
+        self.service = Service.objects.create(
+            customer=previous.customer,
+            service_plan=previous.service_plan,
+            currency=previous.currency,
+            service_name=previous.service_name,
+            domain=previous.domain,
+            username="assigned_" + uuid4().hex[:12],
+            price=previous.price,
+            status="pending",
+        )
 
     def _http(
         self,
@@ -67,11 +84,20 @@ class VirtualminCreationCoverageTests(VirtualminServiceCoverageCase):
             {key: value for key, value in self.requests[-1].items() if key != "desc"},
             {
                 "program": "create-domain",
+                "no-email": "",
+                "quota": "0",
+                "uquota": "0",
+                "bandwidth": "0",
                 "domain": account.domain,
                 "user": account.virtualmin_username,
                 "pass": "CoveragePass123!",
                 "template": "Default Settings",
-                "unix": "", "dir": "", "web": "", "ssl": "", "logrotate": "", "mysql": "",
+                "unix": "",
+                "dir": "",
+                "web": "",
+                "ssl": "",
+                "logrotate": "",
+                "mysql": "",
                 "json": "1",
             },
         )
@@ -213,19 +239,23 @@ class VirtualminCreationCoverageTests(VirtualminServiceCoverageCase):
     def test_stored_quotas_persist_and_use_virtualmin_units(self) -> None:
         self.assertTrue(SettingsService.update_setting("virtualmin.domain_quota_default_mb", 25).is_ok())
         self.assertTrue(SettingsService.update_setting("virtualmin.bandwidth_quota_default_mb", 50).is_ok())
+        self._new_service_after_defaults()
         account = self.provisioning.create_virtualmin_account(self._creation()).unwrap()
         account.refresh_from_db()
         self.assertEqual(account.disk_quota_mb, 25)
         self.assertEqual(account.bandwidth_quota_mb, 50)
-        self.assertEqual(self.requests[-1]["quota"], str(25 * 1024))
+        self.assertEqual(account.effective_disk_quota_mb, 28)
+        self.assertEqual(self.requests[-1]["quota"], str(28 * 1024))
+        self.assertEqual(self.requests[-1]["uquota"], str(28 * 1024))
         self.assertEqual(self.requests[-1]["bandwidth"], str(50 * 1024 * 1024))
         self.assertEqual(account.status, "active")
 
     def test_insufficient_remote_disk_fails_preflight_and_keeps_quota_snapshot(self) -> None:
         self.assertTrue(SettingsService.update_setting("virtualmin.domain_quota_default_mb", 25).is_ok())
+        self._new_service_after_defaults()
         self.payloads["info"] = {"status": "success", "output": f"disk_free: {10 * 1024 * 1024}\n"}
         result = self.provisioning.create_virtualmin_account(self._creation())
-        self.assertIn("Insufficient disk space: 10MB available, 25MB requested", result.unwrap_err())
+        self.assertIn("Insufficient disk space: 10MB available, 28MB requested", result.unwrap_err())
         account = VirtualminAccount.objects.get(service=self.service)
         self.assertEqual(account.status, "error")
         self.assertEqual(account.disk_quota_mb, 25)

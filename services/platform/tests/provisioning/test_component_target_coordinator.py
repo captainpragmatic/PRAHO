@@ -104,6 +104,15 @@ class ComponentTargetCoordinatorTests(SimpleTestCase):
         with self.assertRaisesRegex(ValueError, "Unix login"):
             target.prepare()
 
+    def test_native_create_preserves_both_caps_and_suppresses_customer_mail(self):
+        self.creation.update(quota="5767168", uquota="5767168", **{"no-email": ""})
+        self.target().prepare()
+        creation = next(call for call in self.native.call_args_list if call.args[0] == "create-domain")
+        arguments = creation.args[1]
+        self.assertIn("--no-email", arguments)
+        for parameter in ("--quota", "--uquota"):
+            self.assertEqual(arguments[arguments.index(parameter) + 1], "5767168")
+
     def test_unprepared_archive_retirement_seals_namespace_without_adopting_or_creating_domain(self):
         payload = b"selected private archive uploaded before native preparation"
         archive = self.directory / ("migration_" + self.operation + ".tar.gz")

@@ -22,7 +22,7 @@ from uuid import uuid4
 
 import pytest
 
-from tests.native_role_helpers import INVALID_CADDY_SITE
+from tests.native_role_helpers import INVALID_CADDY_SITE, failed_ansible_task
 
 ROOT = Path(__file__).resolve().parents[2]
 IMAGE = "praho-native-acceptance:26.04"
@@ -548,10 +548,7 @@ def _fail_running_deployment(lab: NativeLab, fault: str, previous: str) -> subpr
 
 
 def _failed_task(result: subprocess.CompletedProcess[str]) -> str:
-    before_failure = result.stdout.split("fatal:", 1)[0]
-    tasks = re.findall(r"TASK \[(.*?)\]", before_failure)
-    assert "fatal:" in result.stdout and tasks, "Expected an actual Ansible task failure"
-    return tasks[-1]
+    return failed_ansible_task(result.stdout)
 
 
 def _assert_fault_reached_application(lab: NativeLab, fault: str, failed: subprocess.CompletedProcess[str]) -> None:
