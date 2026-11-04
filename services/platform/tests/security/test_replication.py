@@ -244,7 +244,7 @@ class SecurityReplicationTests(ActionFixture, TestCase):
         self.assertIsNotNone(approval.revoked_at)
         self.assertEqual(replication.replicate_decision(self.decision.pk), [])
 
-        with patch("apps.security.action_transport.call") as rpc:
+        with patch("apps.security.action_transport.send_request") as rpc:
             action_tasks.run_target(str(replica.pk))
         rpc.assert_not_called()
 

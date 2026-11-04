@@ -84,13 +84,13 @@ class SecurityActionPostgresTests(ActionFixture, TransactionTestCase):
             peer(*args)
             raise SystemExit("Worker crashed after remote commit")
 
-        with patch("apps.security.action_transport.call", side_effect=crash), self.assertRaises(SystemExit):
+        with patch("apps.security.action_transport.send_request", side_effect=crash), self.assertRaises(SystemExit):
             action_tasks.run_target(str(target.pk))
         target.refresh_from_db()
         self.assertEqual(target.state, "dispatching")
         with (
             patch("django.utils.timezone.now", return_value=self.now + timedelta(seconds=121)),
-            patch("apps.security.action_transport.call", side_effect=peer),
+            patch("apps.security.action_transport.send_request", side_effect=peer),
         ):
             action_tasks.run_target(str(target.pk))
         target.refresh_from_db()
@@ -156,7 +156,7 @@ class SecurityActionPostgresTests(ActionFixture, TransactionTestCase):
         self.assertEqual(target.state, "unknown")
         self.assertIsNone(action_repos.claim_target(target.pk))
         services.reconfigure_source(self.source.pk, self.config, self.admin)
-        with patch("apps.security.action_transport.call", return_value=receipt) as rpc:
+        with patch("apps.security.action_transport.send_request", return_value=receipt) as rpc:
             action_tasks.run_target(str(target.pk))
         self.assertEqual(rpc.call_args.args[1], "receipt_get")
         target.refresh_from_db()
@@ -178,7 +178,7 @@ class SecurityActionPostgresTests(ActionFixture, TransactionTestCase):
             return peer(connection, operation, payload, request_id)
 
         with (
-            patch("apps.security.action_transport.call", side_effect=delayed),
+            patch("apps.security.action_transport.send_request", side_effect=delayed),
             database_worker(lambda: action_tasks.run_target(str(target.pk))) as (_, pending),
         ):
             try:

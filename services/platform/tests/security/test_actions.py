@@ -7,6 +7,7 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from django.core.exceptions import PermissionDenied, ValidationError
+from django.db import InterfaceError
 from django.test import TestCase, override_settings
 
 from apps.common import crowdsec_transport as gateway
@@ -32,7 +33,7 @@ class SecurityActionTests(ActionFixture, TestCase):
             }
 
         with patch("apps.common.crowdsec_transport.remote_rpc", side_effect=peer):
-            result = action_transport.call(
+            result = action_transport.send_request(
                 transport.capture_connection(self.source), target.operation, target.payload, target.request_id
             )
         self.assertEqual(result["status"], "succeeded")
@@ -78,13 +79,13 @@ class SecurityActionTests(ActionFixture, TestCase):
 
     def test_timeout_after_dispatch_stays_unknown_and_next_work_only_reads_receipt(self) -> None:
         target = self.issue().targets.get()
-        with patch("apps.security.action_transport.call", side_effect=TimeoutError("after remote application")) as call:
+        with patch("apps.security.action_transport.send_request", side_effect=TimeoutError("after remote application")) as call:
             action_tasks.run_target(str(target.pk))
         target.refresh_from_db()
         self.assertEqual(target.state, "unknown")
         self.assertIsNotNone(target.dispatched_at)
         with patch(
-            "apps.security.action_transport.call", return_value={"status": "unknown", "evidence": "no_receipt"}
+            "apps.security.action_transport.send_request", return_value={"status": "unknown", "evidence": "no_receipt"}
         ) as call:
             action_tasks.run_target(str(target.pk))
         self.assertEqual(call.call_args.args[1], "receipt_get")
@@ -109,7 +110,7 @@ class SecurityActionTests(ActionFixture, TestCase):
         target = self.issue().targets.get()
         with (
             patch("django.utils.timezone.now", return_value=self.now + timedelta(minutes=6)),
-            patch("apps.security.action_transport.call") as rpc,
+            patch("apps.security.action_transport.send_request") as rpc,
         ):
             action_tasks.run_target(str(target.pk))
         rpc.assert_not_called()
@@ -128,7 +129,7 @@ class SecurityActionTests(ActionFixture, TestCase):
         )
         verified = request.targets.get(source=self.source)
         skipped = request.targets.get(source=self.target)
-        with patch("apps.security.action_transport.call", return_value=self.receipt(verified)):
+        with patch("apps.security.action_transport.send_request", return_value=self.receipt(verified)):
             action_tasks.run_target(str(verified.pk))
         services.retire_source(self.target.pk, self.admin)
         action_tasks.run_target(str(skipped.pk))
@@ -154,14 +155,28 @@ class SecurityActionTests(ActionFixture, TestCase):
             self.issue()
         self.assertFalse(SecurityActionRequest.objects.exists())
 
+    def test_queue_connection_failure_invalidates_the_undispatched_claim(self) -> None:
+        target = self.issue().targets.get()
+        claim = action_repos.claim_target(target.pk)
+        self.assertIsNotNone(claim)
+        with patch("apps.security.action_tasks.async_task", side_effect=InterfaceError("fixture queue disconnected")):
+            action_tasks._enqueue(claim)
+        target.refresh_from_db()
+        self.assertIsNone(target.claim_token)
+        self.assertIsNone(target.dispatched_at)
+        with patch("apps.security.action_transport.send_request") as rpc:
+            result = action_tasks.execute_claim(str(target.pk), str(claim.token))
+        self.assertEqual(result["state"], "superseded")
+        rpc.assert_not_called()
+
     def test_disabling_mutations_keeps_existing_unknown_receipt_reads_available(self) -> None:
         target = self.issue().targets.get()
-        with patch("apps.security.action_transport.call", side_effect=TimeoutError("after application")):
+        with patch("apps.security.action_transport.send_request", side_effect=TimeoutError("after application")):
             action_tasks.run_target(str(target.pk))
         with (
             override_settings(PRAHO_CROWDSEC_ACTIONS_ENABLED=False),
             patch(
-                "apps.security.action_transport.call", return_value={"status": "unknown", "evidence": "no_receipt"}
+                "apps.security.action_transport.send_request", return_value={"status": "unknown", "evidence": "no_receipt"}
             ) as rpc,
         ):
             action_tasks.run_target(str(target.pk))
@@ -178,9 +193,9 @@ class SecurityActionTests(ActionFixture, TestCase):
         )
         target = request.targets.get()
         uncertain = self.receipt(target, status="unknown", evidence="mutation_uncertain")
-        with patch("apps.security.action_transport.call", return_value=uncertain):
+        with patch("apps.security.action_transport.send_request", return_value=uncertain):
             action_tasks.run_target(str(target.pk))
-        with patch("apps.security.action_transport.call", side_effect=[uncertain, self.receipt(target)]) as rpc:
+        with patch("apps.security.action_transport.send_request", side_effect=[uncertain, self.receipt(target)]) as rpc:
             action_tasks.run_target(str(target.pk))
         self.assertEqual([call.args[1] for call in rpc.call_args_list], ["receipt_get", "revoke"])
         self.assertEqual(rpc.call_args_list[1].args[3], target.request_id)
@@ -194,7 +209,7 @@ class SecurityActionTests(ActionFixture, TestCase):
             actor=self.admin, reason="Remove false positive", idempotency_key=uuid4(), decision_id=self.decision.pk
         ).targets.get()
         uncertain = self.receipt(target, status="unknown", evidence="mutation_uncertain")
-        with patch("apps.security.action_transport.call", return_value=uncertain):
+        with patch("apps.security.action_transport.send_request", return_value=uncertain):
             action_tasks.run_target(str(target.pk))
 
         def changed(*args):
@@ -203,7 +218,7 @@ class SecurityActionTests(ActionFixture, TestCase):
             )
             return uncertain
 
-        with patch("apps.security.action_transport.call", side_effect=changed) as rpc:
+        with patch("apps.security.action_transport.send_request", side_effect=changed) as rpc:
             action_tasks.run_target(str(target.pk))
         self.assertEqual(rpc.call_count, 1)
         target.refresh_from_db()
@@ -256,9 +271,9 @@ class SecurityActionTests(ActionFixture, TestCase):
             cidrs=["198.51.100.8/32"],
         ).targets.get()
         uncertain = self.receipt(target, status="unknown", evidence="mutation_uncertain")
-        with patch("apps.security.action_transport.call", return_value=uncertain):
+        with patch("apps.security.action_transport.send_request", return_value=uncertain):
             action_tasks.run_target(str(target.pk))
-        with patch("apps.security.action_transport.call", side_effect=[uncertain, self.receipt(target)]) as rpc:
+        with patch("apps.security.action_transport.send_request", side_effect=[uncertain, self.receipt(target)]) as rpc:
             action_tasks.run_target(str(target.pk))
         self.assertEqual([call.args[1] for call in rpc.call_args_list], ["receipt_get", "allowlist_replace"])
         self.assertEqual(rpc.call_args_list[1].args[3], target.request_id)
@@ -271,7 +286,7 @@ class SecurityActionTests(ActionFixture, TestCase):
             source_id=self.source.pk,
             cidrs=["198.51.100.8/32"],
         ).targets.get()
-        with patch("apps.security.action_transport.call", side_effect=TimeoutError("after application")):
+        with patch("apps.security.action_transport.send_request", side_effect=TimeoutError("after application")):
             action_tasks.run_target(str(target.pk))
         action_services.replace_allowlist(
             actor=self.admin,
@@ -281,7 +296,7 @@ class SecurityActionTests(ActionFixture, TestCase):
             cidrs=["203.0.113.8/32"],
         )
         uncertain = self.receipt(target, status="unknown", evidence="mutation_uncertain")
-        with patch("apps.security.action_transport.call", return_value=uncertain) as rpc:
+        with patch("apps.security.action_transport.send_request", return_value=uncertain) as rpc:
             action_tasks.run_target(str(target.pk))
         self.assertEqual(rpc.call_count, 1)
         target.refresh_from_db()

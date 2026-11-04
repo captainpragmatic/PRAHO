@@ -9,7 +9,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError, InterfaceError, transaction
 from django.utils import timezone
 from django_q.models import Schedule
 from django_q.tasks import async_task
@@ -47,7 +47,7 @@ def execute_claim(target_id: str, token: str) -> dict[str, str]:
     try:
         operation = "receipt_get" if claim.reconcile else target.operation
         payload = {"request_id": str(target.request_id)} if claim.reconcile else target.payload
-        result = action_transport.call(
+        result = action_transport.send_request(
             claim.connection,
             operation,
             cast("dict[str, object]", payload),
@@ -63,7 +63,7 @@ def execute_claim(target_id: str, token: str) -> dict[str, str]:
             if not action_repos.prepare_verified_repair(claim, result):
                 target.refresh_from_db()
                 return {"state": target.state}
-            result = action_transport.call(claim.connection, target.operation, target.payload, target.request_id)
+            result = action_transport.send_request(claim.connection, target.operation, target.payload, target.request_id)
         action_repos.record_result(claim, result)
     except (CrowdSecRPCError, ValidationError, ValueError, TypeError, OSError, RuntimeError):
         action_repos.mark_unknown(claim)
@@ -93,7 +93,7 @@ def _enqueue(claim: action_repos.ActionClaim) -> None:
         async_task(
             "apps.security.action_tasks.execute_claim", str(claim.target_id), str(claim.token), timeout=75, sync=False
         )
-    except (ValueError, RuntimeError, OSError, DatabaseError):
+    except (ValueError, RuntimeError, OSError, DatabaseError, InterfaceError):
         action_repos.mark_unknown(claim)
 
 

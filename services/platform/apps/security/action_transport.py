@@ -22,7 +22,7 @@ def payload_digest(operation: str, payload: dict[str, object]) -> str:
     return digest({"operation": operation, "payload": payload})
 
 
-def call(
+def send_request(
     connection: SourceConnection, operation: str, payload: dict[str, object], request_id: UUID | None = None
 ) -> dict[str, object]:
     request = json.dumps(
