@@ -181,12 +181,14 @@ class NativeCommercialSetupTests(TestCase):
         membership = CustomerMembership.objects.create(
             customer=self.customer, user=staff, role="viewer", is_active=True
         )
-        original_password = staff.password
+        original_hash = staff.password
         with self.assertRaisesMessage(ValueError, "existing staff"):
             create_commercial_staff(str(run), "replacement-password")
         staff.refresh_from_db()
         membership.refresh_from_db()
-        self.assertEqual((staff.staff_role, staff.password, membership.role), ("support", original_password, "viewer"))
+        self.assertEqual(staff.staff_role, "support")
+        self.assertEqual(staff.password, original_hash)
+        self.assertEqual(membership.role, "viewer")
 
 
 class NativePeerIntentTests(TestCase):
