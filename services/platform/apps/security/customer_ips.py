@@ -80,7 +80,7 @@ def _write_observations(user_id: int, customer_ids: list[int], family: int, pack
 
 
 def record_recent_customer_ip(*, user_id: int, ip: str | None) -> ObservationResult:
-    """Own the entire COMMIT and fresh user lock, so an erasure cannot be repopulated.
+    """Own COMMIT and ordered user/customer roots, so erasure cannot be repopulated.
 
     The caller has already committed password/MFA authentication and its session.
     Deferred foreign-key failures belong solely to this optional transaction.
@@ -93,6 +93,7 @@ def record_recent_customer_ip(*, user_id: int, ip: str | None) -> ObservationRes
         family, packed = pack_address(ip)
     except (ValueError, TypeError):
         return ObservationResult(False, "no_trusted_ip")
+    from apps.customers.models import Customer  # noqa: PLC0415 -- cross-app runtime boundary
     from apps.users.models import CustomerMembership, User  # noqa: PLC0415 -- cross-app runtime boundary
 
     deadline = monotonic() + RECORDING_SECONDS
@@ -110,6 +111,15 @@ def record_recent_customer_ip(*, user_id: int, ip: str | None) -> ObservationRes
                 .order_by("customer_id")
                 .values_list("customer_id", flat=True)
             )
+            # Lock roots without joined predicates: a waiting READ COMMITTED reader must
+            # inspect the marker from the newly locked Customer, not a stale joined row.
+            customer_ids = [
+                customer.pk
+                for customer in Customer.all_objects.select_for_update(of=("self",), no_key=True)
+                .filter(pk__in=customer_ids)
+                .order_by("pk")
+                if customer.anonymized_at is None
+            ]
             _write_observations(user_id, customer_ids, family, packed, deadline)
         return ObservationResult(True, "recorded", len(customer_ids))
     except (DatabaseError, InterfaceError, RuntimeError, _ObservationTimeoutError) as error:

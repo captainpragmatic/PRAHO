@@ -86,6 +86,12 @@ class SecurityCustomerMatchViewTests(TestCase):
         ended.save(update_fields=["ended_at"])
         self.assertNotContains(self.client.get("/security/", {"state": "all"}), "CRITICAL")
 
+    def test_preexisting_observation_of_an_erased_customer_does_not_warn(self) -> None:
+        self.observation("198.51.100.8")
+        self.decision(1, "198.51.100.8")
+        Customer.all_objects.filter(pk=self.customer.pk).update(anonymized_at=self.now)
+        self.assertNotContains(self.client.get("/security/"), "CRITICAL")
+
     def test_all_active_memberships_and_mapped_host_addresses_match(self) -> None:
         other = Customer.objects.create(name="Second active customer", customer_type="company", status="active")
         CustomerMembership.objects.create(user=self.user, customer=other, role="owner")

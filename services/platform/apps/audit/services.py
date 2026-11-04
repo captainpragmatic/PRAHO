@@ -1275,9 +1275,9 @@ class GDPRExportService:
                     "first_seen_at": observation.created_at.isoformat(),
                     "last_seen_at": observation.last_seen_at.isoformat(),
                 }
-                for observation in CustomerIPObservation.objects.filter(user_id=user.pk).order_by(
-                    "customer_id", "last_seen_at", "pk"
-                )
+                for observation in CustomerIPObservation.objects.filter(
+                    user_id=user.pk, customer__anonymized_at__isnull=True
+                ).order_by("customer_id", "last_seen_at", "pk")
             ]
             subject = capture_subject(user)
             # The proof rows concern the person too; the sweep keeps them, so the export must list them.
@@ -1623,6 +1623,9 @@ class GDPRDeletionService:
         # Lock the row, then write only the fields anonymisation changes: a full save of a stale
         # instance would write back anything changed meanwhile, such as a role or a 2FA reset (#689).
         User.objects.select_for_update().filter(pk=user.pk).first()
+        # Consent suppression and individual erasure touch overlapping customer subsets.
+        # Lock their union before either write, in the recorder's User -> Customer pk order.
+        cls._lock_erasure_customers(user)
         # Who the person is, captured before their email and name are overwritten below.
         subject = capture_subject(user)
 
@@ -1658,10 +1661,6 @@ class GDPRDeletionService:
         # whose address is the customer contact must not keep receiving marketing.
         GDPRConsentService._propagate_marketing_consent(user, consent=False)
 
-        # The person's individual customers are locked first, in pk order, before anything about
-        # them changes: a writer that read one earlier waits for this erasure, then is refused.
-        cls._lock_individual_customers(user)
-
         # An individual customer's CNP is the person's national identification number. It is
         # cleared wherever it is not a fiscal record: the tax profile, every proforma (a proforma
         # is not a fiscal document) and every invoice not yet issued. Issued invoices keep their
@@ -1691,15 +1690,13 @@ class GDPRDeletionService:
         cls._erase_audit_identity(subject)
 
     @staticmethod
-    def _lock_individual_customers(user: User) -> None:
-        """Lock the rows of the individual customers the person owns (apps/customers/erasure_guard.py)."""
+    def _lock_erasure_customers(user: User) -> None:
+        """Lock every active member customer before consent or individual-customer writes."""
         from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
         from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
 
-        owned = CustomerMembership.objects.filter(
-            user=user, role="owner", is_active=True, customer__customer_type="individual"
-        ).values("customer_id")
-        list(Customer.all_objects.select_for_update(of=("self",)).filter(pk__in=owned).order_by("pk").values("pk"))
+        members = CustomerMembership.objects.filter(user=user, is_active=True).values("customer_id")
+        list(Customer.all_objects.select_for_update(of=("self",)).filter(pk__in=members).order_by("pk").values("pk"))
 
     @staticmethod
     def _solely_owned_individuals(user: User) -> list[int]:
@@ -1707,7 +1704,7 @@ class GDPRDeletionService:
 
         Each one is the person, so its identity and CNP go. One with another owner may be that
         other person's record, so the erasure leaves it to staff and logs it. Read after the lock
-        in _lock_individual_customers, so no owner is added or removed meanwhile by a guarded write.
+        in _lock_erasure_customers, so guarded writers share the customer-root lock.
         """
         from apps.users.models import CustomerMembership  # noqa: PLC0415  # Deferred: import cycle
 
@@ -1743,6 +1740,7 @@ class GDPRDeletionService:
         from apps.customers.contact_models import CustomerAddress  # noqa: PLC0415  # Deferred: import cycle
         from apps.customers.customer_models import Customer  # noqa: PLC0415  # Deferred: import cycle
         from apps.orders.models import Order  # noqa: PLC0415  # Deferred: import cycle
+        from apps.security.models import CustomerIPObservation  # noqa: PLC0415  # Deferred: import cycle
 
         for customer_id in customer_ids:
             name = f"{cls.ANONYMIZATION_MAP['first_name']()} {cls.ANONYMIZATION_MAP['last_name']()}"
@@ -1755,6 +1753,8 @@ class GDPRDeletionService:
                 website="",
                 updated_at=timezone.now(),
             )
+            # Other active members can have observations too; erasure belongs to the customer.
+            CustomerIPObservation.objects.filter(customer_id=customer_id).delete()
             CustomerAddress.all_objects.filter(customer_id=customer_id).update(
                 label="",
                 address_line1=cls.ANONYMIZED_ADDRESS,
@@ -2146,7 +2146,7 @@ class GDPRConsentService:
             )
             customer_ids = [cid for cid in customer_ids if cid not in blocked_ids]
 
-        for customer in Customer.objects.filter(id__in=customer_ids).exclude(marketing_consent=consent):
+        for customer in Customer.objects.filter(id__in=customer_ids).exclude(marketing_consent=consent).order_by("pk"):
             customer.marketing_consent = consent
             customer._consent_source = "gdpr_consent_service"  # type: ignore[attr-defined]  # transient signal-instance attr; read via getattr in customers.signals
             customer._consent_category = "marketing"  # type: ignore[attr-defined]  # transient signal-instance attr; read via getattr in customers.signals

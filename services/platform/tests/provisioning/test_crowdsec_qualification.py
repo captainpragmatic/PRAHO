@@ -7,13 +7,15 @@ import json
 from importlib import import_module
 from unittest.mock import patch
 
+from django.apps import apps
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import connection, models
+from django.db import DatabaseError, connection, models, transaction
 from django.db.migrations.state import ModelState, ProjectState
 from django.test import TestCase, TransactionTestCase, override_settings
 from django.utils import timezone
 
 from apps.audit.models import AuditEvent
+from apps.common.db_triggers import create_context_immutability_trigger, drop_context_immutability_trigger
 from apps.provisioning import virtualmin_security as security
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_node_capability import destination_refusal
@@ -159,6 +161,14 @@ class CrowdSecProfileAdmissionTests(TestCase):
 
 
 class CrowdSecProfileMigrationTests(TransactionTestCase):
+    def assert_probe_identity_is_guarded(self, pk: int) -> None:
+        with (
+            self.assertRaisesMessage(DatabaseError, "crowdsec_migration_probe.id is immutable"),
+            transaction.atomic(),
+            connection.cursor() as cursor,
+        ):
+            cursor.execute("UPDATE crowdsec_migration_probe SET id = %s WHERE id = %s", [pk + 1, pk])
+
     def test_additive_migration_defaults_existing_rows_to_base_and_reverses_without_data_loss(self) -> None:
         before = ProjectState()
         before.add_model(
@@ -175,10 +185,17 @@ class CrowdSecProfileMigrationTests(TransactionTestCase):
         legacy = before.apps.get_model("provisioning", "VirtualminServer")
         migration_type = import_module("apps.provisioning.migrations.0029_crowdsec_qualification_profile").Migration
         migration = migration_type("0029_crowdsec_qualification_profile", "provisioning")
+        restore_guard = import_module(
+            "apps.provisioning.migrations.0015_ssh_transport_state"
+        ).restore_server_identity_guard
         with connection.schema_editor() as editor:
             editor.create_model(legacy)
+            create_context_immutability_trigger(
+                editor, table="crowdsec_migration_probe", column="id", name="crowdsec_migration_probe_identity"
+            )
         try:
-            legacy.objects.create(hostname="preserved.example.test")
+            original = legacy.objects.create(hostname="preserved.example.test")
+            self.assert_probe_identity_is_guarded(original.pk)
             with connection.schema_editor() as editor:
                 after = migration.apply(before.clone(), editor)
             upgraded = after.apps.get_model("provisioning", "VirtualminServer")
@@ -186,12 +203,20 @@ class CrowdSecProfileMigrationTests(TransactionTestCase):
             self.assertEqual(row.hostname, "preserved.example.test")
             self.assertEqual(row.security_policy_version, security.POLICY_VERSION)
             self.assertEqual(row.security_configuration_digest, "")
+            self.assert_probe_identity_is_guarded(row.pk)
             with connection.schema_editor() as editor:
                 migration.unapply(before.clone(), editor)
             self.assertEqual(legacy.objects.get().hostname, "preserved.example.test")
+            self.assert_probe_identity_is_guarded(original.pk)
             with connection.cursor() as cursor:
                 columns = connection.introspection.get_table_description(cursor, "crowdsec_migration_probe")
             self.assertEqual({column.name for column in columns}, {"id", "hostname"})
         finally:
             with connection.schema_editor() as editor:
+                drop_context_immutability_trigger(
+                    editor, table="crowdsec_migration_probe", name="crowdsec_migration_probe_identity"
+                )
                 editor.delete_model(legacy)
+                # The frozen callback uses the production trigger's fixed name.
+                # Restore its real-table binding after this isolated schema probe.
+                restore_guard(apps, editor)

@@ -15,7 +15,7 @@
     },
     "recipe": {
       "path": "build-patched/Dockerfile",
-      "sha256": "6a09cb112437164c3c7daa84e02d6b8b1e65a652d90e509f12b231462e2a9afc"
+      "sha256": "13addb9afcfca025220793756d45a2e3aa22f94bd5ce1a2ce2bc6b95492235b0"
     },
     "build_script": {
       "path": "build-patched/build.sh",
@@ -40,8 +40,8 @@
     },
     "notices": {
       "file": "build/crowdsec-patched/license-notices.tar.gz",
-      "sha256": "abf2c84d39d2d613c5cc67bbd24777c1523f8fb2b015a80ae1d88bce042f8277",
-      "size": 223381
+      "sha256": "0dfee86a14aa53592e4f89881974be56ee287b13afdcf1afc0755a3b214c620f",
+      "size": 223427
     },
     "nftables": {
       "set_only_intervals": true,

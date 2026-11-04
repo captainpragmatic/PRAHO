@@ -153,8 +153,20 @@ These are narrow annotations, not disabled guards or test suppressions.
 
 ## Remote review status
 
-The ten dependent draft PRs are indexed by [#861](https://github.com/captainpragmatic/PRAHO/pull/861).
-Required CI is still running. GitGuardian's GitHub App flags two public
+The complete implementation is consolidated in the ready-for-review
+[#861](https://github.com/captainpragmatic/PRAHO/pull/861). The nine predecessor
+drafts are closed; no predecessor merge is required. It will land through the
+repository's squash merge queue after its required checks pass.
+
+The first complete remote run exposed four gaps that the earlier local selections
+did not cover: builder-CPU-dependent toolchain text in the license archive,
+SQLite secret-context trigger loss when rebuilding the node table, incomplete
+status-page user fixtures, and customer-IP observation erasure coverage. Those
+failures are merge blockers and require regression verification on the repaired
+head and its queued squash commit. Local amd64-builder emulation is unavailable
+(`exec format error`); GitHub's native amd64 qualification verifies that build.
+
+GitGuardian's GitHub App flags two public
 `CROWDSEC_SSH_CONFIG_DIGESTS` values as generic high-entropy secrets. These are
 SHA-256 fingerprints of the complete canonical sshd configurations for the two
 supported `AuthorizedKeysFile` variants; they contain no key or credential data.

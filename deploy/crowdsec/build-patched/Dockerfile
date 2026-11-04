@@ -26,7 +26,7 @@ RUN --network=none mkdir /out \
     done \
     && sha256sum /inputs/source.tar.gz /inputs/patch.diff go.mod go.sum > /out/input-sha256.txt \
     && find vendor -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum > /out/vendor-tree-sha256.txt \
-    && go version > /out/toolchain.txt \
+    && go env GOVERSION > /out/toolchain.txt \
     && go version -m /out/crowdsec-firewall-bouncer-amd64 > /out/build-info-amd64.txt \
     && go version -m /out/crowdsec-firewall-bouncer-arm64 > /out/build-info-arm64.txt
 

@@ -31,15 +31,24 @@ class SecurityMigrationIdentityGuardTests(TransactionTestCase):
 
     def assert_identity_is_guarded(self, executor, target):
         model = executor.loader.project_state([target]).apps.get_model("provisioning", "VirtualminServer")
+        hostname = f"guard-{uuid4().hex}.example.test"
         row = model.objects.create(
-            name="guard-test", hostname="guard.example.test", api_username="root", encrypted_api_password=b""
+            name="guard-test", hostname=hostname, api_username="root", encrypted_api_password=b""
         )
-        with self.assertRaises(DatabaseError), transaction.atomic(), connection.cursor() as cursor:
-            cursor.execute(
-                "UPDATE provisioning_virtualmin_servers SET id = %s WHERE id = %s", [uuid4().hex, row.pk.hex]
-            )
-        self.assertTrue(model.objects.filter(pk=row.pk).exists())
-        row.delete()
+        try:
+            with (
+                self.assertRaisesMessage(DatabaseError, "provisioning_virtualmin_servers.id is immutable"),
+                transaction.atomic(),
+                connection.cursor() as cursor,
+            ):
+                cursor.execute(
+                    "UPDATE provisioning_virtualmin_servers SET id = %s WHERE id = %s", [uuid4().hex, row.pk.hex]
+                )
+            self.assertTrue(model.objects.filter(pk=row.pk).exists())
+        finally:
+            # A missing guard can let the UPDATE commit before the assertion fails.
+            # Remove that changed row too, so it cannot hide the next boundary failure.
+            model.objects.filter(hostname=hostname).delete()
 
     def test_security_migrations_keep_identity_immutable_forward_and_backward(self):
         executor = MigrationExecutor(connection)
@@ -54,5 +63,18 @@ class SecurityMigrationIdentityGuardTests(TransactionTestCase):
                     executor.migrate(latest)
                     provision = next(node for node in latest if node[0] == "provisioning")
                     self.assert_identity_is_guarded(executor, provision)
+        finally:
+            MigrationExecutor(connection).migrate(latest)
+
+    def test_crowdsec_profile_preserves_identity_guard_forward_and_backward(self):
+        executor = MigrationExecutor(connection)
+        latest = executor.loader.graph.leaf_nodes()
+        before = ("provisioning", "0028_component_migration_authority")
+        after = ("provisioning", "0029_crowdsec_qualification_profile")
+        try:
+            for target in (before, after, before, after):
+                executor = MigrationExecutor(connection)
+                executor.migrate([target])
+                self.assert_identity_is_guarded(executor, target)
         finally:
             MigrationExecutor(connection).migrate(latest)

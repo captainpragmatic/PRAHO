@@ -18,6 +18,7 @@ def with_customer_matches(rows: QuerySet[SecurityDecision], now: datetime) -> Qu
     recent = (
         CustomerIPObservation.objects.filter(
             user__is_active=True,
+            customer__anonymized_at__isnull=True,
             last_seen_at__gte=now - timedelta(days=7),
             address_family=OuterRef("address_family"),
             address__gte=OuterRef("network_start"),

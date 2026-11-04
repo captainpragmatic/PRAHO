@@ -50,6 +50,7 @@ _IDENTITY_FIELDS: dict[str, tuple[str, ...]] = {
     "customers.CustomerAddress": ("label", "address_line1", "address_line2", "city", "county", "postal_code"),
     "customers.CustomerTaxProfile": ("cnp",),
     "users.CustomerMembership": (),
+    "security.CustomerIPObservation": ("user_id", "customer_id", "address_family", "address", "last_seen_at"),
     "orders.Order": ("customer_email", "customer_name", "customer_company", "customer_vat_id", "billing_address"),
     "billing.ProformaInvoice": (
         "bill_to_name",

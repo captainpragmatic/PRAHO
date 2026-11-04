@@ -72,7 +72,9 @@ such actions. Docker proves the runner kernel and Ubuntu 26.04 userspace, not th
 production Ubuntu 26.04 kernel or production acceptance.
 
 The build also produces `license-notices.tar.gz`, with deterministic archive
-metadata. It carries upstream MIT, PRAHO GPL-3.0-or-later, Go BSD/PATENTS and
+metadata. Toolchain provenance records `GOVERSION`; each binary's build information
+records its target architecture, so the archive is independent of the builder CPU.
+It carries upstream MIT, PRAHO GPL-3.0-or-later, Go BSD/PATENTS and
 vendored license/notice texts, together with the exact upstream source archive,
 patch, recipe, tests and provenance. The role verifies its locked bytes before
 installation under `/usr/local/share/doc/praho-crowdsec-bouncer`.
