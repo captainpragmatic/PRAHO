@@ -474,6 +474,30 @@ IPWARE_TRUSTED_PROXY_LIST: list[str] = [
     cidr.strip() for cidr in os.environ.get("PORTAL_TRUSTED_PROXY_CIDRS", "").split(",") if cidr.strip()
 ]
 
+# Dedicated fixed-schema events, separate from ordinary application diagnostics.
+CROWDSEC_AUTH_PSEUDONYM_KEY = os.environ.get("CROWDSEC_AUTH_PSEUDONYM_KEY", "")
+CROWDSEC_AUTH_LOG_PATH = os.environ.get("CROWDSEC_AUTH_LOG_PATH", "/var/log/praho/portal/portal-auth.jsonl")
+CROWDSEC_AUTH_EVENTS_ENABLED = os.environ.get("CROWDSEC_AUTH_EVENTS_ENABLED", "false").lower() == "true"
+LOGGING["formatters"]["crowdsec_auth"] = {"format": "%(message)s"}
+LOGGING["handlers"]["crowdsec_auth"] = {
+    "class": "apps.common.auth_events.SecurityEventFileHandler"
+    if CROWDSEC_AUTH_LOG_PATH
+    else "apps.common.auth_events.SecurityEventStreamHandler",
+    "formatter": "crowdsec_auth",
+    **(
+        {
+            "filename": CROWDSEC_AUTH_LOG_PATH,
+            "maxBytes": 10 * 1024 * 1024,
+            "backupCount": 4,
+            "delay": True,
+            "encoding": "utf-8",
+        }
+        if CROWDSEC_AUTH_LOG_PATH
+        else {"stream": "ext://sys.stdout"}
+    ),
+}
+LOGGING["loggers"]["praho.crowdsec.auth"] = {"handlers": ["crowdsec_auth"], "level": "INFO", "propagate": False}
+
 # Handler filters cover Django request and exception logging as well as app logs.
 
 LOGGING = secure_logging_config(LOGGING)

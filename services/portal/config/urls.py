@@ -22,7 +22,9 @@ handler500 = "apps.common.error_views.server_error"
 
 # Portal status endpoint
 def portal_status(request: HttpRequest) -> JsonResponse:
-    return JsonResponse({"status": "healthy", "service": "portal"})
+    from apps.common.auth_events import recording_health  # noqa: PLC0415 -- keep status imports lightweight
+
+    return JsonResponse({"status": "healthy", "service": "portal", "protection": recording_health()})
 
 
 def robots_txt(request: HttpRequest) -> HttpResponse:

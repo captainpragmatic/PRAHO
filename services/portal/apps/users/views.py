@@ -25,6 +25,7 @@ from django.views.decorators.http import require_http_methods, require_POST
 
 from apps.api_client.services import PlatformAPIError, api_client
 from apps.common import altcha, request_context
+from apps.common.auth_events import emit_auth_event, observation_health, record_auth_refusal
 from apps.common.decorators import (
     log_access_attempt,
     require_any_role,
@@ -193,7 +194,7 @@ def _handle_totp_setup_get(
         return render(request, "users/mfa_setup_totp.html", context)
 
     except Exception as e:
-        logger.error(f"🔥 [Portal MFA] Error initializing TOTP setup: {e}")
+        logger.error("🔥 [Portal MFA] Error initializing TOTP setup (%s)", type(e).__name__)
         return _handle_mfa_error_redirect(request, "users:mfa_management", _("An error occurred. Please try again."))
 
 
@@ -215,11 +216,25 @@ MFA_NOT_ENABLED = "mfa_not_enabled"
 LOCKED_MESSAGE = gettext_lazy("Too many attempts. Please wait and try again.")
 
 
+def _record_mfa_refusal(request: HttpRequest, exc: PlatformAPIError) -> None:
+    """Only a verified private category counts as a failed factor."""
+    code = (exc.response_data or {}).get("code")
+    if exc.is_rate_limited:
+        emit_auth_event(request, "throttle_refusal", "mfa")
+    elif exc.is_degraded or exc.is_unavailable:
+        emit_auth_event(request, "protection_degraded", "upstream_unavailable")
+    elif code in {ACCOUNT_LOCKED, MFA_NOT_ENABLED, "staff_mfa_required", "mfa_setup_expired", "mfa_already_enabled"}:
+        emit_auth_event(request, "protection_degraded", "policy_refusal")
+    else:
+        record_auth_refusal(request, (exc.response_data or {}).get("failure_category"))
+
+
 def _setup_refusal(request: HttpRequest, exc: PlatformAPIError, form: TOTPSetupForm) -> HttpResponse | None:
     """Explain a refused confirmation on the form; only a wrong password or code is a failed attempt.
 
     Returns a response only when the page should not be shown again.
     """
+    _record_mfa_refusal(request, exc)
     code = (exc.response_data or {}).get("code")
     if exc.is_rate_limited:
         form.add_error(None, _("Too many attempts. Please wait and try again."))
@@ -261,7 +276,7 @@ def _handle_totp_setup_post(request: HttpRequest, customer_id: str, customer_ema
 
     _store_returned_session_auth_hash(request, result)
     request.session.cycle_key()
-    logger.info(f"✅ [Portal 2FA] TOTP enabled successfully for customer {customer_id}")
+    logger.info("✅ [Portal 2FA] TOTP enabled successfully")
     messages.success(request, _("Two-factor authentication has been enabled successfully!"))
     return _render_new_backup_codes(request, list(result.get("backup_codes", [])))
 
@@ -293,7 +308,7 @@ def _get_safe_redirect_target(request: HttpRequest, fallback: str = "/dashboard/
     if url_has_allowed_host_and_scheme(raw_next, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
         return raw_next
 
-    logger.warning(f"⚠️ [Portal Auth] Unsafe redirect target blocked: {raw_next}")
+    logger.warning("⚠️ [Portal Auth] Unsafe redirect target blocked")
     return fallback_url
 
 
@@ -356,7 +371,11 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     user_id = auth_response.get("user_id")
                     customer_id = auth_response.get("customer_id")
 
-                    logger.info(f"✅ [Portal Auth] Customer {email} authenticated successfully")
+                    observation = auth_response.get("security_observation")
+                    observation_health(observation)
+                    if observation is None or observation.get("degraded") is True:
+                        emit_auth_event(request, "protection_degraded", "observation_failed")
+                    logger.info("✅ [Portal Auth] Customer authenticated successfully")
 
                     # ✅ CRITICAL: Prevent session fixation attacks
                     request.session.cycle_key()
@@ -405,10 +424,7 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                             if not customer_id:
                                 customer_id = first_customer_id
                                 request.session["customer_id"] = customer_id
-                                logger.info(
-                                    f"⚠️ [Portal Auth] No primary customer for {email}, "
-                                    f"using first membership: customer {customer_id}"
-                                )
+                                logger.info("⚠️ [Portal Auth] Using the first active membership")
                     except Exception:
                         logger.debug("Could not fetch memberships on login")
 
@@ -427,8 +443,8 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                         else:
                             # Fallback to email if name not available
                             messages.success(request, _("Sign in confirmed!"))
-                    except Exception as e:
-                        logger.warning(f"⚠️ [Portal Auth] Could not fetch profile for personalized message: {e}")
+                    except Exception:
+                        logger.warning("⚠️ [Portal Auth] Could not fetch profile for personalized message")
                         messages.success(request, _("Sign in confirmed!"))
 
                     next_url = _get_safe_redirect_target(request, fallback="/dashboard/")
@@ -436,7 +452,8 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     return redirect(next_url)
 
                 else:
-                    logger.warning(f"⚠️ [Portal Auth] Invalid credentials for {email}")
+                    logger.warning("⚠️ [Portal Auth] Authentication refused")
+                    record_auth_refusal(request, auth_response.get("failure_category") if auth_response else None)
                     mark_auth_failure(request)
                     form.add_error(None, _("Invalid email address or password. Please try again."))
 
@@ -447,7 +464,8 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     # an unmarked 503 back to the generic branch - which is the original bug, a real
                     # outage reported as a wrong password. `get_degraded_message` decides whether the
                     # wording may call it planned.
-                    logger.warning(f"⚠️ [Portal Auth] Login attempted while the platform was unavailable for {email}")
+                    logger.warning("⚠️ [Portal Auth] Authentication service unavailable")
+                    emit_auth_event(request, "protection_degraded", "upstream_unavailable")
                     degraded_context = build_maintenance_context(request, e)
                     # The ALERT explains the platform's state; this form error explains why THIS
                     # submission went nowhere. Master's login-specific wording rather than
@@ -468,14 +486,18 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
                     mark_auth_failure(request)
                     retry_after = getattr(e, "retry_after", None) or 30
 
-                    logger.warning(f"⚠️ [Portal Auth] Login rate-limited for {email} (retry_after={retry_after}s)")
+                    logger.warning("⚠️ [Portal Auth] Authentication rate limited")
+                    emit_auth_event(request, "throttle_refusal", "login")
                     form.add_error(
                         None,
                         _("Too many login attempts. Please try again in %(seconds)s seconds.")
                         % {"seconds": retry_after},
                     )
                 else:
-                    logger.error(f"🔥 [Portal Auth] Platform API error during login: {e}")
+                    logger.error(
+                        "🔥 [Portal Auth] Authentication request could not be completed (%s)", type(e).__name__
+                    )
+                    emit_auth_event(request, "protection_degraded", "upstream_unavailable")
                     messages.error(
                         request, _("Authentication service is temporarily unavailable. Please try again later.")
                     )
@@ -483,7 +505,8 @@ def login_view(request: HttpRequest) -> HttpResponse:  # noqa: C901, PLR0912, PL
             except SessionSaveContended:
                 raise  # The session middleware answers 503 with Retry-After (ADR-0055).
             except Exception as e:
-                logger.error(f"🔥 [Portal Auth] Unexpected error during login: {e}")
+                logger.error("🔥 [Portal Auth] Authentication failed unexpectedly (%s)", type(e).__name__)
+                emit_auth_event(request, "protection_degraded", "upstream_unavailable")
                 messages.error(request, _("An unexpected error occurred. Please try again."))
 
     context = {
@@ -520,8 +543,7 @@ def logout_view(request: HttpRequest) -> HttpResponse:
     """
 
     # Log the logout
-    customer_id = request.session.get("customer_id", "unknown")
-    logger.info(f"✅ [Portal Auth] Customer {customer_id} logged out")
+    logger.info("✅ [Portal Auth] Customer logged out")
 
     # A customer view's tab goes back to Platform, read before the session is flushed (ADR-0065).
     platform_url = customer_view_views.platform_return_url(request.session)
@@ -867,6 +889,7 @@ def password_reset_view(request: HttpRequest) -> HttpResponse:
             )
             if not result.get("success"):
                 raise PlatformAPIError("Password reset was not accepted")
+            emit_auth_event(request, "password_reset_request", "password_reset")
             messages.success(
                 request,
                 _(
@@ -876,6 +899,11 @@ def password_reset_view(request: HttpRequest) -> HttpResponse:
             )
             return redirect("users:login")
         except PlatformAPIError as exc:
+            emit_auth_event(
+                request,
+                "throttle_refusal" if exc.is_rate_limited else "protection_degraded",
+                "reset" if exc.is_rate_limited else "upstream_unavailable",
+            )
             response_status = 429 if exc.is_rate_limited else 503
             retry_after = exc.retry_after
             form.add_error(
@@ -1453,6 +1481,7 @@ def mfa_backup_codes_view(request: HttpRequest) -> HttpResponse:
             request.session.cycle_key()
             return _render_new_backup_codes(request, list(result["backup_codes"]))
         except PlatformAPIError as exc:
+            _record_mfa_refusal(request, exc)
             code = (exc.response_data or {}).get("code")
             if exc.is_rate_limited or code == ACCOUNT_LOCKED:
                 form.add_error(None, LOCKED_MESSAGE)
@@ -1521,6 +1550,7 @@ def confirm_identity_view(request: HttpRequest) -> HttpResponse:
                 user_id, form.cleaned_data["password"], form.cleaned_data.get("token", "")
             )
         except PlatformAPIError as exc:
+            _record_mfa_refusal(request, exc)
             code = (exc.response_data or {}).get("code")
             if code == "reauth_failed":
                 mark_auth_failure(request, bucket="reauth")
@@ -1575,9 +1605,11 @@ def mfa_disable_view(request: HttpRequest) -> HttpResponse:
                 request.session.cycle_key()
                 messages.success(request, _("Two-factor authentication has been disabled."))
                 return redirect("users:mfa_management")
+            record_auth_refusal(request, (result or {}).get("failure_category"))
             mark_auth_failure(request, bucket="reauth")
             form.add_error(None, _("Could not disable MFA. Check your password and authentication code."))
         except PlatformAPIError as exc:
+            _record_mfa_refusal(request, exc)
             code = (exc.response_data or {}).get("code")
             if exc.is_rate_limited or code == ACCOUNT_LOCKED:
                 form.add_error(None, LOCKED_MESSAGE)

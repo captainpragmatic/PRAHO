@@ -403,6 +403,13 @@
       - PORTAL_HMAC_MODE
       - PORTAL_SESSION_REQUIRED
       - CUSTOMER_VIEW_ENABLED
+      - PRAHO_CROWDSEC_SYNC_ENABLED
+      - PRAHO_CROWDSEC_LOCAL_SOURCE_ENABLED
+      - PRAHO_CROWDSEC_SSH_PUBLIC_KEY_PATH
+      - PRAHO_CROWDSEC_SSH_PRIVATE_KEY_PATH
+      - PRAHO_CROWDSEC_ACTIONS_ENABLED
+      - PRAHO_CROWDSEC_REPLICATION_ENABLED
+      - CROWDSEC_CUSTOMER_IP_OBSERVATIONS_ENABLED
       - PORTAL_PUBLIC_ORIGIN
       - PORTAL_HMAC_CREDENTIALS
       - PLATFORM_TO_PORTAL_WEBHOOK_SECRET
@@ -493,6 +500,9 @@
       - DJANGO_LOG_LEVEL
       - TIME_ZONE
       - BRAND_DIR
+      - CROWDSEC_AUTH_EVENTS_ENABLED
+      - CROWDSEC_AUTH_PSEUDONYM_KEY
+      - CROWDSEC_AUTH_LOG_PATH
     praho_portal_env_base:
       PYTHONPATH: "{{ project_root }}/src/services/portal"
       DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
@@ -505,8 +515,18 @@
       PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
       STATIC_ROOT: "{{ project_root }}/portal-static"
       PORTAL_LOG_DIR: /var/log/praho/portal
+      CROWDSEC_AUTH_LOG_PATH: /var/log/praho/portal/portal-auth.jsonl
       SESSION_DB_PATH: "{{ portal_state_directory + '/portal.sqlite3' }}"
       PORTAL_TRUSTED_PROXY_CIDRS: "{{ deployed_env.PORTAL_TRUSTED_PROXY_CIDRS | default('127.0.0.1/32,::1/128') }}"
+
+- name: Require the qualified Portal authentication log path
+  assert:
+    that:
+      - >-
+        (portal_django_env.CROWDSEC_AUTH_EVENTS_ENABLED | default('false') | lower != 'true')
+        or portal_django_env.CROWDSEC_AUTH_LOG_PATH == '/var/log/praho/portal/portal-auth.jsonl'
+    fail_msg: Enabled native detection requires the qualified Portal authentication log path /var/log/praho/portal/portal-auth.jsonl
+    quiet: true
 
 - name: Install filtered Portal runtime environment
   copy:

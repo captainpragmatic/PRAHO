@@ -1265,6 +1265,20 @@ class GDPRExportService:
         # Audit trail summary (privacy-focused): every event concerning the person, not only those
         # they performed, counted in full and listed up to the latest 100.
         if scope.get("include_audit_logs", True):
+            # Privacy exports share the existing subject lock.
+            from apps.security.models import CustomerIPObservation  # noqa: PLC0415
+
+            data["recent_customer_ip_observations"] = [
+                {
+                    "customer_id": observation.customer_id,
+                    "ip_address": observation.ip_address,
+                    "first_seen_at": observation.created_at.isoformat(),
+                    "last_seen_at": observation.last_seen_at.isoformat(),
+                }
+                for observation in CustomerIPObservation.objects.filter(user_id=user.pk).order_by(
+                    "customer_id", "last_seen_at", "pk"
+                )
+            ]
             subject = capture_subject(user)
             # The proof rows concern the person too; the sweep keeps them, so the export must list them.
             audit_events = (events_concerning(subject) | proofs_concerning(subject)).order_by("-timestamp")
@@ -1396,6 +1410,7 @@ class GDPRExportService:
         count += len(user_data.get("support_tickets", []))
         count += len(user_data.get("emails", []))
         count += len(user_data.get("audit_summary", {}).get("recent_activities", []))
+        count += len(user_data.get("recent_customer_ip_observations", []))
         return count
 
 
@@ -1633,6 +1648,10 @@ class GDPRDeletionService:
 
         user.save(update_fields=cls._ANONYMIZED_USER_FIELDS)
         discard_pending_totp(user.pk)
+        # Erasure shares the recorder's user-root lock.
+        from apps.security.models import CustomerIPObservation  # noqa: PLC0415
+
+        CustomerIPObservation.objects.filter(user_id=user.pk).delete()
 
         # Sibling of #226: the send audience reads Customer.marketing_consent, so an
         # anonymized user's suppression must reach their customers too — an erased user

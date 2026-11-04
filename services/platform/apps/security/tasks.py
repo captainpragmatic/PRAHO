@@ -17,7 +17,7 @@ from django_q.tasks import async_task
 from apps.common.crowdsec_transport import CrowdSecRPCError
 
 from . import repos, transport
-from .models import SecurityAlert, SecurityDecision, SecuritySource
+from .models import CustomerIPObservation, SecurityAlert, SecurityDecision, SecuritySource
 
 logger = logging.getLogger(__name__)
 TASK = "apps.security.tasks.sync_source"
@@ -76,8 +76,9 @@ def sync_source(source_id: str, queued_token: str) -> dict[str, str]:
 def prune_security_history() -> dict[str, int]:
     now = timezone.now()
     deadline = monotonic() + RETENTION_SECONDS
-    totals = {"expired": 0, "decisions": 0, "alerts": 0}
+    totals = {"expired": 0, "decisions": 0, "alerts": 0, "observations": 0}
     cutoff = now - timedelta(days=30)
+    observations_cutoff = now - timedelta(days=7)
     while monotonic() < deadline:
         expired = list(
             SecurityDecision.objects.filter(ended_at__isnull=True, expires_at__lte=now)
@@ -97,9 +98,17 @@ def prune_security_history() -> dict[str, int]:
             .order_by("source_created_at", "pk")
             .values_list("pk", flat=True)[:RETENTION_BATCH]
         )
+        observations = list(
+            CustomerIPObservation.objects.filter(last_seen_at__lt=observations_cutoff)
+            .order_by("last_seen_at", "pk")
+            .values_list("pk", flat=True)[:RETENTION_BATCH]
+        )
+        totals["observations"] += CustomerIPObservation.objects.filter(
+            pk__in=observations, last_seen_at__lt=observations_cutoff
+        ).delete()[0]
         totals["decisions"] += SecurityDecision.objects.filter(pk__in=decisions).delete()[0]
         totals["alerts"] += SecurityAlert.objects.filter(pk__in=alerts).delete()[0]
-        if not expired and not decisions and not alerts:
+        if not expired and not decisions and not alerts and not observations:
             break
     return totals
 

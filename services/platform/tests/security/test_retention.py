@@ -44,7 +44,7 @@ class SecurityRetentionTests(SecurityFixture, TestCase):
         )
         SecuritySyncState.objects.filter(source=self.source).update(alert_cursor=2)
         with patch("apps.security.tasks.RETENTION_BATCH", 1):
-            self.assertEqual(tasks.prune_security_history(), {"expired": 1, "decisions": 1, "alerts": 1})
+            self.assertEqual(tasks.prune_security_history(), {"expired": 1, "decisions": 1, "alerts": 1, "observations": 0})
         expired.refresh_from_db()
         self.assertEqual(expired.ended_at, expired.expires_at)
         self.assertTrue(SecurityDecision.objects.filter(pk=live.pk, ended_at__isnull=True).exists())

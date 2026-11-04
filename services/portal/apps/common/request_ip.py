@@ -1,8 +1,9 @@
 """
 Safe client IP extraction for the portal service.
 
-Cloudflare-aware: only trusts CF-Connecting-IP when CF-Ray header is present
-(CF-Ray is the Cloudflare request ID, always present on CF-proxied requests).
+Portal connects directly over HTTPS through its enrolled Caddy proxy. Only
+Caddy-owned forwarding headers are authoritative; CDN headers supplied by callers
+are never interpreted as a client identity.
 
 When IPWARE_TRUSTED_PROXY_LIST is non-empty, only forwards headers from IPs that fall
 within a configured CIDR range are trusted. Uses our own CIDR validation so that
@@ -23,7 +24,6 @@ from django.http import HttpRequest
 _PROXY_HEADERS: list[str] = [
     "HTTP_X_FORWARDED_FOR",
     "HTTP_X_REAL_IP",
-    "HTTP_X_CLUSTER_CLIENT_IP",
 ]
 
 
@@ -35,13 +35,6 @@ def get_safe_client_ip(request: HttpRequest) -> str:
     """
     remote_addr: str = request.META.get("REMOTE_ADDR", "0.0.0.0")
     trusted_proxies: list[str] = getattr(settings, "IPWARE_TRUSTED_PROXY_LIST", [])
-
-    # Cloudflare: only trust CF-Connecting-IP when CF-Ray header is also present.
-    # CF-Ray is always set by Cloudflare — its absence means the request is not CF-proxied.
-    if request.META.get("HTTP_CF_RAY") and trusted_proxies and _is_trusted_proxy(remote_addr, trusted_proxies):
-        cf_ip = str(request.META.get("HTTP_CF_CONNECTING_IP", "")).strip()
-        if cf_ip and _is_valid_ip(cf_ip):
-            return cf_ip
 
     if not trusted_proxies:
         # No proxy trust configured — use direct connection IP only.
