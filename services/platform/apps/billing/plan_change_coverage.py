@@ -7,15 +7,17 @@ import json
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import pairwise
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.db.models import Q
+from django.utils import timezone
 
 from .invoice_models import Invoice, InvoiceLine
 from .metering_models import BillingCycle
-from .plan_change_models import PlanChange
+from .plan_change_models import PlanChange, PlanChangeInterval
 from .plan_change_pricing import CoveredInterval
 from .proforma_models import ProformaInvoice, ProformaLine
 from .refund_models import refunds_for_invoice
@@ -314,7 +316,117 @@ def _supplement_coverage(
     )
 
 
-def _apply_supplement_coverage(  # noqa: C901, PLR0913 -- Shared fixed evidence and prior/own allocation context.
+def _supplement_document_matches(change: PlanChange) -> bool:
+    if change.total_cents == 0:
+        return change.invoice_id is None and change.proforma_id is None
+    invoice = change.invoice
+    return bool(
+        invoice is not None
+        and invoice.customer_id == change.customer_id
+        and invoice.currency_id == change.currency_id
+        and invoice.converted_from_proforma_id == change.proforma_id
+        and (invoice.subtotal_cents, invoice.tax_cents, invoice.total_cents)
+        == (change.net_cents, change.tax_cents, change.total_cents)
+    )
+
+
+def _complete_allocation_history(change: PlanChange, parts: list[PlanChangeInterval], original: dict[str, Any]) -> bool:
+    """A scheduled price agreement is not a supplement; upgrades require every allocation."""
+    if change.direction == "downgrade":
+        return (
+            not parts
+            and (change.net_cents, change.tax_cents, change.total_cents) == (0, 0, 0)
+            and (change.invoice_id is None and change.proforma_id is None)
+        )
+    if (
+        change.direction != "upgrade"
+        or not parts
+        or len(parts) != len(original)
+        or not _supplement_document_matches(change)
+    ):
+        return False
+    by_cycle = {}
+    for part in parts:
+        key = part.evidence.get("cycle_id") if isinstance(part.evidence, dict) else None
+        if not isinstance(key, str) or key in by_cycle:
+            return False
+        by_cycle[key] = part
+    if set(by_cycle) != set(original) or sum(part.net_cents for part in parts) != change.net_cents:
+        return False
+    try:
+        return all(
+            part.evidence == original[key]
+            and (part.period_start, part.period_end)
+            == (
+                datetime.fromisoformat(original[key]["period_start"]),
+                datetime.fromisoformat(original[key]["period_end"]),
+            )
+            and (part.base_net_cents, part.prior_supplement_cents)
+            == (original[key]["base_net_cents"], original[key]["prior_supplement_cents"])
+            for key, part in by_cycle.items()
+        )
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
+def _expired_supplement(
+    change: PlanChange,
+    parts: list[PlanChangeInterval],
+    values: dict[str, tuple[int, bool, dict[str, Any]]],
+) -> bool:
+    """Past funding does not cover a new period; original-grant validation still reads it.
+
+    This is historical irrelevance, not certification that old money remains
+    undisputed. Original native authority selects its original cycle IDs and
+    therefore never takes this bypass. Unknown/incomplete history fails closed.
+    """
+    original = change.quote_snapshot.get("coverage")
+    if not isinstance(original, dict) or not original or set(original).intersection(values):
+        return False
+    if not _complete_allocation_history(change, parts, original):
+        return False
+    try:
+        boundary = min(datetime.fromisoformat(value[2]["period_start"]) for value in values.values())
+        groups = (
+            sorted(
+                (datetime.fromisoformat(source["period_start"]), datetime.fromisoformat(source["period_end"]))
+                for source in original.values()
+            ),
+            sorted((part.period_start, part.period_end) for part in parts),
+            [(change.current_period_start, change.current_period_end)],
+        )
+    except (ValueError, TypeError, KeyError):
+        return False
+    if (
+        not timezone.is_aware(boundary)
+        or change.confirmed_at is None
+        or change.committed_at is None
+        or not change.confirmed_at <= change.committed_at <= boundary
+        or change.effective_at > boundary
+    ):
+        return False
+    for windows in groups:
+        if any(
+            timezone.is_naive(start) or timezone.is_naive(end) or not start < end <= boundary for start, end in windows
+        ) or any(first[1] > second[0] for first, second in pairwise(windows)):
+            return False
+    return True
+
+
+def _relevant_supplements(
+    subscription: Subscription,
+    values: dict[str, tuple[int, bool, dict[str, Any]]],
+    changes: Iterable[PlanChange],
+) -> Iterable[tuple[PlanChange, list[PlanChangeInterval]]]:
+    for change in changes:
+        if change.customer_id != subscription.customer_id or change.service_id != subscription.service_id:
+            raise _refuse("a settled supplement belongs to another owner or service")
+        parts = list(change.intervals.all())
+        if not _expired_supplement(change, parts, values):
+            yield change, parts
+
+
+def _apply_supplement_coverage(  # noqa: PLR0913 -- Shared fixed evidence and prior/own allocation context.
     subscription: Subscription,
     values: dict[str, tuple[int, bool, dict[str, Any]]],
     current_key: str,
@@ -324,9 +436,7 @@ def _apply_supplement_coverage(  # noqa: C901, PLR0913 -- Shared fixed evidence 
     changes: Iterable[PlanChange],
 ) -> tuple[dict[str, int], int]:
     sums: dict[str, int] = {}
-    for change in changes:
-        if change.customer_id != subscription.customer_id or change.service_id != subscription.service_id:
-            raise _refuse("a settled supplement belongs to another owner or service")
+    for change, parts in _relevant_supplements(subscription, values, changes):
         if change.currency_id != subscription.currency_id or change.status == "paid_review":
             raise _refuse("a settled supplement has invalidated currency or payment coverage")
         if change.total_cents:
@@ -339,7 +449,6 @@ def _apply_supplement_coverage(  # noqa: C901, PLR0913 -- Shared fixed evidence 
                 raise _refuse("a supplement document belongs to another owner or currency")
             if change.invoice.total_cents != change.total_cents or change.invoice.subtotal_cents != change.net_cents:
                 raise _refuse("a supplement document does not match the accepted price")
-        parts = list(change.intervals.all())
         if sum(part.net_cents for part in parts) != change.net_cents:
             raise _refuse("supplement allocations do not match the accepted net amount")
         for part in parts:
