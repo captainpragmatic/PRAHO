@@ -33,7 +33,7 @@ class SecurityActionViewTests(ActionFixture, TestCase):
 
     def test_ban_post_records_once_and_never_calls_a_host(self) -> None:
         payload = self.ban()
-        with patch("apps.security.action_transport.call", side_effect=AssertionError("Host I/O during request")):
+        with patch("apps.security.action_transport.send_request", side_effect=AssertionError("Host I/O during request")):
             first = self.client.post("/security/actions/ban/", payload)
             self.assertEqual(first.status_code, 302)
             self.assertEqual(self.client.post("/security/actions/ban/", payload).status_code, 302)
@@ -114,7 +114,7 @@ class SecurityActionViewTests(ActionFixture, TestCase):
         )
         action.status = "unknown"
         action.save(update_fields=["status"])
-        with patch("apps.security.action_transport.call", side_effect=AssertionError("RPC during result rendering")):
+        with patch("apps.security.action_transport.send_request", side_effect=AssertionError("RPC during result rendering")):
             response = self.client.get(f"/security/actions/{action.pk}/")
         self.assertContains(response, "Unknown")
         self.assertContains(response, "may have applied")
@@ -156,7 +156,7 @@ class SecurityActionViewTests(ActionFixture, TestCase):
     def test_action_history_filters_unknown_results_and_never_calls_a_host(self) -> None:
         unknown, pending = self.issue(), self.issue()
         SecurityActionRequest.objects.filter(pk=unknown.pk).update(status="unknown")
-        with patch("apps.security.action_transport.call", side_effect=AssertionError("RPC during history rendering")):
+        with patch("apps.security.action_transport.send_request", side_effect=AssertionError("RPC during history rendering")):
             response = self.client.get("/security/actions/", {"state": "unknown"})
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, f"/security/actions/{unknown.pk}/")
