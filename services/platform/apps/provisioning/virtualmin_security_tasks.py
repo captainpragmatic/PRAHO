@@ -8,7 +8,7 @@ from typing import cast
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.utils.translation import gettext as _
 
-from apps.infrastructure.ansible_service import AnsibleService, node_admin_allowed_cidrs, uncovered_platform_egress
+from apps.infrastructure.ansible_service import AnsibleService, node_admin_allowed_cidrs
 from apps.infrastructure.permissions import can_deploy_nodes
 
 from .virtualmin_models import VirtualminServer
@@ -46,12 +46,6 @@ def collect_inspection(server: VirtualminServer) -> dict[str, object]:
     if not isinstance(proposals, list) or any(not isinstance(item, str) for item in proposals):
         raise ValidationError(_("Inspection lacks proposed changes."))
     proposals.append("Administrative networks: " + ", ".join(sorted(node_admin_allowed_cidrs())))
-    if uncovered := uncovered_platform_egress():
-        proposals.append(
-            "Warning: Platform source addresses outside the administrative networks: "
-            + ", ".join(uncovered)
-            + ". The node firewall will drop Platform's connections from them."
-        )
     proposals.append("Dedicated API login after conversion: " + dedicated_username(server))
     proposals.append(
         "Rotate the dedicated API password; preserve the separate root rescue login for local operator access."

@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 from urllib.parse import urlsplit
 
 import requests
+import urllib3
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -328,6 +329,12 @@ def _transport_address_suffix(error: requests.exceptions.RequestException) -> st
     except ValueError:
         return ""
     return f" ({address}, IPv{address.version})"
+
+
+def _connection_not_established(error: requests.exceptions.ConnectionError) -> bool:
+    """Whether the TCP connect itself failed; a dropped or stalled response also arrives as ConnectionError."""
+    cause = error.args[0] if error.args else None
+    return isinstance(getattr(cause, "reason", None), urllib3.exceptions.ConnectTimeoutError)
 
 
 @dataclass(frozen=True)
@@ -1164,7 +1171,8 @@ class VirtualminGateway:
                 retriability=Retriability.NOT_RETRIABLE,
             ) from e
         except requests.exceptions.ConnectionError as e:
-            raise VirtualminUnreachableError(
+            failure = VirtualminUnreachableError if _connection_not_established(e) else VirtualminTransientError
+            raise failure(
                 f"Connection error to {self.server.hostname}: {e}{_transport_address_suffix(e)}", self.server.hostname
             ) from e
         except OutboundSecurityError as e:

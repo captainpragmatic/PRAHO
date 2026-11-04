@@ -32231,6 +32231,11 @@ msgstr "Panoul a refuzat verificarea API după securizare (%(detail)s)."
 msgid "The panel check failed after hardening (%(detail)s)."
 msgstr "Verificarea panoului a eșuat după securizare (%(detail)s)."
 
+#: apps/provisioning/virtualmin_security_views.py
+#, python-format
+msgid "Platform source addresses %(addresses)s are missing from the node admin allowlist. The node firewall drops Platform's connections from these addresses, so hardening this node would cut Platform off from it."
+msgstr "Adresele sursă ale Platform %(addresses)s lipsesc din lista de acces administrativ pentru noduri. Firewall-ul nodului blochează conexiunile Platform de la aceste adrese, așa că securizarea acestui nod ar tăia accesul Platform la el."
+
 #: apps/infrastructure/views.py
 #, python-format
 msgid "Platform source addresses %(addresses)s are missing from the node admin allowlist. The node firewall drops Platform's connections from these addresses, so a deploy that connects from one of them fails at hardening."

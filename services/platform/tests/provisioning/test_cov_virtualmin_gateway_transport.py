@@ -8,6 +8,7 @@ from typing import cast
 from unittest.mock import patch
 
 import requests
+import urllib3
 from django.test import TestCase, override_settings
 from django.utils import timezone
 
@@ -93,10 +94,18 @@ class VirtualminGatewayTransportCoverageTests(TestCase):
                 self.assertTrue(call.call_args.kwargs["correlation_id"].startswith("health_check_"))
 
     def test_check_api_unreachable_only_when_the_connection_failed(self) -> None:
-        prepared = requests.Request("POST", "https://[2001:db8::1]:10000/virtual-server/remote.cgi").prepare()
+        url = "https://[2001:db8::1]:10000/virtual-server/remote.cgi"
+        prepared = requests.Request("POST", url).prepare()
+        # Shaped as requests raises them: a refused connect arrives as MaxRetryError(NewConnectionError), while a
+        # response body that stalls after the headers arrives as a bare urllib3 ReadTimeoutError.
+        refused = urllib3.exceptions.MaxRetryError(
+            None, url, urllib3.exceptions.NewConnectionError(None, "Connection refused")
+        )
+        stalled = urllib3.exceptions.ReadTimeoutError(None, url, "Read timed out.")
         for outcome, kind, detail in (
             (requests.exceptions.ConnectTimeout("fixture", request=prepared), "unreachable", "Connection timeout to"),
-            (requests.exceptions.ConnectionError("fixture", request=prepared), "unreachable", "Connection error to"),
+            (requests.exceptions.ConnectionError(refused, request=prepared), "unreachable", "Connection error to"),
+            (requests.exceptions.ConnectionError(stalled, request=prepared), "failed", "Read timed out"),
             (requests.exceptions.ReadTimeout("fixture", request=prepared), "failed", "Read timeout from"),
             (http_response("Service Unavailable", status=503), "failed", "Server error: HTTP 503"),
         ):
@@ -107,7 +116,7 @@ class VirtualminGatewayTransportCoverageTests(TestCase):
                 return outcome
 
             with (
-                self.subTest(outcome=type(outcome).__name__),
+                self.subTest(outcome=type(outcome).__name__, cause=type(getattr(outcome, "args", [None])[0]).__name__),
                 patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=respond),
             ):
                 result = self.gateway.check_api()
