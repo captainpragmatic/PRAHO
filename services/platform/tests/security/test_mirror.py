@@ -7,7 +7,7 @@ from datetime import timedelta
 from unittest.mock import patch
 from uuid import uuid4
 
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, InterfaceError, transaction
 from django.test import TestCase
 from django.utils import timezone
 
@@ -245,15 +245,18 @@ class SecurityMirrorTests(SecurityFixture, TestCase):
         self.assertEqual(SecurityDecision.objects.count(), 1)
 
     def test_enqueue_uncertainty_invalidates_only_its_own_token(self) -> None:
-        with (
-            patch("apps.security.tasks.async_task", side_effect=TimeoutError("lost broker acknowledgement")),
-            self.captureOnCommitCallbacks(execute=True),
-        ):
-            tasks.dispatch_security_sync()
-            old = SecuritySyncState.objects.get(source=self.source).claim_token
-        with patch("apps.common.crowdsec_transport.remote_rpc") as rpc:
-            self.assertEqual(tasks.sync_source(str(self.source.pk), str(old))["state"], "superseded")
-            rpc.assert_not_called()
-        state = SecuritySyncState.objects.get(source=self.source)
-        self.assertIsNone(state.claim_token)
-        self.assertEqual(state.outcome, "enqueue_failed")
+        for failure in (TimeoutError, InterfaceError):
+            with self.subTest(failure=failure.__name__):
+                SecuritySyncState.objects.filter(source=self.source).update(next_run=timezone.now())
+                with (
+                    patch("apps.security.tasks.async_task", side_effect=failure("lost broker acknowledgement")),
+                    self.captureOnCommitCallbacks(execute=True),
+                ):
+                    tasks.dispatch_security_sync()
+                    old = SecuritySyncState.objects.get(source=self.source).claim_token
+                with patch("apps.common.crowdsec_transport.remote_rpc") as rpc:
+                    self.assertEqual(tasks.sync_source(str(self.source.pk), str(old))["state"], "superseded")
+                    rpc.assert_not_called()
+                state = SecuritySyncState.objects.get(source=self.source)
+                self.assertIsNone(state.claim_token)
+                self.assertEqual(state.outcome, "enqueue_failed")

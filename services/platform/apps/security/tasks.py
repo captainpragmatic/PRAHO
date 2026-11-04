@@ -9,7 +9,7 @@ from time import monotonic
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError, models, transaction
+from django.db import DatabaseError, InterfaceError, models, transaction
 from django.utils import timezone
 from django_q.models import Schedule
 from django_q.tasks import async_task
@@ -30,7 +30,7 @@ RETENTION_SECONDS = 5.0
 def _enqueue(source_id: UUID, token: UUID) -> None:
     try:
         async_task(TASK, str(source_id), str(token), timeout=TASK_TIMEOUT, sync=False)
-    except (ValueError, RuntimeError, OSError, DatabaseError):
+    except (ValueError, RuntimeError, OSError, DatabaseError, InterfaceError):
         repos.fail_claim(source_id, token, "enqueue_failed")
         logger.exception("Security poll dispatch acknowledgement failed for source %s", source_id)
 
