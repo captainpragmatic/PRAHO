@@ -91,5 +91,10 @@
 {% endblock %}
 
 {% block extra_js %}
-{% if payment %}{{ payment|json_script:"hosting-plan-payment-config" }}<script src="https://js.stripe.com/v3/" defer></script><script src="{% static 'js/hosting-plan-checkout.js' %}" defer></script>{% endif %}
+{% if payment %}
+{{ payment|json_script:"hosting-plan-payment-config" }}
+{# nosemgrep: missing-integrity — accepted risk: Stripe.js v3 is evergreen and must load from js.stripe.com, so no SRI hash can be pinned; CSP allows external scripts only from that host #}
+<script src="https://js.stripe.com/v3/" defer></script>
+<script src="{% static 'js/hosting-plan-checkout.js' %}" defer></script>
+{% endif %}
 {% endblock %}

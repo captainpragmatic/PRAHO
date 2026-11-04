@@ -79,7 +79,9 @@ def _change(value: object) -> dict[str, object]:
 
 def _failed(request: HttpRequest, service_id: int, error: PlatformAPIError) -> HttpResponse:
     if error.status_code in {403, 404}:
-        return HttpResponseNotFound(_("Plan change not found."))
+        return HttpResponseNotFound(  # nosemgrep: direct-use-of-httpresponse — fixed translated text
+            _("Plan change not found.")
+        )
     status = error.status_code if error.status_code in {400, 409, 429} else 503
     response = render(
         request,
