@@ -9,7 +9,7 @@ from uuid import UUID
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.db import DatabaseError, connection, transaction
+from django.db import DatabaseError, InterfaceError, connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.html import strip_tags
@@ -96,7 +96,7 @@ def _schema_handover_refusal() -> str | None:
             minutes__range=(1, 5),
         ).exists():
             return "Register the durable hosting warning sweep before notification handover."
-    except DatabaseError:
+    except (DatabaseError, InterfaceError):
         return "Apply the warning and preference migrations before notification handover."
     return None
 
