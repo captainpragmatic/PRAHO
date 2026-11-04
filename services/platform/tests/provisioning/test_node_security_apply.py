@@ -1,5 +1,6 @@
 """Enrollment failure must never progress to interactive-access lockdown."""
 
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
@@ -8,6 +9,7 @@ from django.test import TestCase, override_settings
 from apps.common.credential_vault import CredentialVault, EncryptedCredential
 from apps.common.types import Err, Ok
 from apps.infrastructure.ansible_service import AnsibleResult
+from apps.provisioning.virtualmin_gateway import VirtualminAuthError, VirtualminUnreachableError
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_security import connection_identity, record_inspection
 from apps.provisioning.virtualmin_security_apply import apply_hardening
@@ -57,7 +59,10 @@ class SecurityApplyTests(TestCase):
         self.assertEqual(self.server.api_username, "root")
         self.assertEqual(self.server.get_api_password(), "original-root-rescue-password")
 
-    def test_failed_api_authentication_prevents_ssh_and_webmin_lockdown(self):
+    def _api_failure_message(self, outcome):
+        self.server.refresh_from_db()
+        self.assertEqual(self.server.security_operation, self.run.pk)
+        self.assertEqual(self.server.get_api_password(), "original-root-rescue-password")
         with (
             patch(
                 "apps.provisioning.virtualmin_security_apply.AnsibleService.operator_public_keys", return_value=("key",)
@@ -66,13 +71,11 @@ class SecurityApplyTests(TestCase):
             patch(
                 "apps.provisioning.virtualmin_security_apply._run", return_value="PRAHO_PANEL_CERT=" + "a" * 64
             ) as remote,
-            patch(
-                "apps.provisioning.virtualmin_security_apply.VirtualminGateway.test_connection",
-                return_value=Ok({"healthy": False}),
-            ),
-            self.assertRaises(ValidationError),
+            patch("apps.provisioning.virtualmin_security_apply.VirtualminGateway.call", return_value=outcome) as call,
+            self.assertRaises(ValidationError) as caught,
         ):
             apply_hardening(self.run)
+        self.assertEqual(call.call_args.args, ("info",))
         self.assertEqual(remote.call_count, 1)
         self.assertEqual(remote.call_args.args[2], "virtualmin_security_enroll.yml")
         self.assertTrue(
@@ -81,6 +84,36 @@ class SecurityApplyTests(TestCase):
         self.server.refresh_from_db()
         self.assertEqual(self.server.api_username, "root")
         self.assertEqual(self.server.security_operation, self.run.pk)
+        return caught.exception.messages[0]
+
+    def test_failed_api_authentication_prevents_ssh_and_webmin_lockdown(self):
+        message = self._api_failure_message(Err(VirtualminAuthError("HTTP 401")))
+        self.assertEqual(
+            message,
+            "Dedicated API authentication failed; interactive access has not been restricted.",
+        )
+
+    def test_refused_panel_check_prevents_ssh_and_webmin_lockdown(self):
+        message = self._api_failure_message(
+            Ok(
+                SimpleNamespace(
+                    success=False, data={"error": "ACL denies info"}, execution_time=0, server_hostname="node"
+                )
+            )
+        )
+        self.assertEqual(
+            message,
+            "The panel refused the API check (ACL denies info); interactive access has not been restricted",
+        )
+
+    def test_unreachable_panel_is_not_reported_as_bad_credentials(self):
+        message = self._api_failure_message(Err(VirtualminUnreachableError("IPv6 connect timed out")))
+        self.assertEqual(
+            message,
+            f"The panel at {self.server.hostname}:{self.server.api_port} could not be reached "
+            "(IPv6 connect timed out); interactive access has not been restricted",
+        )
+        self.assertNotIn("authentication failed", message)
 
     def test_success_orders_durable_enrollment_api_proof_ssh_and_final_live_proof(self):
         calls = []
@@ -119,8 +152,10 @@ class SecurityApplyTests(TestCase):
             patch("apps.provisioning.virtualmin_security_apply._preserve_imported_trust"),
             patch("apps.provisioning.virtualmin_security_apply.AnsibleService.run_server_playbook", side_effect=remote),
             patch(
-                "apps.provisioning.virtualmin_security_apply.VirtualminGateway.test_connection",
-                return_value=Ok({"healthy": True}),
+                "apps.provisioning.virtualmin_security_apply.VirtualminGateway.call",
+                return_value=Ok(
+                    SimpleNamespace(success=True, data={}, execution_time=0, server_hostname=self.server.hostname)
+                ),
             ),
             patch("apps.provisioning.virtualmin_security_tasks.collect_inspection", side_effect=inspected),
             patch(

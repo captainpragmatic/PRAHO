@@ -16,7 +16,7 @@ from django.views.decorators.http import require_http_methods
 from django_q.models import Task
 from django_q.tasks import async_task
 
-from apps.infrastructure.ansible_service import node_admin_allowed_cidrs
+from apps.infrastructure.ansible_service import node_admin_allowed_cidrs, uncovered_platform_egress
 from apps.infrastructure.permissions import can_deploy_nodes, is_staff_or_superuser
 from apps.ui.widgets import PRAHOCheckboxWidget, PRAHOTextAreaWidget
 
@@ -162,6 +162,16 @@ def node_security(request: HttpRequest, server_id: UUID) -> HttpResponse:
             messages.info(request, _("Node security action queued. Refresh this page for the result."))
             path = reverse("provisioning:node_security", args=[server.pk])
             return redirect(f"{path}?{urlencode({'task': task_id})}")
+    if uncovered := uncovered_platform_egress():
+        messages.warning(
+            request,
+            _(
+                "Platform source addresses %(addresses)s are missing from the node admin allowlist. "
+                "The node firewall drops Platform's connections from these addresses, so hardening "
+                "this node would cut Platform off from it."
+            )
+            % {"addresses": ", ".join(uncovered)},
+        )
     task = Task.objects.filter(pk=request.GET.get("task"), name=task_name).first() if request.GET.get("task") else None
     return render(
         request,

@@ -45,6 +45,20 @@ class SecurityWorkflowTests(TestCase):
         self.assertContains(response, "Inspect current policy")
         queue.assert_not_called()
 
+    def test_page_warns_when_platform_egress_is_outside_the_allowlist(self):
+        for uncovered, expected in ((["2a01:4f9:c015:4d96::1"], 1), ([], 0)):
+            with (
+                self.subTest(uncovered=uncovered),
+                patch("apps.provisioning.virtualmin_security_views.uncovered_platform_egress", return_value=uncovered),
+            ):
+                response = self.client.get(self.url)
+            self.assertEqual(response.status_code, 200)
+            warnings = [str(message) for message in response.context["messages"] if message.level_tag == "warning"]
+            self.assertEqual(len(warnings), expected)
+            if expected:
+                self.assertIn("2a01:4f9:c015:4d96::1", warnings[0])
+                self.assertIn("hardening this node would cut Platform off from it", warnings[0])
+
     def test_queued_task_redirect_preserves_one_encoded_task_identifier(self):
         identifier = "task/id?part=one&mode=two"
         with patch("apps.provisioning.virtualmin_security_views.async_task", return_value=identifier):
@@ -264,6 +278,7 @@ class SecurityWorkflowTests(TestCase):
             transport.return_value.run_server_playbook.return_value = Ok(response)
             evidence = collect_inspection(self.server)
         self.assertIn("Administrative networks: 192.0.2.1/32", evidence["proposed_changes"])
+        self.assertFalse([line for line in evidence["proposed_changes"] if line.startswith("Warning:")])
 
     def test_collector_refuses_multiple_envelopes(self):
         response = AnsibleResult(
