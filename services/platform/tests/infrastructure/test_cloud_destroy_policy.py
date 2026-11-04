@@ -7,6 +7,42 @@ from apps.infrastructure.cloud_resource_inventory import CAPABILITIES, CloudReso
 
 
 class DestroyPolicyTests(SimpleTestCase):
+    def test_owned_attached_auto_delete_primary_ip_is_deleted_with_its_server(self):
+        resources = [
+            CloudResource("server", "vm"),
+            CloudResource("primary_ip", "ip", attached_to=("vm",), auto_delete=True),
+        ]
+        decisions = build_destroy_decisions(
+            resources, {"server:vm", "primary_ip:ip"}, ("vm",), "delete", CAPABILITIES["hetzner"]
+        )
+        decision = next(item for item in decisions if item.key == "primary_ip:ip")
+        self.assertEqual(decision.action, "parent_delete")
+        self.assertFalse(decision.blocks_parent)
+
+    def test_owned_attached_primary_ip_without_auto_delete_requires_explicit_delete(self):
+        resources = [
+            CloudResource("server", "vm"),
+            CloudResource("primary_ip", "ip", attached_to=("vm",), auto_delete=False),
+        ]
+        decisions = build_destroy_decisions(
+            resources, {"server:vm", "primary_ip:ip"}, ("vm",), "delete", CAPABILITIES["hetzner"]
+        )
+        decision = next(item for item in decisions if item.key == "primary_ip:ip")
+        self.assertEqual(decision.action, "delete")
+        self.assertFalse(decision.blocks_parent)
+
+    def test_owned_unattached_auto_delete_primary_ip_requires_explicit_delete(self):
+        resources = [
+            CloudResource("server", "vm"),
+            CloudResource("primary_ip", "ip", attached_to=(), auto_delete=True),
+        ]
+        decisions = build_destroy_decisions(
+            resources, {"server:vm", "primary_ip:ip"}, ("vm",), "delete", CAPABILITIES["hetzner"]
+        )
+        decision = next(item for item in decisions if item.key == "primary_ip:ip")
+        self.assertEqual(decision.action, "delete")
+        self.assertFalse(decision.blocks_parent)
+
     def test_volume_snapshot_used_by_an_unrelated_volume_is_preserved(self):
         resources = [
             CloudResource("server", "vm"),

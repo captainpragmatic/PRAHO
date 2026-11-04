@@ -4,7 +4,14 @@ from unittest.mock import Mock
 
 from django.test import SimpleTestCase
 
+from apps.infrastructure import cloud_resource_inventory
 from apps.infrastructure.cloud_resource_inventory import CloudResourceClient, ResourceResponse
+
+
+class ProviderError(Exception):
+    def __init__(self, code: object) -> None:
+        super().__init__("provider request refused")
+        self.code = code
 
 
 class ResourceInventoryTests(SimpleTestCase):
@@ -156,13 +163,133 @@ class ResourceInventoryTests(SimpleTestCase):
     def test_delete_receipt_requires_exact_authoritative_absence(self):
         request = Mock(side_effect=[ResourceResponse(204, None), ResourceResponse(200, {"snapshot": {"id": "s"}})])
         client = CloudResourceClient("vultr", request, poll_timeout=0)
-        self.assertFalse(client.delete_exact("snapshot", "s").is_ok())
+        result = client.delete_exact("snapshot", "s")
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(
+            result.unwrap_err(),
+            "Provider accepted deletion but resource absence is unconfirmed: resource still present",
+        )
         request = Mock(side_effect=[ResourceResponse(204, None), ResourceResponse(404, {})])
         self.assertTrue(CloudResourceClient("vultr", request, poll_timeout=0).delete_exact("snapshot", "s").is_ok())
 
     def test_error_text_never_proves_absence(self):
         request = Mock(side_effect=RuntimeError("not found 404"))
         self.assertTrue(CloudResourceClient("vultr", request).delete_exact("snapshot", "s").is_err())
+
+    def test_delete_exception_with_authoritative_absence_is_confirmed(self):
+        request = Mock(side_effect=[ProviderError("locked"), ResourceResponse(404, {})])
+        result = CloudResourceClient("hetzner", request).delete_exact("primary_ip", "7")
+        self.assertTrue(result.is_ok(), result)
+        self.assertIs(result.unwrap(), True)
+        self.assertEqual(
+            [call.args[:2] for call in request.call_args_list],
+            [("DELETE", "/primary_ips/7"), ("GET", "/primary_ips/7")],
+        )
+
+    def test_delete_exception_with_present_resource_keeps_provider_code(self):
+        request = Mock(side_effect=[ProviderError("locked"), ResourceResponse(200, {"primary_ip": {"id": 7}})])
+        result = CloudResourceClient("hetzner", request).delete_exact("primary_ip", "7")
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(result.unwrap_err(), "Provider deletion unconfirmed: ProviderError (locked)")
+        self.assertEqual(
+            [call.args[:2] for call in request.call_args_list],
+            [("DELETE", "/primary_ips/7"), ("GET", "/primary_ips/7")],
+        )
+
+    def test_delete_exception_and_failed_reread_keep_original_error(self):
+        request = Mock(side_effect=[ProviderError("locked"), RuntimeError("lookup failed")])
+        result = CloudResourceClient("hetzner", request).delete_exact("primary_ip", "7")
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(result.unwrap_err(), "Provider deletion unconfirmed: ProviderError (locked)")
+        self.assertEqual(
+            [call.args[:2] for call in request.call_args_list],
+            [("DELETE", "/primary_ips/7"), ("GET", "/primary_ips/7")],
+        )
+
+    def test_delete_http_error_with_authoritative_absence_is_confirmed(self):
+        request = Mock(side_effect=[ResourceResponse(409, {}), ResourceResponse(404, {})])
+        result = CloudResourceClient("hetzner", request).delete_exact("primary_ip", "7")
+        self.assertTrue(result.is_ok(), result)
+        self.assertIs(result.unwrap(), True)
+        self.assertEqual(
+            [call.args[:2] for call in request.call_args_list],
+            [("DELETE", "/primary_ips/7"), ("GET", "/primary_ips/7")],
+        )
+
+    def test_delete_http_error_with_present_resource_keeps_original_status(self):
+        request = Mock(side_effect=[ResourceResponse(409, {}), ResourceResponse(200, {"primary_ip": {"id": 7}})])
+        result = CloudResourceClient("hetzner", request).delete_exact("primary_ip", "7")
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(result.unwrap_err(), "Provider deletion returned HTTP 409")
+        self.assertEqual(
+            [call.args[:2] for call in request.call_args_list],
+            [("DELETE", "/primary_ips/7"), ("GET", "/primary_ips/7")],
+        )
+
+    def test_delete_http_error_and_failed_reread_keep_original_status(self):
+        request = Mock(side_effect=[ResourceResponse(409, {}), RuntimeError("lookup failed")])
+        result = CloudResourceClient("hetzner", request).delete_exact("primary_ip", "7")
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(result.unwrap_err(), "Provider deletion returned HTTP 409")
+        self.assertEqual(
+            [call.args[:2] for call in request.call_args_list],
+            [("DELETE", "/primary_ips/7"), ("GET", "/primary_ips/7")],
+        )
+
+    def test_error_label_omits_invalid_provider_codes(self):
+        for code in ("Locked!", 123, "a" * 65):
+            with self.subTest(code=code):
+                self.assertEqual(cloud_resource_inventory._error_label(ProviderError(code)), "ProviderError")
+
+    def test_error_label_without_code_is_class_name(self):
+        self.assertEqual(cloud_resource_inventory._error_label(RuntimeError("private detail")), "RuntimeError")
+
+    def test_error_label_includes_valid_provider_code(self):
+        self.assertEqual(
+            cloud_resource_inventory._error_label(ProviderError("rate_limit_exceeded")),
+            "ProviderError (rate_limit_exceeded)",
+        )
+
+    def test_inventory_exception_includes_provider_code(self):
+        request = Mock(side_effect=ProviderError("rate_limit_exceeded"))
+        result = CloudResourceClient("hetzner", request).inventory(("7",))
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(result.unwrap_err(), "Provider inventory incomplete: ProviderError (rate_limit_exceeded)")
+
+    def test_backup_retention_exception_includes_provider_code(self):
+        request = Mock(side_effect=ProviderError("locked"))
+        result = CloudResourceClient("hetzner", request).retain_backup("7")
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(result.unwrap_err(), "Backup retention unconfirmed: ProviderError (locked)")
+
+    def test_confirm_absent_polls_until_structured_absence(self):
+        request = Mock(side_effect=[ResourceResponse(200, {"primary_ip": {"id": 7}}), ResourceResponse(404, {})])
+        sleep = Mock(return_value=None)
+        client = CloudResourceClient("hetzner", request, poll_timeout=300, sleep=sleep)
+        result = client.confirm_absent("primary_ip", "7")
+        self.assertTrue(result.is_ok(), result)
+        self.assertIs(result.unwrap(), True)
+        sleep.assert_called_once_with(2)
+        self.assertEqual(
+            [call.args[:2] for call in request.call_args_list], [("GET", "/primary_ips/7"), ("GET", "/primary_ips/7")]
+        )
+
+    def test_confirm_absent_times_out_with_resource_still_present(self):
+        request = Mock(return_value=ResourceResponse(200, {"primary_ip": {"id": 7}}))
+        sleep = Mock(return_value=None)
+        client = CloudResourceClient("hetzner", request, poll_timeout=0, sleep=sleep)
+        result = client.confirm_absent("primary_ip", "7")
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(result.unwrap_err(), "resource still present")
+        self.assertEqual([call.args[:2] for call in request.call_args_list], [("GET", "/primary_ips/7")])
+        sleep.assert_not_called()
+
+    def test_confirm_absent_exception_keeps_provider_code(self):
+        request = Mock(side_effect=ProviderError("locked"))
+        result = CloudResourceClient("hetzner", request, poll_timeout=0).confirm_absent("primary_ip", "7")
+        self.assertTrue(result.is_err(), result)
+        self.assertEqual(result.unwrap_err(), "absence read failed: ProviderError (locked)")
+        self.assertEqual([call.args[:2] for call in request.call_args_list], [("GET", "/primary_ips/7")])
 
     def test_conversion_cannot_dispatch_snapshot_create_or_claim_pending_snapshot_ready(self):
         request = Mock(

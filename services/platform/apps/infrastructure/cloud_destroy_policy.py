@@ -127,6 +127,13 @@ def _resource_decision(
         )
     if resource.kind in RESTORE_POINT_KINDS:
         return _restore_decision(resource, context.policy, context.capabilities)
+    if resource.kind == "primary_ip" and resource.auto_delete and resource.attached_to:
+        return DestroyDecision(
+            resource.kind,
+            resource.resource_id,
+            "parent_delete",
+            "The provider deletes this primary IP with its server; confirm its absence after the server is deleted.",
+        )
     return DestroyDecision(
         resource.kind,
         resource.resource_id,
