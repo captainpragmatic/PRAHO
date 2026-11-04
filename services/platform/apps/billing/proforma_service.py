@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from django.db import DatabaseError, transaction
 from django.utils import timezone
-from django.utils.translation import gettext
+from django.utils.translation import gettext, override
 
 from apps.audit.actor_context import bind_current_actor
 from apps.billing.tax_evidence import capture_vat_evidence, derive_tax_category
@@ -73,23 +73,27 @@ def generate_proforma_pdf(proforma: Any) -> bytes:  # ProformaInvoice type would
     return _generate_pdf(proforma)
 
 
-def queue_proforma_message(proforma: Any, email: str, *, customer: Any = None, context: dict[str, Any] | None = None) -> EmailResult:
+def queue_proforma_message(
+    proforma: Any, email: str, *, customer: Any = None, context: dict[str, Any] | None = None
+) -> EmailResult:
     """The existing proforma PDF pipeline, with durable async-only storage when source-bound."""
+    from apps.customers.services import get_customer_locale  # noqa: PLC0415  # ADR-0007 cross-app import.
     from apps.notifications.attachments import AttachmentRef  # noqa: PLC0415
     from apps.notifications.services import EmailService  # noqa: PLC0415
 
-    body = gettext("Please find attached proforma invoice %(number)s.") % {"number": proforma.number}
-    if context:
-        body += "\n" + str(context["target_plan_name"]) + ": " + str(context["disk_allowance"])
-    return EmailService.send_email(
-        to=email,
-        subject=gettext("Proforma Invoice %(number)s") % {"number": proforma.number},
-        body_text=body,
-        attachments=[AttachmentRef("proforma_pdf", str(proforma.pk))],
-        customer=customer,
-        template_key="proforma" if context else "",
-        require_async=bool(context),
-    )
+    with override(get_customer_locale(customer if customer is not None else proforma.customer)):
+        body = gettext("Please find attached proforma invoice %(number)s.") % {"number": proforma.number}
+        if context:
+            body += "\n" + str(context["target_plan_name"]) + ": " + str(context["disk_allowance"])
+        return EmailService.send_email(
+            to=email,
+            subject=gettext("Proforma Invoice %(number)s") % {"number": proforma.number},
+            body_text=body,
+            attachments=[AttachmentRef("proforma_pdf", str(proforma.pk))],
+            customer=customer,
+            template_key="proforma" if context else "",
+            require_async=bool(context),
+        )
 
 
 def send_proforma_email(

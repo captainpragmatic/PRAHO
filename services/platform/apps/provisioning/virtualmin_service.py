@@ -631,13 +631,13 @@ class VirtualminProvisioningService:
             )
         return params
 
-    def _execute_domain_creation(  # noqa: PLR0911, PLR0912, PLR0915 -- Verified create, native quota and canonical ownership commit.
+    def _execute_domain_creation(  # noqa: PLR0911, PLR0915 -- Verified create, native quota and canonical ownership commit.
         self,
         account: VirtualminAccount,
         job: VirtualminProvisioningJob,
         *,
         before_create: Callable[[], Err[str] | None] | None = None,
-        settle_created: Callable[[dict[str, Any]], Result[dict[str, Any], str]] | None = None,
+        settle_created: Callable[[dict[str, Any], bool], Result[dict[str, Any], str]] | None = None,
     ) -> Result[dict[str, Any], str]:
         """Execute domain creation on Virtualmin server with validation and rollback"""
         try:
@@ -697,11 +697,7 @@ class VirtualminProvisioningService:
                         # Retry settlement owns its fresh binding/claim checks.
                         # A post-acceptance bookkeeping failure must never delete
                         # the actual resource or replay the creation command.
-                        settled = settle_created(response.data)
-                        if settled.is_ok():
-                            account.refresh_from_db()
-                            publish_managed_limits(account)
-                        return settled
+                        return settle_created(response.data, quotas.unwrap())
                     # Track successful domain creation for potential rollback
                     rollback_operations.append(
                         {
@@ -1677,7 +1673,9 @@ class VirtualminProvisioningService:
             account,
             job,
             before_create=lambda: self._retry_dispatch_refusal(account, job, binding),
-            settle_created=lambda data: settle_retry_created(binding, job.pk, data, native_outcome="created"),
+            settle_created=lambda data, managed: settle_retry_created(
+                binding, job.pk, data, native_outcome="created", publish_limits=managed
+            ),
         )
         if creation_result.is_err():
             return Err(creation_result.unwrap_err())
@@ -1691,7 +1689,6 @@ class VirtualminProvisioningService:
     ) -> Result[dict[str, Any], str]:
         from .hosting_limit_execution import (  # noqa: PLC0415 -- Same native gate as fresh creation.
             ensure_managed_limits,
-            publish_managed_limits,
         )
 
         verified: Result[bool, str] = Ok(False)
@@ -1704,16 +1701,13 @@ class VirtualminProvisioningService:
             target = lock_create_retry_node(account, job)
             if target.is_err():
                 return Err(target.unwrap_err())
-            settled = settle_retry_created(
+            return settle_retry_created(
                 binding,
                 job.pk,
                 {"recovered": "remote domain already present"},
                 native_outcome="adopted",
+                publish_limits=verified.is_ok() and verified.unwrap(),
             )
-            if settled.is_ok() and verified.is_ok() and verified.unwrap():
-                account.refresh_from_db()
-                publish_managed_limits(account)
-            return settled
 
     def _retry_dispatch_refusal(
         self, account: VirtualminAccount, job: VirtualminProvisioningJob, binding: CreateRetryBinding

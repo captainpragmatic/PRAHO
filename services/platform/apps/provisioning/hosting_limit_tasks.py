@@ -6,9 +6,11 @@ import logging
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 from django.db import transaction
-from django.db.models import F, Q
+from django.db.models import Exists, F, OuterRef, Q
+from django.utils import timezone
 from django_q.tasks import async_task
 
+from .hosting_limit_execution_models import HostingLimitExecution
 from .hosting_limit_models import HostingLimitApplication, ServiceHostingLimits
 from .service_models import Service
 
@@ -74,26 +76,45 @@ def dispatch_hosting_limits() -> dict[str, int]:
 
     expire_hosting_raises()
     recovered = recover_quota_executions()
-    # A bounded batch; no polling write or customer lock, and no per-row catalog read.
-    pending = (
+    reviewed_adoption = HostingLimitApplication.objects.filter(
+        service_id=OuterRef("service_id"),
+        revision=OuterRef("revision"),
+        authority__adopt_existing_native_limits="acknowledged",
+    )
+    held_execution = HostingLimitExecution.objects.filter(
+        job__account__service_id=OuterRef("service_id"), phase__in=("prepared", "issued", "attention")
+    ).exclude(
+        phase="prepared",
+        job__status="running",
+        job__parameters__quota_parent__isnull=False,
+        job__parameters__quota_parent={},
+    )
+    candidates = (
         ServiceHostingLimits.objects.filter(
             service__virtualmin_account__server__hosting_policy__quota_adopted=True,
             service__virtualmin_account__status__in=("active", "suspended"),
+            service__virtualmin_account__restore_hold="",
             service__status__in=("active", "suspended"),
         )
-        .filter(
-            Q(service__virtualmin_account__quota_managed=True)
-            | Q(
-                service__limit_applications__revision=F("revision"),
-                service__limit_applications__authority__adopt_existing_native_limits="acknowledged",
-            )
-        )
+        .alias(reviewed_adoption=Exists(reviewed_adoption), held_execution=Exists(held_execution))
+        .filter(Q(service__virtualmin_account__quota_managed=True) | Q(reviewed_adoption=True), held_execution=False)
         .filter(Q(applied_revision__isnull=True) | ~Q(applied_revision=F("revision")) | Q(verified_at__isnull=True))
-        .order_by("updated_at")
-        .values_list("service_id", flat=True)[:100]
     )
+    # Record scheduling progress even when the worker later refuses admission or
+    # the broker is down. Only this bounded Limits batch is locked; release it
+    # before current_application takes any Service lock or enqueue performs I/O.
+    with transaction.atomic():
+        pending = list(
+            candidates.select_for_update(of=("self",), skip_locked=True)
+            .order_by("updated_at", "pk")
+            .values_list("pk", "service_id")[:100]
+        )
+        if pending:
+            ServiceHostingLimits.objects.filter(pk__in=[pk for pk, _service_id in pending]).update(
+                updated_at=timezone.now()
+            )
     queued = 0
-    for service_id in pending:
+    for _limits_id, service_id in pending:
         application = current_application(service_id)
         enqueue_application(application.pk)
         queued += 1

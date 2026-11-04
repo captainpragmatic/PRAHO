@@ -238,6 +238,53 @@ class ScheduledPlanChangeTests(VerifiedPlanChangeCheckoutFixture, TransactionTes
         self.assertIsNone(activated.limit_application_id)
         self.assertEqual(ServiceHostingLimits.objects.get(service=self.service).disk_allowance_mib, 5120)
 
+    def test_removing_the_source_catalog_plan_preserves_the_accepted_lower_bill_at_the_boundary(self):
+        change = self.scheduled()
+        original_plan = self.service.service_plan_id
+        original_period = (self.subscription.current_period_start, self.subscription.current_period_end)
+        original_revision = ServiceHostingLimits.objects.get(service=self.service).revision
+        # The actual staff catalog form permits clearing this nullable relation.
+        self.product.default_service_plan = None
+        self.product.save(update_fields=["default_service_plan"])
+
+        outcomes = activate_scheduled_plan_changes(at=change.effective_at)
+        change.refresh_from_db()
+        self.subscription.refresh_from_db()
+        self.service.refresh_from_db()
+        self.assertEqual(self.subscription.unit_price_cents, 4000)
+        self.assertEqual(outcomes, {"limits_attention": 1})
+        self.assertEqual(change.status, "limits_attention")
+        self.assertIsNotNone(change.committed_at)
+        self.assertIsNone(change.limit_application_id)
+        self.assertEqual((self.subscription.product_id, self.subscription.unit_price_cents), (self.target.pk, 4000))
+        self.assertEqual((self.service.price, self.service.service_plan_id), (40, original_plan))
+        self.assertEqual(
+            (self.subscription.current_period_start, self.subscription.current_period_end), original_period
+        )
+        limits = ServiceHostingLimits.objects.get(service=self.service)
+        self.assertEqual((limits.revision, limits.disk_allowance_mib), (original_revision, 5120))
+        self.assertEqual(activate_scheduled_plan_changes(at=change.effective_at), {})
+        self.assertIsNone(activate_scheduled_plan_change(change.pk, at=change.effective_at).limit_application_id)
+
+    def test_removing_the_target_catalog_plan_keeps_lower_billing_without_applying_its_resources(self):
+        change = self.scheduled()
+        original_plan = self.service.service_plan_id
+        original_revision = ServiceHostingLimits.objects.get(service=self.service).revision
+        self.target.default_service_plan = None
+        self.target.save(update_fields=["default_service_plan"])
+
+        self.assertEqual(activate_scheduled_plan_changes(at=change.effective_at), {"limits_attention": 1})
+
+        change.refresh_from_db()
+        self.subscription.refresh_from_db()
+        self.service.refresh_from_db()
+        self.assertIsNotNone(change.committed_at)
+        self.assertIsNone(change.limit_application_id)
+        self.assertEqual((self.subscription.product_id, self.subscription.unit_price_cents), (self.target.pk, 4000))
+        self.assertEqual((self.service.price, self.service.service_plan_id), (40, original_plan))
+        limits = ServiceHostingLimits.objects.get(service=self.service)
+        self.assertEqual((limits.revision, limits.disk_allowance_mib), (original_revision, 5120))
+
     def test_usage_growth_after_acceptance_keeps_the_lower_bill_and_leaves_native_limits_pending(self):
         change = self.scheduled()
         self.publish_usage(3072, 1)
