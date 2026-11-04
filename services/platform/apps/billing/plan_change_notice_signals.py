@@ -16,7 +16,7 @@ from .plan_change_notices import publish_plan_change_notice
 @receiver(post_save, sender=PlanChange)
 def publish_plan_change_phase(sender: type[PlanChange], instance: PlanChange, created: bool, **kwargs: Any) -> None:
     fields = kwargs.get("update_fields")
-    if fields and set(fields) <= {"next_reconcile_at", "updated_at"}:
+    if fields and set(fields) <= {"next_reconcile_at", "staff_escalated_at", "updated_at"}:
         return
     phases = {
         "scheduled": "scheduled",

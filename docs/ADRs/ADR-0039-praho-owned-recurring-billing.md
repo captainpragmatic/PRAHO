@@ -67,7 +67,7 @@ Virtualmin and service-monitor disk/bandwidth readings are cumulative snapshots.
 
 PRAHO does not create Stripe Subscriptions, Prices, Meters, or usage records. The Stripe-specific subscription and metering fields and services are removed. Local usage collection, aggregation, rating, and invoicing remain.
 
-The incomplete local mid-cycle plan-change engine is also non-executable. It could not coordinate provisioned-service changes, apply scheduled changes at the renewal boundary, or issue Romanian fiscal credit documents for downgrades. Historical `SubscriptionChange` records remain readable, but a replacement workflow must design those three boundaries explicitly before it may mutate subscriptions.
+The incomplete local mid-cycle plan-change engine is also non-executable. It could not coordinate provisioned-service changes, apply scheduled changes at the renewal boundary, or issue Romanian fiscal credit documents for downgrades. Historical `SubscriptionChange` records remain readable. The separate replacement in [ADR-0074](ADR-0074-paid-hosting-plan-changes.md) uses positive interval supplements for upgrades, future-boundary downgrades, existing refund/storno policy for exceptional reversals, and independently verified native fulfilment. It does not restore the retired engine; new acceptance remains disabled until its rollout gates pass.
 
 ## Consequences
 

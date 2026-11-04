@@ -1,8 +1,8 @@
 # Recurring Billing Operations
 
 > **Status**: Active reference
-> **Last updated**: 2026-07-23
-> **Architecture decision**: [ADR-0039](../ADRs/ADR-0039-praho-owned-recurring-billing.md)
+> **Last updated**: 2026-11-04
+> **Architecture decisions**: [ADR-0039](../ADRs/ADR-0039-praho-owned-recurring-billing.md), [ADR-0074](../ADRs/ADR-0074-paid-hosting-plan-changes.md)
 
 ## Ownership Boundary
 
@@ -40,6 +40,10 @@ From 1 January 2026, the submission deadline is five Romanian working days. A CN
 | `billing-recurring-orchestrator` | Prepare grouped renewal proformas and create due authorized PaymentIntents |
 | `billing-payment-retries` | Create fresh PaymentIntents for due failed-payment retries every 15 minutes |
 | `billing-recurring-payment-reconciliation` | Reconcile stale or unbound recurring PaymentIntents every 10 minutes |
+| `billing-plan-change-payments` | Recover the original on-session plan-change attempt every 5 minutes |
+| `billing-scheduled-plan-changes` | Expire safely unissued quotes and activate due scheduled changes every 5 minutes |
+| `billing-plan-change-financial-review` | Process durable dispute/refund review facts every 5 minutes |
+| `billing-plan-change-fulfilment` | Reconcile committed native applications and pending phase notices every 5 minutes |
 | `billing-expired-trials` | Cancel unpaid expired trials and expire their services |
 | `billing-grace-expirations` | Apply subscription and service non-payment lifecycle |
 | `Process Pending Usage Events` | Retry usage events that were not aggregated immediately |
@@ -87,7 +91,63 @@ The short database transaction ends before Stripe is contacted. The durable clai
 
 ## Plan Changes
 
-The historical `SubscriptionChange` table is read-only. Do not apply mid-cycle product, quantity, or billing-cycle changes through model mutation or ad-hoc invoices. The retired implementation did not update the provisioned service, never applied scheduled changes, and discarded negative proration instead of issuing the required credit/refund documents. A future plan-change workflow must coordinate provisioning, renewal timing, customer communication, payment, and Romanian fiscal documents atomically.
+The historical `SubscriptionChange` table is read-only. Do not apply changes through model mutation or ad-hoc invoices. The separate, flag-gated `PlanChange` workflow below replaces only supported commercial changes; it does not revive the retired engine.
+
+## Paid hosting plan changes
+
+Keep `billing.hosting_plan_changes_enabled=false` until the
+[deployment acceptance gates](../deployment/DEPLOYMENT.md#paid-hosting-plan-changes)
+pass. This flag is independent of automatic recurring collection. Reconcile the
+four schedules above with `setup_scheduled_tasks --billing-only` before enabling
+new customer acceptance.
+
+Use the Portal **Change plan** workflow for active compatible Virtualmin services.
+Owners and billing members accept an itemized quote; staff shares the proposal link
+from the service's commercial plan-change page. Catalog `upgrades_to` edges define
+forward upgrades and reverse downgrades. Targets retain currency, cycle, quantity
+one and the compatible service feature profile. Setup fees, mixed resource changes
+and unsupported targets require support review. Future recurring authorization is
+preserved, never newly granted by paying an upgrade.
+
+An upgrade uses one standalone on-session supplement document for the remaining
+current interval and every already committed future interval. A frozen future base
+of 80 plus a paid supplement of 120 covers 200; a later target of 300 owes 100 for
+that interval. The old base document remains payable if it was unpaid. An early-paid
+renewal does not change which interval contains today. Zero-due upgrades require
+explicit no-charge acceptance and create no synthetic Payment or invoice.
+
+After financial commitment, new renewals use the accepted per-service price and
+included disk/bandwidth allowances. They do not restore ended price locks or future
+renewal benefits from the old plan. Existing reserved benefits, frozen cycles and
+document amounts remain unchanged. Other services' shared grandfathering promises
+remain protected. An independently accepted later currency transition keeps its own
+notice, preparation and activation rules; historical plan-change evidence retains
+its original currency.
+
+Downgrades target the first uncommitted renewal, with an explicit effective date and
+no immediate credit/refund. The target renewal uses the agreed lower terms. Paying
+it early does not lower native limits early, and committing that renewal to
+preparation closes cancellation. If usage grows or native admission is held at the
+boundary, lower billing terms remain agreed while limits enter attention. Do not
+raise the price again, delete data or force a below-usage cap.
+
+An unsettled plan-change attempt temporarily blocks conflicting renewal
+preparation/collection while its application authority is live. Authority expiry
+ends that billing hold; recovery still owns unknown money and any late payment must
+enter review rather than apply stale terms. A paid change awaiting native quota
+verification does not pause normal renewals. Monitor `paid_review`,
+`applying_limits`, `limits_attention`, pending review events and stale native proof;
+see [recovery](../deployment/PLATFORM_RESTORE.md#hosting-plan-change-recovery).
+
+A due scheduled downgrade that remains in `limits_attention` is escalated on its
+first operation reconciliation to the existing staff **Audit → Review Queue**
+(`/audit/review/`) as one HIGH, review-required event. No extra 24-hour grace is
+invented. The durable marker and event commit together; replay/concurrent workers
+do not create another event, and an audit write failure leaves the marker unset for
+retry. Review the agreed boundary and current ownership before intervention. The
+alert preserves the lower price, data and native enabled state and sends no new
+customer email. Audit review records staff acknowledgement without rewriting the
+original event or automatically resolving the plan change.
 
 ## Monitoring and Reconciliation
 
@@ -111,6 +171,13 @@ An automatic attempt reserves its document locally, then revalidates the locked 
 ## Emergency Stop and Recovery
 
 Set `billing.recurring_auto_collection_enabled` to `false` to stop all new automatic PaymentIntents. This does not stop proforma/invoice creation, manual settlement, webhook reconciliation for already-created attempts, or service lifecycle processing.
+
+For paid hosting changes, also disable `billing.hosting_plan_changes_enabled` to
+stop new acceptance/first claims. Keep all four plan-change schedules, existing
+webhook and invoice-convergence consumers, EmailLog delivery and native
+reconciliation running. The switch does not cancel accepted scheduled terms,
+erase a processor attempt or undo money/resources. Do not roll back to a worker
+version that cannot process already accepted plan-change payments.
 
 After an incident:
 

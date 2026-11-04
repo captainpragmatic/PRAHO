@@ -55,6 +55,7 @@ class PlanChangeReviewEvent(models.Model):
 
     class Meta:
         db_table = "billing_plan_change_review_events"
+        db_table_comment = "Immutable financial invalidation facts and document-first hosting plan review progress."
         indexes: ClassVar[list[models.Index]] = [models.Index(fields=["processed_at", "created_at"])]
 
     def save(self, *args: Any, **kwargs: Any) -> None:

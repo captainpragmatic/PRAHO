@@ -12,7 +12,7 @@
     <form method="post" class="space-y-3">
       {% csrf_token %}<input type="hidden" name="action" value="refresh-usage">
       <p class="text-sm text-slate-300">{% trans "A lower plan requires a fresh usage check. Refresh the check, then reload the available plans." %}</p>
-      {% trans "Refresh usage check" as refresh_usage_label %}{% button refresh_usage_label type="submit" variant="secondary" %}
+      {% trans "Refresh usage check" as refresh_usage_label %}{% button refresh_usage_label type="submit" variant="secondary" class_="min-h-11" %}
     </form>
   {% endif %}
   {% for option in options %}
@@ -23,7 +23,7 @@
       {% if option.available %}
         <form method="post" class="space-y-4">
           {% csrf_token %}{{ option.form }}
-          {% trans "Review exact quote" as quote_label %}{% button quote_label type="submit" variant="primary" %}
+          {% trans "Review exact quote" as quote_label %}{% button quote_label type="submit" variant="primary" class_="min-h-11" %}
         </form>
       {% else %}
         <p class="text-amber-300">{% trans "This plan currently needs a usage or eligibility review. Contact support." %}</p>
@@ -56,29 +56,29 @@
       {% if can_accept %}
         <form method="post" action="{% url 'services:plan_change_action' service_id=service_id change_id=change.id action='confirm' %}" class="space-y-4">
           {% csrf_token %}<input type="hidden" name="quote_fingerprint" value="{{ change.quote_fingerprint }}">
-          {% if change.total_cents == 0 and change.direction == 'upgrade' %}<label class="flex min-h-11 items-center gap-3 text-slate-200"><input type="checkbox" name="accept_zero_due" required>{% trans "I accept this plan change without a payment." %}</label>{% endif %}
-          {% trans "Accept quoted terms" as confirm_label %}{% button confirm_label type="submit" variant="primary" %}
+          {% if change.total_cents == 0 and change.direction == 'upgrade' %}{% trans "I accept this plan change without a payment." as zero_due_label %}{% checkbox_field "accept_zero_due" label=zero_due_label required=True container_class="flex min-h-11 items-center gap-3 [&_label]:inline-flex [&_label]:min-h-11 [&_label]:items-center" %}{% endif %}
+          {% trans "Accept quoted terms" as confirm_label %}{% button confirm_label type="submit" variant="primary" class_="min-h-11" %}
         </form>
       {% endif %}
       {% if can_pay and not payment %}
         <form method="post" action="{% url 'services:plan_change_action' service_id=service_id change_id=change.id action='payment-intent' %}">
           {% csrf_token %}<input type="hidden" name="quote_fingerprint" value="{{ change.quote_fingerprint }}">
-          {% trans "Pay by card" as pay_label %}{% button pay_label type="submit" variant="primary" %}
+          {% trans "Pay by card" as pay_label %}{% button pay_label type="submit" variant="primary" class_="min-h-11" %}
         </form>
       {% endif %}
       {% if payment %}
         <form method="post" id="hosting-plan-payment-form" action="{% url 'services:plan_change_action' service_id=service_id change_id=change.id action='refresh' %}" class="space-y-4" data-return-url="{% url 'services:plan_change_detail' service_id=service_id change_id=change.id %}" data-payment-error="{% trans 'Payment could not be confirmed. Refresh its status before trying again.' %}">
           {% csrf_token %}<div id="hosting-plan-payment-element"></div><p id="hosting-plan-payment-error" class="text-amber-300" role="alert" hidden></p>
-          {% trans "Confirm card payment" as card_label %}{% button card_label type="submit" variant="primary" %}
+          {% trans "Confirm card payment" as card_label %}{% button card_label type="submit" variant="primary" class_="min-h-11" %}
         </form>
       {% endif %}
       <form method="post" id="hosting-plan-refresh-form" action="{% url 'services:plan_change_action' service_id=service_id change_id=change.id action='refresh' %}">
-        {% csrf_token %}{% trans "Refresh status" as refresh_label %}{% button refresh_label type="submit" variant="secondary" %}
+        {% csrf_token %}{% trans "Refresh status" as refresh_label %}{% button refresh_label type="submit" variant="secondary" class_="min-h-11" %}
       </form>
       {% if can_cancel %}
         <form method="post" action="{% url 'services:plan_change_action' service_id=service_id change_id=change.id action='cancel' %}">
           {% csrf_token %}<input type="hidden" name="quote_fingerprint" value="{{ change.quote_fingerprint }}">
-          {% trans "Cancel this change" as cancel_label %}{% button cancel_label type="submit" variant="secondary" %}
+          {% trans "Cancel this change" as cancel_label %}{% button cancel_label type="submit" variant="secondary" class_="min-h-11" %}
         </form>
       {% endif %}
       {% if change.status == 'completed' or change.status == 'cancelled' or change.status == 'expired' %}

@@ -55,6 +55,7 @@ class PlanChangeNotice(models.Model):
 
     class Meta:
         db_table = "billing_plan_change_notices"
+        db_table_comment = "Durable hosting plan notice obligations linked to their original email delivery."
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(fields=("change", "phase"), name="plan_change_notice_phase_unique")
         ]

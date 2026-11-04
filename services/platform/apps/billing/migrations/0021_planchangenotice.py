@@ -69,6 +69,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "billing_plan_change_notices",
+                "db_table_comment": "Durable hosting plan notice obligations linked to their original email delivery.",
                 "indexes": [models.Index(fields=["state", "due_at"], name="billing_pla_state_e612a9_idx")],
                 "constraints": [
                     models.UniqueConstraint(fields=("change", "phase"), name="plan_change_notice_phase_unique")

@@ -511,6 +511,7 @@ class AuditEvent(models.Model):
         ("virtualmin_bridge_origin_attested", "Virtualmin Bridge Origin Attested"),
         ("hosting_dns_state_changed", "Hosting DNS State Changed"),
         ("hosting_dns_recheck_requested", "Hosting DNS Recheck Requested"),
+        ("hosting_plan_change_attention", _("Hosting Plan Change Needs Staff Review")),
         ("dns_zone_import_staged", "DNS Zone Import Staged"),
         ("dns_zone_import_confirmed", "DNS Zone Import Confirmed"),
         ("dns_zone_operation_parked", "DNS Zone Operation Parked"),

@@ -7,6 +7,7 @@ from django.urls import reverse
 
 from apps.billing.models import Payment
 from apps.billing.plan_change_models import PlanChange
+from apps.customers.models import Customer
 from apps.provisioning.hosting_limit_models import ServiceHostingLimits
 from apps.settings.services import SettingsService
 from apps.users.models import User
@@ -55,3 +56,21 @@ class StaffPlanChangeProposalTests(VerifiedPlanChangeCheckoutFixture, Transactio
         response = self.client.get(self.path)
         self.assertEqual(response.status_code, 302)
         self.assertEqual(PlanChange.objects.count(), 0)
+
+    def test_public_owner_transfer_does_not_offer_the_previous_customers_checkout(self) -> None:
+        change = self.quote()
+        other = Customer.objects.create(name="Current proposal customer", status="active")
+        admin = User.objects.create_user(email="proposal-transfer-admin@example.test", staff_role="admin")
+        self.client.force_login(admin)
+        transferred = self.client.post(
+            reverse("provisioning:service_edit", args=[self.service.pk]),
+            {"customer_id": other.pk, "domain": self.service.domain},
+        )
+        self.assertEqual(transferred.status_code, 302, transferred.content)
+        self.service.refresh_from_db()
+        self.assertEqual(self.service.customer_id, other.pk)
+        self.client.force_login(self.staff)
+        response = self.client.get(self.path)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertIsNone(response.context["current_change"])
+        self.assertNotContains(response, str(change.pk))

@@ -158,6 +158,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "billing_plan_changes",
+                "db_table_comment": "Accepted hosting plan agreements with independent financial and resource progress.",
             },
             bases=(django_fsm.ConcurrentTransitionMixin, models.Model),
         ),
@@ -184,6 +185,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "billing_plan_change_intervals",
+                "db_table_comment": "Frozen hosting plan supplement allocations for each covered billing interval.",
                 "ordering": ("ordinal",),
             },
         ),

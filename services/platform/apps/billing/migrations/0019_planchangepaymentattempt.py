@@ -66,6 +66,7 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "billing_plan_change_payment_attempts",
+                "db_table_comment": "Durable on-session payment attempts and provider replay authority for hosting plan agreements.",
                 "indexes": [models.Index(fields=["state", "lease_expires_at"], name="billing_pla_state_c5cc37_idx")],
             },
         ),

@@ -12,6 +12,7 @@ from apps.customers.models import Customer
 from apps.provisioning.hosting_limit_selectors import hosting_limits_summary, prime_current_verification
 from apps.provisioning.models import Service, VirtualminAccount, VirtualminProvisioningJob
 
+from .plan_change_escalation import escalate_scheduled_attention
 from .plan_change_financial import validate_preserved_plan_coverage
 from .plan_change_lifecycle import _cancel_context
 from .plan_change_models import PlanChange
@@ -132,4 +133,5 @@ def reconcile_plan_change_operation(change_id: UUID | str) -> PlanChange:
             resume_scheduled_plan_limits(change, subscription, service)
         else:
             _reconcile_native_proof(change, service)
+        escalate_scheduled_attention(change, customer, subscription, service)
         return change

@@ -1555,3 +1555,65 @@ root-controlled log configuration so the loss interval is explicit on resumption
 Do not restore legacy commands or the billing collector. Resetting/replacing a node
 installation identity requires explicit operator reconciliation; an old binding is
 never silently trusted under a new installation UUID.
+
+## Paid hosting plan changes
+
+The #840 workflow is described in
+[ADR-0074](../ADRs/ADR-0074-paid-hosting-plan-changes.md). Its acceptance switch
+`billing.hosting_plan_changes_enabled` defaults to false and is independent of
+`billing.recurring_auto_collection_enabled`. Keep it off throughout deployment and
+until the acceptance checks below pass. Deploying this code does not adopt existing
+nodes/accounts or authorize quota-format changes.
+
+1. Deploy the additive Platform schema, settlement/webhook consumers, payment
+   recovery, financial-review and native fulfilment workers before Portal checkout.
+   Preserve the complete encryption keyring for attempt secrets and existing
+   credentials. Reconcile `setup_scheduled_tasks --billing-only`; verify the four
+   five-minute `billing-plan-change-*` schedules in the
+   [queue reference](../domain/QUEUE_TASK_METHODOLOGY.md#paid-hosting-plan-change-ownership).
+2. Verify real Stripe webhook authentication and the configured Platform email
+   backend, canonical public Portal origin, invoice numbering and fiscal policy.
+   Operational phase notices honor service preferences and hard suppression.
+   Inspect rendered/stored EmailLog messages as well as provider acceptance; a
+   successful render is not mailbox delivery.
+3. Configure compatible active Product/ServicePlan mappings and standard prices in
+   the existing subscription currency/cycle. Maintain explicit `upgrades_to` links
+   through the catalog editor. Keep commercial checkout separate from the named
+   resource-only staff exception. Staff shares a customer proposal link; the
+   customer authenticates, accepts the quote and completes the on-session payment.
+4. Use one approved disposable provider VM, real owned test DNS and the private
+   manifest/database/vault authority from the
+   [native acceptance instructions](../../tests/virtualmin_lab/native/README.md).
+   Missing provider/DNS authority is a failed prerequisite. Run the fresh public
+   deployment and registration/quotas/restore controls through their root Make
+   interfaces. Container-kernel tests and transport mocks do not qualify the node.
+   Explicitly adopt only that intended node/account after current supported
+   baseline, quota, capacity and notification-ownership proofs.
+5. Complete the actual Portal → signed API → hosted payment → invoice settlement →
+   assigned limits → current native receipt journey. Verify duplicate submissions
+   and lost responses retain one attempt, no card data or client secret appears in
+   status/history, pending limits retain the old operational allowance, and the
+   next real renewal uses exact accepted cents/dates with old document bytes intact.
+   Test frozen future renewals and a repeated supplement, zero-due acceptance,
+   scheduled downgrade preparation/early payment/boundary/cancellation, overuse at
+   the boundary, and dispute/refund/erasure before delayed native work. Foundation
+   native commands alone do not prove these commercial paths.
+6. Exercise backup/restore and migration under the accepted plan, including a later
+   independently accepted currency transition. Verify historical original payment
+   coverage still authorizes a valid repair while disputed or unissued stale work
+   refuses. Prove zero native customer notification attempts and the expected
+   Platform financial/operational logs with the owned mail fixture. Complete the
+   integrated PostgreSQL, native, fault, contract and browser gates on the same head
+   before any broad customer rollout.
+
+No native/provider-DNS, paid browser or mail-sink execution is established by this
+documentation or by source-level tests. Keep the switch disabled while any required
+gate lacks evidence. Warnings and temporary raises have their separate #783 rollout;
+deploying #840 does not enable them.
+
+Rollback stops new acceptance by setting `billing.hosting_plan_changes_enabled` to
+false. Retain the new settlement consumers, all four schedules, original-attempt
+recovery, notice dispatch and native reconciliation once any real agreement/payment
+exists. Do not revert schema/evidence, reprice a committed service, manufacture a
+second PaymentIntent or remove applied quotas. Recover unresolved work through the
+[plan-change recovery procedure](PLATFORM_RESTORE.md#hosting-plan-change-recovery).

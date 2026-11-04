@@ -102,6 +102,7 @@ class PlanChange(ConcurrentTransitionMixin, models.Model):
     committed_at = models.DateTimeField(null=True)
     applied_at = models.DateTimeField(null=True)
     next_reconcile_at = models.DateTimeField(null=True, db_index=True)
+    staff_escalated_at = models.DateTimeField(null=True, editable=False)
     review_reason = models.CharField(max_length=255, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -109,6 +110,7 @@ class PlanChange(ConcurrentTransitionMixin, models.Model):
 
     class Meta:
         db_table = "billing_plan_changes"
+        db_table_comment = "Accepted hosting plan agreements with independent financial and resource progress."
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(
                 fields=["customer", "requested_by", "submission_id"], name="plan_change_submission_unique"
@@ -163,7 +165,14 @@ class PlanChange(ConcurrentTransitionMixin, models.Model):
         if self._state.adding:
             kwargs["force_insert"] = True
         else:
-            bindings = ("proforma_id", "invoice_id", "limit_application_id", "confirmed_at", "committed_at")
+            bindings = (
+                "proforma_id",
+                "invoice_id",
+                "limit_application_id",
+                "confirmed_at",
+                "committed_at",
+                "staff_escalated_at",
+            )
             original = type(self).objects.using(using).filter(pk=self.pk).values(*self.QUOTE_FIELDS, *bindings).get()
             if any(getattr(self, field) != original[field] for field in self.QUOTE_FIELDS):
                 raise ValidationError(_("A commercial quote cannot be rewritten; request a fresh quote."))
@@ -319,6 +328,7 @@ class PlanChangeInterval(models.Model):
 
     class Meta:
         db_table = "billing_plan_change_intervals"
+        db_table_comment = "Frozen hosting plan supplement allocations for each covered billing interval."
         ordering = ("ordinal",)
         constraints: ClassVar[list[models.BaseConstraint]] = [
             models.UniqueConstraint(fields=["change", "ordinal"], name="plan_change_interval_order_unique"),

@@ -5,20 +5,60 @@ from __future__ import annotations
 from copy import copy
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, cast
 
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import Prefetch, Q, QuerySet
 from django.utils.translation import gettext as _
 
 from apps.provisioning.hosting_limit_policy import HostingAssignmentTerms
 
 from .cycle_terms import CycleTerms, build_terms_snapshot
 from .plan_change_models import PlanChange
+from .subscription_currency_models import SubscriptionCurrencyTransition
 from .subscription_models import Subscription
 
 
+def with_plan_change_renewal_data(queryset: QuerySet[Subscription]) -> QuerySet[Subscription]:
+    """Batch commercial facts for one locked preparation operation.
+
+    The caller holds Customer and Subscription through preparation. These
+    per-instance prefetches never outlive or replace a new locked queryset;
+    standalone selectors continue to read current committed data normally.
+    """
+    changes = (
+        PlanChange.objects.filter(
+            Q(committed_at__isnull=False) | Q(status__in=("scheduled", "awaiting_payment", "payment_in_flight"))
+        )
+        .select_related("to_product__default_service_plan", "service", "currency", "payment_attempt__payment")
+        .order_by("-effective_at", "-committed_at", "-created_at", "-pk")
+    )
+    return queryset.prefetch_related(
+        Prefetch("plan_changes", queryset=changes, to_attr="_renewal_plan_changes"),
+        Prefetch(
+            "currency_transitions",
+            queryset=SubscriptionCurrencyTransition.objects.filter(status="committed", committed_cycle__isnull=False),
+            to_attr="_renewal_committed_currency_changes",
+        ),
+    )
+
+
+def primed_plan_changes(subscription: Subscription) -> list[PlanChange] | None:
+    return cast("list[PlanChange] | None", getattr(subscription, "_renewal_plan_changes", None))
+
+
 def accepted_plan_change(subscription: Subscription, period_start: datetime) -> PlanChange | None:
+    if (changes := primed_plan_changes(subscription)) is not None:
+        return next(
+            (
+                change
+                for change in changes
+                if change.confirmed_at is not None
+                and (change.committed_at is not None or change.status == "scheduled")
+                and change.effective_at <= period_start
+            ),
+            None,
+        )
     return (
         PlanChange.objects.filter(
             Q(committed_at__isnull=False) | Q(status="scheduled"),
@@ -40,12 +80,25 @@ def accepted_plan_terms(subscription: Subscription, period_start: datetime) -> d
     # A later independently accepted currency transition retains its existing
     # immutable preparation and activation protocol. An old plan quote must not
     # force that service back into its earlier currency.
-    if subscription.currency_transitions.filter(
-        status="committed",
-        effective_period_start__gt=change.effective_at,
-        effective_period_start__lte=period_start,
-        committed_cycle__isnull=False,
-    ).exists():
+    transitions = cast(
+        "list[SubscriptionCurrencyTransition] | None",
+        getattr(subscription, "_renewal_committed_currency_changes", None),
+    )
+    newer_currency_terms = (
+        any(
+            transition.effective_period_start is not None
+            and change.effective_at < transition.effective_period_start <= period_start
+            for transition in transitions
+        )
+        if transitions is not None
+        else subscription.currency_transitions.filter(
+            status="committed",
+            effective_period_start__gt=change.effective_at,
+            effective_period_start__lte=period_start,
+            committed_cycle__isnull=False,
+        ).exists()
+    )
+    if newer_currency_terms:
         return None
     expected_product = change.from_product_id if change.status == "scheduled" else change.to_product_id
     if (

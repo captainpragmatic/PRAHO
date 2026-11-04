@@ -49,6 +49,7 @@ ACTION_OVERRIDES: dict[str, dict[str, Any]] = {
     "virtualmin_server_health_alert": {"severity": "high", "requires_review": True},
     "virtualmin_migration_needs_review": {"requires_review": True},
     "node_drain_paused": {"severity": "high", "requires_review": True},
+    "hosting_plan_change_attention": {"severity": "high", "requires_review": True},
     # Severity or category set by the writer, and kept.
     "refund_reconciliation_gap": {"severity": "critical"},
     "efactura_submission_failed": {"severity": "high"},
