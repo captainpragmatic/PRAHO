@@ -21,6 +21,7 @@ from apps.notifications.tasks import setup_notification_scheduled_tasks
 from apps.orders.tasks import setup_order_scheduled_tasks
 from apps.promotions.tasks import setup_gift_scheduled_tasks
 from apps.provisioning.virtualmin_tasks import setup_virtualmin_scheduled_tasks
+from apps.security.action_tasks import setup_action_scheduled_tasks
 from apps.security.tasks import setup_security_scheduled_tasks
 from apps.tickets.tasks import setup_ticket_scheduled_tasks
 from apps.users.tasks import setup_user_security_scheduled_tasks
@@ -233,6 +234,7 @@ class Command(BaseCommand):
             if run_all or flags["security_only"]:
                 self._setup_task_category("user security", "🛡️", setup_user_security_scheduled_tasks, all_results)
                 self._setup_task_category("host security", "🛡️", setup_security_scheduled_tasks, all_results)
+                self._setup_task_category("host security actions", "🛡️", setup_action_scheduled_tasks, all_results)
 
             # Set up Order Processing tasks
             if run_all or flags["orders_only"]:

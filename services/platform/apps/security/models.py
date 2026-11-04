@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 import uuid
 from typing import ClassVar
 
@@ -9,6 +10,25 @@ from django.core.validators import RegexValidator
 from django.db import models
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+
+__all__ = [
+    "CustomerIPObservation",
+    "SecurityActionRequest",
+    "SecurityActionTarget",
+    "SecurityAlert",
+    "SecurityAllowlist",
+    "SecurityCoverageApproval",
+    "SecurityDecision",
+    "SecurityDecisionSuppression",
+    "SecurityManagedDecision",
+    "SecurityModel",
+    "SecurityReplication",
+    "SecurityReplicationScan",
+    "SecuritySource",
+    "SecuritySyncState",
+]
+
+IPV4_FAMILY = 4
 
 _DIGEST = RegexValidator(r"^[0-9a-f]{64}$", _("A complete lowercase SHA-256 digest is required."))
 
@@ -179,3 +199,47 @@ class SecuritySyncState(SecurityModel):
                 name="security_claim_complete",
             ),
         ]
+
+
+class CustomerIPObservation(SecurityModel):
+    """A completed login's address for every active customer membership, retained seven days."""
+
+    user = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="security_ip_observations")
+    customer = models.ForeignKey(
+        "customers.Customer", on_delete=models.CASCADE, related_name="security_ip_observations"
+    )
+    address_family = models.PositiveSmallIntegerField()
+    address = models.BinaryField(max_length=16)
+    last_seen_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        db_table = "security_customer_ip_observation"
+        db_table_comment = (
+            "Seven-day customer IP safety observations after complete authentication; no raw event samples."
+        )
+        constraints: ClassVar[list[models.BaseConstraint]] = [
+            models.CheckConstraint(condition=models.Q(address_family__in=(4, 6)), name="security_customer_ip_family"),
+            models.UniqueConstraint(
+                fields=("user", "customer", "address_family", "address"), name="security_customer_ip_identity"
+            ),
+        ]
+        indexes: ClassVar[list[models.Index]] = [
+            models.Index(fields=("address_family", "address", "last_seen_at"), name="security_customer_ip_recent"),
+        ]
+
+    @property
+    def ip_address(self) -> str:
+        packed = bytes(self.address)
+        return str(ipaddress.ip_address(packed[-4:] if self.address_family == IPV4_FAMILY else packed))
+
+
+from .action_models import (  # noqa: E402 -- Django discovers these after the shared base is defined.
+    SecurityActionRequest,
+    SecurityActionTarget,
+    SecurityAllowlist,
+    SecurityCoverageApproval,
+    SecurityDecisionSuppression,
+    SecurityManagedDecision,
+    SecurityReplication,
+    SecurityReplicationScan,
+)
