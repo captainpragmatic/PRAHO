@@ -3,6 +3,7 @@
 import hashlib
 from datetime import timedelta
 from threading import Event
+from unittest import skipUnless
 from unittest.mock import patch
 
 from django.db import connection
@@ -113,6 +114,7 @@ class PlanChangeRenewalHoldTests(VerifiedPlanChangeCheckoutFixture, TransactionT
             8000,
         )
 
+    @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks and observed blocker PIDs")
     def test_final_renewal_claim_waits_for_plan_claim_then_abandons_its_unissued_reservation(self):
         method = self.enroll()
         prepared = RecurringBillingOrchestrator.prepare_due_proformas(as_of=self.now)

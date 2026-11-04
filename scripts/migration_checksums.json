@@ -23,6 +23,7 @@
     "services/platform/apps/audit/migrations/0020_session_security_actions.py": "a47e58d492827458359d736e7cc41cc93566d0ac5407bb0b93ed7dfd0dd7b48e",
     "services/platform/apps/audit/migrations/0021_alter_auditevent_action.py": "4909efb5bf645707eda3ae45e61b018f38d5360ca957c6565e59987b1807b8ec",
     "services/platform/apps/audit/migrations/0022_alter_auditevent_action.py": "1b66676b793b7906d4eba2891a90c6bded4882983f70d5a0c7a52428fd083cbe",
+    "services/platform/apps/audit/migrations/0023_alter_auditevent_action.py": "f21b3d792dcf76692bd8e9db8c222340395b34d80b7fae8b0a3f3d2a3fd5aa13",
     "services/platform/apps/billing/migrations/0001_initial.py": "8407779156bb0295475690a2c80e9a420f83d95abd30b64c855f8e261406ff29",
     "services/platform/apps/billing/migrations/0002_initial.py": "2a80143877f926a7c0e6df8635e319cfc3cb37905319fa4e222954adbc6d9278",
     "services/platform/apps/billing/migrations/0003_postgres_event_storage_indexes.py": "4f8d67e96f6b4898764ccb27b73c4d0ec4a3c62fde4e61de20836f82f5ba2677",

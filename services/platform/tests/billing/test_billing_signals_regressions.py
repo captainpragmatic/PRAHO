@@ -1781,31 +1781,40 @@ class TestUpdateBillingRefundMetrics(TestCase):
 class TestEmailFunctions(TestCase):
     """Test all email helper functions handle exceptions gracefully."""
 
+    def _invoice(self, *, bill_to_email="test@example.com"):
+        customer = CustomerFactory(primary_email="customer@example.test")
+        # Model signals and the source-document lookup stay real; isolate only setup delivery.
+        with patch("apps.notifications.services.EmailService.send_template_email"):
+            return InvoiceFactory(customer=customer, bill_to_email=bill_to_email)
+
     @patch("apps.notifications.services.EmailService")
     def test_send_invoice_created_email(self, mock_es):
-        invoice = MagicMock()
-        invoice.bill_to_email = "test@example.com"
+        invoice = self._invoice()
         _send_invoice_created_email(invoice)
         mock_es.send_template_email.assert_called_once()
+        self.assertEqual(mock_es.send_template_email.call_args.kwargs["template_key"], "invoice_created")
+        self.assertEqual(mock_es.send_template_email.call_args.kwargs["recipient"], invoice.bill_to_email)
 
     @patch("apps.notifications.services.EmailService")
     def test_send_invoice_created_email_fallback(self, mock_es):
-        invoice = MagicMock()
-        invoice.bill_to_email = ""
+        invoice = self._invoice(bill_to_email="")
         _send_invoice_created_email(invoice)
         mock_es.send_template_email.assert_called_once()
+        self.assertEqual(mock_es.send_template_email.call_args.kwargs["recipient"], invoice.customer.primary_email)
 
     @patch("apps.notifications.services.EmailService")
     def test_send_invoice_issued_email(self, mock_es):
-        invoice = MagicMock()
+        invoice = self._invoice()
         _send_invoice_issued_email(invoice)
         mock_es.send_template_email.assert_called_once()
+        self.assertEqual(mock_es.send_template_email.call_args.kwargs["template_key"], "invoice_issued")
 
     @patch("apps.notifications.services.EmailService")
     def test_send_payment_received_email(self, mock_es):
-        invoice = MagicMock()
+        invoice = self._invoice()
         _send_payment_received_email(invoice)
         mock_es.send_template_email.assert_called_once()
+        self.assertEqual(mock_es.send_template_email.call_args.kwargs["template_key"], "payment_received")
 
     @patch("apps.notifications.services.EmailService")
     def test_send_invoice_overdue_email(self, mock_es):
@@ -1829,9 +1838,13 @@ class TestEmailFunctions(TestCase):
 
     @patch("apps.notifications.services.EmailService")
     def test_send_payment_success_email(self, mock_es):
-        payment = MagicMock()
+        invoice = self._invoice()
+        with patch("apps.notifications.services.EmailService.send_template_email"):
+            payment = _make_payment(invoice.customer, invoice=invoice)
         _send_payment_success_email(payment)
         mock_es.send_template_email.assert_called_once()
+        self.assertEqual(mock_es.send_template_email.call_args.kwargs["template_key"], "payment_success")
+        self.assertEqual(mock_es.send_template_email.call_args.kwargs["recipient"], invoice.customer.primary_email)
 
     @patch("apps.notifications.services.EmailService")
     def test_send_payment_failed_email(self, mock_es):
@@ -1871,12 +1884,13 @@ class TestEmailFunctions(TestCase):
     @patch("apps.notifications.services.EmailService")
     def test_email_exception_handling(self, mock_es):
         mock_es.send_template_email.side_effect = Exception("SMTP error")
-        invoice = MagicMock()
+        invoice = self._invoice()
         # Should not raise
         _send_invoice_created_email(invoice)
         _send_invoice_issued_email(invoice)
         _send_payment_received_email(invoice)
         _send_invoice_voided_email(invoice)
+        self.assertEqual(mock_es.send_template_email.call_count, 4)
 
 
 # ===============================================================================

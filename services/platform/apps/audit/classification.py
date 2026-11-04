@@ -33,6 +33,13 @@ ACTION_OVERRIDES: dict[str, dict[str, Any]] = {
     "customer_membership_updated": {"severity": "medium"},
     "customer_membership_deleted": {"severity": "high", "requires_review": True},
     "customer_role_changed": {"severity": "high", "requires_review": True},
+    "plan_change_payment_binding_rejected": {
+        "category": "security_event",
+        "severity": "high",
+        "is_sensitive": True,
+        "requires_review": True,
+    },
+    "plan_change_submission_conflict": {"category": "security_event", "severity": "medium"},
     # Operational alerts: a person has to look.
     "coupon_reversal_failed_on_cancellation": {"severity": "high", "requires_review": True},
     "coupon_reversal_failed_on_refund": {"severity": "high", "requires_review": True},

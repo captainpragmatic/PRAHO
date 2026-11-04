@@ -6,7 +6,9 @@ import ast
 import json
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
@@ -19,11 +21,13 @@ from apps.billing.efactura.settings import (
     EFacturaSettings,
     company_identity_setting,
 )
+from apps.billing.plan_change_validation import require_plan_change_acceptance
 from apps.settings.catalog import CATALOG_BY_KEY, SettingDef
 from apps.settings.key_scan import iter_scannable_python_files
 from apps.settings.management.commands import setup_default_settings as sync
 from apps.settings.models import SettingActivation, SystemSetting
 from apps.settings.services import (
+    SettingsService,
     get_company_legal_name,
     get_default_country,
     get_default_from_email,
@@ -38,6 +42,9 @@ REQUIRED_KEYS = frozenset(EFACTURA_DEFAULTS) | QUOTA_KEYS | {
     "portal.public_base_url",
     "system.default_country",
 }
+# Admission authority requires an explicit stored True; deployment defaults
+# must never grant it. Keep this distinct from inherited configuration below.
+STORED_AUTHORITY_KEYS = frozenset({"billing.hosting_plan_changes_enabled"})
 APPS_ROOT = Path(__file__).resolve().parents[2] / "apps"
 
 
@@ -134,8 +141,13 @@ class DeploymentFallbackCatalogTests(SimpleTestCase):
         self.assertIn("efactura.company.bank_name", consumed)
         self.assertIn("efactura.oauth.client_secret", consumed)
         self.assertIn("company.email_noreply", consumed)
-        self.assertEqual(consumed, set(REQUIRED_KEYS))
-        required = consumed | REQUIRED_KEYS
+        self.assertEqual(consumed, REQUIRED_KEYS | STORED_AUTHORITY_KEYS)
+        for key in STORED_AUTHORITY_KEYS:
+            definition = CATALOG_BY_KEY[key]
+            self.assertIs(definition.default, False)
+            self.assertFalse(definition.deployment_fallback)
+            self.assertEqual(definition.deployment_source, "")
+        required = (consumed - STORED_AUTHORITY_KEYS) | REQUIRED_KEYS
         missing = sorted(
             key
             for key in required
@@ -144,6 +156,22 @@ class DeploymentFallbackCatalogTests(SimpleTestCase):
         self.assertEqual(missing, [], f"Row-only consumers must preserve deployment fallbacks: {missing}")
         flagged = {key for key, definition in CATALOG_BY_KEY.items() if definition.deployment_fallback}
         self.assertEqual(flagged, required, "Every flagged key needs a real-reader case in this suite.")
+
+
+class StoredHostingAcceptanceTests(TestCase):
+    def test_only_explicit_stored_true_grants_acceptance_even_with_an_inherited_true(self) -> None:
+        key = "billing.hosting_plan_changes_enabled"
+        SystemSetting.objects.filter(key=key).delete()
+        with patch.dict(SettingsService.DEFAULT_SETTINGS, {key: True}):
+            self.assertIs(SettingsService.get_setting(key), True)
+            self.assertIsNone(SettingsService.get_stored_setting(key))
+            with self.assertRaises(ValidationError):
+                require_plan_change_acceptance()
+            self.assertTrue(SettingsService.update_setting(key, False).is_ok())
+            with self.assertRaises(ValidationError):
+                require_plan_change_acceptance()
+            self.assertTrue(SettingsService.update_setting(key, True).is_ok())
+            require_plan_change_acceptance()
 
 
 class DeploymentFallbackSeedTests(TestCase):

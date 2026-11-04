@@ -33773,3 +33773,11 @@ msgstr "Înapoi la serviciu"
 #| msgid "Customer name"
 msgid "Customer plan change"
 msgstr "Schimbarea planului clientului"
+
+#: apps/audit/models.py:515
+msgid "Plan Change Payment Binding Rejected"
+msgstr "Asocierea plății pentru schimbarea planului a fost refuzată"
+
+#: apps/audit/models.py:516
+msgid "Plan Change Submission Conflict"
+msgstr "Conflict la trimiterea cererii de schimbare a planului"

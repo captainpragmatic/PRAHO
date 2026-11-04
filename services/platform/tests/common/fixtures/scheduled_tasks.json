@@ -189,6 +189,33 @@
     "cluster": null
   },
   {
+    "name": "billing-plan-change-financial-review",
+    "func": "apps.billing.plan_change_review_service.sweep_financial_reviews",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "*/5 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-plan-change-fulfilment",
+    "func": "apps.billing.plan_change_operations.sweep_plan_change_fulfilment",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "*/5 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-plan-change-payments",
+    "func": "apps.billing.plan_change_payment_service.recover_plan_change_payments",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "*/5 * * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
     "name": "billing-recurring-orchestrator",
     "func": "apps.billing.tasks.run_daily_billing",
     "schedule_type": "C",
@@ -212,6 +239,15 @@
     "schedule_type": "C",
     "minutes": null,
     "cron": "45 2 * * *",
+    "repeats": -1,
+    "cluster": null
+  },
+  {
+    "name": "billing-scheduled-plan-changes",
+    "func": "apps.billing.plan_change_lifecycle.activate_scheduled_plan_changes",
+    "schedule_type": "C",
+    "minutes": null,
+    "cron": "*/5 * * * *",
     "repeats": -1,
     "cluster": null
   },
@@ -400,6 +436,15 @@
     "func": "apps.provisioning.hosting_limit_tasks.dispatch_hosting_limits",
     "schedule_type": "I",
     "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": "praho-cluster"
+  },
+  {
+    "name": "hosting-safety-observations",
+    "func": "apps.provisioning.hosting_safety_observation.dispatch_hosting_safety_observations",
+    "schedule_type": "I",
+    "minutes": 1,
     "cron": null,
     "repeats": -1,
     "cluster": "praho-cluster"
