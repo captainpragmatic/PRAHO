@@ -19,6 +19,8 @@ STOPSIGNAL SIGRTMIN+3
 CMD ["/sbin/init"]
 
 FROM runtime AS controller
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends rsync \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN uv venv --python 3.13 /opt/controller \
     && uv pip install --python /opt/controller/bin/python ansible-core==2.20.6 \
     && /opt/controller/bin/ansible-galaxy collection install \
