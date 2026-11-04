@@ -1,5 +1,6 @@
 """Customer-owned optional quota warnings; critical notices retain their policy."""
 
+from django.utils.translation import gettext as _
 from django.views.decorators.cache import never_cache
 from rest_framework import serializers
 from rest_framework.decorators import api_view, authentication_classes, permission_classes
@@ -19,9 +20,9 @@ class QuotaWarningPreferenceInput(serializers.Serializer):
 
     def validate(self, attrs: dict[str, object]) -> dict[str, object]:
         if any(key in self.initial_data for key in ("critical_notices", "global_unsubscribe")):
-            raise serializers.ValidationError("This form changes optional hosting warnings only.")
+            raise serializers.ValidationError(_("This form changes optional hosting warnings only."))
         if attrs["action"] == "update" and type(self.initial_data.get("quota_warnings")) is not bool:
-            raise serializers.ValidationError("Submit an explicit boolean quota warning preference.")
+            raise serializers.ValidationError(_("Submit an explicit boolean quota warning preference."))
         return attrs
 
 

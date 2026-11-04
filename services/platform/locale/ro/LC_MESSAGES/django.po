@@ -34214,3 +34214,12 @@ msgstr "Asocierea plății pentru schimbarea planului a fost refuzată"
 #: apps/audit/models.py:516
 msgid "Plan Change Submission Conflict"
 msgstr "Conflict la trimiterea cererii de schimbare a planului"
+
+#: apps/api/customers/notification_preferences.py:23
+msgid "This form changes optional hosting warnings only."
+msgstr "Acest formular modifică numai avertizările opționale privind găzduirea."
+
+#: apps/api/customers/notification_preferences.py:25
+#| msgid "Expected an explicit boolean acceptance."
+msgid "Submit an explicit boolean quota warning preference."
+msgstr "Trimiteți o valoare booleană explicită pentru preferința avertizărilor privind resursele de găzduire."

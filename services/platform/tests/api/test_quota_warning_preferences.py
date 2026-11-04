@@ -3,7 +3,7 @@
 from datetime import timedelta
 
 from django.test import TestCase, override_settings
-from django.utils import timezone
+from django.utils import timezone, translation
 
 from apps.customers.models import Customer
 from apps.notifications.models import EmailPreference
@@ -102,3 +102,46 @@ class QuotaWarningPreferenceTests(BoundSessionMixin, HMACTestMixin, TestCase):
             response = self.portal_post(self.path, {**self.body, "action": "update", "quota_warnings": True, **extra})
             self.assertEqual(response.status_code, 400, response.content)
         self.assertFalse(EmailPreference.objects.filter(customer=self.customer).exists())
+
+    @translation.override("en")
+    def test_signed_refusals_follow_request_language_without_changing_preferences(self):
+        preference = EmailPreference.objects.create(
+            customer=self.customer, quota_warnings=True, global_unsubscribe=True
+        )
+        cases = (
+            (
+                {"quota_warnings": False, "critical_notices": False},
+                "This form changes optional hosting warnings only.",
+                "Acest formular modifică numai avertizările opționale privind găzduirea.",
+            ),
+            (
+                {"quota_warnings": "false"},
+                "Submit an explicit boolean quota warning preference.",
+                "Trimiteți o valoare booleană explicită pentru preferința avertizărilor privind resursele de găzduire.",
+            ),
+        )
+        for language in ("en", "ro"):
+            for fields, english, romanian in cases:
+                with self.subTest(language=language, fields=fields):
+                    response = self.portal_post(
+                        self.path,
+                        {**self.body, "action": "update", **fields},
+                        HTTP_ACCEPT_LANGUAGE=language,
+                    )
+                    self.assertEqual(response.status_code, 400, response.content)
+                    self.assertEqual(response["Content-Language"], language)
+                    self.assertEqual(response.json(), {"non_field_errors": [romanian if language == "ro" else english]})
+                    preference.refresh_from_db()
+                    self.assertTrue(preference.quota_warnings)
+                    self.assertTrue(preference.global_unsubscribe)
+        response = self.portal_post(
+            self.path,
+            {**self.body, "action": "update", "quota_warnings": False},
+            HTTP_ACCEPT_LANGUAGE="ro",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response["Content-Language"], "ro")
+        preference.refresh_from_db()
+        self.assertFalse(preference.quota_warnings)
+        self.assertTrue(preference.global_unsubscribe)
+        self.assertTrue(response.json()["data"]["critical_notices"])
