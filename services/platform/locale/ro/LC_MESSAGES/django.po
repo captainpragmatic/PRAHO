@@ -32200,3 +32200,85 @@ msgstr "Conturile așteptate de Platform lipseau din snapshot-ul nodului."
 #: templates/settings/system_status.html:35
 msgid "The node reported accounts that are not assigned in Platform. Review account discovery."
 msgstr "Nodul a raportat conturi care nu sunt atribuite în Platform. Verificați descoperirea conturilor."
+
+#: apps/provisioning/crowdsec_policy.py:80
+msgid ""
+"The selected CrowdSec host policy is incomplete or differs from the reviewed"
+" schema."
+msgstr ""
+"Politica CrowdSec selectată pentru gazdă este incompletă sau diferă de "
+"schema verificată."
+
+#: apps/provisioning/crowdsec_policy.py:102
+#| msgid ""
+#| "The reviewed operator SSH key bundle is unavailable or invalid."
+msgid "The dedicated CrowdSec SSH public identity is unavailable or invalid."
+msgstr ""
+"Identitatea publică SSH dedicată CrowdSec nu este disponibilă sau nu este "
+"validă."
+
+#: apps/provisioning/crowdsec_policy.py:247
+#| msgid "SSH policy evidence is malformed."
+msgid "CrowdSec configuration evidence is malformed."
+msgstr "Dovada configurației CrowdSec are un format incorect."
+
+#: apps/provisioning/crowdsec_policy.py:357
+#| msgid "SSH policy evidence is malformed."
+msgid "CrowdSec firewall evidence is malformed."
+msgstr "Dovada configurației firewall CrowdSec are un format incorect."
+
+#: apps/provisioning/virtualmin_node_capability.py:23
+msgid ""
+"The selected node security policy is unsupported or incomplete; inspect it "
+"again."
+msgstr ""
+"Politica de securitate selectată pentru nod nu este acceptată sau este "
+"incompletă; inspectați-o din nou."
+
+#: apps/provisioning/virtualmin_security.py:129
+#: apps/provisioning/virtualmin_security.py:236
+msgid "The selected node security policy is unsupported."
+msgstr "Politica de securitate selectată pentru nod nu este acceptată."
+
+#: apps/provisioning/virtualmin_security.py:133
+msgid ""
+"The selected node security policy lacks its intended configuration digest."
+msgstr ""
+"Politica de securitate selectată pentru nod nu are amprenta configurației "
+"prevăzute."
+
+#: apps/provisioning/virtualmin_security.py:147
+#| msgid "An administrator has disabled new node deployments."
+msgid "An active administrator must select the node security policy."
+msgstr ""
+"Un administrator activ trebuie să selecteze politica de securitate a "
+"nodului."
+
+#: apps/provisioning/virtualmin_security.py:151
+msgid ""
+"CrowdSec adoption cannot automatically restore an earlier security policy."
+msgstr ""
+"Adoptarea CrowdSec nu poate restabili automat o politică de securitate "
+"anterioară."
+
+#: apps/provisioning/virtualmin_security.py:153
+#| msgid "Could not acquire the new component migration lease."
+msgid "CrowdSec adoption requires the complete intended configuration digest."
+msgstr ""
+"Adoptarea CrowdSec necesită amprenta completă a configurației prevăzute."
+
+#: apps/provisioning/virtualmin_security.py:155
+msgid ""
+"The base security policy cannot contain a CrowdSec configuration digest."
+msgstr ""
+"Politica de securitate de bază nu poate conține o amprentă de configurație "
+"CrowdSec."
+
+#: apps/provisioning/virtualmin_security.py:157
+#| msgid ""
+#| "Resolve the node's hardening attempt before recovering its original create."
+msgid ""
+"Resolve the current hardening attempt before changing the security policy."
+msgstr ""
+"Soluționați încercarea curentă de securizare înainte de a schimba politica "
+"de securitate."
