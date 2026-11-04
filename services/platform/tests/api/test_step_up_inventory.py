@@ -82,6 +82,9 @@ EXEMPT: dict[str, str] = {
     "api/customers/create/": "a new company, not a change to an existing one",
     "api/customers/profile/": "DRF session or token authentication only: no portal path reaches it",
     "api/customers/details/": "a read",
+    "api/customers/notification-preferences/": (
+        "an owner or billing member's optional warning preference; critical notices and global privacy choices cannot change"
+    ),
     "api/customers/users/": "a read",
     "api/customers/addresses/": "a read",
     "api/customers/": "the read-only customer viewset's root",

@@ -1,13 +1,17 @@
 """Real signed customer preference requests update the customer, never user-profile flags."""
 
+from datetime import timedelta
+
 from django.test import TestCase, override_settings
+from django.utils import timezone
 
 from apps.customers.models import Customer
 from apps.notifications.models import EmailPreference
 from apps.notifications.services import EmailPreferenceService
-from apps.users.models import CustomerMembership, User
+from apps.users import portal_sessions
+from apps.users.models import CustomerMembership, PortalSession, User
 from tests.helpers.hmac import HMAC_TEST_MIDDLEWARE, HMAC_TEST_SECRET, HMACTestMixin
-from tests.helpers.portal_session import BoundSessionMixin
+from tests.helpers.portal_session import BoundSessionMixin, bound_fields
 
 
 @override_settings(PLATFORM_API_SECRET=HMAC_TEST_SECRET, MIDDLEWARE=HMAC_TEST_MIDDLEWARE)
@@ -49,6 +53,27 @@ class QuotaWarningPreferenceTests(BoundSessionMixin, HMACTestMixin, TestCase):
         self.assertFalse(preference.global_unsubscribe)
         self.assertTrue(response.json()["data"]["critical_notices"])
         self.assertIn("no-store", response["Cache-Control"])
+
+    def test_live_owner_or_billing_session_may_change_optional_preferences_after_the_identity_window(self):
+        preference = EmailPreference.objects.create(customer=self.customer, global_unsubscribe=True)
+        session = portal_sessions.open_session(self.user)
+        stale = timezone.now() - timedelta(seconds=301)
+        PortalSession.objects.filter(pk=session.pk).update(reauth_at=stale)
+        session.refresh_from_db()
+        self.assertEqual(session.reauth_at, stale)
+        for role in ("owner", "billing"):
+            with self.subTest(role=role):
+                self.membership.role = role
+                self.membership.save(update_fields=["role"])
+                response = self.portal_post(
+                    self.path,
+                    {**self.body, **bound_fields(session), "action": "update", "quota_warnings": False},
+                )
+                self.assertEqual(response.status_code, 200, response.content)
+                preference.refresh_from_db()
+                self.assertFalse(preference.quota_warnings)
+                self.assertTrue(preference.global_unsubscribe)
+                self.assertTrue(response.json()["data"]["critical_notices"])
 
     def test_real_billing_role_may_edit_but_viewer_tech_inactive_and_other_customer_may_not(self):
         for role, active, expected in (
