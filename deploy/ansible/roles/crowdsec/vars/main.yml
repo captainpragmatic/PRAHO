@@ -1,0 +1,62 @@
+---
+# Render once on the controller, hash those exact bytes, and copy the same values.
+crowdsec_rendered_files: "{{ crowdsec_core_rendered_files + (crowdsec_portal_rendered_files if crowdsec_host_kind == 'portal' else []) }}"
+crowdsec_portal_rendered_files:
+  - path: /etc/crowdsec/parsers/s01-parse/praho-portal-auth.yaml
+    content: "{{ lookup('ansible.builtin.file', (crowdsec_artifact_lock_path | dirname) + '/portal/praho-portal-auth.yaml', rstrip=false) }}"
+    mode: '0644'
+  - path: /etc/crowdsec/scenarios/praho-portal-auth-bf.yaml
+    content: "{{ lookup('ansible.builtin.file', (crowdsec_artifact_lock_path | dirname) + '/portal/praho-portal-auth-bf.yaml', rstrip=false) }}"
+    mode: '0644'
+  - path: /etc/crowdsec/scenarios/praho-portal-auth-throttle.yaml
+    content: "{{ lookup('ansible.builtin.file', (crowdsec_artifact_lock_path | dirname) + '/portal/praho-portal-auth-throttle.yaml', rstrip=false) }}"
+    mode: '0644'
+crowdsec_core_rendered_files:
+  - path: /etc/crowdsec/config.yaml
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/config.yaml.j2') }}"
+    mode: '0644'
+  - path: /etc/crowdsec/acquis.yaml
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/acquis.yaml.j2') }}"
+    mode: '0644'
+  - path: /etc/crowdsec/profiles.yaml
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/profiles.yaml.j2') }}"
+    mode: '0644'
+  - path: /etc/crowdsec/simulation.yaml
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/simulation.yaml.j2') }}"
+    mode: '0644'
+  - path: /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/bouncer.yaml.j2') }}"
+    mode: '0644'
+  - path: /usr/bin/cscli
+    content: "{{ lookup('ansible.builtin.file', role_path + '/files/cli_guard.py', rstrip=false) }}"
+    mode: '0755'
+  - path: /etc/systemd/system/crowdsec.service.d/praho.conf
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/engine-guard.conf.j2') }}"
+    mode: '0644'
+  - path: /etc/systemd/system/crowdsec-firewall-bouncer.service.d/praho.conf
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/bouncer-guard.conf.j2') }}"
+    mode: '0644'
+  - path: /etc/systemd/system/crowdsec-hubupdate.service.d/praho.conf
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/hub-guard.conf.j2') }}"
+    mode: '0644'
+  - path: /etc/systemd/system/crowdsec-hubupdate.timer.d/praho.conf
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/hub-guard.conf.j2') }}"
+    mode: '0644'
+  - path: /etc/systemd/system/praho-crowdsec-firewall.service
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/firewall.service.j2') }}"
+    mode: '0644'
+  - path: /usr/local/libexec/praho-crowdsec-firewall
+    content: "{{ lookup('ansible.builtin.file', role_path + '/files/firewall.py', rstrip=false) }}"
+    mode: '0755'
+  - path: /usr/local/libexec/praho-crowdsec-gateway
+    content: "{{ lookup('ansible.builtin.file', role_path + '/files/gateway.py', rstrip=false) }}"
+    mode: '0755'
+  - path: /home/praho-crowdsec/.ssh/authorized_keys
+    content: "restrict {{ crowdsec_gateway_public_key | trim }}\n"
+    mode: '0644'
+  - path: /etc/sudoers.d/praho-crowdsec
+    content: "{{ lookup('ansible.builtin.template', role_path + '/templates/sudoers.j2') }}"
+    mode: '0440'
+  - path: /etc/praho-crowdsec/artifacts.lock.json
+    content: "{{ lookup('ansible.builtin.file', crowdsec_artifact_lock_path, rstrip=false) }}"
+    mode: '0600'

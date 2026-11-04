@@ -1,0 +1,9 @@
+Defaults:praho-crowdsec env_reset
+Defaults:praho-crowdsec secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+Defaults:praho-crowdsec env_keep += "SSH_ORIGINAL_COMMAND"
+praho-crowdsec ALL=(root) NOPASSWD: /usr/local/libexec/praho-crowdsec-gateway ""
+{% if crowdsec_local_reader_user %}
+Defaults:{{ crowdsec_local_reader_user }} env_reset
+Defaults:{{ crowdsec_local_reader_user }} secure_path="/usr/sbin:/usr/bin:/sbin:/bin"
+{{ crowdsec_local_reader_user }} ALL=(root) NOPASSWD: /usr/local/libexec/praho-crowdsec-gateway ""
+{% endif %}

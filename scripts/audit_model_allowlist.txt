@@ -29,6 +29,19 @@ audit.ComplianceLog             # compliance audit trail
 audit.ComplianceReportRecord    # compliance report output
 audit.CookieConsent             # consent record (IS the compliance trail)
 audit.DataExport                # GDPR export record
+security.SecuritySource         # enrollment, reconfiguration and retirement are explicitly audited by security.services
+security.SecurityDecision       # derived bounded remote decision summaries; source and later staff actions retain explicit business audits
+security.SecurityAlert          # immutable sanitized remote alert history; polling does not emit another event per alert
+security.SecuritySyncState      # technical coalescing leases, cursors and primitive health observations; no business action authority
+security.CustomerIPObservation  # short-lived safety observations; authentication is audited and duplicating addresses would defeat seven-day erasure
+security.SecurityActionRequest # canonical issuance is explicitly audited by action_services and replication approvals
+security.SecurityActionTarget  # durable per-target evidence belongs to its audited immutable action issuance
+security.SecurityAllowlist     # every complete desired-list revision is explicitly audited through its action request
+security.SecurityCoverageApproval # native coverage approval and withdrawal are explicitly audited by replication services
+security.SecurityDecisionSuppression # durable consequence of an explicitly audited original-decision revoke request
+security.SecurityManagedDecision # derived positive receipt mapping; provenance and issuance are retained by audited targets
+security.SecurityReplication   # fixed admission and revision provenance belongs to explicitly approved audited actions
+security.SecurityReplicationScan # technical fair scheduling cursor without independent security authority
 
 # ── 2. Append-only history/log models (these ARE the audit trail) ─────────────
 domains.HostedZone              # aggregate changes use audited import, confirmation, export, record, switch, deletion and state workflows

@@ -60,6 +60,7 @@ urlpatterns = [
     path("domains/", include("apps.domains.urls")),
     # Infrastructure management
     path("infrastructure/", include("apps.infrastructure.urls")),
+    path("security/", include("apps.security.urls")),
     # Notifications (admin/staff tools)
     path("notifications/", include("apps.notifications.urls")),
     # External integrations & webhooks

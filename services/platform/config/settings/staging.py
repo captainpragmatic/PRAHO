@@ -52,6 +52,7 @@ PLATFORM_API_SECRET = _hmac_secret  # Middleware reads settings.PLATFORM_API_SEC
 # ===============================================================================
 
 # Staging flags - limited debugging for testing
+ENVIRONMENT = "staging"
 DEBUG = False  # Set to True only if needed for staging debugging
 TEMPLATE_DEBUG = False
 

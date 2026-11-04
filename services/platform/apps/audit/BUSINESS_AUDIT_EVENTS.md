@@ -597,7 +597,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `backup_domain_success` | low | no | no | provisioning |
 | `cloud_provider_created` | low | no | no | infrastructure |
 | `cloud_provider_updated` | low | no | no | infrastructure |
-| `configuration_changed` | high | yes | no | billing, domains, infrastructure, provisioning, settings |
+| `configuration_changed` | high | yes | no | billing, domains, infrastructure, provisioning, security, settings |
 | `customer_view_denied` | low | no | yes | users |
 | `customer_view_ended` | low | no | yes | users |
 | `customer_view_issue_denied` | low | no | yes | users |

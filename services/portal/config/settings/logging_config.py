@@ -28,7 +28,31 @@ def portal_log_dir(env: Mapping[str, str] = os.environ) -> str:
     return DEFAULT_LOG_DIR if value is None else value.strip()
 
 
-def portal_logging(log_dir: str, *, apps_level: str = "INFO") -> dict[str, Any]:
+def add_crowdsec_auth_logging(config: dict[str, Any], auth_log_path: str) -> dict[str, Any]:
+    """Attach the dedicated event sink before privacy filters are applied."""
+    config["formatters"]["crowdsec_auth"] = {"format": "%(message)s"}
+    config["handlers"]["crowdsec_auth"] = {
+        "class": "apps.common.auth_events.SecurityEventFileHandler"
+        if auth_log_path
+        else "apps.common.auth_events.SecurityEventStreamHandler",
+        "formatter": "crowdsec_auth",
+        **(
+            {
+                "filename": auth_log_path,
+                "maxBytes": 10 * 1024 * 1024,
+                "backupCount": 4,
+                "delay": True,
+                "encoding": "utf-8",
+            }
+            if auth_log_path
+            else {"stream": "ext://sys.stdout"}
+        ),
+    }
+    config["loggers"]["praho.crowdsec.auth"] = {"handlers": ["crowdsec_auth"], "level": "INFO", "propagate": False}
+    return config
+
+
+def portal_logging(log_dir: str, *, apps_level: str = "INFO", auth_log_path: str | None = None) -> dict[str, Any]:
     """The LOGGING dict: console always, plus watched files when ``log_dir`` is set."""
     files = ["file"] if log_dir else []
     error_files = ["error_file"] if log_dir else []
@@ -101,4 +125,6 @@ def portal_logging(log_dir: str, *, apps_level: str = "INFO") -> dict[str, Any]:
         },
     }
 
+    if auth_log_path is not None:
+        add_crowdsec_auth_logging(config, auth_log_path)
     return secure_logging_config(config)

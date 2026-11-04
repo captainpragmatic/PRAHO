@@ -1,0 +1,18 @@
+type: leaky
+name: praho/portal-auth-bf
+description: Repeated actual Portal password and second-factor failures
+filter: |
+  evt.Meta.log_type == 'praho_portal_auth' &&
+  ((evt.Meta.auth_event == 'auth_failure' && evt.Meta.auth_reason == 'credentials') ||
+   (evt.Meta.auth_event == 'mfa_failure' && evt.Meta.auth_reason == 'second_factor'))
+leakspeed: 10s
+capacity: 5
+groupby: evt.Meta.source_ip
+blackhole: 1m
+labels:
+  service: praho-portal
+  remediation: true
+  confidence: 3
+  spoofable: 0
+  behavior: http:bruteforce
+  label: Portal authentication failures

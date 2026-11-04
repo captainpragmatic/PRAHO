@@ -1,4 +1,5 @@
 - name: restart fail2ban
-  service:
-    name: fail2ban
-    state: restarted
+  ansible.builtin.include_tasks:
+    file: '{{ role_path }}/tasks/fail2ban_restart.yml'
+    apply:
+      tags: always

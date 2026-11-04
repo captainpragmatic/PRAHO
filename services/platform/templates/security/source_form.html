@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Security source" %}{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-3xl space-y-6 px-4 py-6 sm:px-6 [&_a]:inline-flex [&_a]:min-h-11 [&_a]:min-w-11 [&_a]:items-center [&_a]:px-2 [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base [&_input:not([type=checkbox])]:min-h-11 [&_select]:min-h-11 [&_textarea]:min-h-11 [&_input[type=checkbox]]:h-5 [&_input[type=checkbox]]:w-5 [&_input[type=checkbox]]:shrink-0">
+  <header>
+    <h1 class="break-all text-2xl font-semibold text-slate-100">{% if source %}{% trans "Security source" %}: {{ source.hostname }}{% else %}{% trans "Enroll security source" %}{% endif %}</h1>
+    <p class="mt-2 text-sm text-slate-400">{% trans "Use the physical installation UUID, configuration digest and host keys verified during qualification. Source enrollment schedules background reads; local transport requires explicit staging configuration." %}</p>
+  </header>
+  {% if source.retired_at %}
+  <p class="text-amber-300">{% trans "This source is retired. A replacement installation needs a new enrollment." %}</p>
+  {% else %}
+  {# nosemgrep: django-no-csrf-token -- csrf_token is the first form child; nested template branches confuse the generic matcher. #}
+  <form method="post" class="space-y-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
+    {% csrf_token %}
+    {% for error in form.non_field_errors %}<p class="text-red-300" role="alert">{{ error }}</p>{% endfor %}
+    {% for field in form %}
+      {% if field.is_hidden %}{{ field }}{% else %}
+      <div class="min-w-0 space-y-1 break-words">
+        {% if field.field.widget.input_type == "checkbox" %}
+        <label for="{{ field.id_for_label }}" class="flex min-h-11 cursor-pointer items-center gap-3 px-2 py-2 text-base text-slate-300">{{ field }}<span class="min-w-0">{{ field.label }}</span></label>
+        {% else %}
+        <label for="{{ field.id_for_label }}" class="block text-sm text-slate-300">{{ field.label }}</label>
+        {{ field }}
+        {% endif %}
+        {% for error in field.errors %}<p class="text-sm text-red-300" role="alert">{{ error }}</p>{% endfor %}
+      </div>
+      {% endif %}
+    {% endfor %}
+    {% trans "Save source" as save_label %}{% button save_label type="submit" variant="primary" %}
+  </form>
+  {% if source %}
+  <form method="post" action="{% url 'security:source-retire' source_id=source.pk %}" class="space-y-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
+    {% csrf_token %}
+    <h2 class="text-lg text-slate-100">{% trans "Retire physical installation" %}</h2>
+    <p class="text-sm text-slate-400">{% trans "Retirement stops synchronization and retains history. Existing local bans continue until they expire or are revoked." %}</p>
+    {{ retire_form.generation }}
+    {% for error in retire_form.non_field_errors %}<p class="text-red-300" role="alert">{{ error }}</p>{% endfor %}
+    <label for="{{ retire_form.reason.id_for_label }}" class="block text-sm text-slate-300">{{ retire_form.reason.label }}</label>
+    {{ retire_form.reason }}{{ retire_form.reason.errors }}
+    {% trans "Retire source" as retire_label %}{% button retire_label type="submit" variant="danger" %}
+  </form>
+  {% endif %}
+  {% endif %}
+  <a href="{% url 'security:dashboard' %}" class="text-sm text-blue-300 hover:text-blue-200">{% trans "Back to Security" %}</a>
+</div>
+{% endblock %}

@@ -16,14 +16,13 @@ from django.views.decorators.http import require_http_methods
 from django_q.models import Task
 from django_q.tasks import async_task
 
-from apps.infrastructure.ansible_service import uncovered_platform_egress
+from apps.infrastructure.ansible_service import node_admin_allowed_cidrs, uncovered_platform_egress
 from apps.infrastructure.permissions import can_deploy_nodes, is_staff_or_superuser
 from apps.ui.widgets import PRAHOCheckboxWidget, PRAHOTextAreaWidget
 
 from .virtualmin_models import VirtualminServer
 from .virtualmin_node_capability import destination_refusal
-from .virtualmin_security import POLICY_VERSION
-from .virtualmin_security_policy import network_preparation
+from .virtualmin_security_policy import selected_network_preparation
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -80,8 +79,17 @@ class PolicyVerificationForm(forms.Form):
 def _admission_context(server: VirtualminServer) -> dict[str, object]:
     refusal = destination_refusal(server)
     review = server.current_security_review
-    preparation = network_preparation(cast("list[str]", review.evidence.get("firewall", []))) if review else []
-    if review and review.policy_version != POLICY_VERSION:
+    preparation = (
+        selected_network_preparation(
+            review.evidence,
+            server.security_policy_version,
+            server.security_configuration_digest,
+            node_admin_allowed_cidrs(),
+        )
+        if review
+        else []
+    )
+    if review and review.policy_version != server.security_policy_version:
         preparation = [str(_("Inspect again for current NAT, forwarding and topology evidence."))]
     return {
         "verification_stale": server.security_state == "verified_web" and refusal is not None,

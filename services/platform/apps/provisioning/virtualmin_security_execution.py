@@ -17,16 +17,17 @@ from django.utils.translation import gettext_lazy as _
 from apps.infrastructure.ansible_service import AnsibleService, node_admin_allowed_cidrs
 from apps.infrastructure.permissions import can_deploy_nodes
 
+from .crowdsec_policy import CROWDSEC_PROFILE, gateway_public_key
 from .virtualmin_models import VirtualminServer
 from .virtualmin_security import (
     MAX_REASON_LENGTH,
-    POLICY_VERSION,
     _evidence_digest,
     connection_identity,
+    selected_profile,
     validate_decision,
 )
 from .virtualmin_security_models import NodeSecurityDecision, NodeSecurityExecution, NodeSecurityReview
-from .virtualmin_security_policy import verify_evidence, verify_network_ingress
+from .virtualmin_security_policy import verify_evidence, verify_selected_network
 
 if TYPE_CHECKING:
     from apps.users.models import User
@@ -65,7 +66,19 @@ def reviewed_transport_policy(server: VirtualminServer, token: str) -> dict[str,
         or sorted(operator_key_fingerprints(keys)) != recorded_keys
     ):
         raise ValidationError(_("Administrative networks or operator keys differ from the reviewed preview."))
-    return {"node_admin_allowed_cidrs": cidrs, "ssh_allowed_cidrs": cidrs, "ssh_operator_public_keys": list(keys)}
+    policy: dict[str, object] = {
+        "node_admin_allowed_cidrs": cidrs,
+        "ssh_allowed_cidrs": cidrs,
+        "ssh_operator_public_keys": list(keys),
+    }
+    if selected_profile(server) == CROWDSEC_PROFILE:
+        policy.update(
+            ssh_crowdsec_gateway_enabled=True,
+            crowdsec_gateway_public_key=gateway_public_key(),
+            security_policy_version=CROWDSEC_PROFILE,
+            security_configuration_digest=server.security_configuration_digest,
+        )
+    return policy
 
 
 def frozen_transport_policy() -> dict[str, object] | None:
@@ -132,7 +145,9 @@ def claim_hardening(
         raise ValidationError(refusal)
     validate_decision(server, stored, evidence)
     # Read-only qualification precedes decisions, operation exclusion and enrollment.
-    verify_network_ingress(cast("list[str]", evidence["firewall"]))
+    verify_selected_network(
+        evidence, selected_profile(server), server.security_configuration_digest, node_admin_allowed_cidrs()
+    )
     from .component_migration_models import retained_source_refusal  # noqa: PLC0415 -- node responsibility boundary
 
     retained = retained_source_refusal(server.pk)
@@ -210,7 +225,15 @@ def complete_hardening(
         for line in proposals
         if line.startswith("Approved operator SSH key: ")
     ]
-    verify_evidence(evidence, server.api_username, cidrs, expected_operator_fingerprints=fingerprints)
+    profile = selected_profile(server)
+    verify_evidence(
+        evidence,
+        server.api_username,
+        cidrs,
+        expected_operator_fingerprints=fingerprints,
+        policy_version=profile,
+        expected_configuration_digest=server.security_configuration_digest,
+    )
     gateway = VirtualminGateway(VirtualminConfig(server=server))
     credentials = gateway._get_credentials(reason="Verify dedicated identity after node hardening")
     if credentials.is_err() or credentials.unwrap()[0] != server.api_username:
@@ -236,9 +259,9 @@ def complete_hardening(
         verification = NodeSecurityReview.objects.create(
             server=server,
             server_uuid=server.pk,
-            policy_version=POLICY_VERSION,
+            policy_version=profile,
             identity=cast("str", evidence["identity"]),
-            digest=_evidence_digest(evidence),
+            digest=_evidence_digest(evidence, policy_version=profile),
             evidence=evidence,
         )
         NodeSecurityDecision.objects.create(

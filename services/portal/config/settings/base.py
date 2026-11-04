@@ -12,6 +12,8 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.secret_urls import secure_logging_config
 
+from .logging_config import add_crowdsec_auth_logging
+
 # ===============================================================================
 # CORE DJANGO SETTINGS
 # ===============================================================================
@@ -473,6 +475,12 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 IPWARE_TRUSTED_PROXY_LIST: list[str] = [
     cidr.strip() for cidr in os.environ.get("PORTAL_TRUSTED_PROXY_CIDRS", "").split(",") if cidr.strip()
 ]
+
+# Dedicated fixed-schema events, separate from ordinary application diagnostics.
+CROWDSEC_AUTH_PSEUDONYM_KEY = os.environ.get("CROWDSEC_AUTH_PSEUDONYM_KEY", "")
+CROWDSEC_AUTH_LOG_PATH = os.environ.get("CROWDSEC_AUTH_LOG_PATH", "/var/log/praho/portal/portal-auth.jsonl")
+CROWDSEC_AUTH_EVENTS_ENABLED = os.environ.get("CROWDSEC_AUTH_EVENTS_ENABLED", "false").lower() == "true"
+LOGGING = add_crowdsec_auth_logging(LOGGING, CROWDSEC_AUTH_LOG_PATH)
 
 # Handler filters cover Django request and exception logging as well as app logs.
 
