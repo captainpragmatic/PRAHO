@@ -32,6 +32,11 @@
     url: https://www.postgresql.org/media/keys/ACCC4CF8.asc
     dest: /etc/apt/keyrings/postgresql.asc
     mode: "0644"
+    timeout: 60
+  register: native_postgresql_key_download
+  until: native_postgresql_key_download is succeeded
+  retries: 3
+  delay: 3
 
 - name: Add PostgreSQL APT repository
   apt_repository:
