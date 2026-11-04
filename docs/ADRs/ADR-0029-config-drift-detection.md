@@ -27,6 +27,13 @@ Without detection, PRAHO's database silently becomes stale. Operations like upgr
 
 ## Decision
 
+Hosting quota drift compares the node with the Service's assigned and last
+verified allowance, never an edited shared catalog default. Discovery and drift
+observation cannot adopt an account, initialize quotas or mark an application
+verified. Corrections use the explicit qualified-node quota application and
+fencing services (#776); ambiguous native outcomes retain their reservation and
+require reconciliation. No drift remedy enables a suspended service implicitly.
+
 Account usage is reconciled separately by the hourly, observational
 `virtualmin-usage-sync` task (ADR-0068). Missing or unassigned account observations
 raise staff attention; they do not import customers, change quotas or remediate

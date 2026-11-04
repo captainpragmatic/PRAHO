@@ -61,6 +61,7 @@ def target_operation_variables(
             "user": source["owner"],
             "template": "Default Settings",
             "desc": "PRAHO selected website " + source["domain"],
+            "no-email": "",
             **dict.fromkeys(FEATURES, ""),
             **quota_parameters(limits["disk_quota_mb"], limits["bandwidth_quota_mb"]),
         },

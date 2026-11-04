@@ -1,0 +1,31 @@
+---
+# Shared by fresh installation and reviewed enrollment on an installed panel.
+# The password arrives from a private controller vars file and node stdin only.
+- name: Install the PRAHO API user helper
+  ansible.builtin.copy:
+    src: files/praho-webmin-api-user.pl
+    dest: /usr/local/sbin/praho-webmin-api-user
+    owner: root
+    group: root
+    mode: '0700'
+  when: praho_api_user is defined and praho_api_password is defined
+
+# This is a Virtualmin master administrator; an empty allowlist must fail closed.
+- name: Refuse an empty node admin allowlist
+  ansible.builtin.assert:
+    that:
+      - node_admin_allowed_cidrs is defined
+      - node_admin_allowed_cidrs | length > 0
+    fail_msg: >-
+      infrastructure.node_admin_allowed_cidrs is empty; set Platform's egress
+      addresses and the admin networks before deploying a node.
+  when: praho_api_user is defined and praho_api_password is defined
+
+- name: Create or update the PRAHO API user
+  ansible.builtin.command:
+    argv: "{{ ['/usr/local/sbin/praho-webmin-api-user', praho_api_user] + node_admin_allowed_cidrs }}"
+    stdin: "{{ praho_api_password }}"
+  when: praho_api_user is defined and praho_api_password is defined
+  no_log: true
+  register: praho_admin_result
+  changed_when: true

@@ -129,11 +129,29 @@ def _lock_services(identifiers: Iterable[int], using: str) -> dict[int, int]:
     )
 
 
+def _refuse_quota_owned_accounts(identifiers: Iterable[Any], using: str) -> None:
+    from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415 -- Ownership boundary imports models.
+
+    if (
+        VirtualminProvisioningJob.objects.using(using)
+        .filter(
+            account_id__in=tuple(identifiers),
+            operation="apply_hosting_limits",
+            status__in=("pending", "running", "attention"),
+        )
+        .exists()
+    ):
+        raise ValidationError(
+            _("Verify or permanently fence the native quota operation before changing hosting ownership.")
+        )
+
+
 @contextmanager
 def fence_service_ownership(expected: dict[Any, int], *, using: str) -> Iterator[None]:
     with transaction.atomic(using=using):
         accounts = dict(_accounts(using).filter(service_id__in=expected).values_list("pk", "service_id"))
         locked = _lock_account_names(accounts, using)
+        _refuse_quota_owned_accounts(locked, using)
         current = _lock_services(expected, using)
         fresh_accounts = dict(_accounts(using).filter(service_id__in=expected).values_list("pk", "service_id"))
         if current != expected or locked != accounts or fresh_accounts != accounts:
@@ -143,6 +161,11 @@ def fence_service_ownership(expected: dict[Any, int], *, using: str) -> Iterator
 
         changed = set(_services(using).filter(pk__in=expected).values_list("pk", "customer_id"))
         changed_services = {key for key, owner in changed if owner != expected[key]}
+        from .hosting_limit_assignments import reassign_hosting_limit_owner  # noqa: PLC0415 -- Ownership boundary.
+
+        for service_id, customer_id in sorted(changed):
+            if service_id in changed_services:
+                reassign_hosting_limit_owner(service_id, customer_id, using=using)
         for identifier, service_id in accounts.items():
             if service_id in changed_services:
                 reset_owner_scope(identifier)
@@ -154,6 +177,7 @@ def fence_account_ownership(expected: dict[Any, int], desired: Iterable[int], *,
         service_ids = set(expected.values()) | set(desired)
         owners = dict(_services(using).filter(pk__in=service_ids).values_list("pk", "customer_id"))
         locked = _lock_account_names(expected, using)
+        _refuse_quota_owned_accounts(locked, using)
         current_owners = _lock_services(service_ids, using)
         if locked != expected or owners != current_owners or set(current_owners) != service_ids:
             raise _stale()
@@ -173,12 +197,14 @@ def _fence(kind: OwnershipKind, expected: dict[Any, int], desired: Iterable[int]
     )
 
 
-def save_with_ownership(
+def save_with_ownership(  # noqa: PLR0913 -- Preserve caller intent through both ownership and resource-plan filters.
     instance: models.Model,
     kind: OwnershipKind,
     save: Callable[..., None],
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
+    *,
+    caller_intent: object = _MISSING,
 ) -> None:
     kwargs = dict(kwargs)
     if len(args) > len(_SAVE_POSITIONAL):
@@ -193,7 +219,7 @@ def save_with_ownership(
     if fields is not None:
         fields = set(fields)
         kwargs["update_fields"] = fields
-    intent = fields
+    intent = fields if caller_intent is _MISSING else cast("Collection[str] | None", caller_intent)
     desired = instance.__dict__.get(attribute, _MISSING)
     if (fields is not None and not {field, attribute}.intersection(fields)) or desired is _MISSING:
         _save_with_field_intent(instance, save, kwargs, intent)
@@ -266,6 +292,45 @@ class _OwnershipQuerySet(models.QuerySet[OwnedModel]):
 class ServiceOwnershipQuerySet(_OwnershipQuerySet["Service"]):
     model: type[Service]
     ownership_kind = "service"
+
+    def update(self, **kwargs: Any) -> int:
+        from .hosting_limit_assignments import assignment_write_allowed  # noqa: PLC0415 -- Model boundary.
+
+        if {"service_plan", "service_plan_id"}.intersection(kwargs) and not assignment_write_allowed():
+            raise ValidationError(_("Use an explicit hosting plan assignment to change a service's plan."))
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs: Iterable[Any], fields: Iterable[str], batch_size: int | None = None) -> int:
+        from .hosting_limit_assignments import assignment_write_allowed  # noqa: PLC0415 -- Model boundary.
+
+        selected = tuple(fields)
+        if {"service_plan", "service_plan_id"}.intersection(selected) and not assignment_write_allowed():
+            raise ValidationError(_("Use an explicit hosting plan assignment to change a service's plan."))
+        return super().bulk_update(objs, selected, batch_size=batch_size)
+
+    def bulk_create(  # noqa: PLR0913 -- Preserve Django's queryset API, including positional batch_size.
+        self,
+        objs: Iterable[Any],
+        batch_size: int | None = None,
+        ignore_conflicts: bool = False,
+        update_conflicts: bool = False,
+        update_fields: Collection[str] | None = None,
+        unique_fields: Collection[str] | None = None,
+    ) -> list[Service]:
+        from .hosting_limit_assignments import capture_initial_limits  # noqa: PLC0415 -- Model boundary.
+
+        if ignore_conflicts or update_conflicts:
+            raise ValidationError(_("Hosting services require an unambiguous initial allowance assignment."))
+        self._for_write = True
+        with transaction.atomic(using=self.db):
+            records = super().bulk_create(
+                objs,
+                batch_size=batch_size,
+                update_fields=update_fields,
+                unique_fields=unique_fields,
+            )
+            capture_initial_limits(records, using=self.db)
+        return records
 
 
 class AccountOwnershipQuerySet(_OwnershipQuerySet["VirtualminAccount"]):

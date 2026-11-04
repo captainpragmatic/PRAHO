@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Resource-only exception" %} - {{ service.domain }}{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto px-4 py-6">
+  <h1 class="text-2xl font-semibold text-white">{% trans "Resource-only exception" %}</h1>
+  <p class="mt-2 text-slate-300">{{ service.domain }}</p>
+  {% trans "This exception changes hosting resources only. The customer's billing, recurring prices and frozen tariffs stay unchanged. Native limits remain pending until verified." as unchanged_billing_notice %}
+  {% alert unchanged_billing_notice variant="warning" css_class="my-4" %}
+  {# nosemgrep: django-no-csrf-token -- token immediately below; middleware refusal and rendered-token acceptance are tested. #}
+  <form method="post" class="space-y-4 rounded-lg border border-slate-700 bg-slate-800 p-6">
+    {% csrf_token %}
+    {{ form.non_field_errors }}
+    {% for field in form %}
+      {% if field.is_hidden %}{{ field }}{{ field.errors }}{% else %}
+        <div>{{ field.label_tag }}{{ field }}{% if field.help_text %}<p class="text-sm text-slate-400">{{ field.help_text }}</p>{% endif %}{{ field.errors }}</div>
+      {% endif %}
+    {% endfor %}
+    {% trans "Grant resource-only exception" as grant_label %}
+    {% button grant_label type="submit" variant="primary" %}
+    {% url 'provisioning:service_detail' service.pk as detail_url %}
+    {% trans "Cancel" as cancel_label %}{% button cancel_label href=detail_url variant="secondary" %}
+  </form>
+</div>
+{% endblock %}

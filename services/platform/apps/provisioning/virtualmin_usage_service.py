@@ -15,6 +15,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 from .account_locks import LockedAccount, lock_account
+from .hosting_limit_selectors import operational_allowances, prime_current_verification, usage_percentage
 from .service_models import Service
 from .virtualmin_migration_models import account_blocks_reconcile
 from .virtualmin_models import VirtualminAccount, VirtualminServer
@@ -37,6 +38,8 @@ def enabled() -> bool:
 
 def observations_apply(service: Service) -> bool:
     """Other providers retain their own usage source when this feature is enabled."""
+    if hasattr(service, "_hosting_usage_context"):
+        return bool(service._hosting_usage_context[3])
     return VirtualminAccount.objects.filter(service=service).exists() and (
         enabled() or AccountUsageState.objects.filter(account__service=service).exists()
     )
@@ -468,6 +471,29 @@ def transaction_time_filter(start: datetime) -> Q:
     return Q(ended_at__isnull=True) | Q(ended_at__gt=start)
 
 
+def prime_service_usage(services: list[Service]) -> None:
+    """Read one account/observation batch; serializers perform no per-service reads."""
+    accounts = {
+        account.service_id: account
+        for account in VirtualminAccount.objects.filter(
+            service_id__in=[service.pk for service in services]
+        ).select_related(
+            "usage_state__disk_reading",
+            "usage_state__bandwidth_reading",
+            "server__usage_sync",
+            "server__hosting_policy",
+        )
+    }
+    observations_enabled = enabled() if accounts else False
+    for service in services:
+        account = accounts.get(service.pk)
+        state = getattr(account, "usage_state", None) if account else None
+        failed_poll = getattr(account.server, "usage_sync", None) if account else None
+        applies = account is not None and (observations_enabled or state is not None)
+        service.__dict__["_hosting_usage_context"] = (account, state, failed_poll, applies)
+    prime_current_verification(services, accounts)
+
+
 def public_usage(service: Service) -> dict[str, object]:
     """Local-only selector; no request contacts a node or initializes observations."""
     result: dict[str, object] = {
@@ -484,11 +510,18 @@ def public_usage(service: Service) -> dict[str, object]:
         "bandwidth_state": "unknown",
         "bandwidth_age_hours": None,
     }
-    account = VirtualminAccount.objects.filter(service=service).first()
+    cached = getattr(service, "_hosting_usage_context", None)
+    account = cached[0] if cached is not None else VirtualminAccount.objects.filter(service=service).first()
     if account is None:
         return result
     state = (
-        AccountUsageState.objects.select_related("disk_reading", "bandwidth_reading").filter(account=account).first()
+        cached[1]
+        if cached is not None
+        else (
+            AccountUsageState.objects.select_related("disk_reading", "bandwidth_reading")
+            .filter(account=account)
+            .first()
+        )
     )
     if state is None or (state.service_id_snapshot, state.customer_id_snapshot, state.server_id_snapshot) != (
         service.pk,
@@ -496,7 +529,12 @@ def public_usage(service: Service) -> dict[str, object]:
         account.server_id,
     ):
         return result
-    failed_poll = NodeUsageSyncState.objects.filter(server_id=account.server_id, outcome="unavailable").first()
+    failed_poll = (
+        cached[2] if cached is not None else NodeUsageSyncState.objects.filter(server_id=account.server_id).first()
+    )
+    if failed_poll is not None and failed_poll.outcome != "unavailable":
+        failed_poll = None
+    disk_allowance, bandwidth_allowance = operational_allowances(service)
     reading = state.disk_reading
     if (
         reading
@@ -511,11 +549,7 @@ def public_usage(service: Service) -> dict[str, object]:
         result.update(
             {
                 "disk_usage_gb": round(reading.disk_total_bytes / MIB / 1024, 2),
-                "disk_usage_percentage": round(
-                    reading.disk_total_bytes / MIB / 1024 / service.service_plan.disk_space_gb * 100, 1
-                )
-                if service.service_plan.disk_space_gb
-                else None,
+                "disk_usage_percentage": usage_percentage(reading.disk_total_bytes / MIB, disk_allowance),
                 "databases_used": reading.databases,
                 "email_accounts_used": reading.mailboxes,
                 "usage_as_of": reading.taken_at.isoformat(),
@@ -551,11 +585,7 @@ def public_usage(service: Service) -> dict[str, object]:
                 if timezone.now() - bandwidth.taken_at >= STALE_AFTER
                 or (failed_poll and failed_poll.last_attempt_at and failed_poll.last_attempt_at > bandwidth.taken_at)
                 else "fresh",
-                "bandwidth_usage_percentage": round(
-                    bandwidth.bandwidth_bytes / MIB / 1024 / service.service_plan.bandwidth_gb * 100, 1
-                )
-                if service.service_plan.bandwidth_gb
-                else None,
+                "bandwidth_usage_percentage": usage_percentage(bandwidth.bandwidth_bytes / MIB, bandwidth_allowance),
             }
         )
     return result

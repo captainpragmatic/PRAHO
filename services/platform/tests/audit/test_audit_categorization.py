@@ -4,6 +4,7 @@ Validates industry compliance requirements and threat detection capabilities.
 """
 
 import pytest
+from django.contrib.contenttypes.models import ContentType
 from django.test import TestCase
 from unittest.mock import Mock, patch
 
@@ -61,8 +62,8 @@ class TestAuditEventCategorizationModel(TestCase):
             severity='high',
             is_sensitive=True,
             requires_review=True,
-            content_type_id=1,
-            object_id='1',
+            content_type=ContentType.objects.get_for_model(User),
+            object_id=str(self.user.pk),
             description='Test audit event',
             ip_address='192.168.1.1'
         )
@@ -78,8 +79,8 @@ class TestAuditEventCategorizationModel(TestCase):
         event = AuditEvent.objects.create(
             user=self.user,
             action='test_action',
-            content_type_id=1,
-            object_id='1',
+            content_type=ContentType.objects.get_for_model(User),
+            object_id=str(self.user.pk),
             description='Test audit event'
         )
 

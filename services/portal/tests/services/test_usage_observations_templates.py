@@ -40,18 +40,23 @@ def observation(**changes: object) -> dict[str, object]:
 @override_settings(
     SESSION_ENGINE="django.contrib.sessions.backends.cache",
     CACHES={"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}},
-    MIDDLEWARE=["django.contrib.sessions.middleware.SessionMiddleware", "django.contrib.messages.middleware.MessageMiddleware"],
+    MIDDLEWARE=[
+        "django.contrib.sessions.middleware.SessionMiddleware",
+        "django.contrib.messages.middleware.MessageMiddleware",
+    ],
     LANGUAGE_CODE="en",
 )
 class UsageObservationTemplateTests(SimpleTestCase):
     def setUp(self) -> None:
         session = self.client.session
-        session.update({
-            "customer_id": 42,
-            "user_id": 7,
-            "user_memberships": [{"customer_id": 42, "role": "owner"}],
-            "user_memberships_fetched_at": time.time(),
-        })
+        session.update(
+            {
+                "customer_id": 42,
+                "user_id": 7,
+                "user_memberships": [{"customer_id": 42, "role": "owner"}],
+                "user_memberships_fetched_at": time.time(),
+            }
+        )
         session.save()
 
     def usage(self, current: dict[str, object], *, history: dict[str, object] | None = None) -> dict[str, object]:
@@ -69,7 +74,12 @@ class UsageObservationTemplateTests(SimpleTestCase):
             "service_name": "Observed hosting",
             "domain": "example.com",
             "currency_code": "RON",
-            "service_plan": {"disk_space_gb": 10, "bandwidth_gb": 100, "email_accounts": 10, "databases": 5},
+            "service_plan": {
+                "disk_space_gb": current.get("disk_limit_gb"),
+                "bandwidth_gb": current.get("bandwidth_limit_gb"),
+                "email_accounts": 10,
+                "databases": 5,
+            },
             **current,
         }
         with patch("apps.services.views.services_api") as api:
@@ -133,7 +143,7 @@ class UsageObservationTemplateTests(SimpleTestCase):
             bandwidth_age_hours=1,
         )
         for html in (self.page(current), self.fragment(current)):
-            with self.subTest(fragment='<!DOCTYPE' not in html):
+            with self.subTest(fragment="<!DOCTYPE" not in html):
                 self.assertIn("3.5 GB", html)
                 self.assertIn("Stale reading", html)
                 self.assertIn("9 hours ago", html)
@@ -154,12 +164,12 @@ class UsageObservationTemplateTests(SimpleTestCase):
             "disk_usage_trend": [{"taken_at": SOURCE_TIME, "value": 3.5}],
         }
         for html in (self.page(current, history=history), self.fragment(current, history=history)):
-            with self.subTest(fragment='<!DOCTYPE' not in html):
+            with self.subTest(fragment="<!DOCTYPE" not in html):
                 self.assertIn("Files:", html)
                 self.assertIn("3.20 GB", html)
                 self.assertIn("Databases:", html)
                 self.assertIn("0.30 GB", html)
-                self.assertIn('<polyline', html)
+                self.assertIn("<polyline", html)
                 self.assertIn('points="0,60 150,30 300,0"', html)
                 self.assertNotIn("Coming Soon", html)
                 self.assertNotIn("Service Uptime", html)
@@ -167,7 +177,7 @@ class UsageObservationTemplateTests(SimpleTestCase):
 
     def test_history_is_not_fabricated_before_the_first_reading(self) -> None:
         for html in (self.page(observation()), self.fragment(observation())):
-            with self.subTest(fragment='<!DOCTYPE' not in html):
+            with self.subTest(fragment="<!DOCTYPE" not in html):
                 self.assertIn("No disk usage history is available yet", html)
                 self.assertNotIn("<polyline", html)
 
@@ -182,12 +192,35 @@ class UsageObservationTemplateTests(SimpleTestCase):
         self.assertIn('value="90d"', html)
 
     def test_known_usage_percentages_remain_readable_without_the_progress_bar(self) -> None:
-        current = observation(disk_usage_gb=3.5, disk_usage_percentage=35,
-                              bandwidth_usage_gb=2, bandwidth_usage_percentage=2, bandwidth_state="fresh")
+        current = observation(
+            disk_usage_gb=3.5,
+            disk_usage_percentage=35,
+            bandwidth_usage_gb=2,
+            bandwidth_usage_percentage=2,
+            bandwidth_state="fresh",
+        )
         for html in (self.page(current), self.fragment(current)):
             text = " ".join(strip_tags(html).split())
             self.assertIn("35.0% used", text)
             self.assertIn("2.0% used", text)
+
+    def test_assigned_allowances_trim_only_insignificant_decimal_places(self) -> None:
+        for disk, bandwidth, disk_text, bandwidth_text in (
+            (10.0, 100.0, "10", "100"),
+            (15.5, 0.0009765625, "15.5", "0.0009765625"),
+        ):
+            current = observation(
+                disk_usage_gb=0,
+                bandwidth_usage_gb=0,
+                bandwidth_state="fresh",
+                disk_limit_gb=disk,
+                bandwidth_limit_gb=bandwidth,
+            )
+            for html in (self.page(current), self.fragment(current)):
+                with self.subTest(disk=disk, fragment="<!DOCTYPE" not in html):
+                    text = " ".join(strip_tags(html).split())
+                    self.assertIn(f"of {disk_text} GB used", text)
+                    self.assertIn(f"of {bandwidth_text} GB used", text)
 
     def test_service_age_is_not_labelled_as_measured_uptime(self) -> None:
         html = self.page(observation(service_age_days=5))
@@ -197,5 +230,5 @@ class UsageObservationTemplateTests(SimpleTestCase):
     def test_small_database_measurement_does_not_round_to_zero_in_breakdown(self) -> None:
         current = observation(disk_usage_gb=0.31, disk_files_gb=0.29, disk_db_gb=0.02)
         for html in (self.page(current), self.fragment(current)):
-            with self.subTest(fragment='<!DOCTYPE' not in html):
+            with self.subTest(fragment="<!DOCTYPE" not in html):
                 self.assertIn("0.02 GB", html)

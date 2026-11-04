@@ -139,11 +139,10 @@ class ProvisioningDeepReviewTests(TestCase):
         return response(program, output="Operation complete\n")
 
     def test_upstream_disk_bytes_allow_seeded_quota_at_and_above_capacity(self) -> None:
-        self.set_value("virtualmin.domain_quota_default_mb", 1000)
+        self.account.disk_quota_mb = 1000
+        self.account.save(update_fields=["disk_quota_mb"])
         for free_bytes in (1000 * 1024**2, 1000 * 1024**2 + 1):
             with self.subTest(free_bytes=free_bytes):
-                self.account.disk_quota_mb = None
-                self.account.save(update_fields=["disk_quota_mb"])
                 self.info_output = f"disk_free: {free_bytes}\ndisk_total: 2097152000\n"
                 self.sent.clear()
                 with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http):
@@ -155,7 +154,8 @@ class ProvisioningDeepReviewTests(TestCase):
                 self.assertIn("create-domain", self.sent)
 
     def test_disk_bytes_below_capacity_are_not_mistaken_for_megabytes(self) -> None:
-        self.set_value("virtualmin.domain_quota_default_mb", 1000)
+        self.account.disk_quota_mb = 1000
+        self.account.save(update_fields=["disk_quota_mb"])
         self.info_output = f"disk_free: {1000 * 1024**2 - 1}\n"
         with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http):
             result = VirtualminProvisioningService(self.server).reprovision_virtualmin_account(self.account)
@@ -164,7 +164,8 @@ class ProvisioningDeepReviewTests(TestCase):
         self.assertEqual(self.sent, ["info"])
 
     def test_unknown_free_space_warns_and_does_not_block_creation(self) -> None:
-        self.set_value("virtualmin.domain_quota_default_mb", 1000)
+        self.account.disk_quota_mb = 1000
+        self.account.save(update_fields=["disk_quota_mb"])
         for output in ("host:\n    hostname: review-node.example.test\n", "disk_free: unknown\n"):
             with self.subTest(output=output):
                 self.info_output = output

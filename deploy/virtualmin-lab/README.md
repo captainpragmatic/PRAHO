@@ -11,10 +11,11 @@ make virtualmin-lab-up      # build images if missing, start, register in the la
 make test-virtualmin-lab    # production-path backup + restore round trip, then the vm-b checks
 make test-virtualmin-contract # every allowlisted Virtualmin program against the real node (also run by test-virtualmin-lab)
 make test-virtualmin-faults # nightly: Webmin stopped, network cut and calls timed out while PRAHO backs up and restores
-make test-virtualmin-node-deploy # nightly: virtualmin.yml + virtualmin_harden.yml on the bare node, then the contract smoke checks
+make test-virtualmin-node-deploy # explicit owned Ubuntu VM: fresh public deployment, kernel qualification and native lifecycle
 make test-virtualmin-workflows # PRAHO's services, jobs and tasks end to end against the nodes (also run by test-virtualmin-lab)
 make test-virtualmin-e2e    # Playwright smoke tests of the staff pages against the lab (own server on :8710; not part of make test-e2e)
-make test-virtualmin-lab-full # nightly: test-virtualmin-lab + node-deploy + faults + the browser tests; every leg runs, failed legs are named
+make test-virtualmin-lab-containers # routine container suites, faults, browser and Maintenance Portal; no native qualification
+make test-virtualmin-lab-full # explicit native-inclusive run: lab + owned Ubuntu node-deploy + faults + browser; every leg runs
 make test-virtualmin-drift  # builds the lab from the LATEST Virtualmin, fresh every time (replaces a running lab), and runs the contract suite, recording nothing
 VIRTUALMIN_LAB=1 make dev   # Platform on :8700 against the lab: starts and registers it if needed, then runs the lab server
 make virtualmin-probe       # incremental-backup contract probe -> docs/domain/virtualmin-incremental-contract.md
@@ -36,7 +37,7 @@ If a pull hangs on the `docker-credential-desktop` helper, point `LAB_DOCKER_CON
 | Virtualmin node A | `vmlab-a` | SSH `2522`, Webmin/API `10101` | `vm-a.praho.test` |
 | Virtualmin node B | `vmlab-b` | SSH `2622`, Webmin/API `10102` | `vm-b.praho.test` |
 | MinIO API / console | `vmlab-minio` | `19000` / `19001` | – |
-| Bare Debian node (profile `debian-node`, `lab.sh node-up`) | `vmlab-debian-node` | SSH `2722` | `node-c.praho.test` |
+| Legacy Debian diagnostic image (profile `debian-node`, `lab.sh node-up`; no managed-node qualification) | `vmlab-debian-node` | SSH `2722` | `node-c.praho.test` |
 
 The ports can be overridden with `LAB_A_SSH_PORT`, `LAB_A_WEBMIN_PORT`, and so on (see `compose.yml`). If you change one, change the matching `LabNode` in `virtualmin_lab_bootstrap.py` too.
 
@@ -193,20 +194,27 @@ The fault is applied by a thread that watches the node (an archive appearing in 
 
 The lab is restored whatever happens: after every test, and again by the runner's trap, which unpauses and reconnects both nodes, starts Webmin, waits for them to be healthy and checks that each node still presents the certificate its `VirtualminServer` pins (`manage.py virtualmin_lab_pins`). A node restart regenerates its TLS identity and invalidates the pin, so a mismatch re-runs `virtualmin_lab_bootstrap` and `lab.sh apply-credentials`. Nothing in the suite restarts a node on purpose.
 
-### Node deploy from scratch (`praho-debian-node`)
+### Owned Ubuntu node deployment
 
-`make test-virtualmin-node-deploy` is the nightly run. It is not part of `make test-virtualmin-lab`, because the Virtualmin 8 installer alone takes several minutes and is not pinned to 8.3.0. On a freshly created container of the bare image (SSH on 127.0.0.1:2722, the panel published on 10103 once installed) it:
-- registers a deployment and a new managed SSH key, pins the node's host keys, and sets the node admin allowlist (ADR-0060) to the lab's address, the compose network gateway;
-- runs `virtualmin.yml` and `virtualmin_harden.yml` through `AnsibleService`, with an API password generated the way a deployment generates it;
-- registers the node as a `VirtualminServer` pinned to the certificate the installer produced, and activates it through `NodeRegistrationService.verify_and_activate`;
-- reads the API user's ACL and IP lock and the UFW rules on the node, and checks that vm-a, outside the allowlist, cannot reach port 10000;
-- runs the contract suite's `smoke` subset against it, without comparing or writing recordings.
+`make test-virtualmin-node-deploy` requires an explicitly approved disposable
+Ubuntu VM authority, real DNS and an owned storage fixture. Follow
+[native acceptance](../../tests/virtualmin_lab/native/README.md) to prepare those
+private inputs and complete its fresh public deployment proof first. The runner
+refuses an unverified intent before any deployment action, then rechecks that
+completed original deployment, registration, actual UID/GID/PHP/database quota
+and reboot/update qualification, provider/DNS/SSH/API/TLS proof, storage and the
+public native lifecycle. It retains the original database, private key and
+provider identity through every phase. Missing authority or uncertain outcomes
+fail the gate. See [CI native admission](../../docs/development/virtualmin-ci-native-gate.md)
+for the separate prepared-runner requirements.
 
-The container is recreated every run and removed at the end, whatever the outcome. vm-a, vm-b and MinIO are not touched.
+Raw-provider registration-resume uses a separate fixture/database. It does not
+prove fresh public provider creation. The legacy bare Debian image remains a
+diagnostic image; its Docker kernel cannot establish managed Ubuntu qualification.
 
-The image holds only what Ansible itself needs on top of systemd and OpenSSH: `python3`, `iproute2` (the installer cannot find the primary interface without it) and `ca-certificates`, and `docker-clean` is removed from apt's configuration because it deletes downloaded packages before dpkg installs them. Nothing of Virtualmin is in the image.
-
-The Ansible fact cache (`/tmp/ansible_facts_cache`, `gathering = smart`) is keyed by inventory hostname: a node rebuilt under the same name reuses the old facts for an hour. The node deploy clears it before every run.
+Native failures retain the exact original authority and resource IDs for public
+reconciliation or explicit owned teardown. They do not authorize deleting a
+replacement VM, changing manifests or cleaning unrelated lab containers.
 
 ### Transport adaptations (lab only)
 
@@ -250,8 +258,9 @@ Both services load one freshly generated private authority file after developmen
 
 | Run | When | What |
 |---|---|---|
-| pull request | a change under `services/platform/apps/provisioning/`, `services/platform/infrastructure/ansible/`, `deploy/virtualmin-lab/`, `tests/virtualmin_lab/` or the `Makefile` | `make test-virtualmin-lab` on the pinned version |
-| nightly full | 03:30 UTC, skipped without activity in the last 24 hours | `make test-virtualmin-lab-full` on the pinned version |
+| pull request / merge queue | relevant paths are classified on the PR; execution is deferred to the merge queue | `make test-virtualmin-lab` on the pinned version; a deferred PR check is not execution proof |
+| nightly containers | 03:30 UTC, skipped without activity in the last 24 hours; manual `containers` dispatch also supported | `make test-virtualmin-lab-containers`; container coverage only |
+| explicit native full | manual `full` dispatch with a configured isolated runner and original owned native authority | native-inclusive `make test-virtualmin-lab-full`, actual fresh capability verification and Maintenance Portal; missing native proof fails qualification |
 | nightly drift | 05:30 UTC, always, on amd64 and arm64 | `make test-virtualmin-drift`: the image is built from the latest packages and the contract suite runs without recording; the tested versions go to the job summary |
 
 A failed scheduled run opens or updates the `virtualmin-lab-failure` issue. The setup action checks cgroup v2 and a privileged systemd container before anything starts. Every step is a make target, so it runs locally the same way. `RECORD=none` (run_contract.sh) is the no-recording mode the drift run uses; the unpinned build is `VIRTUALMIN_LAB_UNPINNED=1 VIRTUALMIN_LAB_TAG=latest lab.sh build`.
@@ -259,9 +268,9 @@ A failed scheduled run opens or updates the `virtualmin-lab-failure` issue. The 
 ## Limits
 
 The lab is not a production node. It does not provide:
-- **Mail.** The minimal LAMP bundle has no mail feature (`virtualmin list-features`: mail `No`), and neither does a node built by PRAHO's own `virtualmin.yml`, which also installs with `--minimal`.
+- **Mail on the two default web nodes.** The minimal LAMP bundle has no mail feature (`virtualmin list-features`: mail `No`), and neither does a node built by PRAHO's own `virtualmin.yml`, which also installs with `--minimal`.
   - The gate's default backup (email included) therefore also proves that verification expects only the components the domain has, which the manifest records as `domain_features`.
-  - Mail data itself is never exercised.
+  - The separate mixed-service component fixture exercises retained SMTP/IMAP and website/DNS isolation. The owned native mail fixture separately tests notification-emitter ownership. Neither supplies Ubuntu kernel quota proof.
 - **Quotas.** There are no filesystem quotas in containers.
 - **DNS.** BIND is not installed, and `*.praho.test` resolves only inside PRAHO's lab transport.
 - **Realistic timing, disk pressure or failure modes of real hardware.**

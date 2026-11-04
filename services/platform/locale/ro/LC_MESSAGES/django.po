@@ -11893,10 +11893,12 @@ msgstr "❌ Nu aveți permisiunea de a edita acest serviciu."
 msgid "❌ You do not have permission to move services to this customer."
 msgstr "❌ Nu aveți permisiunea de a muta servicii pentru acest client."
 
-#: apps/provisioning/service_views.py:285
-#| msgid "The service's owner changed while this was checked; try again."
-msgid "The service's owner changed. Review the current details before submitting again."
-msgstr "Proprietarul serviciului s-a schimbat. Verificați detaliile curente înainte de a trimite din nou."
+#~ msgid ""
+#~ "The service's owner changed. Review the current details before submitting "
+#~ "again."
+#~ msgstr ""
+#~ "Proprietarul serviciului s-a schimbat. Verificați detaliile curente înainte "
+#~ "de a trimite din nou."
 
 #: apps/provisioning/service_views.py:271
 #, python-brace-format
@@ -32200,6 +32202,721 @@ msgstr "Conturile așteptate de Platform lipseau din snapshot-ul nodului."
 #: templates/settings/system_status.html:35
 msgid "The node reported accounts that are not assigned in Platform. Review account discovery."
 msgstr "Nodul a raportat conturi care nu sunt atribuite în Platform. Verificați descoperirea conturilor."
+
+#: apps/provisioning/hosted_zone_ownership.py:145
+#| msgid "Verify and resolve the linked OFF operation before acknowledging this creation."
+msgid "Verify or permanently fence the native quota operation before changing hosting ownership."
+msgstr "Verificați operațiunea nativă de aplicare a cotelor sau blocați-o definitiv înainte de a schimba proprietarul găzduirii."
+
+#: apps/provisioning/hosted_zone_ownership.py:300
+#: apps/provisioning/hosted_zone_ownership.py:308
+msgid "Use an explicit hosting plan assignment to change a service's plan."
+msgstr "Utilizați o alocare explicită a planului de găzduire pentru a schimba planul unui serviciu."
+
+#: apps/provisioning/hosted_zone_ownership.py:323
+msgid "Hosting services require an unambiguous initial allowance assignment."
+msgstr "Serviciile de găzduire necesită o alocare inițială neechivocă a limitelor incluse."
+
+#: apps/provisioning/hosting_limit_assignments.py:109
+#| msgid "The invoice customer and recorded VAT decision cannot be changed."
+msgid "A saved service must be loaded before it can be changed."
+msgstr "Un serviciu salvat trebuie încărcat înainte de a putea fi modificat."
+
+#: apps/provisioning/hosting_limit_assignments.py:131
+msgid "Use an explicit hosting plan assignment to change this service's plan."
+msgstr "Utilizați o alocare explicită a planului de găzduire pentru a schimba planul acestui serviciu."
+
+#: apps/provisioning/hosting_limit_assignments.py:149
+#| msgid "This order cannot accept a transfer code in its current state."
+msgid "This service cannot receive a new resource assignment in its current state."
+msgstr "Acest serviciu nu poate primi o nouă alocare de resurse în starea sa curentă."
+
+#: apps/provisioning/hosting_limit_assignments.py:151
+msgid "Import and review the service's assigned allowance first."
+msgstr "Importați și verificați mai întâi limita alocată serviciului."
+
+#: apps/provisioning/hosting_limit_assignments.py:175
+msgid "An explicit reason and authority are required for a resource assignment."
+msgstr "Alocarea resurselor necesită un motiv explicit și o autorizare explicită."
+
+#: apps/provisioning/hosting_limit_assignments.py:178
+msgid "Load and authorize the service's current owner before assigning resources."
+msgstr "Încărcați și autorizați proprietarul curent al serviciului înainte de a aloca resurse."
+
+#: apps/provisioning/hosting_limit_assignments.py:181
+#: apps/provisioning/hosting_limit_override_service.py:109
+#| msgid "This window changed. Reload and review the current revision."
+msgid "The service's owner changed. Reload and authorize the current owner."
+msgstr "Proprietarul serviciului s-a schimbat. Reîncărcați datele și autorizați proprietarul curent."
+
+#: apps/provisioning/hosting_limit_assignments.py:191
+#| msgid "This submission was already used for a different request."
+msgid "This submission identity was already used for different assignment terms."
+msgstr "Identificatorul acestei solicitări a fost deja utilizat pentru alte condiții de alocare."
+
+#: apps/provisioning/hosting_limit_assignments.py:198
+#| msgid "The service's owner changed. Review the current details before submitting again."
+msgid "The assigned allowance changed. Reload before submitting again."
+msgstr "Limita alocată s-a schimbat. Reîncărcați datele înainte de a trimite din nou solicitarea."
+
+#: apps/provisioning/hosting_limit_assignments.py:201
+msgid "The target hosting plan is inactive."
+msgstr "Planul de găzduire ales este inactiv."
+
+#: apps/provisioning/hosting_limit_execution.py:47
+msgid "The native quota job has no immutable hosting application."
+msgstr "Sarcina nativă de aplicare a cotelor nu are o alocare imuabilă de găzduire."
+
+#: apps/provisioning/hosting_limit_execution.py:282
+msgid "The native quota execution has no account."
+msgstr "Execuția nativă de aplicare a cotelor nu este asociată unui cont."
+
+#: apps/provisioning/hosting_limit_execution.py:677
+msgid "Fresh canonical disk evidence for this exact owner and native scope is required."
+msgstr "Sunt necesare dovezi canonice recente privind spațiul pe disc pentru exact acest proprietar și acest context nativ."
+
+#: apps/provisioning/hosting_limit_execution.py:694
+msgid "The node rebooted; requalify it before dispatching managed quotas."
+msgstr "Nodul a fost repornit; recalificați-l înainte de a lansa aplicarea cotelor gestionate."
+
+#: apps/provisioning/hosting_limit_execution.py:706
+msgid "The assigned disk allowance is unknown."
+msgstr "Limita alocată pentru spațiul pe disc este necunoscută."
+
+#: apps/provisioning/hosting_limit_execution.py:712
+msgid "The native owner or adopted node identity differs from the prepared application."
+msgstr "Proprietarul nativ sau identitatea nodului preluat în gestiune diferă de cele din alocarea pregătită."
+
+#: apps/provisioning/hosting_limit_execution.py:716
+msgid "Current usage exceeds the requested cap; limits remain pending for review."
+msgstr "Utilizarea curentă depășește plafonul solicitat; limitele rămân în așteptare pentru verificare."
+
+#: apps/provisioning/hosting_limit_execution.py:718
+msgid "An unbounded increase needs an explicit node capacity review."
+msgstr "O creștere fără plafon necesită o verificare explicită a capacității nodului."
+
+#: apps/provisioning/hosting_limit_execution.py:739
+msgid "Insufficient verified unreserved node capacity for this increase."
+msgstr "Capacitatea verificată și nerezervată a nodului este insuficientă pentru această creștere."
+
+#: apps/provisioning/hosting_limit_execution.py:871
+msgid "The canonical target has no current verified managed quota receipt."
+msgstr "Destinația canonică nu are o confirmare verificată și actuală a cotelor gestionate."
+
+#: apps/provisioning/hosting_limit_models.py:15
+#: apps/provisioning/hosting_limit_models.py:18
+#: apps/provisioning/hosting_limit_models.py:94
+#| msgid "An accepted domain currency offer cannot be rewritten"
+msgid "Accepted hosting assignments cannot be overwritten."
+msgstr "Alocările de găzduire acceptate nu pot fi suprascrise."
+
+#: apps/provisioning/hosting_limit_models.py:21
+msgid "Hosting assignments must be accepted and audited individually."
+msgstr "Alocările de găzduire trebuie acceptate și auditate individual."
+
+#: apps/provisioning/hosting_limit_models.py:24
+#: apps/provisioning/hosting_limit_models.py:102
+#| msgid "Security review history cannot be deleted."
+msgid "Accepted hosting assignments cannot be deleted."
+msgstr "Alocările de găzduire acceptate nu pot fi șterse."
+
+#: apps/provisioning/hosting_limit_override_service.py:32
+#| msgid "Resolve the previous source operation history before starting another component move."
+msgid "Resolve the pending subscription change before granting a resource exception."
+msgstr "Rezolvați modificarea în așteptare a abonamentului înainte de a acorda o excepție de resurse."
+
+#: apps/provisioning/hosting_limit_override_service.py:44
+#| msgid "Resolve the currency hold before making this credit available."
+msgid "Resolve the currency transition before granting a resource exception."
+msgstr "Rezolvați tranziția valutară înainte de a acorda o excepție de resurse."
+
+#: apps/provisioning/hosting_limit_override_service.py:59
+#| msgid "Please select an existing user to link."
+msgid "Select an existing resource plan."
+msgstr "Selectați un plan de resurse existent."
+
+#: apps/provisioning/hosting_limit_override_service.py:63
+msgid "A resource-only exception cannot change the hosting template or other features."
+msgstr "O excepție limitată la resurse nu poate schimba șablonul de găzduire sau alte funcționalități."
+
+#: apps/provisioning/hosting_limit_override_service.py:90
+msgid "Acknowledge that billing and frozen tariffs stay unchanged."
+msgstr "Confirmați că facturarea și tarifele înghețate rămân neschimbate."
+
+#: apps/provisioning/hosting_limit_override_service.py:92
+msgid "Explicitly choose whether to adopt native enforcement for this account."
+msgstr "Alegeți explicit dacă preluați în gestiune aplicarea limitelor native pentru acest cont."
+
+#: apps/provisioning/hosting_limit_override_service.py:94
+#| msgid "Please provide a reason for this request..."
+msgid "Give a reason for this resource-only exception."
+msgstr "Precizați un motiv pentru această excepție limitată la resurse."
+
+#: apps/provisioning/hosting_limit_override_service.py:99
+#: apps/provisioning/hosting_limit_override_views.py:68
+msgid "Administrator or manager authority is required for a resource-only exception."
+msgstr "O excepție limitată la resurse necesită drepturi de administrator sau manager."
+
+#: apps/provisioning/hosting_limit_override_service.py:111
+#| msgid "The source belongs to a different customer."
+msgid "Resource exceptions require an active customer."
+msgstr "Excepțiile de resurse necesită un client activ."
+
+#: apps/provisioning/hosting_limit_override_service.py:114
+#| msgid "The source belongs to a different customer."
+msgid "Select a support ticket belonging to this service's customer."
+msgstr "Selectați un tichet de asistență care aparține clientului acestui serviciu."
+
+#: apps/provisioning/hosting_limit_override_service.py:116
+#| msgid "The linked domain does not match the purchased line."
+msgid "The subscription owner does not match this service."
+msgstr "Proprietarul abonamentului nu corespunde acestui serviciu."
+
+#: apps/provisioning/hosting_limit_override_views.py:27
+#: templates/provisioning/service_form.html:74
+#| msgid "Resource"
+msgid "Resource plan"
+msgstr "Plan de resurse"
+
+#: apps/provisioning/hosting_limit_override_views.py:28
+#| msgid "No recent support tickets"
+msgid "Customer support ticket"
+msgstr "Tichet de asistență al clientului"
+
+#: apps/provisioning/hosting_limit_override_views.py:33
+msgid "I acknowledge that billing, recurring prices and frozen tariffs stay unchanged."
+msgstr "Confirm că facturarea, prețurile recurente și tarifele înghețate rămân neschimbate."
+
+#: apps/provisioning/hosting_limit_override_views.py:38
+msgid "I explicitly authorize adopting native quota enforcement for this existing account after fresh verification."
+msgstr "Autorizez explicit preluarea în gestiune a aplicării cotelor native pentru acest cont existent, după o nouă verificare."
+
+#: apps/provisioning/hosting_limit_override_views.py:41
+msgid "Leave unchecked to keep an imported account observational. Adoption requires a qualified node, current ownership and fresh usage that fits; it may impose a hard disk cap."
+msgstr "Lăsați opțiunea nebifată pentru a păstra contul importat doar sub observație. Preluarea în gestiune necesită un nod calificat, proprietatea curentă confirmată și date recente de utilizare care se încadrează în limită; poate impune un plafon strict pentru spațiul pe disc."
+
+#: apps/provisioning/hosting_limit_override_views.py:101
+msgid "Resource-only exception accepted. Billing is unchanged; native limits are pending verification."
+msgstr "Excepția limitată la resurse a fost acceptată. Facturarea este neschimbată; limitele native așteaptă verificarea."
+
+#: apps/provisioning/hosting_node_execution.py:47
+msgid "Provide at most 25 explicit operator alert recipients."
+msgstr "Specificați cel mult 25 de destinatari expliciți pentru alertele operatorilor."
+
+#: apps/provisioning/hosting_node_execution.py:51
+#| msgid "Recipient email address"
+msgid "Operator alert recipients must be email addresses."
+msgstr "Destinatarii alertelor pentru operatori trebuie să fie adrese de email."
+
+#: apps/provisioning/hosting_node_execution.py:68
+#| msgid "A reviewed hardening operation owns this server. Reconcile its outcome before other work."
+msgid "A native hosting-policy operation owns this node; reconcile it before other work."
+msgstr "O operațiune nativă de politică de găzduire deține controlul acestui nod; reconciliați-o înainte de alte operațiuni."
+
+#: apps/provisioning/hosting_node_execution.py:142
+#| msgid "Node connection changed during inspection. Inspect it again."
+msgid "Node connection changed during inspection."
+msgstr "Conexiunea nodului s-a schimbat în timpul inspectării."
+
+#: apps/provisioning/hosting_node_execution.py:175
+#| msgid "Choose a supported maintenance action."
+msgid "Choose a supported action and record an operator reason."
+msgstr "Alegeți o acțiune acceptată și înregistrați motivul operatorului."
+
+#: apps/provisioning/hosting_node_execution.py:181
+#| msgid "Cancel or finish the applicable window before changing its scheduling policy."
+msgid "Activate the node and finish draining before changing hosting policy."
+msgstr "Activați nodul și finalizați evacuarea înainte de a schimba politica de găzduire."
+
+#: apps/provisioning/hosting_node_execution.py:193
+msgid "Reconcile the existing hosting-policy attempt first."
+msgstr "Reconciliați mai întâi încercarea existentă de modificare a politicii de găzduire."
+
+#: apps/provisioning/hosting_node_execution.py:200
+#| msgid "Node connection changed; inspect it again."
+msgid "Native inventory changed; inspect and review it again."
+msgstr "Inventarul nativ s-a schimbat; inspectați-l și verificați-l din nou."
+
+#: apps/provisioning/hosting_node_execution.py:216
+msgid "Isolated requalification requires the same previously adopted installation and filesystem after reboot."
+msgstr "Recalificarea izolată necesită, după repornire, aceeași instalare și același sistem de fișiere preluate anterior în gestiune."
+
+#: apps/provisioning/hosting_node_execution.py:247
+#| msgid "Hardening operation ownership changed."
+msgid "Node hosting-policy ownership changed."
+msgstr "Controlul politicii de găzduire a nodului s-a schimbat."
+
+#: apps/provisioning/hosting_node_execution.py:249
+#| msgid "Native restore metadata cannot be inspected."
+msgid "Native receipt no longer matches the inspected node."
+msgstr "Confirmarea nativă nu mai corespunde nodului inspectat."
+
+#: apps/provisioning/hosting_node_execution.py:252
+msgid "Fence the native resource-policy token before completing managed quota adoption."
+msgstr "Blocați definitiv tokenul nativ al politicii de resurse înainte de a finaliza preluarea în gestiune a cotelor gestionate."
+
+#: apps/provisioning/hosting_node_execution.py:260
+msgid "The native qualification differs from the reviewed installation, filesystem or boot."
+msgstr "Calificarea nativă diferă de instalarea, sistemul de fișiere sau sesiunea de pornire verificate."
+
+#: apps/provisioning/hosting_node_execution.py:267
+#| msgid "Record the creating provider credential before resource ownership."
+msgid "Fence the native handover token before releasing uncertain ownership."
+msgstr "Blocați definitiv tokenul nativ de predare înainte de a elibera un control al cărui rezultat este incert."
+
+#: apps/provisioning/hosting_node_execution.py:274
+#| msgid "The durable API credential does not match the reviewed dedicated identity."
+msgid "The prepared helper bundle must match its reviewed and fenced installation."
+msgstr "Pachetul de utilitare pregătit trebuie să corespundă instalării sale verificate și sigilate."
+
+#: apps/provisioning/hosting_node_policy.py:49
+msgid "Deploy and enable the Platform warning pipeline before handing over native customer notifications."
+msgstr "Instalați și activați mecanismul de avertizare al Platform înainte de a preda notificările native pentru clienți."
+
+#: apps/provisioning/hosting_node_policy.py:52
+msgid "The Platform warning pipeline does not provide the required handover capability."
+msgstr "Mecanismul de avertizare al Platform nu oferă capacitatea necesară pentru predare."
+
+#: apps/provisioning/hosting_node_policy.py:58
+msgid "The Platform warning pipeline returned an invalid readiness result."
+msgstr "Mecanismul de avertizare al Platform a returnat un rezultat invalid al verificării pregătirii."
+
+#: apps/provisioning/hosting_node_policy.py:64
+msgid "Native evidence exceeds the supported size."
+msgstr "Dovezile native depășesc dimensiunea acceptată."
+
+#: apps/provisioning/hosting_node_policy.py:78
+#| msgid "The accepted email does not match this exact domain offer"
+msgid "Native evidence does not match this node and policy."
+msgstr "Dovezile native nu corespund acestui nod și acestei politici."
+
+#: apps/provisioning/hosting_node_policy.py:85
+msgid "Native evidence contains an invalid installation or filesystem identity."
+msgstr "Dovezile native conțin o identitate invalidă a instalării sau a sistemului de fișiere."
+
+#: apps/provisioning/hosting_node_policy.py:134
+msgid "Complete supported native quota acceptance is required before managed adoption."
+msgstr "Înainte de preluarea în gestiune sunt necesare toate testele de acceptanță pentru cotele native acceptate."
+
+#: apps/provisioning/hosting_node_policy.py:141
+msgid "Requalify this node after its reboot before using managed quotas."
+msgstr "Recalificați acest nod după repornire înainte de a utiliza cote gestionate."
+
+#: apps/provisioning/hosting_node_policy.py:144
+msgid "Disable native automatic bandwidth suspension and reactivation before managed quota adoption."
+msgstr "Dezactivați suspendarea și reactivarea native automate bazate pe trafic înainte de a prelua în gestiune cotele."
+
+#: apps/provisioning/hosting_node_policy.py:170
+msgid "Reconcile every native customer emitter before handing notifications to Platform."
+msgstr "Reconciliați fiecare mecanism nativ de notificare a clienților înainte de a preda notificările către Platform."
+
+#: apps/provisioning/hosting_node_policy.py:194
+#| msgid "Resolve the node lifecycle operation before hardening."
+msgid "Reconcile the node hosting-policy operation before native quota work."
+msgstr "Reconciliați operațiunea de politică de găzduire a nodului înainte de a lucra cu cotele native."
+
+#: apps/provisioning/hosting_node_policy.py:196
+msgid "This node has not been explicitly adopted for managed quotas."
+msgstr "Acest nod nu a fost preluat explicit în gestiune pentru cote gestionate."
+
+#: apps/provisioning/hosting_node_policy.py:203
+#| msgid "Node verification no longer matches its policy, credential or transport; inspect it again."
+msgid "Native quota qualification no longer matches this node; inspect and adopt it again."
+msgstr "Calificarea cotelor native nu mai corespunde acestui nod; inspectați-l și preluați-l din nou în gestiune."
+
+#: apps/provisioning/hosting_node_policy.py:227
+#| msgid "The node has been removed."
+msgid "The node quota policy was removed."
+msgstr "Politica de cote a nodului a fost eliminată."
+
+#: apps/provisioning/hosting_node_policy_models.py:24
+#: apps/provisioning/hosting_node_policy_models.py:147
+#| msgid "Security review history cannot be overwritten."
+msgid "Accepted node hosting authority cannot be overwritten."
+msgstr "Autorizarea acceptată a găzduirii pe nod nu poate fi suprascrisă."
+
+#: apps/provisioning/hosting_node_policy_models.py:28
+msgid "Node hosting executions must be transitioned and audited individually."
+msgstr "Execuțiile de găzduire pe nod trebuie să parcurgă tranzițiile de stare și să fie auditate individual."
+
+#: apps/provisioning/hosting_node_policy_models.py:31
+msgid "Node hosting executions must be accepted and audited individually."
+msgstr "Execuțiile de găzduire pe nod trebuie acceptate și auditate individual."
+
+#: apps/provisioning/hosting_node_policy_models.py:34
+#: apps/provisioning/hosting_node_policy_models.py:154
+#| msgid "Component migration history cannot be deleted."
+msgid "Accepted node hosting history cannot be deleted."
+msgstr "Istoricul acceptat al găzduirii pe nod nu poate fi șters."
+
+#: apps/provisioning/hosting_node_policy_models.py:52
+#| msgid "Not set"
+msgid "Not inspected"
+msgstr "Neinspectat"
+
+#: apps/provisioning/hosting_node_policy_models.py:53
+#| msgid "active nodes"
+msgid "Native node"
+msgstr "Nod nativ"
+
+#: apps/provisioning/hosting_node_policy_models.py:91
+#| msgid "Security review history cannot be overwritten."
+msgid "Hosting review history cannot be overwritten."
+msgstr "Istoricul verificărilor găzduirii nu poate fi suprascris."
+
+#: apps/provisioning/hosting_node_policy_models.py:96
+#| msgid "Security review history cannot be deleted."
+msgid "Hosting review history cannot be deleted."
+msgstr "Istoricul verificărilor găzduirii nu poate fi șters."
+
+#: apps/provisioning/hosting_node_policy_models.py:112
+#| msgid "Not verified"
+msgid "Adopt verified quotas"
+msgstr "Preluați gestionarea cotelor verificate"
+
+#: apps/provisioning/hosting_node_policy_models.py:113
+msgid "Requalify an adopted node after reboot"
+msgstr "Recalificați un nod preluat în gestiune după repornire"
+
+#: apps/provisioning/hosting_node_policy_models.py:114
+#| msgid "Back to customer details"
+msgid "Hand over customer mail"
+msgstr "Predați gestionarea emailurilor pentru clienți"
+
+#: apps/provisioning/hosting_node_policy_models.py:115
+#| msgid "Prepare the source and inspect again"
+msgid "Prepare read-only inspection helpers"
+msgstr "Pregătiți utilitarele de inspectare în mod doar-citire"
+
+#: apps/provisioning/hosting_node_policy_models.py:125
+#| msgid "Invoice reconciliation"
+msgid "Needs reconciliation"
+msgstr "Necesită reconciliere"
+
+#: apps/provisioning/hosting_node_tasks.py:35
+#| msgid "Node connection changed during inspection. Inspect it again."
+msgid "Node identity changed during inspection; inspect again."
+msgstr "Identitatea nodului s-a schimbat în timpul inspectării; inspectați-l din nou."
+
+#: apps/provisioning/hosting_node_tasks.py:46
+#| msgid "There is no held hardening attempt to reconcile."
+msgid "There is no held hosting-policy operation."
+msgstr "Nu există nicio operațiune blocată de politică de găzduire."
+
+#: apps/provisioning/hosting_node_tasks.py:51
+#| msgid "The active series changed. Reload and try again."
+msgid "The inspection helper release changed; review and approve it again."
+msgstr "Versiunea utilitarului de inspectare s-a schimbat; verificați-o și aprobați-o din nou."
+
+#: apps/provisioning/hosting_node_tasks.py:58
+msgid "Inspect the node and choose its reviewed inventory before this action."
+msgstr "Inspectați nodul și selectați inventarul verificat al acestuia înainte de această acțiune."
+
+#: apps/provisioning/hosting_node_tasks.py:72
+msgid "Reconcile this attempt with its originally reviewed helper release."
+msgstr "Reconciliați această încercare folosind versiunea utilitarului verificată inițial."
+
+#: apps/provisioning/hosting_node_tasks.py:116
+#: apps/provisioning/hosting_node_transport.py:56
+msgid "Unsupported native hosting policy action."
+msgstr "Acțiune nativă de politică de găzduire neacceptată."
+
+#: apps/provisioning/hosting_node_tasks.py:136
+#| msgid "Inspect the linked disable operation before acknowledging this creation."
+msgid "Inspect the held operation before reconciliation."
+msgstr "Inspectați operațiunea blocată înainte de reconciliere."
+
+#: apps/provisioning/hosting_node_transport.py:26
+msgid "Native hosting policy operation did not complete; reconcile before retrying."
+msgstr "Operațiunea nativă de politică de găzduire nu s-a încheiat; reconciliați-o înainte de a reîncerca."
+
+#: apps/provisioning/hosting_node_transport.py:29
+#| msgid "The source returned invalid component evidence."
+msgid "Native hosting operation returned incomplete evidence."
+msgstr "Operațiunea nativă de găzduire a returnat dovezi incomplete."
+
+#: apps/provisioning/hosting_node_transport.py:36
+#: apps/provisioning/hosting_node_transport.py:38
+#| msgid "The source returned invalid component evidence."
+msgid "Native hosting operation returned invalid evidence."
+msgstr "Operațiunea nativă de găzduire a returnat dovezi invalide."
+
+#: apps/provisioning/hosting_node_transport.py:44
+#| msgid "Choose a supported maintenance action."
+msgid "Unsupported native quota action."
+msgstr "Acțiune nativă de aplicare a cotelor neacceptată."
+
+#: apps/provisioning/hosting_node_transport.py:63
+msgid "Unsupported native helper preparation action."
+msgstr "Acțiune nativă de pregătire a utilitarelor neacceptată."
+
+#: apps/provisioning/hosting_node_views.py:33
+msgid "Prepare inspection helpers without changing quotas or mail"
+msgstr "Pregătiți utilitarele de inspectare fără a modifica cotele sau emailul"
+
+#: apps/provisioning/hosting_node_views.py:34
+msgid "Adopt verified native quotas"
+msgstr "Preluați gestionarea cotelor native verificate"
+
+#: apps/provisioning/hosting_node_views.py:35
+msgid "Requalify an adopted node after reboot while preserving account holds"
+msgstr "Recalificați un nod preluat în gestiune după repornire, păstrând blocările conturilor"
+
+#: apps/provisioning/hosting_node_views.py:36
+#| msgid "Send notification to customer"
+msgid "Hand customer notifications to Platform"
+msgstr "Predați notificările pentru clienți către Platform"
+
+#: apps/provisioning/hosting_node_views.py:37
+#| msgid "Reconcile recorded outcome"
+msgid "Reconcile held operation"
+msgstr "Reconciliați operațiunea blocată"
+
+#: apps/provisioning/hosting_node_views.py:45
+#| msgid "Additional fee for domain redemption"
+msgid "Additional operator alert recipients"
+msgstr "Destinatari suplimentari pentru alertele operatorilor"
+
+#: apps/provisioning/hosting_node_views.py:47
+msgid "Comma-separated operator addresses to preserve during notification handover. Customer operational recipients are removed."
+msgstr "Adrese ale operatorilor, separate prin virgulă, care trebuie păstrate la predarea notificărilor. Destinatarii notificărilor operaționale pentru clienți sunt eliminați."
+
+#: apps/provisioning/hosting_node_views.py:50
+#| msgid "I have reviewed the maintenance impact and approve this decision."
+msgid "I reviewed this inventory and accept this specific policy change."
+msgstr "Am verificat acest inventar și accept această modificare specifică de politică."
+
+#: apps/provisioning/hosting_node_views.py:91
+msgid "Read-only native inventory queued. Import and inspection change no caps or warnings."
+msgstr "Inventarierea nativă în mod doar-citire a fost pusă în coadă. Importul și inspectarea nu modifică nici plafoanele, nici avertizările."
+
+#: apps/provisioning/hosting_node_views.py:113
+msgid "Reviewed hosting policy operation queued; current ownership remains until native proof."
+msgstr "Operațiunea verificată de politică de găzduire a fost pusă în coadă; responsabilitatea existentă se păstrează până la obținerea dovezii native."
+
+#: apps/provisioning/hosting_parent_limits.py:58
+msgid "Native parent resource authority is captured by admission, not supplied by callers."
+msgstr "Autorizarea resurselor pentru operațiunea nativă părinte este stabilită la admiterea operațiunii, nu furnizată de apelanți."
+
+#: apps/provisioning/hosting_parent_limits.py:92
+msgid "Existing native parents cannot invent resource admission authority."
+msgstr "Operațiunile native părinte existente nu pot crea o autorizare de admitere a resurselor."
+
+#: apps/provisioning/hosting_parent_limits.py:96
+#| msgid "The original payment provider identity cannot change."
+msgid "Accepted native parent resource bindings cannot change."
+msgstr "Asocierile de resurse acceptate pentru operațiunea nativă părinte nu pot fi modificate."
+
+#: apps/provisioning/hosting_parent_limits.py:100
+msgid "Accepted native parent resource snapshots cannot change."
+msgstr "Instantaneele de resurse acceptate pentru operațiunea nativă părinte nu pot fi modificate."
+
+#: apps/provisioning/hosting_parent_limits.py:111
+msgid "Native parent dispatch evidence can only append an admitted claim."
+msgstr "Dovezile de lansare ale operațiunii native părinte pot fi doar completate cu o revendicare de execuție autorizată."
+
+#: apps/provisioning/hosting_parent_limits.py:146
+msgid "This native parent has no admitted managed resource snapshot."
+msgstr "Această operațiune nativă părinte nu are un instantaneu autorizat al resurselor gestionate."
+
+#: apps/provisioning/hosting_parent_limits.py:175
+msgid "The native parent's immutable resource admission no longer matches its owner or target."
+msgstr "Admiterea imuabilă a resurselor operațiunii native părinte nu mai corespunde proprietarului sau destinației sale."
+
+#: apps/provisioning/service_views.py:280
+msgid "Use the separate resource-only exception workflow to change hosting resources. Billing requires a commercial plan change."
+msgstr "Utilizați fluxul separat de excepții limitate la resurse pentru a schimba resursele de găzduire. Facturarea necesită o modificare comercială a planului."
+
+#: apps/provisioning/virtualmin_models.py:389
+msgid "Desired native cap including headroom; not proof of kernel enforcement"
+msgstr "Plafonul nativ solicitat, inclusiv marja de siguranță; nu confirmă aplicarea la nivelul nucleului"
+
+#: apps/provisioning/virtualmin_models.py:392
+msgid "Monotonic native quota execution epoch; never reset on a move"
+msgstr "Epocă de execuție monoton crescătoare pentru cotele native; nu se resetează la mutare"
+
+#: apps/provisioning/virtualmin_models.py:398
+msgid "Explicit account adoption or verified PRAHO creation; node adoption alone never changes existing caps"
+msgstr "Preluare explicită a contului în gestiune sau creare PRAHO verificată; simpla preluare a nodului în gestiune nu modifică niciodată plafoanele existente"
+
+#: apps/provisioning/virtualmin_models.py:689
+#| msgid "Provider resource history cannot be overwritten."
+msgid "Accepted native parent resource bindings cannot be bulk overwritten."
+msgstr "Asocierile de resurse acceptate pentru operațiunea nativă părinte nu pot fi suprascrise în bloc."
+
+#: apps/provisioning/virtualmin_models.py:723
+#| msgid "Provider resource history must be recorded individually."
+msgid "Native create and restore admissions must capture resources individually."
+msgstr "Admiterea operațiunilor native de creare și restaurare trebuie să înregistreze resursele individual."
+
+#: apps/provisioning/virtualmin_models.py:758
+msgid "Apply Hosting Limits"
+msgstr "Aplicați limitele de găzduire"
+
+#: apps/settings/catalog.py:3197
+msgid "Node free-space reserve"
+msgstr "Rezerva de spațiu liber a nodului"
+
+#: apps/settings/catalog.py:3199
+msgid "Keep this much free space outside pending native quota reservations before accepting a positive cap change."
+msgstr "Păstrați acest spațiu liber, separat de rezervările native de cote în așteptare, înainte de a accepta o creștere a plafonului."
+
+#: templates/provisioning/partials/hosting_limits.html:3
+#| msgid "Hosting plan"
+msgid "Hosting allowances"
+msgstr "Limite incluse în găzduire"
+
+#: templates/provisioning/partials/hosting_limits.html:4
+#| msgid "Operation Failed"
+msgid "Operational allowance"
+msgstr "Limită inclusă în vigoare"
+
+#: templates/provisioning/partials/hosting_limits.html:6
+#: templates/provisioning/partials/hosting_limits.html:16
+#: templates/provisioning/partials/hosting_limits.html:27
+#: templates/provisioning/partials/hosting_limits_summary.html:4
+#: templates/provisioning/service_detail.html:12
+#| msgid "Disk"
+msgid "Disk:"
+msgstr "Disc:"
+
+#: templates/provisioning/partials/hosting_limits.html:8
+#: templates/provisioning/partials/hosting_limits.html:17
+#: templates/provisioning/partials/hosting_limits.html:28
+#: templates/provisioning/service_detail.html:12
+#| msgid "Monthly Cost"
+msgid "Monthly bandwidth:"
+msgstr "Trafic lunar:"
+
+#: templates/provisioning/partials/hosting_limits.html:12
+msgid "This account has not been adopted for managed native quotas. Recorded allowances do not prove native enforcement."
+msgstr "Acest cont nu a fost preluat pentru gestionarea cotelor native. Limitele înregistrate nu confirmă aplicarea lor efectivă la nivelul sistemului."
+
+#: templates/provisioning/partials/hosting_limits.html:15
+#| msgid "Requested By"
+msgid "Requested allowance"
+msgstr "Limită inclusă solicitată"
+
+#: templates/provisioning/partials/hosting_limits.html:19
+msgid "The requested limits are not yet verified. Usage percentages still use the operational allowance."
+msgstr "Limitele solicitate nu sunt încă verificate. Procentele de utilizare se raportează în continuare la limita inclusă în vigoare."
+
+#: templates/provisioning/partials/hosting_limits.html:21
+msgid "Native limits verified. Writes may fail when the enforced disk cap is reached."
+msgstr "Limitele de la nivelul sistemului sunt verificate. Scrierile pot eșua când este atins plafonul aplicat spațiului pe disc."
+
+#: templates/provisioning/partials/hosting_limits.html:23
+msgid "Native limits are not yet verified. Reaching the allowance means usage needs review."
+msgstr "Limitele de la nivelul sistemului nu sunt încă verificate. Atingerea limitei incluse impune verificarea utilizării."
+
+#: templates/provisioning/partials/hosting_limits.html:26
+msgid "Last verified allowance"
+msgstr "Ultima limită inclusă verificată"
+
+#: templates/provisioning/partials/hosting_limits_summary.html:5
+#| msgid "pending"
+msgid "Limits pending"
+msgstr "Limite în așteptare"
+
+#: templates/provisioning/partials/hosting_limits_summary.html:5
+#| msgid "Not verified"
+msgid "Not yet verified"
+msgstr "Încă neverificate"
+
+#: templates/provisioning/service_detail.html:12
+msgid "Assigned allowance provenance"
+msgstr "Proveniența limitei alocate"
+
+#: templates/provisioning/service_detail.html:78
+#: templates/provisioning/service_resource_override.html:3
+#: templates/provisioning/service_resource_override.html:6
+#| msgid "Recent redemptions"
+msgid "Resource-only exception"
+msgstr "Excepție limitată la resurse"
+
+#: templates/provisioning/service_form.html:76
+msgid "Ordinary edits keep the assigned resource plan and billing unchanged."
+msgstr "Editările obișnuite păstrează neschimbate planul de resurse alocat și facturarea."
+
+#: templates/provisioning/service_form.html:79
+msgid "Grant a resource-only exception"
+msgstr "Acordați o excepție limitată la resurse"
+
+#: templates/provisioning/service_resource_override.html:8
+msgid "This exception changes hosting resources only. The customer's billing, recurring prices and frozen tariffs stay unchanged. Native limits remain pending until verified."
+msgstr "Această excepție modifică doar resursele de găzduire. Facturarea clientului, prețurile recurente și tarifele înghețate rămân neschimbate. Limitele native rămân în așteptare până la verificare."
+
+#: templates/provisioning/service_resource_override.html:19
+msgid "Grant resource-only exception"
+msgstr "Acordați excepția limitată la resurse"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:3
+#: templates/provisioning/virtualmin/hosting_policy.html:6
+#| msgid "Awaiting review"
+msgid "Hosting policy review"
+msgstr "Verificarea politicii de găzduire"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:7
+msgid "Import and inspection are read-only. Quota adoption and customer notification handover are separate decisions."
+msgstr "Importul și inspectarea se fac în mod doar-citire. Preluarea în gestiune a cotelor și predarea notificărilor pentru clienți sunt decizii separate."
+
+#: templates/provisioning/virtualmin/hosting_policy.html:8
+#| msgid "Manager cont"
+msgid "Managed quotas"
+msgstr "Cote gestionate"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:9
+#| msgid "Customer Details"
+msgid "Customer operational emails"
+msgstr "Emailuri operaționale pentru clienți"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:9
+#| msgid "Platform off-server backups"
+msgid "Platform owns delivery"
+msgstr "Platform gestionează trimiterea"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:9
+msgid "Native ownership has not been handed over"
+msgstr "Gestionarea nativă nu a fost predată"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:11
+#| msgctxt "operation kind"
+#| msgid "Registration resume"
+msgid "Last operation result"
+msgstr "Rezultatul ultimei operațiuni"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:12
+#| msgid "A reviewed hardening operation owns this server. Reconcile its outcome before other work."
+msgid "A held operation must be reconciled before other native work."
+msgstr "O operațiune blocată trebuie reconciliată înainte de alte operațiuni native."
+
+#: templates/provisioning/virtualmin/hosting_policy.html:13
+msgid "Inspect without changes"
+msgstr "Inspectați fără modificări"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:15
+#| msgid "Event marked as reviewed."
+msgid "Inventory reviewed at"
+msgstr "Inventar verificat la"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:16
+msgid "Inventory digest"
+msgstr "Amprenta inventarului"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:19
+#| msgid "Inspect selected website"
+msgid "Inspection helper release"
+msgstr "Versiunea utilitarului de inspectare"
+
+#: templates/provisioning/virtualmin/hosting_policy.html:20
+#| msgid "Reviewed impact"
+msgid "Queue reviewed action"
+msgstr "Puneți acțiunea verificată în coadă"
+
+#: templates/provisioning/virtualmin/server_detail.html:26
+#| msgid "Hosting plan"
+msgid "Hosting policy"
+msgstr "Politică de găzduire"
 
 #: apps/provisioning/virtualmin_security_apply.py
 #, python-format

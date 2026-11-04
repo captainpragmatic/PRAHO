@@ -152,6 +152,7 @@
   </div>
 
   <!-- Main Content -->
+  {% include "services/partials/hosting_limits.html" with limits=service.hosting_limits %}
   <div class="space-y-8" x-data="tabGroup">
       <!-- Navigation Tabs -->
       <div class="bg-slate-800 rounded-lg border border-slate-700">

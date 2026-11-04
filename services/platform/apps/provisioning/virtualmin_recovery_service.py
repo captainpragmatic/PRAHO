@@ -166,6 +166,10 @@ class VirtualminRecoveryService(VirtualminMigrationService):
                 invalidate_chain(locked)
                 source.status = "disabled"  # fsm-bypass: the fenced node is unavailable for placement
                 source.save(update_fields=["status", "updated_at"])
+                from .hosting_limit_execution import (  # noqa: PLC0415
+                    freeze_migration_limits,
+                )
+
                 migration = VirtualminMigration.objects.create(
                     account=locked,
                     source_server=source,
@@ -174,6 +178,7 @@ class VirtualminRecoveryService(VirtualminMigrationService):
                     reason=VirtualminMigration.Reason.RECOVERY,
                     initiated_by=initiated_by,
                     pre_migration_snapshot={
+                        "hosting_limits": freeze_migration_limits(locked),
                         "domain": locked.domain,
                         "status": locked.status,
                         "remote": {"username": locked.virtualmin_username, "attributes": {}},
@@ -290,8 +295,15 @@ class VirtualminRecoveryService(VirtualminMigrationService):
             raise ValueError(MAIL_RECOVERY_REFUSAL)
         # Native restore replaces the placeholder's limits with those in the older archive.
         # Billing's current limits take effect before this replacement can be activated.
+        from .hosting_node_policy_models import (  # noqa: PLC0415
+            NodeHostingPolicy,
+        )
+
+        managed_target = NodeHostingPolicy.objects.filter(
+            server_id=migration.target_server_id, quota_adopted=True
+        ).exists()
         quotas = modify_quota_parameters(migration.account.disk_quota_mb, migration.account.bandwidth_quota_mb)
-        if quotas:
+        if quotas and not managed_target:
             self._move(migration, token, migration.status)
             self._command(migration, migration.target_server, "modify-domain", **quotas)
         named = ensure_on_recreated_node(migration.account, migration.target_server, enabled=False)
@@ -334,6 +346,13 @@ class VirtualminRecoveryService(VirtualminMigrationService):
             raise ValueError(refusal)
         if migration.cutover_committed_at is None:
             raise ValueError("Recovery activation requires the ownership commit")
+        from .hosting_limit_execution import (  # noqa: PLC0415 -- Current canonical-target policy completion barrier.
+            ensure_managed_limits,
+        )
+
+        limits = ensure_managed_limits(migration.account, migration=migration, native_server=migration.target_server)
+        if limits.is_err():
+            raise ValueError(limits.unwrap_err())
         from .migration_enabled_state import (  # noqa: PLC0415  # Same-app activation policy seam.
             activation_guard,
             converge_before_release,
