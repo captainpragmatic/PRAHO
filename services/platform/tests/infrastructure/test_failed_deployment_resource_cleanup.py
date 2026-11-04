@@ -30,6 +30,11 @@ class FailedDeploymentResourceCleanupTests(TestCase):
         self.client.inventory.side_effect = lambda _ids: Ok(list(self.resources))
         self.client.read_exact.side_effect = self.read
         self.client.delete_exact.side_effect = self.delete
+        self.client.confirm_absent.side_effect = lambda kind, identifier: (
+            Err("resource still present")
+            if any(row.kind == kind and row.resource_id == identifier for row in self.resources)
+            else Ok(True)
+        )
         self.gateway = Mock()
         self.gateway.resource_client.return_value = self.client
         self.service = _make_service()
