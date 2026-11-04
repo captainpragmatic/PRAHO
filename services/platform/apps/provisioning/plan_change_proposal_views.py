@@ -37,14 +37,18 @@ def service_plan_change_proposal(request: HttpRequest, pk: int) -> HttpResponse:
     actor = cast(User, request.user)
     customer = service.customer
     if not actor.can_access_customer(customer):
-        return HttpResponseBadRequest(_("This customer is outside your billing access."))
+        return HttpResponseBadRequest(  # nosemgrep: direct-use-of-httpresponse — fixed translated text
+            _("This customer is outside your billing access.")
+        )
     if (
         service.status != "active"
         or customer.status != "active"
         or customer.deleted_at is not None
         or customer.anonymized_at is not None
     ):
-        return HttpResponseBadRequest(_("This service cannot currently accept a plan proposal."))
+        return HttpResponseBadRequest(  # nosemgrep: direct-use-of-httpresponse — fixed translated text
+            _("This service cannot currently accept a plan proposal.")
+        )
     current = PlanChange.objects.filter(service=service, customer=customer, status__in=PlanChange.ACTIVE_STATES).first()
     options = []
     if current is None and SettingsService.get_setting("billing.hosting_plan_changes_enabled", default=False) is True:
@@ -53,7 +57,7 @@ def service_plan_change_proposal(request: HttpRequest, pk: int) -> HttpResponse:
             try:
                 amounts = _tax_quote(customer, [target.period_price_cents])
             except ValidationError:
-                return HttpResponseBadRequest(
+                return HttpResponseBadRequest(  # nosemgrep: direct-use-of-httpresponse — fixed translated text
                     _("Refresh this customer's billing details before preparing a plan link.")
                 )
             options.append(
