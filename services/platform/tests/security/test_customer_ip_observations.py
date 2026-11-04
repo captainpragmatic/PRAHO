@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pyotp
 from django.core.cache import cache
-from django.db import DatabaseError
+from django.db import DatabaseError, InterfaceError
 from django.db.models import QuerySet
 from django.test import TestCase, override_settings
 from django.utils import timezone
@@ -76,15 +76,20 @@ class CustomerIPObservationTests(HMACTestMixin, TestCase):
         self.assertFalse(CustomerIPObservation.objects.exists())
 
     def test_observation_storage_failure_preserves_the_successful_platform_session(self) -> None:
-
-        with patch(
-            "apps.security.customer_ips._write_observations",
-            side_effect=DatabaseError("fixture observation unavailable"),
-        ):
-            result = self.login(client_ip="198.51.100.29")
-        self.assertEqual(result.status_code, 200, result.content)
-        self.assertEqual(result.json()["security_observation"], {"enabled": True, "recorded": False, "degraded": True})
-        self.assertTrue(PortalSession.objects.filter(pk=result.json()["session_id"], user=self.user).exists())
+        for failure in (DatabaseError, InterfaceError):
+            with (
+                self.subTest(failure=failure.__name__),
+                patch(
+                    "apps.security.customer_ips._write_observations",
+                    side_effect=failure("fixture observation unavailable"),
+                ),
+            ):
+                result = self.login(client_ip="198.51.100.29")
+                self.assertEqual(result.status_code, 200, result.content)
+                self.assertEqual(
+                    result.json()["security_observation"], {"enabled": True, "recorded": False, "degraded": True}
+                )
+                self.assertTrue(PortalSession.objects.filter(pk=result.json()["session_id"], user=self.user).exists())
 
     def test_observations_are_exported_and_erased_without_repopulation(self) -> None:
 
@@ -109,6 +114,16 @@ class CustomerIPObservationTests(HMACTestMixin, TestCase):
         self.assertTrue(result.is_ok(), result)
         self.assertFalse(CustomerIPObservation.objects.filter(user=self.user).exists())
         self.assertTrue(record_recent_customer_ip(user_id=self.user.pk, ip="198.51.100.29").healthy)
+        self.assertFalse(CustomerIPObservation.objects.filter(user=self.user).exists())
+
+    def test_direct_recorder_reports_an_unusable_connection_without_raising(self) -> None:
+        with patch(
+            "apps.security.customer_ips._write_observations",
+            side_effect=InterfaceError("fixture connection closed after authentication"),
+        ):
+            result = record_recent_customer_ip(user_id=self.user.pk, ip="198.51.100.29")
+        self.assertFalse(result.healthy)
+        self.assertEqual(result.reason, "unavailable")
         self.assertFalse(CustomerIPObservation.objects.filter(user=self.user).exists())
 
     def test_retention_removes_only_observations_older_than_seven_days(self) -> None:

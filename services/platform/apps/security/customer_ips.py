@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from time import monotonic
 
 from django.conf import settings
-from django.db import DatabaseError, connection, transaction
+from django.db import DatabaseError, InterfaceError, connection, transaction
 from django.utils import timezone
 
 from .addresses import pack_address
@@ -49,7 +49,7 @@ def _sqlite_timeout() -> Iterator[None]:
             try:
                 with connection.cursor() as cursor:
                     cursor.execute(f"PRAGMA busy_timeout = {int(original)}")
-            except DatabaseError:
+            except (DatabaseError, InterfaceError):
                 logger.warning("Customer IP observation timeout state could not be restored")
 
 
@@ -108,6 +108,6 @@ def record_recent_customer_ip(*, user_id: int, ip: str | None) -> ObservationRes
             )
             _write_observations(user_id, customer_ids, family, packed, deadline)
         return ObservationResult(True, "recorded", len(customer_ids))
-    except (DatabaseError, RuntimeError, _ObservationTimeoutError) as error:
+    except (DatabaseError, InterfaceError, RuntimeError, _ObservationTimeoutError) as error:
         logger.warning("Customer IP observation recording unavailable (%s)", type(error).__name__)
         return ObservationResult(False, "unavailable")
