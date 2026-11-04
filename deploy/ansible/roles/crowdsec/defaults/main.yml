@@ -1,5 +1,6 @@
 ---
 crowdsec_enabled: false
+crowdsec_retire_fail2ban: false
 crowdsec_simulation: true
 crowdsec_policy_preview: false
 crowdsec_host_kind: node

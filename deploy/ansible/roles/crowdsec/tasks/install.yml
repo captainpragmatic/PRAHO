@@ -6,6 +6,8 @@
       - ansible_facts.distribution_version == '26.04'
       - ansible_facts.architecture in ['x86_64', 'aarch64']
       - crowdsec_simulation is boolean
+      - crowdsec_retire_fail2ban is boolean
+      - not crowdsec_retire_fail2ban or (not crowdsec_simulation and crowdsec_enforcement_qualified | bool)
       - crowdsec_policy_preview is boolean
       - crowdsec_host_kind in ['node', 'portal']
       - crowdsec_ssh_acquisition in ['journalctl', 'file']
@@ -202,7 +204,9 @@
 
 - name: Preview the desired policy without changing host state
   ansible.builtin.debug:
-    msg: "PRAHO_CROWDSEC_CONFIGURATION_DIGEST={{ crowdsec_configuration_digest }}"
+    msg:
+      - "PRAHO_CROWDSEC_CONFIGURATION_DIGEST={{ crowdsec_configuration_digest }}"
+      - "PRAHO_CROWDSEC_RETIRE_FAIL2BAN={{ crowdsec_retire_fail2ban | lower }}"
   when: crowdsec_policy_preview
 
 - name: End the preview before any persistent host mutation
@@ -688,6 +692,10 @@
     owner: root
     group: root
     mode: '0600'
+
+- name: Retire legacy protection only through an explicitly qualified enforcing adoption
+  ansible.builtin.include_tasks: retire_fail2ban.yml
+  when: crowdsec_retire_fail2ban
 
 - name: Return the enrolled installation and reviewed policy without credentials
   ansible.builtin.debug:

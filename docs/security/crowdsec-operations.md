@@ -95,6 +95,28 @@ off before applying. Enforcing adoption requires this exact digest. Observe one
 enforcing node for 24 hours before expanding. Portal has a separate qualification
 and production requires #769's split-host topology.
 
+## Retire existing fail2ban explicitly
+
+Simulation preserves an existing fail2ban installation. Its removal is a separate
+explicit choice: after qualifying the enforcing replacement, add
+`crowdsec_retire_fail2ban: true` to that reviewed enforcing policy and apply it.
+The default is false; simulation and unqualified retirement requests are refused
+before host changes. Preview also prints the requested retirement choice.
+
+After applied-state witnesses and canonical engine/bouncer/firewall health pass,
+the role writes a root-private, installation-bound **pending** retirement intent
+before stopping or purging fail2ban. It records **complete** only after verifying
+replacement health, package absence, inactive legacy service and removed jail.
+If interrupted, converge the qualified enforcing policy again to finish; a
+pending marker does not claim completed removal.
+
+Ordinary common-role deployments and already-queued restart handlers re-read this
+state and cannot reinstall or restart retired protection, even when the inventory
+flag is omitted or CrowdSec later returns to simulation. Malformed or mismatched
+state fails closed. Do not delete the marker to silence an enrollment mismatch.
+The unchanged Virtualmin base profile retains its existing purge policy; only
+the explicitly selected CrowdSec extension defers legacy removal to this path.
+
 ## Staging and recovery
 
 An explicitly shared staging host may use `crowdsec_host_kind: portal`,

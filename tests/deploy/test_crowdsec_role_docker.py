@@ -79,6 +79,12 @@ def test_shared_role_install_convergence_acquisition_and_simulation_transitions(
     docker("exec", target, "apt-get", "update")
     docker("exec", target, "apt-get", "install", "-y", "--no-install-recommends", "gnupg")
     docker("exec", target, "touch", "/var/log/auth.log")
+    docker("exec", target, "apt-get", "install", "-y", "--no-install-recommends", "fail2ban", "python3-systemd")
+    docker(
+        "cp", str(ROOT / "deploy/ansible/roles/common/templates/jail.local.j2"), target + ":/etc/fail2ban/jail.local"
+    )
+    docker("exec", target, "systemctl", "enable", "--now", "fail2ban")
+    assert docker("exec", target, "systemctl", "is-active", "fail2ban").stdout.strip() == "active"
     variables = {
         "crowdsec_enabled": True,
         "crowdsec_simulation": True,
@@ -115,6 +121,12 @@ def test_shared_role_install_convergence_acquisition_and_simulation_transitions(
             check=False,
         )
 
+    variables["crowdsec_retire_fail2ban"] = True
+    premature_retirement = apply()
+    assert premature_retirement.returncode != 0
+    assert docker("exec", target, "systemctl", "is-active", "fail2ban").stdout.strip() == "active"
+    assert docker("exec", target, "test", "-e", "/etc/praho-crowdsec/config.json", check=False).returncode != 0
+    variables["crowdsec_retire_fail2ban"] = False
     variables["crowdsec_policy_preview"] = True
     preview = apply()
     assert preview.returncode == 0 and "PRAHO_CROWDSEC_CONFIGURATION_DIGEST=" in preview.stdout, preview.stdout[-5000:]
@@ -128,6 +140,8 @@ def test_shared_role_install_convergence_acquisition_and_simulation_transitions(
     assert installed.returncode == 0, installed.stdout[-15000:] + installed.stderr[-2000:]
     first = json.loads(docker("exec", target, "cat", "/etc/praho-crowdsec/config.json").stdout)
     assert first["simulation"] is True
+    assert docker("exec", target, "systemctl", "is-active", "fail2ban").stdout.strip() == "active"
+    assert docker("exec", target, "test", "-f", "/etc/fail2ban/jail.local").returncode == 0
     assert "PRAHO_CROWDSEC_INSTALLATION_ID=" + first["installation_id"] in installed.stdout
     assert docker("exec", target, "systemctl", "is-active", "crowdsec").stdout.strip() == "active"
     unauthenticated = docker(
@@ -246,9 +260,61 @@ def test_shared_role_install_convergence_acquisition_and_simulation_transitions(
     )
     assert json.loads(docker("exec", target, "cat", "/etc/praho-crowdsec/config.json").stdout)["simulation"] is True
     variables["crowdsec_policy_preview"] = False
+    variables["crowdsec_retire_fail2ban"] = True
     enforcing = apply()
     assert enforcing.returncode == 0, enforcing.stdout[-15000:] + enforcing.stderr[-1500:]
     assert docker("exec", target, "systemctl", "is-active", "crowdsec-firewall-bouncer").stdout.strip() == "active"
+    legacy_package = docker("exec", target, "dpkg-query", "-W", "-f", "${db:Status-Status}", "fail2ban", check=False)
+    assert legacy_package.stdout.strip() != "installed", (
+        "Qualified enforcing adoption must retire the legacy fail2ban package"
+    )
+    assert docker("exec", target, "systemctl", "is-active", "fail2ban", check=False).returncode != 0
+    assert docker("exec", target, "test", "-e", "/etc/fail2ban/jail.local", check=False).returncode != 0
+    retirement = json.loads(docker("exec", target, "cat", "/var/lib/praho-crowdsec/fail2ban-retired.json").stdout)
+    assert retirement["state"] == "complete" and retirement["installation_id"] == first["installation_id"]
+    assert (
+        docker("exec", target, "stat", "-c", "%a %u %g", "/var/lib/praho-crowdsec/fail2ban-retired.json").stdout.strip()
+        == "600 0 0"
+    )
+    common_play = [
+        {
+            "hosts": "localhost",
+            "connection": "local",
+            "gather_facts": False,
+            "roles": ["common"],
+            "post_tasks": [
+                {
+                    "name": "Force a queued legacy restart after retirement",
+                    "ansible.builtin.debug": {"msg": "queued restart guard"},
+                    "changed_when": True,
+                    "notify": "restart fail2ban",
+                    "tags": ["fail2ban"],
+                }
+            ],
+        }
+    ]
+    docker("exec", "-i", target, "tee", "/work/common-legacy.yml", input_text=yaml.safe_dump(common_play))
+    common_rerun = docker(
+        "exec",
+        "-w",
+        "/work",
+        target,
+        "/opt/controller/bin/ansible-playbook",
+        "-i",
+        "localhost,",
+        "common-legacy.yml",
+        "--tags",
+        "fail2ban",
+        check=False,
+    )
+    assert common_rerun.returncode == 0, common_rerun.stdout[-10000:] + common_rerun.stderr[-1000:]
+    assert (
+        docker("exec", target, "dpkg-query", "-W", "-f", "${db:Status-Status}", "fail2ban", check=False).stdout.strip()
+        != "installed"
+    )
+    assert docker("exec", target, "test", "-e", "/etc/fail2ban/jail.local", check=False).returncode != 0
+    assert docker("exec", target, "systemctl", "is-active", "fail2ban", check=False).returncode != 0
+    variables["crowdsec_retire_fail2ban"] = False
     enforcing_config = json.loads(docker("exec", target, "cat", "/etc/praho-crowdsec/config.json").stdout)
     assert_native_role_profile(target, expected_configuration_digest=enforcing_config["configuration_digest"])
     docker("exec", target, "cscli", "decisions", "add", "--ip", "198.51.100.77", "--duration", "5m")
@@ -435,3 +501,24 @@ def test_shared_role_install_convergence_acquisition_and_simulation_transitions(
             == final_config["configuration_digest"] + "\n"
         )
     assert_native_role_profile(target, expected_configuration_digest=final_config["configuration_digest"])
+    assert (
+        json.loads(docker("exec", target, "cat", "/var/lib/praho-crowdsec/fail2ban-retired.json").stdout) == retirement
+    )
+    simulated_common = docker(
+        "exec",
+        "-w",
+        "/work",
+        target,
+        "/opt/controller/bin/ansible-playbook",
+        "-i",
+        "localhost,",
+        "common-legacy.yml",
+        "--tags",
+        "fail2ban",
+        check=False,
+    )
+    assert simulated_common.returncode == 0, simulated_common.stdout[-10000:]
+    assert (
+        docker("exec", target, "dpkg-query", "-W", "-f", "${db:Status-Status}", "fail2ban", check=False).stdout.strip()
+        != "installed"
+    )
