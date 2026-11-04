@@ -216,3 +216,66 @@ def test_independent_controllers_acquire_one_persistent_platform_lock(tmp_path: 
     assert (winner / "operation-acquired").exists()
     loser = next(directory for directory in controllers if directory != winner)
     assert not (loser / "operation-acquired").exists()
+
+
+def test_rsync_command_preserves_the_targets_pinned_ssh_policy(tmp_path: Path) -> None:
+    recorded = tmp_path / "rsync-arguments"
+    sender = tmp_path / "rsync"
+    sender.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" > "$RSYNC_CAPTURE_FILE"\n')
+    sender.chmod(0o755)
+    task = next(
+        task for task in yaml.safe_load((ROLE / "shared.yml").read_text()) if task["name"] == "Deploy code via rsync"
+    )
+    task.pop("notify")
+    inventory, playbook = tmp_path / "hosts.json", tmp_path / "transport.yml"
+    inventory.write_text(
+        json.dumps(
+            {
+                "all": {
+                    "hosts": {
+                        "target": {
+                            "ansible_host": "192.0.2.10",
+                            "ansible_user": "root",
+                            "ansible_connection": "ssh",
+                            "ansible_rsync_path": str(sender),
+                            "ansible_ssh_common_args": f"-o StrictHostKeyChecking=yes -o UserKnownHostsFile={tmp_path}/pins",
+                        }
+                    }
+                }
+            }
+        )
+    )
+    playbook.write_text(
+        yaml.safe_dump(
+            [
+                {
+                    "hosts": "target",
+                    "gather_facts": False,
+                    "vars": {
+                        "project_root": str(tmp_path / "target"),
+                        "native_source_directory": str(tmp_path),
+                        "deploy_method": "rsync",
+                    },
+                    "tasks": [task],
+                }
+            ]
+        )
+    )
+    controller = Path(sys.executable).with_name("ansible-playbook")
+    result = subprocess.run(  # noqa: S603 -- real action/module; capture only the external rsync boundary
+        [str(controller), "-i", str(inventory), str(playbook)],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+        env={
+            **os.environ,
+            "ANSIBLE_LOCAL_TEMP": str(tmp_path / "local"),
+            "ANSIBLE_REMOTE_TEMP": str(tmp_path / "remote"),
+            "RSYNC_CAPTURE_FILE": str(recorded),
+        },
+    )
+    assert result.returncode == 0 and recorded.exists(), result.stdout + result.stderr
+    arguments = recorded.read_text()
+    assert "StrictHostKeyChecking=no" not in arguments and "UserKnownHostsFile=/dev/null" not in arguments, arguments
+    assert "StrictHostKeyChecking=yes" in arguments and f"UserKnownHostsFile={tmp_path}/pins" in arguments, arguments

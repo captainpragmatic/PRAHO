@@ -23,11 +23,19 @@
     name: logrotate
     state: present
 
+- name: Install the native rsync receiver
+  apt:
+    name: rsync
+    state: present
+  when: deploy_method == 'rsync'
+
 - name: Deploy code via rsync
   ansible.posix.synchronize:
     src: "{{ native_source_directory | default(playbook_dir + '/../../../') }}"
     dest: "{{ project_root }}/src/"
     delete: yes
+    verify_host: true
+    use_ssh_args: true
     rsync_opts:
       # Controller/lab state and saved plans can contain credentials; never ship them as code.
       - "--exclude=.terraform"
