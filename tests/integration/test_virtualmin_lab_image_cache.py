@@ -153,7 +153,12 @@ def test_standalone_components_validate_base_before_building_source_image() -> N
 
 
 @pytest.mark.parametrize(
-    "workflow,job", [("virtualmin-lab-pr.yml", "pull-request"), ("virtualmin-lab.yml", "nightly-full")]
+    "workflow,job",
+    [
+        ("virtualmin-lab-pr.yml", "pull-request"),
+        ("virtualmin-lab.yml", "nightly-containers"),
+        ("virtualmin-lab.yml", "native-full"),
+    ],
 )
 def test_image_cache_users_have_commit_history_for_source_comparison(workflow: str, job: str) -> None:
     document = yaml.safe_load((REPO / ".github/workflows" / workflow).read_text())

@@ -62,6 +62,165 @@ def test_the_full_target_runs_every_leg_the_task_names() -> None:
         assert re.search(rf"\b{leg}\b", body), leg
 
 
+def test_full_native_failure_remains_fatal_and_other_legs_still_run(tmp_path: Path) -> None:
+    calls = tmp_path / "calls"
+    stub = tmp_path / "record-step"
+    stub.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LAB_RECIPE_TRACE"\nfor argument do\n  if [ "$argument" = test-virtualmin-node-deploy ]; then exit 23; fi\ndone\n'
+    )
+    stub.chmod(0o700)
+    result = subprocess.run(  # noqa: S603 -- Actual unchanged full Make recipe, all external legs are task-owned recorders.
+        [
+            shutil.which("make") or "make",
+            "--no-print-directory",
+            "test-virtualmin-lab-full",
+            "MAKE=" + shlex.quote(str(stub)),
+        ],
+        cwd=REPO,
+        env={**os.environ, "LAB_RECIPE_TRACE": str(calls)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert calls.read_text().splitlines() == [
+        "--no-print-directory " + leg
+        for leg in (
+            "test-virtualmin-lab",
+            "test-virtualmin-node-deploy",
+            "test-virtualmin-faults",
+            "test-virtualmin-e2e",
+        )
+    ]
+    assert "Failed legs: test-virtualmin-node-deploy" in result.stdout
+
+
+@pytest.mark.parametrize("failed_leg", ["", "test-virtualmin-faults"])
+def test_container_aggregation_runs_every_non_native_leg_and_reports_failure(tmp_path: Path, failed_leg: str) -> None:
+    calls = tmp_path / "calls"
+    stub = tmp_path / "record-step"
+    stub.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LAB_RECIPE_TRACE"\nfor argument do\n  if [ "$argument" = "$FAILED_LEG" ]; then exit 23; fi\ndone\n'
+    )
+    stub.chmod(0o700)
+    result = subprocess.run(  # noqa: S603 -- Actual Make aggregation, external leg calls replaced by an exact recorder.
+        [
+            shutil.which("make") or "make",
+            "--no-print-directory",
+            "test-virtualmin-lab-containers",
+            "MAKE=" + shlex.quote(str(stub)),
+        ],
+        cwd=REPO,
+        env={**os.environ, "LAB_RECIPE_TRACE": str(calls), "FAILED_LEG": failed_leg},
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert calls.read_text().splitlines() == [
+        "--no-print-directory " + name
+        for name in (
+            "test-virtualmin-lab",
+            "test-virtualmin-faults",
+            "test-virtualmin-e2e",
+            "test-virtualmin-maintenance-portal",
+        )
+    ]
+    assert (result.returncode != 0) is bool(failed_leg)
+    assert "native" not in recipe("test-virtualmin-lab-containers").split("for leg", 1)[1].split("; do", 1)[0]
+    if failed_leg:
+        assert failed_leg in result.stdout
+
+
+@pytest.mark.parametrize("refuse_admission", [False, True])
+def test_native_node_script_runs_only_the_supported_fresh_pipeline_serially(
+    tmp_path: Path, refuse_admission: bool
+) -> None:
+    calls = tmp_path / "calls"
+    stub = tmp_path / "make"
+    stub.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$NATIVE_RECIPE_TRACE"\nif [ "$REFUSE_NATIVE_ADMISSION" = 1 ]; then\n  for argument do\n    if [ "$argument" = test-virtualmin-native-fresh-deployment ]; then exit 23; fi\n  done\nfi\n'
+    )
+    stub.chmod(0o700)
+    environment = {
+        **os.environ,
+        "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+        "NATIVE_RECIPE_TRACE": str(calls),
+        "NATIVE_VM_MANIFEST": str(tmp_path / "owned VM.json"),
+        "NATIVE_DNS_ZONE": "native.example.invalid",
+        "REFUSE_NATIVE_ADMISSION": "1" if refuse_admission else "0",
+        "NATIVE_S3_MANIFEST": str(tmp_path / "owned S3.json"),
+        "PRAHO_NATIVE_S3_ENDPOINT_URL": "http://127.0.0.1:1",
+        "PRAHO_NATIVE_S3_BUCKET": "synthetic-fixture-bucket",
+        "PRAHO_NATIVE_S3_ACCESS_KEY_ID": "fixture-only",
+        "PRAHO_NATIVE_S3_SECRET_ACCESS_KEY": "fixture-only",
+    }
+    result = subprocess.run(  # noqa: S603 -- Exact repository shell script; Make replaced by a task-owned recorder.
+        [shutil.which("bash") or "/bin/bash", str(REPO / "tests/virtualmin_lab/run_node_deploy.sh")],
+        cwd=REPO,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert (result.returncode != 0) is refuse_admission, result.stderr
+    expected = (
+        ("test-virtualmin-native-fresh-deployment",)
+        if refuse_admission
+        else (
+            "test-virtualmin-native-fresh-deployment",
+            "native-vm-migrate",
+            "native-vm-fresh-deploy",
+            "native-vm-register",
+            "test-virtualmin-quotas",
+            "test-virtualmin-native-fresh-deployment",
+            "native-s3-verify",
+            "test-virtualmin-native-workflow",
+        )
+    )
+    assert calls.read_text().splitlines() == [f"-C {REPO} --no-print-directory {name}" for name in expected]
+
+
+def test_native_full_is_manual_isolated_and_checks_actual_capability() -> None:
+    assert on_block()["workflow_dispatch"]["inputs"]["suite"]["default"] == "containers"
+    job = WORKFLOW["jobs"]["native-full"]
+    assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.suite == 'full'"
+    assert job["runs-on"] == ["self-hosted", "linux", "native-acceptance"]
+    assert job["environment"] == "native-acceptance"
+    assert job["needs"] == "native-admission"
+    checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    capability = [step for step in job["steps"] if step.get("name") == "Verify fresh Ubuntu native hosting capability"]
+    assert len(capability) == 1 and capability[0]["run"] == "make test-virtualmin-native-fresh-deployment"
+    full = next(step for step in job["steps"] if step.get("run") == "make test-virtualmin-lab-full")
+    assert job["steps"].index(capability[0]) < job["steps"].index(full)
+    assert "continue-on-error" not in capability[0] and "continue-on-error" not in job
+    assert "make test-virtualmin-lab-full" in str(job["steps"])
+    assert "native-full" not in WORKFLOW["jobs"]["notify-scheduled-failure"]["needs"]
+
+
+@pytest.mark.parametrize("ready,successful", [("", False), ("false", False), ("TRUE", False), ("true", True)])
+def test_native_admission_fails_fast_until_explicitly_configured(ready: str, successful: bool) -> None:
+    admission = WORKFLOW["jobs"]["native-admission"]
+    assert admission["if"] == "github.event_name == 'workflow_dispatch' && inputs.suite == 'full'"
+    assert admission["runs-on"] == "ubuntu-latest"
+    command = admission["steps"][0]
+    assert command["env"]["NATIVE_ACCEPTANCE_RUNNER_READY"] == "${{ vars.NATIVE_ACCEPTANCE_RUNNER_READY }}"
+    result = subprocess.run(  # noqa: S603 -- Exact workflow configuration precheck, no resources or credentials.
+        [shutil.which("bash") or "/bin/bash", "-c", command["run"]],
+        env={**os.environ, "NATIVE_ACCEPTANCE_RUNNER_READY": ready},
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert (result.returncode == 0) is successful
+    if not successful:
+        assert "private authority" in result.stdout
+
+
 def test_queue_lab_target_runs_components_serially_after_existing_suites(tmp_path: Path) -> None:
     calls = tmp_path / "calls"
     stub = tmp_path / "record-step"
@@ -116,7 +275,7 @@ def test_native_sql_contract_transfers_all_database_export_import_dependencies(t
 
 
 def test_queue_and_full_lab_failure_diagnostics_include_imported_component_source() -> None:
-    for workflow, job in ((PR_WORKFLOW, "pull-request"), (WORKFLOW, "nightly-full")):
+    for workflow, job in ((PR_WORKFLOW, "pull-request"), (WORKFLOW, "nightly-containers"), (WORKFLOW, "native-full")):
         diagnostics = next(
             step["run"] for step in workflow["jobs"][job]["steps"] if step.get("name") == "Lab diagnostics"
         )
@@ -136,16 +295,16 @@ def on_block() -> dict[str, Any]:
 
 def test_component_diagnostics_require_an_explicit_manual_dispatch_and_have_a_distinct_job() -> None:
     suite = on_block()["workflow_dispatch"]["inputs"]["suite"]
-    assert suite["options"] == ["full", "drift", "components"]
-    assert suite["default"] == "full"
+    assert suite["options"] == ["containers", "full", "drift", "components"]
+    assert suite["default"] == "containers"
     job = WORKFLOW["jobs"]["components-diagnostic"]
     assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.suite == 'components'"
     assert "needs" not in job, "Diagnostics must not depend on a scheduled/full proof job"
     assert job["runs-on"] == "ubuntu-24.04"
     assert 1 <= job["timeout-minutes"] <= 90
     assert "components-diagnostic" not in WORKFLOW["jobs"]["notify-scheduled-failure"]["needs"]
-    assert "inputs.suite == 'full'" in WORKFLOW["jobs"]["nightly-full"]["if"]
-    assert "components" not in WORKFLOW["jobs"]["nightly-full"]["if"]
+    assert "inputs.suite == 'full'" in WORKFLOW["jobs"]["native-full"]["if"]
+    assert "components" not in WORKFLOW["jobs"]["native-full"]["if"]
 
 
 def test_component_diagnostics_use_only_the_component_boundary_with_unconditional_evidence_and_cleanup() -> None:
@@ -207,11 +366,13 @@ def test_the_workflow_follows_the_nightly_conventions() -> None:
     assert on_block()["schedule"], "a nightly schedule"
     assert "check-activity" in jobs and "notify-scheduled-failure" in jobs
     assert jobs["notify-scheduled-failure"]["permissions"] == {"issues": "write"}
-    assert "make test-virtualmin-lab-full" in str(jobs["nightly-full"]["steps"])
+    assert "make test-virtualmin-lab-containers" in str(jobs["nightly-containers"]["steps"])
+    assert "make test-virtualmin-lab-full" not in str(jobs["nightly-containers"]["steps"])
+    assert "make test-virtualmin-lab-full" in str(jobs["native-full"]["steps"])
     assert "make test-virtualmin-lab" in str(PR_WORKFLOW["jobs"]["pull-request"]["steps"])
     # A release candidate's lab must test the candidate, not the master tip it was dispatched on.
-    checkout = next(step for step in jobs["nightly-full"]["steps"] if "actions/checkout" in str(step.get("uses")))
-    assert checkout["with"]["ref"] == "${{ inputs.ref }}"
+    checkout = next(step for step in jobs["native-full"]["steps"] if "actions/checkout" in str(step.get("uses")))
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
     assert "make test-virtualmin-drift" in str(jobs["nightly-drift"]["steps"])
     assert set(jobs["nightly-drift"]["strategy"]["matrix"]["runner"]) == {"ubuntu-latest", "ubuntu-24.04-arm"}
 

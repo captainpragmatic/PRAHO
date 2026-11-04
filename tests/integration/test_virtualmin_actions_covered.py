@@ -26,6 +26,7 @@ from tests.virtualmin_lab.native.hosting_playbook_contract import (
     assert_hosting_route,
     assert_installed_hosting_helpers,
 )
+from tests.virtualmin_lab.native.installed_panel_playbook_contract import assert_shared_api_user_tasks
 
 pytestmark = pytest.mark.integration
 
@@ -359,7 +360,8 @@ class TestEveryActionIsCovered:
 
     def test_every_node_playbook_is_named_by_a_lab_test(self) -> None:
         playbooks = [path.name for path in PLAYBOOKS.glob("virtualmin_*.yml")] + ["virtualmin.yml"]
-        assert len(playbooks) == 29, "a new playbook: it needs a lab test, then update this count"
+        assert len(playbooks) == 30, "a new playbook: it needs a lab test, then update this count"
+        assert "virtualmin_api_user_tasks.yml" in playbooks
         assert "virtualmin_account_name_neutral.yml" in playbooks
         assert {"virtualmin_firewall.yml", "virtualmin_security_read.yml", "virtualmin_security_enroll.yml"} <= set(
             playbooks
@@ -387,6 +389,9 @@ class TestNativeHostingControllerContracts:
 
     def test_fresh_install_and_reviewed_preparation_ship_the_same_exact_helpers(self) -> None:
         assert_installed_hosting_helpers()
+
+    def test_fresh_install_and_reviewed_api_enrollment_import_the_same_tasks(self) -> None:
+        assert_shared_api_user_tasks()
 
 
 # ------------------------------------------------- each check on a planted violation

@@ -11,6 +11,14 @@ approved disposable-project `HCLOUD_TOKEN`, narrow `PRAHO_NATIVE_ADMIN_CIDR`,
 `NATIVE_DNS_ZONE`, and `DB_NAME=praho_native_workflow` with its dedicated local
 PostgreSQL connection. The database name must start with `praho_native_`.
 
+Keep the original private SSH key and the private `<run>.native-crypto.json`
+marker with the manifest. Field encryption, the credential vault and sessions
+derive independent keys from that exact original key; the marker also binds the
+isolated database name. Replacing or re-encoding the key, changing the database,
+or resuming an older bound fixture without this marker refuses startup. Use a
+fresh isolated fixture for an older test-key database; there is no automatic
+rekey. Cleanup retains the same original crypto authority.
+
 The complete fresh-deployment gate uses **one** VM created by the public Platform
 pipeline. Export `PRAHO_NATIVE_LOCATION` and `PRAHO_NATIVE_SERVER_TYPE` explicitly,
 plus the approved DNS authority references as `PRAHO_NATIVE_CLOUDFLARE_TOKEN` and

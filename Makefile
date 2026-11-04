@@ -64,10 +64,11 @@ help:
 	@echo "  make test-virtualmin-lab - Opt-in production-path backup/restore round trip against the lab (+ the contract suite)"
 	@echo "  make test-virtualmin-contract - Opt-in: every allowlisted Virtualmin program against the lab node"
 	@echo "  make test-virtualmin-workflows - Opt-in: provision, suspend, backup, restore, migrate, drain and recover through PRAHO's own services against the lab"
-	@echo "  make test-virtualmin-node-deploy - Nightly, opt-in: virtualmin.yml + virtualmin_harden.yml on the bare Debian node, then the contract smoke checks"
+	@echo "  make test-virtualmin-node-deploy - Explicit owned Ubuntu VM: fresh public deployment, kernel qualification and native lifecycle"
 	@echo "  make test-virtualmin-faults - Nightly, opt-in: stop Webmin, cut the network and time calls out while PRAHO backs up and restores"
 	@echo "  make test-virtualmin-e2e - Opt-in: Playwright smoke tests of the staff pages against the lab (starts and stops its own server; not part of make test-e2e)"
-	@echo "  make test-virtualmin-lab-full - Opt-in, long: test-virtualmin-lab + node-deploy + faults + the browser tests (the nightly run)"
+	@echo "  make test-virtualmin-lab-containers - Routine container suites, faults, browser and Maintenance Portal; no native qualification"
+	@echo "  make test-virtualmin-lab-full - Explicit native-inclusive run: lab + owned Ubuntu node-deploy + faults + browser"
 	@echo "  make test-virtualmin-drift - Opt-in: build the lab from the LATEST Virtualmin (replaces a running lab) and run the contract suite, recording nothing"
 	@echo "  VIRTUALMIN_LAB=1 make dev - Platform on :8700 against the Docker Virtualmin lab (starts and registers it if needed)"
 	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
@@ -1527,6 +1528,17 @@ test-virtualmin-faults:
 	@echo "🧪 [Virtualmin lab] Fault injection: Webmin stopped, network cut and calls timed out mid-operation (needs make virtualmin-lab-up)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_faults.sh $(FAULT_ARGS)
+
+.PHONY: test-virtualmin-lab-containers
+# Routine container evidence only. Native deployment/quota proof remains in the separate full gate below.
+test-virtualmin-lab-containers:
+	@echo "🧪 [Virtualmin lab] Container-only suites, faults, browser and maintenance Portal; no native qualification"
+	@failed=""; \
+	for leg in test-virtualmin-lab test-virtualmin-faults test-virtualmin-e2e test-virtualmin-maintenance-portal; do \
+		$(MAKE) --no-print-directory $$leg || failed="$$failed $$leg"; \
+	done; \
+	if [ -n "$$failed" ]; then echo "🔥 [Virtualmin container lab] Failed legs:$$failed"; exit 1; fi; \
+	echo "✅ [Virtualmin container lab] Every container leg passed; native acceptance remains separate"
 
 # The nightly run: every leg runs even when an earlier one fails, and the failed legs are named at the end.
 test-virtualmin-lab-full:
