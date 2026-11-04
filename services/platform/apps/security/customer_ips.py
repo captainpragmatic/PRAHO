@@ -41,6 +41,8 @@ def _sqlite_timeout() -> Iterator[None]:
         with connection.cursor() as cursor:
             cursor.execute("PRAGMA busy_timeout")
             original = cursor.fetchone()[0]
+            # SQLite PRAGMA assignment cannot bind parameters; this value is a fixed integer constant.
+            # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query
             cursor.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_MILLISECONDS}")
     try:
         yield
@@ -48,6 +50,8 @@ def _sqlite_timeout() -> Iterator[None]:
         if original is not None:
             try:
                 with connection.cursor() as cursor:
+                    # Restore only the integer read from this connection; int() excludes SQL syntax.
+                    # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query
                     cursor.execute(f"PRAGMA busy_timeout = {int(original)}")
             except (DatabaseError, InterfaceError):
                 logger.warning("Customer IP observation timeout state could not be restored")
