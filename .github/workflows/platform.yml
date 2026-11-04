@@ -69,7 +69,8 @@ jobs:
     - name: Set up Python and install dependencies
       run: |
         uv python install
-        uv sync --group platform --group dev
+        # Platform tests exercise the real Portal response consumer in an isolated subprocess.
+        uv sync --group platform --group portal --group dev
 
     - name: Platform global coverage floor
       run: make coverage-platform
@@ -94,7 +95,8 @@ jobs:
     - name: Set up Python and install dependencies
       run: |
         uv python install
-        uv sync --group platform --group dev
+        # Platform tests exercise the real Portal response consumer in an isolated subprocess.
+        uv sync --group platform --group portal --group dev
 
     - name: Detect affected test modules
       id: affected

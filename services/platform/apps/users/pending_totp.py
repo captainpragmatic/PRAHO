@@ -139,6 +139,8 @@ class EnrolmentResult:
     backup_codes: list[str] = field(default_factory=list)
     # The account as committed by the enrolment, so a session binds to its new credentials.
     user: User | None = None
+    # Private transport metadata; every browser refusal keeps the same generic answer.
+    failure_category: Literal["credentials", "second_factor"] | None = None
 
 
 def complete_enrolment(  # noqa: PLR0913  # keyword-only enrolment contract
@@ -175,10 +177,11 @@ def complete_enrolment(  # noqa: PLR0913  # keyword-only enrolment contract
         before = locked_user.get_session_auth_hash()  # the session's hash before the credential changes
         if locked_user.is_account_locked():  # answered before the password, so it says nothing about it
             return EnrolmentResult("locked")
-        if not check_password_locked(
-            locked_user, password, source="mfa_enrolment"
-        ) or not TOTPService.verify_enrolment_code(locked_user, secret, code):
-            return EnrolmentResult("incorrect")
+        valid_shape = len(code) == TOTPService.TOTP_DIGITS and code.isdigit()
+        if not check_password_locked(locked_user, password, source="mfa_enrolment"):
+            return EnrolmentResult("incorrect", failure_category="credentials")
+        if not TOTPService.verify_enrolment_code(locked_user, secret, code):
+            return EnrolmentResult("incorrect", failure_category="second_factor" if valid_shape else None)
         proof_passed(locked_user)
         _secret, backup_codes = MFAService.enable_totp(locked_user, request, secret=secret, origin=origin)
         row.delete()

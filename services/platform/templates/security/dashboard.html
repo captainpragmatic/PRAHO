@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+
+{% block title %}{% trans "Security" %}{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 [&_a]:inline-flex [&_a]:min-h-11 [&_a]:min-w-11 [&_a]:items-center [&_a]:px-2 [&_button]:min-h-11 [&_button]:min-w-11 [&_input]:text-base [&_select]:text-base [&_textarea]:text-base [&_input]:min-h-11 [&_select]:min-h-11 [&_textarea]:min-h-11">
+  <header>
+    <h1 class="text-2xl font-semibold text-slate-100">{% trans "Security" %}</h1>
+    <p class="mt-2 text-sm text-slate-400">{% trans "Recorded decisions, simulated detections and source health." %}</p>
+    {% if can_manage_security %}<a href="{% url 'security:source-enroll' %}" class="mt-3 inline-block text-sm text-blue-300 hover:text-blue-200">{% trans "Enroll source" %}</a>{% endif %}
+    <a href="{% url 'security:action-list' %}" class="mt-3 inline-block text-sm text-blue-300 hover:text-blue-200">{% trans "Action history" %}</a>
+    {% if can_manage_security %}<a href="{% url 'security:ban-create' %}" class="mt-3 inline-block text-sm text-blue-300 hover:text-blue-200">{% trans "Create manual ban" %}</a>{% endif %}
+  </header>
+
+  <section aria-labelledby="security-source-title" class="space-y-3">
+    <h2 id="security-source-title" class="text-lg font-medium text-slate-100">{% trans "Source health" %}</h2>
+    <div class="grid min-w-0 gap-4 md:grid-cols-2 xl:grid-cols-3">
+      {% for status in source_statuses %}
+      <article class="min-w-0 rounded-xl border border-slate-700 bg-slate-800 p-4">
+        <h3 class="break-all font-medium text-slate-100">{{ status.source.hostname }}</h3>
+        <p class="mt-1 text-sm {% if status.stale %}text-amber-300{% else %}text-slate-300{% endif %}">{{ status.freshness }}</p>
+        {% if can_manage_security %}<a href="{% url 'security:source-edit' source_id=status.source.pk %}" class="mt-2 inline-block text-sm text-blue-300 hover:text-blue-200">{% trans "Manage source" %}</a>{% endif %}
+        {% if can_manage_security %}<a href="{% url 'security:allowlist-edit' source_id=status.source.pk %}" class="mt-2 inline-block text-sm text-blue-300 hover:text-blue-200">{% trans "Staff allowlist" %}</a> <a href="{% url 'security:coverage-edit' source_id=status.source.pk %}" class="mt-2 inline-block text-sm text-blue-300 hover:text-blue-200">{% trans "Scenario sharing" %}</a>{% endif %}
+        <dl class="mt-4 space-y-2 text-sm">
+          <div><dt class="text-slate-400">{% trans "Detection (last report)" %}</dt><dd class="text-slate-200">{{ status.detection }}</dd></div>
+          <div><dt class="text-slate-400">{% trans "Enforcement (last report)" %}</dt><dd class="text-slate-200">{{ status.enforcement }}</dd></div>
+          <div><dt class="text-slate-400">{% trans "Clock" %}</dt><dd class="text-slate-200">{{ status.clock }}</dd></div>
+          <div><dt class="text-slate-400">{% trans "Alerts" %}</dt><dd class="text-slate-200">{{ status.alerts }}</dd></div>
+          <div><dt class="text-slate-400">{% trans "Last decision snapshot" %}</dt><dd class="text-slate-200">{{ status.state.last_decision_sync_at|date:"SHORT_DATETIME_FORMAT"|default:"—" }}</dd></div>
+        </dl>
+      </article>
+      {% empty %}
+      <p class="rounded-xl border border-slate-700 bg-slate-800 p-4 text-slate-300">{% trans "No sources enrolled" %}</p>
+      {% endfor %}
+    </div>
+    <p class="text-sm text-slate-400">{% trans "Process and firewall reports do not confirm recent bouncer pulls or complete enforcement. Stale sources retain their last recorded results." %}</p>
+  </section>
+
+  <section aria-labelledby="security-records-title" class="min-w-0 space-y-4">
+    <h2 id="security-records-title" class="text-lg font-medium text-slate-100">{% trans "Recorded activity" %}</h2>
+    <nav class="flex gap-4 border-b border-slate-700 pb-3" aria-label="{% trans 'Security records' %}">
+      <a href="?kind=decisions&amp;{{ query }}" class="text-sm font-medium text-blue-300 hover:text-blue-200" {% if kind == "decisions" %}aria-current="page"{% endif %}>{% trans "Decisions" %}</a>
+      <a href="?kind=alerts&amp;{{ query }}" class="text-sm font-medium text-blue-300 hover:text-blue-200" {% if kind == "alerts" %}aria-current="page"{% endif %}>{% trans "Alerts" %}</a>
+    </nav>
+
+    <form method="get" class="grid min-w-0 gap-4 rounded-xl border border-slate-700 bg-slate-800 p-4 sm:grid-cols-2 lg:grid-cols-3">
+      <input type="hidden" name="kind" value="{{ kind }}">
+      {% for field in filters %}
+      <div class="min-w-0 space-y-1">
+        <label for="{{ field.id_for_label }}" class="block text-sm font-medium text-slate-300">{{ field.label }}</label>
+        {{ field }}
+        {% for error in field.errors %}<p class="text-sm text-red-300" role="alert">{{ error }}</p>{% endfor %}
+      </div>
+      {% endfor %}
+      <div class="flex items-end gap-3">
+        {% trans "Apply filters" as filter_label %}{% button filter_label type="submit" variant="secondary" %}
+        <a href="{% url 'security:dashboard' %}?kind={{ kind }}" class="text-sm text-blue-300 hover:text-blue-200">{% trans "Reset" %}</a>
+      </div>
+    </form>
+
+    <div class="min-w-0 overflow-x-auto rounded-xl border border-slate-700" tabindex="0" role="region" aria-label="{% trans 'Recorded security activity' %}">
+      <table class="w-full text-left text-sm">
+        <thead class="bg-slate-800 text-slate-300">
+          <tr>
+            <th scope="col" class="min-w-64 px-4 py-3">{% trans "Source" %}</th>
+            <th scope="col" class="px-4 py-3">{% trans "IP / network" %}</th>
+            <th scope="col" class="min-w-64 px-4 py-3">{% trans "Scenario" %}</th>
+            <th scope="col" class="px-4 py-3">{% trans "Mode" %}</th>
+            {% if kind == "decisions" %}
+            <th scope="col" class="px-4 py-3">{% trans "Origin" %}</th>
+            <th scope="col" class="px-4 py-3">{% trans "Type" %}</th>
+            <th scope="col" class="px-4 py-3">{% trans "Expires" %}</th>
+            <th scope="col" class="px-4 py-3">{% trans "Actions" %}</th>
+            {% else %}
+            <th scope="col" class="px-4 py-3">{% trans "Events" %}</th>
+            <th scope="col" class="px-4 py-3">{% trans "Detected" %}</th>
+            {% endif %}
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-700 bg-slate-900 text-slate-200">
+          {% for row in security_page %}
+          <tr>
+            <td class="px-4 py-3"><span class="break-all">{{ row.source.hostname }}</span>{% if row.source.retired_at %}<span class="block text-xs text-amber-300">{% trans "Retired source" %}</span>{% endif %}</td>
+            <td class="px-4 py-3">
+              <span class="font-mono">{{ row.value|default:"—" }}</span>
+              {% if row.recent_customer_match %}
+              <span class="mt-2 block">{% trans "CRITICAL" as critical_label %}{% badge critical_label variant="danger" %}</span>
+              <p class="mt-1 text-xs text-red-300">{% trans "Recent customer IP match" %}</p>
+              <p class="mt-1 text-xs text-slate-400">{% trans "The recorded ban keeps its fixed expiry; check source health for enforcement." %}</p>
+              {% endif %}
+            </td>
+            <td class="break-all px-4 py-3">{{ row.scenario }}</td>
+            <td class="px-4 py-3">{% if row.simulated %}<span class="text-amber-300">{% trans "Simulated" %}</span>{% else %}{% trans "Reported" %}{% endif %}</td>
+            {% if kind == "decisions" %}
+            <td class="break-all px-4 py-3">{{ row.origin }}</td>
+            <td class="px-4 py-3">{{ row.type }}</td>
+            <td class="whitespace-nowrap px-4 py-3">{{ row.expires_at|date:"SHORT_DATETIME_FORMAT" }}</td>
+            <td class="px-4 py-3">{% if can_revoke_security %}<a href="{% url 'security:decision-revoke' decision_id=row.pk %}" class="text-blue-300 hover:text-blue-200">{% trans "Revoke" %}</a>{% endif %}</td>
+            {% else %}
+            <td class="px-4 py-3">{{ row.event_count }}</td>
+            <td class="whitespace-nowrap px-4 py-3">{{ row.source_created_at|date:"SHORT_DATETIME_FORMAT" }}</td>
+            {% endif %}
+          </tr>
+          {% empty %}
+          <tr><td colspan="8" class="px-4 py-8 text-center text-slate-400">{% trans "No matching records" %}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <nav class="flex flex-wrap items-center justify-between gap-3 text-sm text-slate-300" aria-label="{% trans 'Security record pages' %}">
+      <span>{% blocktrans with number=security_page.number total=security_page.paginator.num_pages %}Page {{ number }} of {{ total }}{% endblocktrans %}</span>
+      <div class="flex gap-4">
+        {% if security_page.has_previous %}<a href="?kind={{ kind }}&amp;{{ query }}&amp;page={{ security_page.previous_page_number }}" class="text-blue-300 hover:text-blue-200">{% trans "Previous" %}</a>{% endif %}
+        {% if security_page.has_next %}<a href="?kind={{ kind }}&amp;{{ query }}&amp;page={{ security_page.next_page_number }}" class="text-blue-300 hover:text-blue-200">{% trans "Next" %}</a>{% endif %}
+      </div>
+    </nav>
+  </section>
+</div>
+{% endblock %}

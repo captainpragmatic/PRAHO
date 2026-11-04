@@ -40,11 +40,15 @@
         manager: apt
 
     - name: Purge unused authentication and file transfer packages
+      vars:
+        # The unchanged base profile keeps its existing purge. An explicitly selected
+        # extension leaves legacy protection until qualified CrowdSec retirement.
+        praho_unused_auth_pattern: "{{ '^(usermin|proftpd.*)$' if security_policy_version | default('virtualmin-web-only-v2') == 'virtualmin-web-only-v2+crowdsec-v1' else '^(fail2ban|usermin|proftpd.*)$' }}"
       ansible.builtin.apt:
-        name: "{{ ansible_facts.packages.keys() | select('match', '^(fail2ban|usermin|proftpd.*)$') | list }}"
+        name: "{{ ansible_facts.packages.keys() | select('match', praho_unused_auth_pattern) | list }}"
         state: absent
         purge: true
-      when: ansible_facts.packages.keys() | select('match', '^(fail2ban|usermin|proftpd.*)$') | list | length > 0
+      when: ansible_facts.packages.keys() | select('match', praho_unused_auth_pattern) | list | length > 0
 
     - name: Install system update and password policy tools
       ansible.builtin.apt:

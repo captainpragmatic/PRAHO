@@ -38,3 +38,12 @@ Match User praho-webmin-tunnel
 Match all
 # END PRAHO WEBMIN TUNNEL
 {% endif %}
+{% if ssh_crowdsec_gateway_enabled | default(false) %}
+# BEGIN PRAHO CROWDSEC GATEWAY
+Match User praho-crowdsec
+    ForceCommand sudo -n /usr/local/libexec/praho-crowdsec-gateway
+    DisableForwarding yes
+    PermitTTY no
+Match all
+# END PRAHO CROWDSEC GATEWAY
+{% endif %}

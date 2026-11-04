@@ -5,7 +5,7 @@
 import io
 import logging
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import qrcode
 import qrcode.image.svg
@@ -142,6 +142,7 @@ class MFADisableSerializer(serializers.Serializer):
 
     token = serializers.CharField(max_length=8, min_length=6)
     password = serializers.CharField(write_only=True, trim_whitespace=False)
+    failure_category: Literal["credentials", "second_factor"] | None = None
 
     def validate(self, data: dict[str, Any]) -> dict[str, Any]:
         """Validate password and 2FA token on the user row the view has locked."""
@@ -152,12 +153,19 @@ class MFADisableSerializer(serializers.Serializer):
         # never tells a right password from a wrong one. The code is checked only after the
         # password, so a backup code offered with a wrong password is not spent.
         incorrect = _("The password or the code is incorrect.")
-        if not user.two_factor_enabled or not check_password_locked(
-            user, data["password"], source=self.context.get("check", "mfa_disable")
-        ):
+        if not user.two_factor_enabled or user.is_account_locked():
+            raise serializers.ValidationError(incorrect)
+        token = data["token"]
+        valid_shape = token.isdigit() and len(token) in (TOTP_TOKEN_LENGTH, BACKUP_CODE_LENGTH)
+        if not check_password_locked(user, data["password"], source=self.context.get("check", "mfa_disable")):
+            self.failure_category = "credentials"
             raise serializers.ValidationError(incorrect)
 
-        if not MFAService.verify_mfa_code(user, data["token"], self.context.get("request"))["success"]:
+        factor = MFAService.verify_mfa_code(user, token, self.context.get("request"))
+        if not factor["success"]:
+            # A limiter refusal checks no factor; malformed input also verifies no code.
+            if valid_shape and factor["success"] is False and not factor["rate_limited"]:
+                self.failure_category = "second_factor"
             raise serializers.ValidationError(incorrect)
 
         proof_passed(user)

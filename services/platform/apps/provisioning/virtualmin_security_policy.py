@@ -12,6 +12,15 @@ from typing import Any, NoReturn, cast
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 
+from .crowdsec_policy import (
+    BASE_PROFILE,
+    CROWDSEC_PROFILE,
+    CROWDSEC_SSH_CONFIG_DIGESTS,
+    GATEWAY_COMMAND,
+    gateway_key_fingerprint,
+    verify_configuration,
+    verify_owned_firewall,
+)
 from .virtualmin_security import _evidence_digest
 from .virtualmin_validators import WEB_ONLY_VIRTUALMIN_FEATURES
 
@@ -486,9 +495,21 @@ def _qualify_native_network(rows: list[str]) -> None:
             _network_fail("Unclassified native packet rule: " + json.dumps(rule, sort_keys=True)[:450])
 
 
-def verify_network_ingress(firewall: list[str]) -> None:
+def verify_network_ingress(
+    firewall: list[str],
+    *,
+    policy_version: str = BASE_PROFILE,
+    protected_cidrs: list[str] | None = None,
+) -> None:
     """Qualify ingress without changing or blanket-rejecting unrelated NAT/routing policy."""
     try:
+        owned = _network_json(firewall, "PRAHO_CROWDSEC_NFT")
+        if policy_version == CROWDSEC_PROFILE:
+            if protected_cidrs is None:
+                _network_fail("The complete reviewed CrowdSec protected inventory is required")
+            verify_owned_firewall(owned, protected_cidrs)
+        elif policy_version != BASE_PROFILE or owned:
+            _network_fail("CrowdSec requires its explicitly selected qualification extension")
         if firewall.count("PRAHO_NETWORK_V2") != 1 or firewall.count("PRAHO_NETWORK_COMPLETE") != 1:
             observed = [
                 row.removeprefix("Network preparation required: ")
@@ -518,9 +539,43 @@ def verify_network_ingress(firewall: list[str]) -> None:
         _network_fail("Malformed network topology evidence: " + str(error)[:120])
 
 
-def network_preparation(firewall: list[str]) -> list[str]:
+def network_preparation(
+    firewall: list[str],
+    *,
+    policy_version: str = BASE_PROFILE,
+    protected_cidrs: list[str] | None = None,
+) -> list[str]:
     try:
-        verify_network_ingress(firewall)
+        verify_network_ingress(firewall, policy_version=policy_version, protected_cidrs=protected_cidrs)
+    except ValidationError as error:
+        return error.messages
+    return []
+
+
+def verify_selected_network(
+    evidence: dict[str, object],
+    policy_version: str,
+    configuration_digest: str,
+    cidrs: list[str],
+) -> None:
+    protected = (
+        verify_configuration(cast("list[str]", evidence["services"]), configuration_digest, cidrs)
+        if policy_version == CROWDSEC_PROFILE
+        else None
+    )
+    verify_network_ingress(
+        cast("list[str]", evidence["firewall"]), policy_version=policy_version, protected_cidrs=protected
+    )
+
+
+def selected_network_preparation(
+    evidence: dict[str, object],
+    policy_version: str,
+    configuration_digest: str,
+    cidrs: list[str],
+) -> list[str]:
+    try:
+        verify_selected_network(evidence, policy_version, configuration_digest, cidrs)
     except ValidationError as error:
         return error.messages
     return []
@@ -559,7 +614,7 @@ def _verify_services(services: list[str]) -> None:
         _fail()
 
 
-def _verify_listeners(listeners: list[str]) -> None:
+def _verify_listeners(listeners: list[str], policy_version: str = BASE_PROFILE) -> None:
     for line in listeners:
         fields = line.split()
         if len(fields) < MIN_SOCKET_FIELDS or fields[0] not in {"tcp", "udp"}:
@@ -568,6 +623,8 @@ def _verify_listeners(listeners: list[str]) -> None:
         address = address.strip("[]").split("%", 1)[0]
         # This compares listener evidence; it does not open or bind a socket.
         loopback = address not in {"*", "0.0.0.0", "::"} and ipaddress.ip_address(address).is_loopback  # nosec B104 - reject wildcard evidence before checking loopback.
+        if policy_version == CROWDSEC_PROFILE and fields[0] == "tcp" and address == "127.0.0.1" and port == "8080":
+            continue
         if fields[0] == "tcp" and (port in {"80", "443", "9876", "10000"} or (loopback and port in LOOPBACK_TCP_PORTS)):
             continue
         if fields[0] == "udp" and ((loopback and port == "53") or port in {"68", "546"}):
@@ -576,16 +633,17 @@ def _verify_listeners(listeners: list[str]) -> None:
     listening_ports = {line.split()[4].rsplit(":", 1)[1] for line in listeners if line.startswith("tcp ")}
     if not {"80", "9876", "10000"} <= listening_ports:
         _fail()
+    if policy_version == CROWDSEC_PROFILE and "8080" not in listening_ports:
+        _fail()
 
 
-def _verify_firewall(firewall: list[str], cidrs: list[str]) -> None:
+def _verify_firewall(firewall: list[str], cidrs: list[str], policy_version: str = BASE_PROFILE) -> None:
     if not {"Status: active", "PRAHO_NFT_INPUT_INSPECTED"} <= set(firewall):
         _fail()
-    if any(
-        line.startswith("NFT input chain: ")
-        and line not in {"NFT input chain: ip:filter:INPUT", "NFT input chain: ip6:filter:INPUT"}
-        for line in firewall
-    ):
+    allowed_input = {"NFT input chain: ip:filter:INPUT", "NFT input chain: ip6:filter:INPUT"}
+    if policy_version == CROWDSEC_PROFILE:
+        allowed_input |= {"NFT input chain: ip:praho_crowdsec4:input", "NFT input chain: ip6:praho_crowdsec6:input"}
+    if any(line.startswith("NFT input chain: ") and line not in allowed_input for line in firewall):
         _fail()
     for family, ipv6 in (("IPV4", False), ("IPV6", True)):
         start, end = f"PRAHO_{family}_FILTER_BEGIN", f"PRAHO_{family}_FILTER_END"
@@ -600,15 +658,20 @@ def _ssh_fail() -> NoReturn:
     )
 
 
-def _ssh_rows(services: list[str]) -> dict[str, list[object]]:
+def _ssh_rows(services: list[str], policy_version: str = BASE_PROFILE) -> dict[str, list[object]]:
     rows: dict[str, list[object]] = defaultdict(list)
     for line in services:
         if not line.startswith("PRAHO_SSH_"):
             continue
         tag, separator, payload = line.partition(" ")
-        if not separator or tag not in {
+        allowed_tags = {
             "PRAHO_SSH_" + name for name in ("GLOBAL", "ROOT", "TUNNEL", "ACCOUNT", "KEYS", "KEY", "CONFIG", "STARTUP")
-        }:
+        }
+        if policy_version == CROWDSEC_PROFILE:
+            allowed_tags |= {
+                "PRAHO_SSH_" + name for name in ("GATEWAY", "GATEWAY_ACCOUNT", "GATEWAY_KEYS", "GATEWAY_KEY")
+            }
+        if not separator or tag not in allowed_tags:
             _ssh_fail()
         try:
             rows[tag.removeprefix("PRAHO_SSH_")].append(json.loads(payload))
@@ -624,16 +687,20 @@ def _ssh_single(rows: dict[str, list[object]], name: str) -> dict[str, object]:
     return cast("dict[str, object]", values[0])
 
 
-def _verify_ssh_context(rows: dict[str, list[object]], name: str) -> list[str]:
+def _verify_ssh_context(rows: dict[str, list[object]], name: str, policy_version: str = BASE_PROFILE) -> list[str]:
     projection = _ssh_single(rows, name)
     # OpenSSH 10 uses the modern spelling; earlier supported releases print its alias.
     if projection.get("permitrootlogin") == ["prohibit-password"]:
         projection = {**projection, "permitrootlogin": ["without-password"]}
     expected = dict(SSH_BASELINE)
+    if policy_version == CROWDSEC_PROFILE:
+        expected["disableforwarding"] = ["no"]
     if name == "TUNNEL":
         expected.update(
             allowtcpforwarding=["local"], forcecommand=["/bin/false"], permittty=["no"], permitopen=["127.0.0.1:10000"]
         )
+    if name == "GATEWAY" and policy_version == CROWDSEC_PROFILE:
+        expected.update(forcecommand=[GATEWAY_COMMAND], permittty=["no"], disableforwarding=["yes"])
     files = projection.get("authorizedkeysfile")
     if files not in ([".ssh/authorized_keys"], [".ssh/authorized_keys .ssh/authorized_keys2"]):
         _ssh_fail()
@@ -642,7 +709,13 @@ def _verify_ssh_context(rows: dict[str, list[object]], name: str) -> list[str]:
     return cast("list[str]", files)[0].split()
 
 
-def verify_ssh_policy(services: list[str], expected_operator_fingerprints: list[str] | None) -> None:
+def verify_ssh_policy(
+    services: list[str],
+    expected_operator_fingerprints: list[str] | None,
+    *,
+    policy_version: str = BASE_PROFILE,
+    expected_gateway_fingerprint: str | None = None,
+) -> None:
     """Require effective auth/forwarding policy and the exact separately reviewed tunnel key set."""
     if (
         not isinstance(expected_operator_fingerprints, list)
@@ -654,15 +727,16 @@ def verify_ssh_policy(services: list[str], expected_operator_fingerprints: list[
         or len(set(expected_operator_fingerprints)) != len(expected_operator_fingerprints)
     ):
         _ssh_fail()
-    rows = _ssh_rows(services)
-    global_files = _verify_ssh_context(rows, "GLOBAL")
-    if _verify_ssh_context(rows, "ROOT") != global_files:
+    rows = _ssh_rows(services, policy_version)
+    global_files = _verify_ssh_context(rows, "GLOBAL", policy_version)
+    if _verify_ssh_context(rows, "ROOT", policy_version) != global_files:
         _ssh_fail()
-    key_files = _verify_ssh_context(rows, "TUNNEL")
+    key_files = _verify_ssh_context(rows, "TUNNEL", policy_version)
+    config_digests = CROWDSEC_SSH_CONFIG_DIGESTS if policy_version == CROWDSEC_PROFILE else SSH_CONFIG_DIGESTS
     startup = _ssh_single(rows, "STARTUP")
     if (
         key_files != global_files
-        or _ssh_single(rows, "CONFIG") != {"sha256": SSH_CONFIG_DIGESTS[" ".join(key_files)]}
+        or _ssh_single(rows, "CONFIG") != {"sha256": config_digests[" ".join(key_files)]}
         or set(startup) != {"canonical"}
         or startup["canonical"] is not True
     ):
@@ -694,22 +768,57 @@ def verify_ssh_policy(services: list[str], expected_operator_fingerprints: list[
         actual.append(key["fingerprint"])
     if sorted(actual) != sorted(expected_operator_fingerprints):
         _ssh_fail()
+    if policy_version == CROWDSEC_PROFILE:
+        _verify_gateway_ssh(rows, global_files, expected_gateway_fingerprint or gateway_key_fingerprint())
 
 
-def verify_evidence(
+def _verify_gateway_ssh(rows: dict[str, list[object]], key_files: list[str], fingerprint: str) -> None:
+    if _verify_ssh_context(rows, "GATEWAY", CROWDSEC_PROFILE) != key_files:
+        _ssh_fail()
+    account = _ssh_single(rows, "GATEWAY_ACCOUNT")
+    if (
+        set(account) != {"present", "name", "uid", "gid", "home", "shell"}
+        or account["present"] is not True
+        or account["name"] != "praho-crowdsec"
+        or any(type(account[key]) is not int or not 0 < cast("int", account[key]) < 2**32 for key in ("uid", "gid"))
+        or account["home"] != "/home/praho-crowdsec"
+        or account["shell"] != "/bin/sh"
+        or _ssh_single(rows, "GATEWAY_KEYS") != {"status": "complete", "files": key_files}
+        or rows.get("GATEWAY_KEY") != [{"fingerprint": fingerprint, "options": ["restrict"]}]
+    ):
+        _ssh_fail()
+
+
+def verify_evidence(  # noqa: PLR0913 -- independent operator, configuration and gateway identities remain explicit
     evidence: dict[str, object],
     username: str,
     cidrs: list[str],
     *,
     expected_operator_fingerprints: list[str] | None = None,
+    policy_version: str = BASE_PROFILE,
+    expected_configuration_digest: str = "",
+    expected_gateway_fingerprint: str | None = None,
 ) -> None:
     """Require native principal, service, listener and effective dual-stack firewall proof."""
-    _evidence_digest(evidence)
-    verify_network_ingress(cast("list[str]", evidence["firewall"]))
+    _evidence_digest(evidence, policy_version=policy_version)
+    services = cast("list[str]", evidence["services"])
+    protected = (
+        verify_configuration(services, expected_configuration_digest, cidrs)
+        if policy_version == CROWDSEC_PROFILE
+        else None
+    )
+    verify_network_ingress(
+        cast("list[str]", evidence["firewall"]), policy_version=policy_version, protected_cidrs=protected
+    )
     if username == "root" or evidence["versions"] != {"webmin": "2.670", "virtualmin": "8.3.0"}:
         _fail()
     _verify_principals(cast("list[dict[str, str]]", evidence["principals"]), username, cidrs)
-    _verify_services(cast("list[str]", evidence["services"]))
-    _verify_listeners(cast("list[str]", evidence["listeners"]))
-    _verify_firewall(cast("list[str]", evidence["firewall"]), cidrs)
-    verify_ssh_policy(cast("list[str]", evidence["services"]), expected_operator_fingerprints)
+    _verify_services(services)
+    _verify_listeners(cast("list[str]", evidence["listeners"]), policy_version)
+    _verify_firewall(cast("list[str]", evidence["firewall"]), cidrs, policy_version)
+    verify_ssh_policy(
+        services,
+        expected_operator_fingerprints,
+        policy_version=policy_version,
+        expected_gateway_fingerprint=expected_gateway_fingerprint,
+    )

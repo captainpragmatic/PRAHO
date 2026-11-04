@@ -208,7 +208,7 @@ class WebAuthnCredential(models.Model):
 
 
 class MFAStoreUnavailable(Exception):  # noqa: N818  # names the condition, like DatabaseError
-    """The counter store holding used codes and the attempt budget could not be reached.
+    """Stored verification material or the counter store could not be used.
 
     Nothing was decided: the code was neither accepted nor refused, so nobody is charged a
     failed attempt. Answered 503 by StoreUnavailableMiddleware, never as a wrong code.
@@ -314,8 +314,8 @@ class TOTPService:
         except MFAStoreUnavailable:
             raise
         except Exception as e:
-            logger.error(f"🔥 [TOTP] Verification error: {e}")
-            return False
+            logger.error("🔥 [TOTP] Verification unavailable (%s)", type(e).__name__)
+            raise MFAStoreUnavailable from e
 
     @staticmethod
     def verify_enrolment_code(user: "User", secret: str, token: str) -> bool:
@@ -360,11 +360,11 @@ class TOTPService:
             qr_img.save(qr_buffer, "PNG")
             qr_data = base64.b64encode(qr_buffer.getvalue()).decode()
 
-            logger.info(f"✅ [TOTP] QR code generated for {user.email}")
+            logger.info("✅ [TOTP] QR code generated")
             return qr_data
 
         except Exception as e:
-            logger.error(f"🔥 [TOTP] Failed to generate QR code for {user.email}: {e}")
+            logger.error("🔥 [TOTP] QR generation unavailable (%s)", type(e).__name__)
             raise
 
     @staticmethod
@@ -391,7 +391,7 @@ class TOTPService:
             data = base64.b64encode(buf.getvalue()).decode()
             return f"data:image/png;base64,{data}"
         except Exception as e:  # pragma: no cover - exercised by patched test
-            logger.error(f"🔥 [TOTP] QR image generation failed: {e}")
+            logger.error("🔥 [TOTP] QR image generation unavailable (%s)", type(e).__name__)
             return None
 
 
@@ -519,7 +519,7 @@ class WebAuthnService:
         It used to store any well-formed payload with public_key="unknown". Registration
         goes through verify_registration_response, which needs a verification library.
         """
-        logger.warning(f"📱 [WebAuthn] Unverified registration refused for {user.email}")
+        logger.warning("📱 [WebAuthn] Unverified registration refused")
         return False
 
     @staticmethod
@@ -563,7 +563,7 @@ class WebAuthnService:
                 user=user, credential_id=credential_id, is_active=True
             ).first()
             if not credential_id or credential is None:
-                logger.warning(f"📱 [WebAuthn] Unknown credential for {user.email}")
+                logger.warning("📱 [WebAuthn] Unknown credential")
                 return False
 
             result = webauthn.verify_authentication_response(
@@ -573,20 +573,20 @@ class WebAuthnService:
             )
             new_sign_count = result.get("new_sign_count") if result and result.get("verified") else None
             if type(new_sign_count) is not int:
-                logger.warning(f"📱 [WebAuthn] Authentication verification failed for {user.email}")
+                logger.warning("📱 [WebAuthn] Authentication verification failed")
                 return False
             if credential.sign_count > 0 and new_sign_count <= credential.sign_count:
-                logger.error(f"📱 [WebAuthn] Signature counter did not advance for {user.email}")
+                logger.error("📱 [WebAuthn] Signature counter did not advance")
                 return False
 
             credential.sign_count = new_sign_count
             credential.last_used = timezone.now()
             credential.save(update_fields=["last_used", "sign_count"])
-            logger.info(f"✅ [WebAuthn] Authentication verified for {user.email}")
+            logger.info("✅ [WebAuthn] Authentication verified")
             return True
 
         except Exception as e:
-            logger.error(f"🔥 [WebAuthn] Authentication verification error for {user.email}: {e}")
+            logger.error("🔥 [WebAuthn] Authentication verification unavailable (%s)", type(e).__name__)
             return False
 
     @staticmethod
@@ -645,7 +645,7 @@ class WebAuthnService:
                 MFAService.apply_state_change(cred.user, action="rotate")
             return {"success": True, "credential": cred}
         except Exception as e:  # pragma: no cover
-            logger.error(f"🔥 [WebAuthn] Registration response verification error: {e}")
+            logger.error("🔥 [WebAuthn] Registration verification unavailable (%s)", type(e).__name__)
             return {"success": False, "error": "Internal error"}
 
 
@@ -798,11 +798,11 @@ class MFAService:
                 ),
             )
 
-            logger.info(f"✅ [MFA] TOTP enabled for user {user.email}")
+            logger.info("✅ [MFA] TOTP enabled")
             return secret, backup_codes
 
         except Exception as e:
-            logger.error(f"🔥 [MFA] Failed to enable TOTP for user {user.email}: {e}")
+            logger.error("🔥 [MFA] TOTP enablement unavailable (%s)", type(e).__name__)
             raise
 
     @staticmethod
@@ -878,13 +878,11 @@ class MFAService:
                 ),
             )
 
-            logger.warning(
-                f"⚠️ [MFA] TOTP disabled for user {user.email} by {admin_user.email if admin_user else 'self'}"
-            )
+            logger.warning("⚠️ [MFA] TOTP disabled")
             return True
 
         except Exception as e:
-            logger.error(f"🔥 [MFA] Failed to disable TOTP for user {user.email}: {e}")
+            logger.error("🔥 [MFA] TOTP disablement unavailable (%s)", type(e).__name__)
             raise
 
     @staticmethod
@@ -923,11 +921,11 @@ class MFAService:
                 )
             )
 
-            logger.info(f"✅ [MFA] Generated {len(codes)} backup codes for {user.email}")
+            logger.info("✅ [MFA] Generated %s backup codes", len(codes))
             return codes
 
         except Exception as e:
-            logger.error(f"🔥 [MFA] Failed to generate backup codes for {user.email}: {e}")
+            logger.error("🔥 [MFA] Backup-code generation unavailable (%s)", type(e).__name__)
             raise
 
     @staticmethod
@@ -941,8 +939,8 @@ class MFAService:
         try:
             with transaction.atomic():
                 AuditService.log_2fa_event(audit_request)
-        except Exception:
-            logger.exception("🔥 [MFA] 2FA audit write failed; the verification result stands")
+        except Exception as error:
+            logger.error("🔥 [MFA] 2FA audit unavailable (%s); the verification result stands", type(error).__name__)
 
     @staticmethod
     def verify_mfa_code(user: "User", code: str, request: HttpRequest | None = None) -> dict[str, Any]:
@@ -973,7 +971,7 @@ class MFAService:
             # Rate limiting check: refused without checking the code, and audited as a failure
             if not MFAService._check_rate_limit(user):
                 result["rate_limited"] = True
-                logger.warning(f"⚠️ [MFA] Rate limit exceeded for user {user.email}")
+                logger.warning("⚠️ [MFA] Verification rate limit exceeded")
                 MFAService._log_2fa_event_isolated(
                     TwoFactorAuditRequest(
                         event_type="2fa_verification_failed",
@@ -1041,18 +1039,17 @@ class MFAService:
             )
 
             if result["success"]:
-                logger.info(f"✅ [MFA] Successful {result['method']} verification for {user.email}")
+                logger.info("✅ [MFA] Successful %s verification", result["method"])
             else:
-                logger.warning(f"⚠️ [MFA] Failed verification for {user.email}")
+                logger.warning("⚠️ [MFA] Failed verification")
 
             return result
 
         except MFAStoreUnavailable:
             raise  # Nothing was decided; StoreUnavailableMiddleware answers 503.
         except Exception as e:
-            logger.error(f"🔥 [MFA] Verification error for {user.email}: {e}")
-            result["success"] = False
-            return result
+            logger.error("🔥 [MFA] Verification unavailable (%s)", type(e).__name__)
+            raise MFAStoreUnavailable from e
 
     @staticmethod
     def generate_qr_code(user: "User", secret: str) -> str:
@@ -1113,7 +1110,7 @@ class MFAService:
         # In the counter store, not the cache: a cull or a cache clear must not hand the budget back.
         attempts = _counters_call(lambda: counters.increment(f"mfa_attempts:{user.id}", _ATTEMPT_WINDOW_SECONDS))
         if attempts > MAX_LOGIN_ATTEMPTS:  # Max attempts per 5 minutes, this one included
-            logger.error(f"🔥 [MFA] Rate limit exceeded for user {user.email}")
+            logger.error("🔥 [MFA] Verification rate limit exceeded")
             return False
         return True
 

@@ -1,0 +1,4 @@
+# Preserve upstream cryptographic inputs byte-for-byte, including signed whitespace.
+InRelease binary
+repository-key.asc binary
+*.gz binary

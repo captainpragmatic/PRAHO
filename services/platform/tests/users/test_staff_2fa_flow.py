@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
@@ -403,7 +402,7 @@ class TwoFactorCopyTests(StaffTestBase):
     CACHES=LOCMEM,
 )
 class PortalCredentialRefusalTests(HMACTestMixin, StaffTestBase):
-    """Through the Portal API: one answer for both factors, and the failed attempt stays audited.
+    """One public answer for both factors, private detection categories and committed audit rows.
 
     The refusal used to raise inside the transaction that would have applied the change, which
     rolled back the failed-verification audit row with it.
@@ -422,8 +421,11 @@ class PortalCredentialRefusalTests(HMACTestMixin, StaffTestBase):
             wrong_code = self.portal_post(path, {"user_id": self.user.pk, "password": PASSWORD, "token": "00000000"})
             with self.subTest(path=path):
                 self.assertEqual((wrong_password.status_code, wrong_code.status_code), (400, 400))
-                self.assertEqual(wrong_password.json(), wrong_code.json())
-                self.assertIn(GENERIC_ERROR, json.dumps(wrong_code.json()))
+                password_answer, code_answer = wrong_password.json(), wrong_code.json()
+                self.assertEqual(password_answer.pop("failure_category"), "credentials")
+                self.assertEqual(code_answer.pop("failure_category"), "second_factor")
+                self.assertEqual(password_answer, code_answer)
+                self.assertEqual(code_answer, {"non_field_errors": [GENERIC_ERROR]})
         self.assertEqual(AuditEvent.objects.filter(action="2fa_verification_failed", user=self.user).count(), 2)
         self.user.refresh_from_db()
         self.assertTrue(self.user.two_factor_enabled)

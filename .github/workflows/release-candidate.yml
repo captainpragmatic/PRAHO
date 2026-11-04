@@ -121,7 +121,8 @@ jobs:
       - name: Set up Python and install dependencies
         run: |
           uv python install
-          uv sync --group platform --group dev
+          # The whole Platform suite includes the isolated real Portal response consumer.
+          uv sync --group platform --group portal --group dev
 
       - name: Whole platform suite on PostgreSQL
         run: make test-platform-postgres-full
