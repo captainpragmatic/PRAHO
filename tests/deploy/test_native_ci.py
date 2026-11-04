@@ -72,6 +72,25 @@ def test_native_ci_qualifies_each_topology_in_parallel_with_no_missing_profile()
     assert native.get("env", {}).get("PRAHO_NATIVE_ACCEPTANCE_PROFILE") == "${{ matrix.profile }}"
 
 
+@pytest.mark.parametrize("workflow", ["integration.yml", "nightly.yml"])
+def test_general_integration_installs_the_pinned_transport_collection_before_tests(workflow: str) -> None:
+    jobs = yaml.safe_load((ROOT / ".github/workflows" / workflow).read_text())["jobs"]
+    matching = [
+        job
+        for job in jobs.values()
+        if any("make test-integration" in step.get("run", "") for step in job.get("steps", []))
+    ]
+    assert len(matching) == 1
+    commands = [step.get("run", "") for step in matching[0]["steps"]]
+    tests = next(index for index, command in enumerate(commands) if "make test-integration" in command)
+    install = [
+        index
+        for index, command in enumerate(commands)
+        if "ansible-galaxy" in command and "ansible.posix:2.2.0" in command
+    ]
+    assert len(install) == 1 and install[0] < tests, "A fresh runner has ansible-core but no transport collection"
+
+
 @pytest.mark.parametrize("general", ["success", "failure", "cancelled", "skipped"])
 @pytest.mark.parametrize("native", ["success", "failure", "cancelled", "skipped"])
 def test_required_integration_gate_only_passes_when_both_real_jobs_succeed(general: str, native: str) -> None:

@@ -175,6 +175,10 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y gettext
 
+    - name: Install the pinned native transport collection
+      # A staging checkout may predate new Make targets or controller dependencies.
+      run: uv tool run --from ansible-core==2.20.6 ansible-galaxy collection install ansible.posix:2.2.0
+
     - name: Full lint (every make lint phase)
       run: make lint
 
