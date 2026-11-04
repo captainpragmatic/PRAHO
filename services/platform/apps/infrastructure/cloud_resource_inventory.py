@@ -6,6 +6,7 @@ relationships, never permission to delete. Provider payloads are reduced before 
 
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field, replace
@@ -31,6 +32,15 @@ MAX_RESOURCE_PAGES = 100
 MAX_RESOURCES = 20000
 MAX_RESOURCE_ID_LENGTH = 128
 MAX_CURSOR_LENGTH = 4096
+_ERROR_CODE_PATTERN = re.compile(r"[a-z][a-z0-9_]{0,63}")
+
+
+def _error_label(error: BaseException) -> str:
+    label = type(error).__name__
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and _ERROR_CODE_PATTERN.fullmatch(code):
+        return f"{label} ({code})"
+    return label
 
 
 @dataclass(frozen=True)
@@ -278,7 +288,7 @@ class CloudResourceClient:
                         resources[resource.key] = resource
             return Ok(sorted(resources.values(), key=lambda item: item.key))
         except Exception as error:
-            return Err(f"Provider inventory incomplete: {type(error).__name__}")
+            return Err(f"Provider inventory incomplete: {_error_label(error)}")
 
     def _labels(self, collection: str, row: dict[str, object]) -> dict[str, str]:
         labels = row.get("labels", {})
@@ -457,6 +467,18 @@ class CloudResourceClient:
             raise ValueError("Provider resource lookup returned a different ID")
         return row
 
+    def confirm_absent(self, kind: ResourceKind, resource_id: str) -> Result[bool, str]:
+        try:
+            deadline = time.monotonic() + self.poll_timeout
+            while True:
+                if self.read_exact(kind, resource_id) is None:
+                    return Ok(True)
+                if time.monotonic() >= deadline:
+                    return Err("resource still present")
+                self.sleep(2)
+        except Exception as error:
+            return Err(f"absence read failed: {_error_label(error)}")
+
     def delete_exact(self, kind: ResourceKind, resource_id: str) -> Result[bool, str]:
         try:
             if kind == "backup" and self.provider == "vultr":
@@ -465,17 +487,20 @@ class CloudResourceClient:
             reply = self.request("DELETE", path)
             if reply.status == HTTPStatus.NOT_FOUND:
                 return Ok(True)
-            if reply.status not in {200, 202, 204}:
-                return Err(f"Provider deletion returned HTTP {reply.status}")
-            deadline = time.monotonic() + self.poll_timeout
-            while True:
-                if self.read_exact(kind, resource_id) is None:
-                    return Ok(True)
-                if time.monotonic() >= deadline:
-                    return Err("Provider accepted deletion but resource absence is unconfirmed")
-                self.sleep(2)
+            if reply.status in {200, 202, 204}:
+                absent = self.confirm_absent(kind, resource_id)
+                if absent.is_err():
+                    return Err(f"Provider accepted deletion but resource absence is unconfirmed: {absent.unwrap_err()}")
+                return absent
+            message = f"Provider deletion returned HTTP {reply.status}"
         except Exception as error:
-            return Err(f"Provider deletion unconfirmed: {type(error).__name__}")
+            message = f"Provider deletion unconfirmed: {_error_label(error)}"
+        # A refused or failed DELETE can still have taken effect; only structured absence proves it.
+        try:
+            gone = self.read_exact(kind, resource_id) is None
+        except Exception:
+            gone = False  # The re-read proves nothing; the original error stands.
+        return Ok(True) if gone else Err(message)
 
     def retain_backup(self, backup_id: str) -> Result[str, str]:
         """Convert an existing restore point; never create a new final snapshot implicitly."""
@@ -503,4 +528,4 @@ class CloudResourceClient:
                     return Err("Backup conversion has not produced a verified durable snapshot")
                 self.sleep(2)
         except Exception as error:
-            return Err(f"Backup retention unconfirmed: {type(error).__name__}")
+            return Err(f"Backup retention unconfirmed: {_error_label(error)}")
