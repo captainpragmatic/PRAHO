@@ -266,6 +266,10 @@ jobs:
         retention-days: 30
 
     - name: Integration test suite (make test-integration)
+      env:
+        # The required native step above already executes these suites. Keep every other
+        # Docker suite in the aggregate and leave local Make defaults unchanged.
+        PYTEST_ADDOPTS: --ignore-glob=tests/deploy/test_crowdsec*_docker.py
       run: make test-integration
 
     - name: Upload integration test reports

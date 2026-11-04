@@ -210,6 +210,19 @@ worker events, requires actual rotation and verifies that the shared inode stays
 stable. No writer retry, timeout budget or runtime protection changed. Final
 required checks still run on the published head and its queued squash commit.
 
+The required CI native phase passed on GitHub's amd64 runner. Inspection of the
+longer aggregate phase then found that `make test-integration` also collects
+`tests/deploy/`, repeating the same 44 CrowdSec native cases. CI now excludes
+exactly those files from that aggregate step, after their mandatory dedicated
+execution. Local Make defaults and all unrelated Docker coverage remain intact.
+Actual collection proves that 44 dedicated cases and 1,600 aggregate cases are
+disjoint and reproduce the full 1,644-case set, including all 36 other
+`*_docker.py` cases and all 53 Caddy cases. Generated UUID parameter labels are
+normalized without collapsing distinct cases for this comparison. The workflow
+guard was observed failing before the scoped exclusion; all 52 CI-contract
+tests pass afterward. The revised required job must still finish on its final
+head and queued commit.
+
 GitGuardian's GitHub App flags two public
 `CROWDSEC_SSH_CONFIG_DIGESTS` values as generic high-entropy secrets. These are
 SHA-256 fingerprints of the complete canonical sshd configurations for the two
