@@ -34206,3 +34206,11 @@ msgstr "Actualizați verificarea utilizării"
 #| msgid "Request data deletion"
 msgid "Request temporary relief"
 msgstr "Solicitați resurse suplimentare temporare"
+
+#: apps/audit/models.py:515
+msgid "Plan Change Payment Binding Rejected"
+msgstr "Asocierea plății pentru schimbarea planului a fost refuzată"
+
+#: apps/audit/models.py:516
+msgid "Plan Change Submission Conflict"
+msgstr "Conflict la trimiterea cererii de schimbare a planului"

@@ -9,8 +9,6 @@ from typing import Any
 from django.db import connection, transaction
 from django.utils import timezone
 
-from apps.customers.models import Customer
-
 from .invoice_models import Invoice
 from .payment_models import Payment
 from .plan_change_models import PlanChange
@@ -73,6 +71,9 @@ def record_refund_review(refund: Refund, *, using: str) -> PlanChangeReviewEvent
 
 def process_financial_review(event_id: str) -> None:
     """Resume the durable event after its original writer has committed."""
+
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: runtime model.
+
     from .plan_change_lifecycle import _cancel_context  # noqa: PLC0415 -- Existing document-first admission.
 
     if connection.in_atomic_block:

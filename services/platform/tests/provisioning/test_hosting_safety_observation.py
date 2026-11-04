@@ -3,6 +3,7 @@
 from copy import deepcopy
 from datetime import timedelta
 from threading import Event
+from unittest import skipUnless
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -382,6 +383,7 @@ class HostingSafetyObservationTests(HostingSafetyObservationFixture, Transaction
         with self.assertRaises(ValidationError):
             VirtualminProvisioningJob.objects.filter(pk=job.pk).update(id=uuid4())
 
+    @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks and observed blocker PIDs")
     def test_waited_claim_rechecks_epoch_before_any_native_read(self):
         self.publish_canonical()
         job = self.request()
@@ -401,6 +403,7 @@ class HostingSafetyObservationTests(HostingSafetyObservationFixture, Transaction
             self.assertEqual(pending.result(timeout=30), ("failed", 0))
         self.assertIsNone(current_safety_used_bytes(self.service))
 
+    @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks and observed blocker PIDs")
     def test_waited_publication_rechecks_changed_epoch_after_real_probe(self):
         self.publish_canonical()
         job = self.request()
@@ -610,6 +613,7 @@ class HostingSafetyNativeAdmissionTests(HostingSafetyObservationFixture, Transac
 
         self.assertEqual(self.run_observer(observation, effect=delete), ("failed", 1))
 
+    @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks and observed blocker PIDs")
     def test_waited_public_backup_sees_committed_running_read_under_account_mutex(self):
         observation = self.request()
         writer, start = backend_pid(), Event()
@@ -630,6 +634,7 @@ class HostingSafetyNativeAdmissionTests(HostingSafetyObservationFixture, Transac
         self.assertIn("safety observation", result.unwrap_err())
         self.assertFalse(VirtualminProvisioningJob.objects.filter(operation="backup_domain").exists())
 
+    @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks and observed blocker PIDs")
     def test_waited_public_read_yields_to_committed_backup_under_account_mutex(self):
         writer, start = backend_pid(), Event()
 

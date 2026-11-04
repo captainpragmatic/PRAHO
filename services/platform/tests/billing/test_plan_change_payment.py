@@ -4,6 +4,7 @@ import hashlib
 import json
 from datetime import timedelta
 from threading import Event
+from unittest import skipUnless
 from unittest.mock import patch
 from uuid import uuid4
 
@@ -262,6 +263,7 @@ class PlanChangeSubmissionTests(_PlanChangeSettlementFixture, TransactionTestCas
         self.assertEqual(self.change_row.status, "applying_limits")
         self.assertIsNotNone(self.change_row.invoice_id)
 
+    @skipUnless(connection.vendor == "postgresql", "Requires independent PostgreSQL READ COMMITTED sessions")
     def test_simultaneous_clicks_have_one_provider_call_while_first_is_outside_transaction(self):
         entered, release = Event(), Event()
 

@@ -9,7 +9,7 @@ from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
@@ -19,11 +19,7 @@ from django.utils import timezone
 from django.utils.translation import gettext as _
 
 from apps.common.tax_service import TaxService, VATCalculationResult
-from apps.customers.models import Customer
-from apps.products.models import Product, ProductPrice
-from apps.provisioning.hosting_limit_models import ServiceHostingLimits
 from apps.provisioning.hosting_limit_policy import BYTES_PER_MIB
-from apps.provisioning.models import Service, ServicePlan
 
 from .metering_models import BillingCycle
 from .plan_change_catalog import PlanTarget, eligible_plan_targets
@@ -41,6 +37,11 @@ from .services import _build_customer_vat_info
 from .subscription_models import Subscription
 from .tax_evidence import derive_tax_category
 from .validators import log_security_event
+
+if TYPE_CHECKING:
+    from apps.customers.models import Customer
+    from apps.provisioning.models import Service
+
 
 QUOTE_TTL = timedelta(minutes=15)
 PAYMENT_AUTHORITY = timedelta(hours=1)
@@ -120,6 +121,10 @@ def _commercial_context(
     service_id: int, *, customer_id: int, actor_id: int
 ) -> Iterator[tuple[Customer, Subscription, Service]]:
     """New unpublished work owns no existing financial document lock."""
+
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.provisioning.models import Service  # noqa: PLC0415  # ADR-0007: runtime model.
+
     with transaction.atomic():
         Customer.all_objects.select_for_update(of=("self",), no_key=True).get(pk=customer_id)
         customer = validate_customer_actor(customer_id, actor_id)
@@ -145,6 +150,9 @@ def _validate_scope(subscription: Subscription, service: Service) -> None:
 
 
 def _lock_catalog(subscription: Subscription, target_product_id: UUID) -> None:
+    from apps.products.models import Product, ProductPrice  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.provisioning.models import ServicePlan  # noqa: PLC0415  # ADR-0007: runtime model.
+
     products = list(
         Product.objects.select_for_update(of=("self",), no_key=True)
         .filter(pk__in=(subscription.product_id, target_product_id))
@@ -168,6 +176,8 @@ def _lock_catalog(subscription: Subscription, target_product_id: UUID) -> None:
 
 
 def _profile(product_id: UUID) -> str:
+    from apps.products.models import Product  # noqa: PLC0415  # ADR-0007: runtime model.
+
     product = Product.objects.select_related("default_service_plan").get(pk=product_id)
     plan = product.default_service_plan
     if plan is None:
@@ -225,6 +235,8 @@ def first_uncommitted_renewal(subscription: Subscription, coverage: PlanCoverage
 def plan_change_options(
     service_id: int, *, customer_id: int, actor_id: int, at: datetime | None = None
 ) -> list[dict[str, Any]]:
+    from apps.provisioning.hosting_limit_models import ServiceHostingLimits  # noqa: PLC0415  # ADR-0007: runtime model.
+
     require_plan_change_acceptance()
     with _commercial_context(service_id, customer_id=customer_id, actor_id=actor_id) as (
         customer,
@@ -277,6 +289,10 @@ def _build_quote(  # noqa: PLR0913 -- Locked scope plus explicit submission/revi
     at: datetime,
 ) -> PlanChange:
     """Financial core; caller owns the commercial context and has proved native admission."""
+
+    from apps.products.models import Product  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.provisioning.hosting_limit_models import ServiceHostingLimits  # noqa: PLC0415  # ADR-0007: runtime model.
+
     if not transaction.get_connection().in_atomic_block:
         raise RuntimeError("A commercial quote requires its locked business context")
     request = {
@@ -421,6 +437,8 @@ def quote_plan_change(  # noqa: PLR0913 -- Authenticated scope, target, submissi
 def _validate_quoted_terms(
     change: PlanChange, subscription: Subscription, service: Service, *, at: datetime
 ) -> PlanTarget:
+    from apps.provisioning.hosting_limit_models import ServiceHostingLimits  # noqa: PLC0415  # ADR-0007: runtime model.
+
     if change.status != "quoted" or at >= min(change.expires_at, change.authority_expires_at):
         raise PlanChangeConflict(_("This quote is no longer awaiting acceptance. Request a fresh quote."))
     if (

@@ -13,10 +13,6 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from apps.customers.models import Customer
-from apps.provisioning.models import Service
-from apps.users.models import CustomerMembership, User
-
 from .metering_models import BillingCycle
 from .plan_change_models import PlanChange
 from .plan_change_payment_models import PlanChangePaymentAttempt
@@ -28,6 +24,10 @@ from .subscription_models import Subscription
 @contextmanager
 def _cancel_context(change_id: UUID | str) -> Iterator[PlanChange]:
     """An existing document owns admission; unpublished quotes own no document."""
+
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.provisioning.models import Service  # noqa: PLC0415  # ADR-0007: runtime model.
+
     for _retry in range(2):
         hint = PlanChange.objects.get(pk=change_id)
         if hint.proforma_id is not None:
@@ -48,6 +48,10 @@ def _cancel_context(change_id: UUID | str) -> Iterator[PlanChange]:
 
 
 def _cancel_authority(change: PlanChange, *, customer_id: int, actor_id: int, expected_fingerprint: str) -> None:
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.provisioning.models import Service  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.users.models import CustomerMembership, User  # noqa: PLC0415  # ADR-0007: runtime model.
+
     customer = Customer.all_objects.get(pk=change.customer_id)
     subscription = Subscription.objects.get(pk=change.subscription_id)
     service = Service.objects.get(pk=change.service_id)

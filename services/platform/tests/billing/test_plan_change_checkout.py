@@ -6,6 +6,7 @@ from datetime import timedelta
 from decimal import Decimal
 from threading import Event
 from types import SimpleNamespace
+from unittest import skipUnless
 from unittest.mock import MagicMock, patch
 
 import stripe
@@ -148,9 +149,11 @@ class PlanChangeCheckoutTests(_PlanChangeCheckoutFixture, TransactionTestCase):
         change.refresh_from_db()
         self.assertEqual(change.status, "applying_limits")
 
+    @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks and observed blocker PIDs")
     def test_actual_webhook_waits_for_document_owner_without_retaining_payment_lock(self):
         self.assert_fact_wait_releases_payment(status="succeeded")
 
+    @skipUnless(connection.vendor == "postgresql", "Requires PostgreSQL row locks and observed blocker PIDs")
     def test_signed_cancellation_waits_without_retaining_payment_lock(self):
         self.assert_fact_wait_releases_payment(status="canceled")
 

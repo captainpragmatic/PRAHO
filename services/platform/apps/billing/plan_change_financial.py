@@ -3,24 +3,25 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from apps.customers.models import Customer
-from apps.provisioning.hosting_limit_models import HostingLimitApplication
 from apps.provisioning.hosting_limit_policy import effective_disk_limit
 from apps.provisioning.hosting_parent_limits import held_parent_cap_repair_issued
-from apps.provisioning.virtualmin_migration_models import VirtualminMigration
 
 from .invoice_models import Invoice
 from .plan_change_coverage import invoice_has_paid_coverage
 from .plan_change_historical_coverage import original_plan_coverage
 from .plan_change_models import PlanChange
 from .subscription_models import Subscription
+
+if TYPE_CHECKING:
+    from apps.provisioning.hosting_limit_models import HostingLimitApplication
+
 
 COMMERCIAL_LIMIT_AUTHORITIES = frozenset({"paid_plan_change", "zero_due_plan_change", "scheduled_plan_change"})
 
@@ -57,6 +58,11 @@ def validate_preserved_plan_coverage(change: PlanChange) -> None:
 
 def _issued_frozen_migration_repair(application: HostingLimitApplication, parent: Mapping[str, Any]) -> bool:
     """Only a token-bound, issued parent may finish its already-approved cap repair."""
+
+    from apps.provisioning.virtualmin_migration_models import (  # noqa: PLC0415  # ADR-0007: runtime model.
+        VirtualminMigration,
+    )
+
     try:
         identifier = UUID(str(parent.get("migration_id", "")))
     except (ValueError, TypeError):
@@ -105,6 +111,9 @@ def commercial_source_refusal(application: HostingLimitApplication) -> str | Non
     persisted bindings before calling this function. They separately prove any
     mandatory issued repair or preauthorized decreasing expiry at the native boundary.
     """
+
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: runtime model.
+
     authority = application.authority
     reason = _("Financial coverage requires review before dispatching this plan's native limits.")
     if authority.get("kind") not in COMMERCIAL_LIMIT_AUTHORITIES:

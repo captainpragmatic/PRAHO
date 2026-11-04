@@ -7,7 +7,6 @@ from uuid import UUID
 
 from django.db.models import Q
 
-from apps.products.models import Product, ProductPrice, ProductRelationship
 from apps.provisioning.hosting_limit_assignments import assignment_terms_for_plans
 from apps.provisioning.hosting_limit_policy import HostingAssignmentTerms
 
@@ -25,6 +24,13 @@ class PlanTarget:
 
 def eligible_plan_targets(subscription: Subscription) -> list[PlanTarget]:
     """Database-only catalog selection; charge admission separately requires native proof."""
+
+    from apps.products.models import (  # noqa: PLC0415  # ADR-0007: runtime model.
+        Product,
+        ProductPrice,
+        ProductRelationship,
+    )
+
     current = Subscription.objects.select_related("product", "service__service_plan", "service__hosting_limits").get(
         pk=subscription.pk
     )

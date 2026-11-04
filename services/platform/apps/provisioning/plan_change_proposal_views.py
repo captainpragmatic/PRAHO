@@ -11,12 +11,9 @@ from django.views.decorators.cache import never_cache
 from django.views.decorators.http import require_GET
 
 from apps.billing.plan_change_catalog import eligible_plan_targets
-from apps.billing.plan_change_models import PlanChange
 from apps.billing.plan_change_quote_service import _tax_quote
-from apps.billing.subscription_models import Subscription
 from apps.common.decorators import billing_staff_required
 from apps.settings.services import SettingsService
-from apps.users.models import User
 from apps.users.services import portal_link
 
 from .service_models import Service
@@ -32,6 +29,10 @@ def _customer_checkout(path: str) -> str:
 @billing_staff_required
 @require_GET
 def service_plan_change_proposal(request: HttpRequest, pk: int) -> HttpResponse:
+    from apps.billing.plan_change_models import PlanChange  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.billing.subscription_models import Subscription  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.users.models import User  # noqa: PLC0415  # ADR-0007: runtime model.
+
     service = get_object_or_404(Service.objects.select_related("customer", "currency", "hosting_limits"), pk=pk)
     actor = cast(User, request.user)
     customer = service.customer

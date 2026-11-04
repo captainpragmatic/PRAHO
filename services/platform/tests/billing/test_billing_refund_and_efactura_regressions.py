@@ -5,16 +5,36 @@
 # ===============================================================================
 
 import logging
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
+from django.utils import timezone
 
 from apps.billing.gateways.stripe_gateway import StripeGateway
-from apps.billing.models import Payment, Refund
+from apps.billing.models import Payment, ProformaInvoice, Refund
 from apps.billing.proforma_service import generate_proforma_pdf, send_proforma_email
 from apps.billing.refund_service import RefundService
+from apps.notifications.services import EmailResult
 from tests.factories.billing_factories import create_currency, create_customer, create_invoice
 from tests.helpers.fsm_helpers import force_status
+
+
+def _email_proforma(number: str) -> ProformaInvoice:
+    customer = create_customer("Proforma Email Co")
+    customer.primary_email = "cust@example.com"
+    customer.save(update_fields=["primary_email"])
+    return ProformaInvoice.objects.create(
+        customer=customer,
+        currency=create_currency("RON"),
+        number=number,
+        bill_to_name=customer.name,
+        bill_to_email=customer.primary_email,
+        subtotal_cents=1000,
+        tax_cents=210,
+        total_cents=1210,
+        valid_until=timezone.now() + timedelta(days=30),
+    )
 
 # ===============================================================================
 # 1. Invoice amount_due Tests
@@ -154,34 +174,32 @@ class ProformaEmailTests(TestCase):
 
     def test_send_email_success(self):
         """Email sent with PDF attachment → returns True"""
-        mock_proforma = MagicMock()
-        mock_proforma.number = "PF-002"
-        mock_proforma.customer.primary_email = "cust@example.com"
+        proforma = _email_proforma("PF-002")
 
         with (
-            patch("apps.billing.pdf_generators.generate_proforma_pdf", return_value=b"PDF"),
-            patch("apps.notifications.services.EmailService.send_email") as mock_send,
+            patch("apps.billing.pdf_generators.generate_proforma_pdf") as mock_pdf,
+            patch("apps.notifications.services.EmailService.send_email", return_value=EmailResult(success=True)) as mock_send,
         ):
-            result = send_proforma_email(mock_proforma, "test@example.com")
+            result = send_proforma_email(proforma, "test@example.com")
             self.assertTrue(result)
             mock_send.assert_called_once()
+            mock_pdf.assert_not_called()
             call_kwargs = mock_send.call_args
             attachments = call_kwargs.kwargs.get("attachments") or call_kwargs[1].get("attachments")
             self.assertEqual(len(attachments), 1)
             # By reference: the PDF is made at send time (and again on a retry), from this proforma.
             self.assertEqual(
-                (attachments[0].source_type, attachments[0].source_id), ("proforma_pdf", str(mock_proforma.pk))
+                (attachments[0].source_type, attachments[0].source_id), ("proforma_pdf", str(proforma.pk))
             )
 
-    def test_send_email_pdf_failure_returns_false(self):
-        """PDF generation failure → returns False, doesn't raise"""
-        mock_proforma = MagicMock()
-        mock_proforma.number = "PF-003"
-        mock_proforma.customer.primary_email = "cust@example.com"
+    def test_send_email_enqueue_exception_returns_false(self):
+        """Queue failure returns False; PDF generation belongs to the later attachment worker."""
+        proforma = _email_proforma("PF-003")
 
-        with patch("apps.billing.pdf_generators.generate_proforma_pdf", side_effect=Exception("PDF error")):
-            result = send_proforma_email(mock_proforma)
+        with patch("apps.notifications.services.EmailService.send_email", side_effect=RuntimeError("Queue error")) as mock_send:
+            result = send_proforma_email(proforma)
             self.assertFalse(result)
+            mock_send.assert_called_once()
 
 
 # ===============================================================================
@@ -557,38 +575,27 @@ class ProformaEmailResultTests(TestCase):
 
     def test_email_service_failure_returns_false(self):
         """EmailService returns success=False → send_proforma_email returns False."""
-        mock_proforma = MagicMock()
-        mock_proforma.number = "PF-FAIL"
-        mock_proforma.customer.primary_email = "cust@example.com"
+        proforma = _email_proforma("PF-FAIL")
+        email_result = EmailResult(success=False, error="Recipient suppressed")
 
-        mock_email_result = MagicMock()
-        mock_email_result.success = False
-        mock_email_result.error = "Recipient suppressed"
-
-        with (
-            patch("apps.billing.pdf_generators.generate_proforma_pdf", return_value=b"PDF"),
-            patch("apps.notifications.services.EmailService.send_email", return_value=mock_email_result),
-        ):
-            result = send_proforma_email(mock_proforma, "suppressed@example.com")
+        with patch("apps.notifications.services.EmailService.send_email", return_value=email_result) as mock_send:
+            result = send_proforma_email(proforma, "suppressed@example.com")
 
         self.assertFalse(result)
+        mock_send.assert_called_once()
+        self.assertEqual(mock_send.call_args.kwargs["to"], "suppressed@example.com")
 
     def test_email_service_success_returns_true(self):
         """EmailService returns success=True → send_proforma_email returns True."""
-        mock_proforma = MagicMock()
-        mock_proforma.number = "PF-OK"
-        mock_proforma.customer.primary_email = "cust@example.com"
+        proforma = _email_proforma("PF-OK")
+        email_result = EmailResult(success=True)
 
-        mock_email_result = MagicMock()
-        mock_email_result.success = True
-
-        with (
-            patch("apps.billing.pdf_generators.generate_proforma_pdf", return_value=b"PDF"),
-            patch("apps.notifications.services.EmailService.send_email", return_value=mock_email_result),
-        ):
-            result = send_proforma_email(mock_proforma, "ok@example.com")
+        with patch("apps.notifications.services.EmailService.send_email", return_value=email_result) as mock_send:
+            result = send_proforma_email(proforma, "ok@example.com")
 
         self.assertTrue(result)
+        mock_send.assert_called_once()
+        self.assertEqual(mock_send.call_args.kwargs["to"], "ok@example.com")
 
 
 # ===============================================================================
