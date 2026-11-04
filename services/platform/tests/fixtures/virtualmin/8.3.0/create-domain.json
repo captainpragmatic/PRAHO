@@ -24,11 +24,13 @@
         "domain": "contract-create.praho.test",
         "logrotate": "",
         "mysql": "",
+        "no-email": "",
         "pass": "<redacted>",
         "quota": "1048576",
         "ssl": "",
         "template": "Default Settings",
         "unix": "",
+        "uquota": "1048576",
         "user": "contractcreate",
         "web": ""
       }
@@ -56,11 +58,13 @@
         "domain": "contract-create.praho.test",
         "logrotate": "",
         "mysql": "",
+        "no-email": "",
         "pass": "<redacted>",
         "quota": "1048576",
         "ssl": "",
         "template": "Default Settings",
         "unix": "",
+        "uquota": "1048576",
         "user": "contractcreate",
         "web": ""
       }
@@ -90,11 +94,13 @@
         "domain": "contract-other.praho.test",
         "logrotate": "",
         "mysql": "",
+        "no-email": "",
         "pass": "<redacted>",
         "quota": "1048576",
         "ssl": "",
         "template": "Default Settings",
         "unix": "",
+        "uquota": "1048576",
         "user": "contractother",
         "web": ""
       }
@@ -123,11 +129,13 @@
         "domain": "contract-other.praho.test",
         "logrotate": "",
         "mysql": "",
+        "no-email": "",
         "pass": "<redacted>",
         "quota": "1048576",
         "ssl": "",
         "template": "Default",
         "unix": "",
+        "uquota": "1048576",
         "user": "contractother",
         "web": ""
       }
