@@ -151,6 +151,19 @@ PRAGMAs accept only the fixed integer or an integer read from that connection,
 and the source form has its CSRF token as the first child. CSRF denial paths pass.
 These are narrow annotations, not disabled guards or test suppressions.
 
+## Remote review status
+
+The ten dependent draft PRs are indexed by [#861](https://github.com/captainpragmatic/PRAHO/pull/861).
+Required CI is still running. GitGuardian's GitHub App flags two public
+`CROWDSEC_SSH_CONFIG_DIGESTS` values as generic high-entropy secrets. These are
+SHA-256 fingerprints of the complete canonical sshd configurations for the two
+supported `AuthorizedKeysFile` variants; they contain no key or credential data.
+The focused `test_ssh_extension_has_exact_forced_command_and_preserves_base_digest`
+checks recompute both from the public template and pass. The findings require
+false-positive classification in the GitGuardian dashboard/check-run UI;
+repository ggshield ignore settings do not classify GitHub App incidents.
+No guard was disabled, hash obscured, or secret material added to resolve them.
+
 Romanian catalog additions use the standard gettext extraction names, retain
 existing translations and ship compiled runtime catalogs. The current master's
 read-only catalog guard is retained alongside the native CrowdSec CI target.
