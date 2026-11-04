@@ -33773,3 +33773,436 @@ msgstr "Înapoi la serviciu"
 #| msgid "Customer name"
 msgid "Customer plan change"
 msgstr "Schimbarea planului clientului"
+
+#: apps/notifications/models.py:251
+#| msgid "Hosting allowances"
+msgid "Hosting Allowance Warnings"
+msgstr "Avertizări privind resursele incluse în găzduire"
+
+#: apps/notifications/models.py:1043
+msgid "Receive optional hosting allowance warnings; critical allowance notices remain enabled."
+msgstr "Primiți avertizări opționale privind resursele incluse în găzduire; notificările critice rămân activate."
+
+#: apps/provisioning/hosting_limit_commercial.py:28
+msgid "The composed hosting allowance has no matching original financial authority."
+msgstr "Resursele de găzduire rezultate din combinare nu corespund unei autorizări financiare inițiale."
+
+#: apps/provisioning/hosting_limit_execution.py:849
+msgid "The temporary resource application has no exact expiry."
+msgstr "Aplicarea resurselor temporare nu are un termen exact de expirare."
+
+#: apps/provisioning/hosting_limit_execution.py:899
+msgid "Prepare the current quota helper protocol before applying temporary resources."
+msgstr "Pregătiți protocolul curent al utilitarului de cote înainte de a aplica resurse temporare."
+
+#: apps/provisioning/hosting_limit_execution.py:957
+msgid "The native helper did not verify the temporary resource protocol."
+msgstr "Utilitarul nativ nu a verificat protocolul pentru resurse temporare."
+
+#: apps/provisioning/hosting_limit_review.py:43
+#| msgid "The native quota job has no immutable hosting application."
+msgid "This migration has no supported immutable hosting-limit review."
+msgstr "Această migrare nu are o evaluare imuabilă acceptată a limitelor de găzduire."
+
+#: apps/provisioning/hosting_limit_review.py:71
+msgid "The migration's reviewed allowance or overlay evidence changed."
+msgstr "Resursele evaluate pentru migrare sau dovezile privind suplimentul temporar s-au modificat."
+
+#: apps/provisioning/hosting_limit_review.py:104
+msgid "Current temporary resources exceed the immutable native-parent review."
+msgstr "Resursele temporare curente depășesc evaluarea imuabilă a operațiunii native părinte."
+
+#: apps/provisioning/hosting_limit_review.py:110
+msgid "The existing reviewed overlay application has different terms."
+msgstr "Aplicarea existentă și evaluată a suplimentului temporar are alți termeni."
+
+#: apps/provisioning/hosting_raise_expiry.py:75
+#: apps/provisioning/hosting_raise_expiry.py:99
+msgid "Temporary resource expiry requires this owner's recorded operational native base."
+msgstr "Expirarea resurselor temporare necesită baza operațională nativă înregistrată pentru acest proprietar."
+
+#: apps/provisioning/hosting_raise_expiry.py:105
+msgid "The existing expiry application has different operational authority."
+msgstr "Aplicarea existentă a expirării are o altă autorizare operațională."
+
+#: apps/provisioning/hosting_raise_expiry.py:199
+msgid "Expiry requires its recorded finite operational base."
+msgstr "Expirarea necesită baza operațională finită înregistrată pentru aceasta."
+
+#: apps/provisioning/hosting_raise_expiry.py:205
+msgid "Expiry cannot increase either independently observed native hard cap."
+msgstr "Expirarea nu poate mări niciuna dintre limitele native stricte observate independent."
+
+#: apps/provisioning/hosting_raise_models.py:17
+#: apps/provisioning/hosting_raise_models.py:58
+#| msgid "Resolve the existing service plan change before requesting another."
+msgid "Use the reviewed hosting raise service to change temporary resources."
+msgstr "Folosiți serviciul cu evaluare pentru suplimentarea resurselor de găzduire pentru a modifica resursele temporare."
+
+#: apps/provisioning/hosting_raise_models.py:21
+#: apps/provisioning/hosting_raise_models.py:24
+#| msgid "Security reviews must be recorded individually."
+msgid "Temporary hosting raises must be reviewed individually."
+msgstr "Suplimentările temporare ale resurselor de găzduire trebuie evaluate individual."
+
+#: apps/provisioning/hosting_raise_models.py:27
+#: apps/provisioning/hosting_raise_models.py:62
+#| msgid "Hosting review history cannot be deleted."
+msgid "Temporary hosting raise identity and history cannot be reset."
+msgstr "Identitatea și istoricul suplimentării temporare a resurselor de găzduire nu pot fi resetate."
+
+#: apps/provisioning/hosting_raise_service.py:153
+msgid "Verify the current purchased base before requesting a new temporary allowance."
+msgstr "Verificați resursele de bază achiziționate în prezent înainte de a solicita resurse temporare noi."
+
+#: apps/provisioning/hosting_raise_service.py:166
+msgid "Refresh verified native safety and protocol 2 helpers before requesting temporary resources."
+msgstr "Actualizați verificarea siguranței native și utilitarele pentru protocolul 2 înainte de a solicita resurse temporare."
+
+#: apps/provisioning/hosting_raise_service.py:177
+#| msgid "Insufficient verified unreserved node capacity for this increase."
+msgid "Refresh sufficient unreserved node capacity before requesting temporary resources."
+msgstr "Actualizați verificarea capacității nerezervate suficiente pe nod înainte de a solicita resurse temporare."
+
+#: apps/provisioning/hosting_raise_service.py:187
+#| msgid "Administrator or manager authority is required for a resource-only exception."
+msgid "Administrator or manager authority is required for a temporary resource raise."
+msgstr "Suplimentarea temporară a resurselor necesită drepturi de administrator sau manager."
+
+#: apps/provisioning/hosting_raise_service.py:196
+#| msgid "Resource exceptions require an active customer."
+msgid "Temporary resources require the active service's current customer."
+msgstr "Resursele temporare necesită clientul curent al serviciului activ."
+
+#: apps/provisioning/hosting_raise_service.py:222
+msgid "Give a positive integer disk raise and an explicit reason."
+msgstr "Introduceți o suplimentare a spațiului pe disc ca număr întreg pozitiv și un motiv explicit."
+
+#: apps/provisioning/hosting_raise_service.py:224
+msgid "Load the current base and temporary resource versions first."
+msgstr "Încărcați mai întâi versiunile curente ale resurselor de bază și temporare."
+
+#: apps/provisioning/hosting_raise_service.py:226
+#| msgid "Select a valid timezone."
+msgid "Select an exact expiry with a timezone."
+msgstr "Selectați un termen exact de expirare, cu fus orar."
+
+#: apps/provisioning/hosting_raise_service.py:246
+#| msgid "The service's owner changed. Reload and authorize the current owner."
+msgid "The service's owner changed. Reload and review the current customer."
+msgstr "Proprietarul serviciului s-a schimbat. Reîncărcați pagina și verificați clientul curent."
+
+#: apps/provisioning/hosting_raise_service.py:251
+#| msgid "This submission was already used for a different request."
+msgid "This submission was already used for different temporary resource terms."
+msgstr "Această solicitare a fost deja folosită pentru alți termeni privind resursele temporare."
+
+#: apps/provisioning/hosting_raise_service.py:255
+msgid "New temporary hosting raises are disabled until rollout qualification is complete."
+msgstr "Suplimentările temporare noi ale resurselor de găzduire sunt dezactivate până la finalizarea verificărilor pentru lansare."
+
+#: apps/provisioning/hosting_raise_service.py:260
+#| msgid "The assigned allowance changed. Reload before submitting again."
+msgid "The base allowance or temporary resources changed. Reload before retrying."
+msgstr "Resursele de bază sau temporare s-au modificat. Reîncărcați pagina înainte de a reîncerca."
+
+#: apps/provisioning/hosting_raise_service.py:262
+msgid "Temporary disk resources are limited to one quarter of the allowance or 5 GiB."
+msgstr "Resursele temporare de disc sunt limitate la un sfert din spațiul inclus sau la 5 GiB."
+
+#: apps/provisioning/hosting_raise_service.py:273
+msgid "A temporary raise must expire within seven days of its first grant."
+msgstr "O suplimentare temporară trebuie să expire în cel mult șapte zile de la prima acordare."
+
+#: apps/provisioning/hosting_raise_service.py:275
+msgid "An active raise can only extend its expiry, with the same fixed disk amount."
+msgstr "Pentru o suplimentare activă se poate doar prelungi termenul de expirare, păstrând aceeași cantitate fixă de spațiu pe disc."
+
+#: apps/provisioning/hosting_raise_views.py:33
+#| msgid "Disk Capacity (GB)"
+msgid "Extra disk capacity (MiB)"
+msgstr "Spațiu suplimentar pe disc (MiB)"
+
+#: apps/provisioning/hosting_raise_views.py:46
+msgid "I authorize automatic removal of this temporary capacity at expiry, including if usage is still above the plan allowance."
+msgstr "Autorizez eliminarea automată a acestei capacități temporare la expirare, inclusiv dacă utilizarea depășește în continuare resursele incluse în plan."
+
+#: apps/provisioning/hosting_raise_views.py:58
+#, python-format
+msgid "Up to %(maximum)d MiB. An existing raise can only extend its expiry."
+msgstr "Cel mult %(maximum)d MiB. Pentru o suplimentare existentă se poate doar prelungi termenul de expirare."
+
+#: apps/provisioning/hosting_raise_views.py:60
+#, python-format
+#| msgid "Expiry notices"
+msgid "Expiry (%(timezone)s)"
+msgstr "Expirare (%(timezone)s)"
+
+#: apps/provisioning/hosting_raise_views.py:73
+#| msgid "Administrator or manager authority is required for a resource-only exception."
+msgid "Administrator or manager authority is required for temporary resource relief."
+msgstr "Acordarea temporară de resurse suplimentare necesită drepturi de administrator sau manager."
+
+#: apps/provisioning/hosting_raise_views.py:105
+#| msgid "Node check queued. Refresh this page shortly for results."
+msgid "Usage check queued. Reload this page after it finishes."
+msgstr "Verificarea utilizării a fost adăugată în coadă. Reîncărcați această pagină după finalizare."
+
+#: apps/provisioning/hosting_raise_views.py:108
+#: templates/provisioning/service_hosting_raise.html:23
+msgid "This raise has reached its original seven-day limit."
+msgstr "Această suplimentare a atins limita inițială de șapte zile."
+
+#: apps/provisioning/hosting_raise_views.py:122
+msgid "Temporary relief requested. Capacity remains pending until verified."
+msgstr "Resursele suplimentare temporare au fost solicitate. Capacitatea rămâne în așteptare până la verificare."
+
+#: apps/provisioning/hosting_warning_models.py:24
+#: apps/provisioning/hosting_warning_models.py:29
+#: apps/provisioning/hosting_warning_models.py:50
+#| msgid "Hosting review history cannot be overwritten."
+msgid "Warning evidence cannot be overwritten."
+msgstr "Dovezile avertizărilor nu pot fi suprascrise."
+
+#: apps/provisioning/hosting_warning_models.py:191
+msgid "A warning delivery requires its stored email before queue publication."
+msgstr "Livrarea unei avertizări necesită stocarea e-mailului înainte de publicarea în coadă."
+
+#: apps/provisioning/hosting_warning_staff.py:67
+#| msgid "Awaiting Review"
+msgid "Awaiting delivery"
+msgstr "În așteptarea livrării"
+
+#: apps/provisioning/hosting_warning_staff.py:69
+#| msgid "Outcome unconfirmed"
+msgid "Dispatch started; outcome unconfirmed"
+msgstr "Trimiterea a început; rezultatul nu este confirmat"
+
+#: apps/provisioning/hosting_warning_staff.py:70
+#: apps/provisioning/hosting_warning_staff.py:71
+#| msgid "Add your first provider"
+msgid "Accepted by email provider"
+msgstr "Acceptat de furnizorul de e-mail"
+
+#: apps/provisioning/hosting_warning_staff.py:72
+#| msgid "Refunded"
+msgid "Refused"
+msgstr "Refuzat"
+
+#: apps/provisioning/hosting_warning_staff.py:74
+#: apps/provisioning/hosting_warning_staff.py:197
+#| msgid "New status"
+msgid "Unknown status"
+msgstr "Stare necunoscută"
+
+#: apps/provisioning/hosting_warning_staff.py:81
+#| msgid "Recipient email address"
+msgid "Recipient suppressed"
+msgstr "Destinatar exclus de la trimitere"
+
+#: apps/provisioning/hosting_warning_staff.py:82
+#| msgid "Optional friendly name"
+msgid "Optional warnings disabled"
+msgstr "Avertizări opționale dezactivate"
+
+#: apps/provisioning/hosting_warning_staff.py:83
+#| msgid "Recipient"
+msgid "Recipient changed"
+msgstr "Destinatar modificat"
+
+#: apps/provisioning/hosting_warning_staff.py:84
+#| msgid "Last changed"
+msgid "Ownership changed"
+msgstr "Proprietar modificat"
+
+#: apps/provisioning/hosting_warning_staff.py:85
+#| msgid "No customers available"
+msgid "Customer unavailable"
+msgstr "Client indisponibil"
+
+#: apps/provisioning/hosting_warning_staff.py:86
+#| msgid "Service price"
+msgid "Service inactive"
+msgstr "Serviciu inactiv"
+
+#: apps/provisioning/hosting_warning_staff.py:87
+msgid "Platform notification handover pending"
+msgstr "Preluarea notificărilor de către Platform este în așteptare"
+
+#: apps/provisioning/hosting_warning_staff.py:88
+#| msgid "User who made the change"
+msgid "Usage month changed"
+msgstr "Luna de utilizare s-a schimbat"
+
+#: apps/provisioning/hosting_warning_staff.py:89
+#| msgid "Price unavailable"
+msgid "Fresh usage unavailable"
+msgstr "Date recente de utilizare indisponibile"
+
+#: apps/provisioning/hosting_warning_staff.py:90
+#| msgid "Operational allowance"
+msgid "Operational allowance changed"
+msgstr "Resurse operaționale modificate"
+
+#: apps/provisioning/hosting_warning_staff.py:91
+msgid "Temporary relief changed"
+msgstr "Resurse suplimentare temporare modificate"
+
+#: apps/provisioning/hosting_warning_staff.py:92
+#| msgid "Storage configuration changed"
+msgid "Usage condition changed"
+msgstr "Nivel de utilizare modificat"
+
+#: apps/provisioning/hosting_warning_staff.py:93
+msgid "Warning episode superseded"
+msgstr "Episod de avertizare înlocuit"
+
+#: apps/provisioning/hosting_warning_staff.py:94
+#| msgid "Delivery disabled"
+msgid "Warning delivery disabled"
+msgstr "Livrarea avertizărilor este dezactivată"
+
+#: apps/provisioning/hosting_warning_staff.py:95
+#| msgid "Triggers urgent renewal notifications."
+msgid "Delivery refused; review notification status."
+msgstr "Livrarea a fost refuzată; verificați starea notificării."
+
+#: apps/provisioning/hosting_warning_staff.py:109
+msgid "Fresh reading"
+msgstr "Citire recentă"
+
+#: apps/provisioning/hosting_warning_staff.py:110
+msgid "Incomplete monthly coverage"
+msgstr "Acoperire lunară incompletă"
+
+#: apps/provisioning/hosting_warning_staff.py:111
+#| msgid "Sending"
+msgid "Stale reading"
+msgstr "Citire învechită"
+
+#: apps/provisioning/hosting_warning_staff.py:112
+#: templates/provisioning/partials/hosting_warning_history.html:8
+#| msgid "Unknown"
+msgid "Usage unknown"
+msgstr "Utilizare necunoscută"
+
+#: apps/provisioning/hosting_warning_staff.py:115
+#: apps/provisioning/hosting_warning_staff.py:204
+#| msgid "Monthly bandwidth:"
+msgid "Monthly bandwidth"
+msgstr "Trafic lunar"
+
+#: apps/provisioning/hosting_warning_staff.py:194
+#| msgid "Not inspected"
+msgid "Not dispatched"
+msgstr "Netrimis"
+
+#: apps/provisioning/hosting_warning_staff.py:195
+msgid "Delivery outcome uncertain"
+msgstr "Rezultatul livrării este incert"
+
+#: apps/provisioning/hosting_warning_staff.py:196
+#| msgid "Provider has not accepted the notice"
+msgid "Provider acceptance recorded"
+msgstr "Acceptarea de către furnizor a fost înregistrată"
+
+#: apps/settings/catalog.py:2806
+#| msgid "Hosting allowances"
+msgid "Platform hosting allowance warnings"
+msgstr "Avertizări Platform privind resursele incluse în găzduire"
+
+#: apps/settings/catalog.py:2808
+#| msgid "Deploy and enable the Platform warning pipeline before handing over native customer notifications."
+msgid "Enable the durable Platform warning pipeline before explicitly handing over native customer notifications."
+msgstr "Activați fluxul durabil de avertizări Platform înainte de a prelua explicit notificările native pentru clienți."
+
+#: apps/settings/catalog.py:3236
+msgid "Allow new temporary disk raises"
+msgstr "Permiteți suplimentări temporare noi ale spațiului pe disc"
+
+#: apps/settings/catalog.py:3240
+#| msgid "Enable new acceptance only after native qualification. Existing payment recovery and fulfilment remain active when disabled."
+msgid "Enable after current workers and protocol 2 native helpers are qualified. Existing expiry and recovery remain active when disabled."
+msgstr "Activați după verificarea proceselor curente de lucru și a utilitarelor native pentru protocolul 2. Expirarea și recuperarea existente rămân active când opțiunea este dezactivată."
+
+#: templates/provisioning/partials/hosting_warning_history.html:3
+msgid "Usage trend and warning history"
+msgstr "Evoluția utilizării și istoricul avertizărilor"
+
+#: templates/provisioning/partials/hosting_warning_history.html:9
+#: templates/provisioning/partials/hosting_warning_history.html:26
+#| msgid "Observed at"
+msgid "Observed"
+msgstr "Observat"
+
+#: templates/provisioning/partials/hosting_warning_history.html:9
+#, python-format
+msgid "%(hours)s hour ago"
+msgid_plural "%(hours)s hours ago"
+msgstr[0] "acum %(hours)s oră"
+msgstr[1] "acum %(hours)s ore"
+msgstr[2] "acum %(hours)s de ore"
+
+#: templates/provisioning/partials/hosting_warning_history.html:13
+msgid "Disk usage over the last 30 days"
+msgstr "Utilizarea spațiului pe disc în ultimele 30 de zile"
+
+#: templates/provisioning/partials/hosting_warning_history.html:15
+msgid "Disk usage trend; daily values follow below"
+msgstr "Evoluția utilizării spațiului pe disc; valorile zilnice sunt prezentate mai jos"
+
+#: templates/provisioning/partials/hosting_warning_history.html:16
+msgid "Daily accepted readings"
+msgstr "Citiri zilnice acceptate"
+
+#: templates/provisioning/partials/hosting_warning_history.html:18
+msgid "No accepted disk readings for the current ownership period."
+msgstr "Nu există citiri acceptate ale spațiului pe disc pentru perioada proprietarului curent."
+
+#: templates/provisioning/partials/hosting_warning_history.html:20
+#| msgid "Type of event being delivered"
+msgid "Recent warning deliveries"
+msgstr "Livrări recente de avertizări"
+
+#: templates/provisioning/partials/hosting_warning_history.html:21
+msgid "Latest 50 warnings and 200 delivery attempts for the current ownership period. Provider acceptance confirms submission, not inbox delivery."
+msgstr "Ultimele 50 de avertizări și 200 de încercări de livrare pentru perioada proprietarului curent. Acceptarea de către furnizor confirmă trimiterea, nu livrarea în căsuța de e-mail."
+
+#: templates/provisioning/partials/hosting_warning_history.html:26
+#| msgid "Records"
+msgid "Recorded"
+msgstr "Înregistrat"
+
+#: templates/provisioning/partials/hosting_warning_history.html:31
+#| msgid "Next delivery attempt"
+msgid "No delivery attempt recorded."
+msgstr "Nu există nicio încercare de livrare înregistrată."
+
+#: templates/provisioning/partials/hosting_warning_history.html:34
+msgid "No warning history for the current ownership period."
+msgstr "Nu există istoric de avertizări pentru perioada proprietarului curent."
+
+#: templates/provisioning/service_detail.html:84
+#: templates/provisioning/service_hosting_raise.html:3
+#: templates/provisioning/service_hosting_raise.html:6
+msgid "Temporary disk relief"
+msgstr "Spațiu suplimentar temporar pe disc"
+
+#: templates/provisioning/service_hosting_raise.html:8
+msgid "The customer's purchased allowance and billing stay unchanged. Capacity remains pending until verified. A raise expires within seven days of its first grant."
+msgstr "Resursele achiziționate de client și facturarea rămân neschimbate. Capacitatea rămâne în așteptare până la verificare. O suplimentare expiră în cel mult șapte zile de la prima acordare."
+
+#: templates/provisioning/service_hosting_raise.html:9
+#| msgid "Recorded problems"
+msgid "Recorded expiry"
+msgstr "Termen de expirare înregistrat"
+
+#: templates/provisioning/service_hosting_raise.html:12
+#| msgid "Refresh Cache"
+msgid "Refresh usage check"
+msgstr "Actualizați verificarea utilizării"
+
+#: templates/provisioning/service_hosting_raise.html:20
+#| msgid "Request data deletion"
+msgid "Request temporary relief"
+msgstr "Solicitați resurse suplimentare temporare"
