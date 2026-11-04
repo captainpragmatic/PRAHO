@@ -2,6 +2,7 @@
 
 import hashlib
 import importlib.util
+import json
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -112,6 +113,270 @@ class ComponentTargetCoordinatorTests(SimpleTestCase):
         self.assertIn("--no-email", arguments)
         for parameter in ("--quota", "--uquota"):
             self.assertEqual(arguments[arguments.index(parameter) + 1], "5767168")
+
+    def legacy_journal(self, *, phase="prepared", child=False, limits=None):
+        """Persist the exact v1 envelope used before the two protective flags existed."""
+        legacy_creation = {
+            **self.creation,
+            **({"quota": "5767168", "bandwidth": "104857600"} if limits is None else limits),
+        }
+        scope = hashlib.sha256(
+            json.dumps(
+                [
+                    "component-target-v1",
+                    self.module.archives.source.authority_digest(self.manifest),
+                    "a" * 64,
+                    "b" * 64,
+                    legacy_creation,
+                ],
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode()
+        ).hexdigest()
+        directory = self.directory / "receipts"
+        if child:
+            directory.mkdir(mode=0o700, parents=True)
+            directory /= "unprepared-artifacts"
+        journal = self.module.journals.ComponentJournal(
+            directory,
+            self.manifest["source"]["domain_id"],
+            {"operation_id": self.operation, "scope_digest": scope, "boot_id": self.boot},
+        )
+        with journal.locked():
+            state = journal.create(
+                {
+                    "policy": "component-unprepared-artifacts-v1" if child else "component-target-v1",
+                    "phase": phase,
+                    "target_domain_id": "987654321",
+                    "target_uid": 1201,
+                    "target_gid": 1201,
+                    "native_sql_owner_hosts": ["localhost"],
+                }
+            )
+        self.fields["disabled"] = "unix,web,mysql"
+        self.creation = legacy_creation
+        return journal, state
+
+    def regenerated_creation(self):
+        self.creation.update(uquota=self.creation["quota"], **{"no-email": ""})
+
+    def test_old_prepared_receipt_resumes_regenerated_flags_without_recreating_native_domain(self):
+        legacy, _state = self.legacy_journal()
+        self.regenerated_creation()
+        target = self.target()
+        receipt = target.prepare()
+        self.assertEqual(receipt["phase"], "prepared")
+        self.assertEqual(target.journal.identity, legacy.identity)
+        self.assertEqual(target.journal.read()["scope_digest"], legacy.identity["scope_digest"])
+        self.native.assert_not_called()
+
+    def test_old_creation_envelope_gains_protective_arguments_on_resume(self):
+        legacy, _state = self.legacy_journal()
+        target = self.target()
+        self.assertEqual(target.prepare()["phase"], "prepared")
+        self.assertEqual(target.creation["uquota"], "5767168")
+        self.assertEqual(target.creation["no-email"], "")
+        self.assertEqual(target.journal.identity, legacy.identity)
+        self.native.assert_not_called()
+
+    def test_old_held_receipt_verifies_and_compensates_with_the_same_derived_authority(self):
+        legacy, state = self.legacy_journal(phase="held")
+        receipt = {"operation_id": self.operation, "target_domain_id": "987654321", "phase": "held"}
+        held_digest = hashlib.sha256(
+            json.dumps(
+                ["component-target-v1", receipt, "a" * 64, "b" * 64, legacy.identity["scope_digest"]],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        with legacy.locked():
+            legacy.write({**state, "held_receipt_sha256": held_digest})
+        self.regenerated_creation()
+        target = self.target()
+        web = self.enterContext(patch.object(target, "_web")).return_value
+        sql = self.enterContext(patch.object(target, "_sql")).return_value
+        self.enterContext(patch.object(target, "_recovery"))
+        self.enterContext(patch.object(self.module.archives.files, "repair_component_files"))
+        self.enterContext(patch.object(target, "_pair"))
+        self.enterContext(patch.object(target, "_assert_absent"))
+        self.assertEqual(target.verify(), {**receipt, "target_receipt_sha256": held_digest})
+        self.assertEqual(target.remove()["phase"], "removed")
+        self.assertEqual(target.journal.identity, legacy.identity)
+        self.assertEqual(target.journal.read()["held_receipt_sha256"], held_digest)
+        self.native.assert_called_once_with("delete-domain", ["--domain", "example.test"])
+        self.assertEqual(sql.verify.call_count, 2)
+        sql.retire.assert_called_once()
+        web.retire_after_domain_absence.assert_called_once()
+
+    def test_old_unprepared_retirement_receipt_remains_terminal_with_regenerated_flags(self):
+        legacy, _state = self.legacy_journal(phase="retired", child=True)
+        self.regenerated_creation()
+        target = self.target()
+        receipt = target.retire_unprepared_archive()
+        self.assertEqual(receipt, {"operation_id": self.operation, "phase": "artifacts_retired"})
+        self.assertEqual(legacy.read()["scope_digest"], legacy.identity["scope_digest"])
+        self.assertIsNone(target.journal.read())
+        self.native.assert_not_called()
+        with self.assertRaisesRegex(ValueError, "seal|retir"):
+            target.prepare()
+
+    def test_legacy_digest_alias_never_accepts_changed_approved_terms_or_identity(self):
+        self.legacy_journal()
+        self.regenerated_creation()
+        creation, manifest = dict(self.creation), json.loads(json.dumps(self.manifest))
+        original_operation, original_boot = self.operation, self.boot
+        for change in (
+            "quota",
+            "bandwidth",
+            "description",
+            "manifest",
+            "owner",
+            "source",
+            "target",
+            "archive",
+            "operation",
+            "boot",
+        ):
+            with self.subTest(change=change):
+                self.creation, self.manifest = dict(creation), json.loads(json.dumps(manifest))
+                self.operation, self.boot = original_operation, original_boot
+                target_identity, checksum = "a" * 64, "b" * 64
+                if change == "quota":
+                    self.creation.update(quota="1", uquota="1")
+                elif change == "bandwidth":
+                    self.creation["bandwidth"] = "1"
+                elif change == "description":
+                    self.creation["desc"] = "different approved description"
+                elif change == "manifest":
+                    self.manifest["paths"][0]["relative"] = "public_html/different"
+                elif change == "owner":
+                    self.manifest["source"]["owner"] = self.creation["user"] = "otherowner"
+                elif change == "source":
+                    self.manifest["source"]["connection_identity"] = "e" * 64
+                elif change == "target":
+                    target_identity = "e" * 64
+                elif change == "archive":
+                    checksum = "f" * 64
+                elif change == "operation":
+                    self.operation = str(uuid4())
+                else:
+                    self.boot = str(uuid4())
+                target = self.module.TargetCoordinator(
+                    self.manifest,
+                    self.operation,
+                    target_identity,
+                    checksum,
+                    self.creation,
+                    state_dir=self.directory / "receipts",
+                    boot_id=self.boot,
+                )
+                with self.assertRaisesRegex(ValueError, "another attempt, scope or source boot"):
+                    target.prepare()
+        self.native.assert_not_called()
+
+    def test_legacy_unresolved_create_never_reissues_native_creation(self):
+        legacy, _state = self.legacy_journal(phase="creating")
+        self.regenerated_creation()
+        target = self.target()
+        with self.assertRaisesRegex(ValueError, "unresolved"):
+            target.prepare()
+        self.assertEqual(target.journal.identity, legacy.identity)
+        self.assertEqual(target.journal.read()["phase"], "creating")
+        self.native.assert_not_called()
+
+    def test_new_legacy_input_uses_current_digest_and_protective_native_arguments(self):
+        legacy, _state = self.legacy_journal()
+        legacy.path.unlink()
+        target = self.target()
+        target.prepare()
+        self.assertNotEqual(target.journal.identity["scope_digest"], legacy.identity["scope_digest"])
+        self.assertEqual(target.journal.read()["scope_digest"], target.journal.identity["scope_digest"])
+        arguments = next(call.args[1] for call in self.native.call_args_list if call.args[0] == "create-domain")
+        self.assertIn("--no-email", arguments)
+        self.assertEqual(arguments[arguments.index("--quota") + 1], "5767168")
+        self.assertEqual(arguments[arguments.index("--uquota") + 1], "5767168")
+
+    def test_legacy_compatibility_does_not_allow_conflicting_uid_cap_or_customer_mail(self):
+        self.legacy_journal()
+        for changed in ({"uquota": "1"}, {"no-email": "1"}, {"mail": ""}):
+            with self.subTest(changed=changed), self.assertRaisesRegex(ValueError, "website-only creation scope"):
+                self.module.TargetCoordinator(
+                    self.manifest,
+                    self.operation,
+                    "a" * 64,
+                    "b" * 64,
+                    {**self.creation, **changed},
+                    state_dir=self.directory / "receipts",
+                    boot_id=self.boot,
+                )
+        self.native.assert_not_called()
+
+    def test_legacy_unset_and_zero_caps_keep_their_distinct_meanings(self):
+        original_directory, creation = self.directory, dict(self.creation)
+        for index, limits in enumerate(({}, {"quota": "0", "bandwidth": "0"})):
+            with self.subTest(limits=limits):
+                self.directory, self.creation = original_directory / str(index), dict(creation)
+                legacy, _state = self.legacy_journal(limits=limits)
+                self.creation["no-email"] = ""
+                if "quota" in limits:
+                    self.creation["uquota"] = limits["quota"]
+                target = self.target()
+                self.assertEqual(target.prepare()["phase"], "prepared")
+                self.assertEqual(target.journal.identity, legacy.identity)
+                self.assertEqual(
+                    {key: value for key, value in target.creation.items() if key in {"quota", "bandwidth"}}, limits
+                )
+                if not limits:
+                    self.assertNotIn("uquota", target.creation)
+        self.native.assert_not_called()
+
+    def test_legacy_target_scope_preserves_the_real_nested_sql_journal(self):
+        principal = {
+            "user": "webapp",
+            "host": "localhost",
+            "plugin": "mysql_native_password",
+            "authentication_string": "*" + "B" * 40,
+            "alternatives": "[]",
+            "grants": ["GRANT SELECT, INSERT ON `customer_web`.* TO `webapp`@`localhost`"],
+        }
+        approved = self.manifest["databases"][0]["principals"][0]
+        approved["auth_digest"] = hashlib.sha256(
+            json.dumps(
+                [principal["plugin"], principal["authentication_string"], principal["alternatives"]],
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        approved["grants_digest"] = hashlib.sha256(
+            json.dumps(principal["grants"], separators=(",", ":")).encode()
+        ).hexdigest()
+        legacy, _state = self.legacy_journal(phase="held")
+        sql_scope = hashlib.sha256(
+            json.dumps(
+                [legacy.identity["scope_digest"], self.manifest, [["customer", "localhost"]]],
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        sql_journal = self.module.journals.ComponentJournal(
+            self.directory / "receipts/sql",
+            "987654321",
+            {"operation_id": self.operation, "scope_digest": sql_scope, "boot_id": self.boot},
+        )
+        with sql_journal.locked():
+            sql_journal.create({"policy": "component-target-sql-v1", "phase": "held"})
+        self.regenerated_creation()
+        target = self.target()
+        read_text = Path.read_text
+
+        def native_boot(path, *args, **kwargs):
+            return self.boot if str(path) == "/proc/sys/kernel/random/boot_id" else read_text(path, *args, **kwargs)
+
+        with target.journal.locked(), patch.object(Path, "read_text", native_boot):
+            child = target._sql(target._state(), {"principals": [principal]})
+            self.assertEqual(child._state()["phase"], "held")
+        self.assertEqual(child.journal.identity, sql_journal.identity)
+        self.native.assert_not_called()
 
     def test_unprepared_archive_retirement_seals_namespace_without_adopting_or_creating_domain(self):
         payload = b"selected private archive uploaded before native preparation"

@@ -75,15 +75,12 @@ class TargetCoordinator:
         self._parameters()
         if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in (target_identity, archive_sha256)):
             raise ValueError("Exact target connection and selected archive digests are required")
-        authority = archives.source.authority_digest(self.manifest)
-        digest = hashlib.sha256(
-            json.dumps(
-                [POLICY, authority, target_identity, archive_sha256, self.creation],
-                sort_keys=True,
-                separators=(",", ":"),
-                allow_nan=False,
-            ).encode()
-        ).hexdigest()
+        digest = self._creation_digest(self.creation)
+        # Original v1 receipts predate these additive execution protections.
+        # Retain every approved value when qualifying their historical digest.
+        self._legacy_scope_digest = self._creation_digest(
+            {key: value for key, value in self.creation.items() if key not in {"no-email", "uquota"}}
+        )
         self.journal = journals.ComponentJournal(
             state_dir or Path("/var/lib/praho/component-targets") / operation_id,
             manifest["source"]["domain_id"],
@@ -94,13 +91,42 @@ class TargetCoordinator:
             },
         )
 
+    def _creation_digest(self, creation: dict[str, str]) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                [
+                    POLICY,
+                    archives.source.authority_digest(self.manifest),
+                    self.target_identity,
+                    self.checksum,
+                    creation,
+                ],
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode()
+        ).hexdigest()
+
+    def _assert_journal_owned(self, journal: Any, state: dict[str, Any]) -> None:
+        if state.get("scope_digest") == self._legacy_scope_digest:
+            historical = journals.ComponentJournal(
+                journal.directory,
+                self.manifest["source"]["domain_id"],
+                {**journal.identity, "scope_digest": self._legacy_scope_digest},
+            )
+            historical.assert_owned(state)
+            # Held receipts and nested SQL journals must continue using their
+            # original authority; never rewrite a persisted envelope on resume.
+            journal.identity["scope_digest"] = self._legacy_scope_digest
+        journal.assert_owned(state)
+
     def _parameters(self) -> None:
         required = {"domain", "user", "template", "desc", *FEATURES}
         if (
             not required <= self.creation.keys()
             or self.creation.keys() - required - {"quota", "uquota", "bandwidth", "no-email"}
             or self.creation.get("no-email", "") != ""
-            or self.creation.get("quota") != self.creation.get("uquota")
+            or ("uquota" in self.creation and self.creation.get("quota") != self.creation["uquota"])
             or self.creation["domain"] != self.domain
             or self.creation["user"] != self.owner
             or self.creation["template"] != "Default Settings"
@@ -121,12 +147,14 @@ class TargetCoordinator:
         # Also suppress mail when resuming a historical reviewed operation whose
         # immutable creation envelope predates notification ownership handover.
         self.creation["no-email"] = ""
+        if "quota" in self.creation:
+            self.creation["uquota"] = self.creation["quota"]
 
     def _state(self) -> dict[str, Any]:
-        state = self.journal.read()
+        state: dict[str, Any] | None = self.journal.read()
         if state is None:
             raise ValueError("The target has no durable component ownership receipt")
-        self.journal.assert_owned(state)
+        self._assert_journal_owned(self.journal, state)
         if state.get("policy") != POLICY or state.get("phase") not in {
             "creating",
             "created",
@@ -147,7 +175,9 @@ class TargetCoordinator:
         domain_id = state.get("target_domain_id")
         if not isinstance(domain_id, str) or re.fullmatch(r"[0-9]{1,30}", domain_id) is None:
             raise ValueError("The native target domain has no confirmed ownership identity")
-        fields = archives.source.inspection._fields(Path("/etc/webmin/virtual-server/domains") / domain_id)
+        fields: dict[str, str] = archives.source.inspection._fields(
+            Path("/etc/webmin/virtual-server/domains") / domain_id
+        )
         owner = pwd.getpwnam(self.owner)
         if (
             fields.get("id") != domain_id
@@ -625,7 +655,7 @@ class TargetCoordinator:
                 state = journal.read()
                 receipt = {"operation_id": self.operation, "phase": "artifacts_retired"}
                 if state is not None:
-                    journal.assert_owned(state)
+                    self._assert_journal_owned(journal, state)
                     if state.get("policy") != "component-unprepared-artifacts-v1" or state.get("phase") not in {
                         "retiring",
                         "retired",

@@ -127,10 +127,17 @@ def park_changed_binding(binding: CreateRetryBinding, job_id: UUID, *, native_ou
 
 
 def settle_retry_created(
-    binding: CreateRetryBinding, job_id: UUID, data: dict[str, Any], *, native_outcome: str
+    binding: CreateRetryBinding,
+    job_id: UUID,
+    data: dict[str, Any],
+    *,
+    native_outcome: str,
+    publish_limits: bool,
 ) -> Result[dict[str, Any], str]:
     try:
-        return _settle_retry_created(binding, job_id, data, native_outcome=native_outcome)
+        return _settle_retry_created(
+            binding, job_id, data, native_outcome=native_outcome, publish_limits=publish_limits
+        )
     except Exception:
         logger.exception("Native creation settlement needs review for job %s", job_id)
         park_changed_binding(binding, job_id, native_outcome=native_outcome)
@@ -138,7 +145,12 @@ def settle_retry_created(
 
 
 def _settle_retry_created(
-    binding: CreateRetryBinding, job_id: UUID, data: dict[str, Any], *, native_outcome: str
+    binding: CreateRetryBinding,
+    job_id: UUID,
+    data: dict[str, Any],
+    *,
+    native_outcome: str,
+    publish_limits: bool,
 ) -> Result[dict[str, Any], str]:
     """Commit verified target/count once; preserve a real resource on stale settlement."""
     with transaction.atomic():
@@ -176,5 +188,11 @@ def _settle_retry_created(
             VirtualminServer.objects.filter(pk=binding.target_server_id).update(
                 current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
             )
+        if publish_limits:
+            from .hosting_limit_execution import publish_managed_limits  # noqa: PLC0415 -- Claim-bound quota commit.
+
+            # Receipt publication still needs the running parent claim. Commit
+            # canonical ownership, quota publication and completion together.
+            publish_managed_limits(account)
         job.mark_completed(data)
     return Ok(data)
