@@ -4,10 +4,41 @@ from uuid import uuid4
 
 from django.db import DatabaseError, connection, transaction
 from django.db.migrations.executor import MigrationExecutor
-from django.test import TransactionTestCase
+from django.db.migrations.loader import MigrationLoader
+from django.test import SimpleTestCase, TransactionTestCase
+
+
+class MergedSecurityMigrationGraphTests(SimpleTestCase):
+    def test_crowdsec_and_hosting_limits_have_one_final_migration(self):
+        loader = MigrationLoader(None)
+        merged = ("provisioning", "0037_merge_crowdsec_hosting_limits")
+        self.assertEqual(loader.graph.leaf_nodes("provisioning"), [merged])
+        state = loader.project_state([merged])
+        server = state.apps.get_model("provisioning", "VirtualminServer")
+        self.assertEqual(server._meta.get_field("security_policy_version").default, "virtualmin-web-only-v2")
+        self.assertEqual(server._meta.get_field("security_configuration_digest").default, "")
+        account = state.apps.get_model("provisioning", "VirtualminAccount")
+        for field in ("effective_disk_quota_mb", "quota_generation", "quota_managed"):
+            with self.subTest(field=field):
+                self.assertIsNotNone(account._meta.get_field(field))
 
 
 class SecurityMigrationIdentityGuardTests(TransactionTestCase):
+    def test_hosting_first_upgrade_preserves_server_identity(self):
+        executor = MigrationExecutor(connection)
+        latest = executor.loader.graph.leaf_nodes()
+        before = ("provisioning", "0028_component_migration_authority")
+        hosting = ("provisioning", "0036_alter_nodehostingexecution_action")
+        merged = ("provisioning", "0037_merge_crowdsec_hosting_limits")
+        try:
+            for target in (before, hosting, merged):
+                with self.subTest(target=target):
+                    executor = MigrationExecutor(connection)
+                    executor.migrate([target])
+                    self.assert_identity_is_guarded(executor, target)
+        finally:
+            MigrationExecutor(connection).migrate(latest)
+
     def test_existing_nodes_only_receive_the_explicit_rollout_exception(self):
         executor = MigrationExecutor(connection)
         latest = executor.loader.graph.leaf_nodes()
@@ -77,4 +108,7 @@ class SecurityMigrationIdentityGuardTests(TransactionTestCase):
                 executor.migrate([target])
                 self.assert_identity_is_guarded(executor, target)
         finally:
-            MigrationExecutor(connection).migrate(latest)
+            executor = MigrationExecutor(connection)
+            executor.migrate(latest)
+            provision = next(node for node in latest if node[0] == "provisioning")
+            self.assert_identity_is_guarded(executor, provision)

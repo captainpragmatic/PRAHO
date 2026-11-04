@@ -44,7 +44,6 @@ from apps.provisioning.management.commands._virtualmin_lab import (
     container_address,
     ensure_lab_deployment,
     lab_transport,
-    load_state,
     refuse_unless_lab_settings,
     with_deploy_node,
     write_private,
@@ -167,20 +166,19 @@ WEB_ROOT_EXPECTED = {
 
 
 class Command(BaseCommand):
-    help = "Prepare and run a from-scratch Virtualmin node deploy on the bare Debian lab node (lab only)"
+    help = "Clean up the retired bare Debian deployment fixture; managed deployment acceptance uses the Ubuntu VM"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         parser.add_argument("phase", choices=("prepare", "deploy", "cleanup"))
 
     def handle(self, *args: Any, **options: Any) -> None:
         refuse_unless_lab_settings()
-        state = load_state()
-        if options["phase"] == "prepare":
-            self._prepare(state)
-        elif options["phase"] == "deploy":
-            self._deploy(state)
-        else:
-            self._forget_server()
+        if options["phase"] != "cleanup":
+            raise CommandError(
+                "The bare Debian fixture does not meet the managed Ubuntu 26.04 baseline. "
+                "Use make test-virtualmin-node-deploy with the exact owned NATIVE_VM_MANIFEST and NATIVE_DNS_ZONE."
+            )
+        self._forget_server()
 
     # -------------------------------------------------------------- prepare
 

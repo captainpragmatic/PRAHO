@@ -172,6 +172,10 @@ class AnsibleService:
             "virtualmin_usage.yml",
             "virtualmin_usage_read.yml",
             "virtualmin_security_read.yml",
+            "virtualmin_hosting_read.yml",
+            "virtualmin_hosting_policy.yml",
+            "virtualmin_hosting_prepare.yml",
+            "virtualmin_quota.yml",
             "virtualmin_component.yml",
             "virtualmin_component_bridge.yml",
             "virtualmin_security_enroll.yml",
@@ -304,8 +308,17 @@ class AnsibleService:
 
         if playbook not in self.ALLOWED_PLAYBOOKS:
             return Err(f"Playbook not allowed: {playbook}")
-        if playbook not in {"virtualmin_usage_read.yml", "virtualmin_security_read.yml"}:
+        if playbook == "virtualmin_quota.yml":
+            from apps.provisioning.hosting_limit_execution import quota_transport_refusal  # noqa: PLC0415
+
+            quota_server = getattr(deployment, "virtualmin_server", None)
+            if quota_server is None:
+                return Err("Quota transport requires its admitted server")
+            if quota_refusal := quota_transport_refusal(quota_server, extra_vars):
+                return Err(quota_refusal)
+        if playbook not in {"virtualmin_usage_read.yml", "virtualmin_security_read.yml", "virtualmin_hosting_read.yml"}:
             from apps.infrastructure.models import NodeDeployment as NodeRow  # noqa: PLC0415 -- runtime model boundary
+            from apps.provisioning.hosting_node_execution import hosting_transport_allowed  # noqa: PLC0415
             from apps.provisioning.virtualmin_security_execution import (  # noqa: PLC0415 -- app boundary avoids import cycle
                 transport_mutation_allowed,
             )
@@ -313,7 +326,15 @@ class AnsibleService:
             if (
                 isinstance(deployment, NodeRow)
                 and (registered_server := deployment.virtualmin_server) is not None
-                and not transport_mutation_allowed(registered_server)
+                and (
+                    not transport_mutation_allowed(registered_server)
+                    or not hosting_transport_allowed(
+                        registered_server,
+                        extra_vars
+                        if playbook in {"virtualmin_hosting_policy.yml", "virtualmin_hosting_prepare.yml"}
+                        else None,
+                    )
+                )
             ):
                 return Err("Node hardening is unresolved; remote mutation is fenced")
         if any(key.startswith(("ansible_", "ssh_")) for key in (extra_vars or {})):
@@ -533,6 +554,28 @@ class AnsibleService:
         )
 
     @staticmethod
+    def _hosting_playbook_refusal(
+        server: VirtualminServer, playbook: str, extra_vars: dict[str, Any] | None
+    ) -> str | None:
+        from apps.provisioning.hosting_limit_execution import quota_transport_refusal  # noqa: PLC0415
+        from apps.provisioning.hosting_node_execution import hosting_transport_allowed  # noqa: PLC0415
+        from apps.provisioning.virtualmin_models import VirtualminServer as ServerRow  # noqa: PLC0415
+
+        if playbook == "virtualmin_quota.yml" and (refusal := quota_transport_refusal(server, extra_vars)):
+            return refusal
+        if (
+            playbook not in {"virtualmin_usage_read.yml", "virtualmin_security_read.yml", "virtualmin_hosting_read.yml"}
+            and isinstance(server, ServerRow)
+            and not server._state.adding
+            and not hosting_transport_allowed(
+                server,
+                extra_vars if playbook in {"virtualmin_hosting_policy.yml", "virtualmin_hosting_prepare.yml"} else None,
+            )
+        ):
+            return "Node hosting policy is unresolved; remote mutation is fenced"
+        return None
+
+    @staticmethod
     def _server_playbook_authority(  # noqa: PLR0911 -- independent enrolled hardening, component and archive authorities
         server: VirtualminServer, playbook: str, extra_vars: dict[str, Any] | None, token: str | None
     ) -> Result[bool, str]:
@@ -554,6 +597,8 @@ class AnsibleService:
             return Ok(True)
         if not transport_allows(playbook, extra_vars):
             return Err("Playbook not allowed for archive transport", retriability=Retriability.NOT_RETRIABLE)
+        if hosting_refusal := AnsibleService._hosting_playbook_refusal(server, playbook, extra_vars):
+            return Err(hosting_refusal, retriability=Retriability.NOT_RETRIABLE)
         if playbook == "virtualmin_component_bridge.yml" and isinstance(server, ServerRow):
             from apps.provisioning.component_bridge_transport import (  # noqa: PLC0415 -- app boundary
                 bridge_operation_refusal,
@@ -596,7 +641,7 @@ class AnsibleService:
             if refusal := component_guard(server, extra_vars):
                 return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
         if (
-            playbook not in {"virtualmin_usage_read.yml", "virtualmin_security_read.yml"}
+            playbook not in {"virtualmin_usage_read.yml", "virtualmin_security_read.yml", "virtualmin_hosting_read.yml"}
             and isinstance(server, ServerRow)
             and not server._state.adding
             and ServerRow.objects.filter(pk=server.pk, security_operation__isnull=False).exists()

@@ -40,6 +40,18 @@
         upgrade: safe
         autoremove: yes
 
+    - name: Check explicit native customer-mail ownership
+      ansible.builtin.stat:
+        path: /var/lib/praho/hosting/notification-owner
+      register: native_mail_owner
+
+    - name: Reconcile handed-over customer emitters after managed package updates
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/praho/praho_hosting_node.py, reconcile]
+        stdin: '{{ {"identity": "0" * 64} | to_json }}'
+      when: native_mail_owner.stat.exists
+      no_log: true
+
     - name: Install required packages
       ansible.builtin.apt:
         name: "{{ required_packages }}"

@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import UUID
 
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -62,6 +64,10 @@ def _configured_file_identity(setting_name: str) -> str | None:
 
 def _vault_identity(hostname: str) -> object:
     credential = EncryptedCredential.objects.filter(service_type="virtualmin", service_identifier=hostname).first()
+    return _credential_identity(credential)
+
+
+def _credential_identity(credential: EncryptedCredential | None) -> object:
     if credential is None:
         return None
     return {
@@ -78,6 +84,42 @@ def _vault_identity(hostname: str) -> object:
 
 def connection_identity(server: VirtualminServer) -> str:
     """Bind evidence to endpoint, trust, credential incarnation and managed resource."""
+    return _connection_identity(server, _vault_identity(server.hostname))
+
+
+def connection_identities(servers: Iterable[VirtualminServer]) -> dict[UUID, str]:
+    """Use the exact single-node algorithm with one bounded credential query.
+
+    Reload current nodes/deployments in one query so stale caller models and
+    uncached reverse relations cannot produce incorrect or per-account identity.
+    """
+    identifiers = {server.pk for server in servers}
+    if not identifiers:
+        return {}
+    current = list(VirtualminServer.objects.filter(pk__in=identifiers).select_related("node_deployment"))
+    credentials = {
+        row.service_identifier: _credential_identity(row)
+        for row in EncryptedCredential.objects.filter(
+            service_type="virtualmin",
+            service_identifier__in={server.hostname for server in current},
+        )
+    }
+    from apps.infrastructure.ansible_service import (  # noqa: PLC0415 -- Avoid security/transport import cycle.
+        node_admin_allowed_cidrs,
+    )
+
+    administrative_networks = sorted(node_admin_allowed_cidrs())
+    return {
+        server.pk: _connection_identity(server, credentials.get(server.hostname), administrative_networks)
+        for server in current
+    }
+
+
+def _connection_identity(
+    server: VirtualminServer,
+    vault_identity: object,
+    administrative_networks: list[str] | None = None,
+) -> str:
     deployment = getattr(server, "node_deployment", None)
     host_keys = deployment.ssh_host_keys if deployment else server.imported_ssh_host_keys or None
     from apps.infrastructure.ansible_service import node_admin_allowed_cidrs  # noqa: PLC0415 -- avoids transport cycle
@@ -89,7 +131,9 @@ def connection_identity(server: VirtualminServer) -> str:
         # provisioned. Apply independently requires a readable, valid bundle.
         operator_keys = "unavailable"
     inputs: dict[str, object] = {
-        "administrative_networks": sorted(node_admin_allowed_cidrs()),
+        "administrative_networks": sorted(node_admin_allowed_cidrs())
+        if administrative_networks is None
+        else administrative_networks,
         "operator_keys": operator_keys,
         "server": str(server.pk),
         "hostname": server.hostname,
@@ -100,7 +144,7 @@ def connection_identity(server: VirtualminServer) -> str:
         "ssl_verify": server.ssl_verify,
         "ssl_cert_fingerprint": server.ssl_cert_fingerprint,
         "credential": hashlib.sha256(bytes(server.encrypted_api_password or b"")).hexdigest(),
-        "vault": _vault_identity(server.hostname),
+        "vault": vault_identity,
         "ssh_port": server.effective_ssh_port,
         # Reading a preview identity cannot enroll legacy configured trust as a side effect.
         "ssh_host_keys": host_keys,

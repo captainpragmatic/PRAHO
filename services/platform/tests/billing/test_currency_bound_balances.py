@@ -10,7 +10,7 @@ from django.test import TestCase, TransactionTestCase
 from django.utils import timezone
 
 from apps.billing.metering_models import BillingCycle, UsageAggregation
-from apps.billing.models import CreditLedger, Currency, Invoice, Payment, PriceGrandfathering
+from apps.billing.models import CreditLedger, Currency, Invoice, InvoiceSequence, Payment, PriceGrandfathering
 from apps.billing.subscription_service import GrandfatheringService, SubscriptionService
 from apps.billing.usage_invoice_service import UsageInvoiceService
 from apps.customers.models import Customer
@@ -134,6 +134,7 @@ class UsageInvoiceCurrencyIsolationTests(TestCase):
 
 class GrandfatheringCurrencyTests(TestCase):
     def setUp(self) -> None:
+        InvoiceSequence.objects.get_or_create(scope="subscription", defaults={"prefix": "SUB"})
         self.ron, _ = Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         self.eur, _ = Currency.objects.get_or_create(code="EUR", defaults={"symbol": "€"})
         self.customer = Customer.objects.create(name="Protected buyer", customer_type="individual")

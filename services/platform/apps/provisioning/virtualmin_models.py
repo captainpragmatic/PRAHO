@@ -9,12 +9,12 @@ import contextlib
 import logging
 import re
 import uuid
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, ClassVar
 
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.urls import reverse
@@ -387,6 +387,19 @@ class VirtualminAccount(models.Model):
 
     # Resource limits
     disk_quota_mb = models.PositiveIntegerField(null=True, blank=True, verbose_name=_("Disk Quota (MB)"))
+    effective_disk_quota_mb = models.PositiveIntegerField(
+        null=True, blank=True, help_text=_("Desired native cap including headroom; not proof of kernel enforcement")
+    )
+    quota_generation = models.PositiveBigIntegerField(
+        default=0, editable=False, help_text=_("Monotonic native quota execution epoch; never reset on a move")
+    )
+    quota_managed = models.BooleanField(
+        default=False,
+        editable=False,
+        help_text=_(
+            "Explicit account adoption or verified PRAHO creation; node adoption alone never changes existing caps"
+        ),
+    )
     bandwidth_quota_mb = models.IntegerField(
         null=True, blank=True, verbose_name=_("Bandwidth Quota (MB)"), help_text=_("Use -1 for unlimited bandwidth")
     )
@@ -485,7 +498,20 @@ class VirtualminAccount(models.Model):
         return f"{self.domain} ({self.get_status_display()})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        fields = kwargs.get("update_fields")
+        moved = bool(
+            not self._state.adding
+            and fields is not None
+            and {"server", "server_id"}.intersection(fields)
+            and type(self).objects.using(self._state.db).filter(pk=self.pk).exclude(server_id=self.server_id).exists()
+        )
         save_with_ownership(self, "account", super().save, args, kwargs)
+        if moved:
+            from .hosting_limit_models import ServiceHostingLimits  # noqa: PLC0415 -- Canonical node publication.
+
+            ServiceHostingLimits.objects.using(self._state.db).filter(service_id=self.service_id).update(
+                verified_at=None
+            )
 
     def get_absolute_url(self) -> str:
         """Get URL for account detail view"""
@@ -614,6 +640,99 @@ class VirtualminAccount(models.Model):
         return self.service.service_plan.name if self.service and self.service.service_plan else "Default"
 
 
+class VirtualminJobQuerySet(models.QuerySet["VirtualminProvisioningJob"]):
+    def update(self, **kwargs: Any) -> int:
+        from .hosting_parent_limits import (  # noqa: PLC0415
+            PARENT_OPERATIONS,
+            PARENT_PROTECTED_FIELDS,
+            guard_parent_write,
+        )
+
+        if PARENT_PROTECTED_FIELDS.intersection(kwargs):
+            changes = {
+                "id"
+                if key == "pk"
+                else key + "_id"
+                if key in {"account", "server", "hosting_limit_application"}
+                else key: getattr(value, "pk", value)
+                for key, value in kwargs.items()
+            }
+            membership = models.Q(pk__in=[])
+            for previous in self.values(
+                "id", "operation", "account_id", "server_id", "hosting_limit_application_id", "parameters"
+            ):
+                guard_parent_write(previous, changes)
+                if previous["operation"] in PARENT_OPERATIONS and previous["hosting_limit_application_id"] is not None:
+                    membership |= models.Q(
+                        pk=previous["id"],
+                        parameters=previous["parameters"],
+                        operation=previous["operation"],
+                        account_id=previous["account_id"],
+                        server_id=previous["server_id"],
+                        hosting_limit_application_id=previous["hosting_limit_application_id"],
+                    )
+                else:
+                    membership |= models.Q(pk=previous["id"])
+            return super(VirtualminJobQuerySet, self.filter(membership)).update(**kwargs)
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs: Any, fields: Any, batch_size: int | None = None) -> int:
+        from .hosting_parent_limits import PARENT_OPERATIONS, PARENT_PROTECTED_FIELDS  # noqa: PLC0415
+
+        records, selected = list(objs), tuple(fields)
+        if (
+            PARENT_PROTECTED_FIELDS.intersection(selected)
+            and self.filter(
+                pk__in=[row.pk for row in records],
+                operation__in=PARENT_OPERATIONS,
+                hosting_limit_application__isnull=False,
+            ).exists()
+        ):
+            raise ValidationError(_("Accepted native parent resource bindings cannot be bulk overwritten."))
+        return super().bulk_update(records, selected, batch_size=batch_size)
+
+    def bulk_create(  # noqa: PLR0913 -- Django ORM positional signature.
+        self,
+        objs: Iterable[VirtualminProvisioningJob],
+        batch_size: int | None = None,
+        ignore_conflicts: bool = False,
+        update_conflicts: bool = False,
+        update_fields: Collection[str] | None = None,
+        unique_fields: Collection[str] | None = None,
+    ) -> list[VirtualminProvisioningJob]:
+        from .hosting_node_policy_models import NodeHostingPolicy  # noqa: PLC0415
+        from .hosting_parent_limits import PARENT_OPERATIONS  # noqa: PLC0415
+
+        records = list(objs)
+        parents = [row for row in records if row.operation in PARENT_OPERATIONS]
+        qualified = (
+            set(
+                NodeHostingPolicy.objects.filter(
+                    server_id__in=[row.server_id for row in parents], quota_adopted=True
+                ).values_list("server_id", flat=True)
+            )
+            if parents
+            else set()
+        )
+        if any(row.hosting_limit_application_id is not None or row.server_id in qualified for row in parents) or (
+            update_conflicts
+            and self.filter(
+                pk__in=[row.pk for row in records],
+                operation__in=PARENT_OPERATIONS,
+                hosting_limit_application__isnull=False,
+            ).exists()
+        ):
+            raise ValidationError(_("Native create and restore admissions must capture resources individually."))
+        return super().bulk_create(
+            records,
+            batch_size=batch_size,
+            ignore_conflicts=ignore_conflicts,
+            update_conflicts=update_conflicts,
+            update_fields=update_fields,
+            unique_fields=unique_fields,
+        )
+
+
 class VirtualminProvisioningJob(models.Model):
     """
     Asynchronous Virtualmin provisioning job tracking.
@@ -638,6 +757,7 @@ class VirtualminProvisioningJob(models.Model):
         ("create_domain", _("Create Domain")),
         ("delete_domain", _("Delete Domain")),
         ("modify_domain", _("Modify Domain")),
+        ("apply_hosting_limits", _("Apply Hosting Limits")),
         ("suspend_domain", _("Suspend Domain")),
         ("unsuspend_domain", _("Unsuspend Domain")),
         ("create_user", _("Create User")),
@@ -661,6 +781,13 @@ class VirtualminProvisioningJob(models.Model):
     server = models.ForeignKey(VirtualminServer, on_delete=models.CASCADE, related_name="provisioning_jobs")
     account = models.ForeignKey(
         VirtualminAccount, on_delete=models.CASCADE, related_name="provisioning_jobs", null=True, blank=True
+    )
+    hosting_limit_application = models.ForeignKey(
+        "provisioning.HostingLimitApplication",
+        on_delete=models.PROTECT,
+        related_name="native_jobs",
+        null=True,
+        blank=True,
     )
 
     # Job parameters and results
@@ -717,6 +844,8 @@ class VirtualminProvisioningJob(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    objects = VirtualminJobQuerySet.as_manager()
+
     class Meta:
         db_table = "provisioning_virtualmin_jobs"
         verbose_name = _("Virtualmin Provisioning Job")
@@ -734,6 +863,75 @@ class VirtualminProvisioningJob(models.Model):
         return f"{self.get_operation_display()} on {self.server.name} ({self.get_status_display()})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
+        from .hosting_parent_limits import (  # noqa: PLC0415
+            PARENT_PROTECTED_FIELDS,
+            guard_parent_write,
+            prepare_new_parent,
+        )
+
+        with transaction.atomic():
+            self.__dict__.pop("_hosting_parent_cas", None)
+            fields = kwargs.get("update_fields")
+            if fields is None or PARENT_PROTECTED_FIELDS.intersection(fields):
+                previous = (
+                    type(self)
+                    .objects.filter(pk=self.pk)
+                    .values("id", "operation", "account_id", "server_id", "hosting_limit_application_id", "parameters")
+                    .first()
+                )
+                if previous is not None:
+                    selected = PARENT_PROTECTED_FIELDS if fields is None else fields
+                    changes = {
+                        "id"
+                        if key == "pk"
+                        else key + "_id"
+                        if key in {"account", "server", "hosting_limit_application"}
+                        else key: getattr(
+                            self,
+                            "id"
+                            if key == "pk"
+                            else key + "_id"
+                            if key in {"account", "server", "hosting_limit_application"}
+                            else key,
+                        )
+                        for key in selected
+                        if key in PARENT_PROTECTED_FIELDS
+                    }
+                    guard_parent_write(previous, changes)
+                    if (
+                        previous["operation"] in {"create_domain", "restore_domain"}
+                        and previous["hosting_limit_application_id"] is not None
+                    ):
+                        self.__dict__["_hosting_parent_cas"] = previous
+                        if fields is None:
+                            kwargs["force_update"] = True
+            if self._state.adding:
+                prepare_new_parent(self)
+                if self.hosting_limit_application_id is not None and self.operation in {
+                    "create_domain",
+                    "restore_domain",
+                }:
+                    kwargs["force_insert"] = True
+            try:
+                self._save_with_usage_transition(*args, **kwargs)
+            finally:
+                self.__dict__.pop("_hosting_parent_cas", None)
+
+    def _do_update(  # noqa: PLR0913 -- Django Model CAS boundary.
+        self, base_qs: Any, using: Any, pk_val: Any, values: Any, update_fields: Any, forced_update: Any
+    ) -> bool:
+        previous = self.__dict__.get("_hosting_parent_cas")
+        if previous is not None:
+            base_qs = base_qs.filter(
+                parameters=previous["parameters"],
+                operation=previous["operation"],
+                account_id=previous["account_id"],
+                server_id=previous["server_id"],
+                hosting_limit_application_id=previous["hosting_limit_application_id"],
+            )
+        return bool(super()._do_update(base_qs, using, pk_val, values, update_fields, forced_update))
+
+    def _save_with_usage_transition(self, *args: Any, **kwargs: Any) -> None:
         fields = kwargs.get("update_fields")
         terminal = self.status in {"completed", "failed", "attention"} and self.completed_at is not None
         if terminal and (fields is None or {"status", "completed_at"}.intersection(fields)):
@@ -784,7 +982,7 @@ class VirtualminProvisioningJob(models.Model):
         jobs = (
             cls.objects.filter(status__in=("pending", "running"))
             # Backup/restore have their own execution_deadline and janitor.
-            .exclude(operation__in=("backup_domain", "restore_domain"))
+            .exclude(operation__in=("backup_domain", "restore_domain", "apply_hosting_limits"))
             .only("operation", "status", "parameters", "claimed_at", "started_at", "updated_at")
         )
         recovered = 0

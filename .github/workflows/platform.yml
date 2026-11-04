@@ -196,6 +196,9 @@ jobs:
     - name: PostgreSQL-gated tests (derived from the tests themselves)
       run: make test-platform-postgres-gated
 
+    - name: Quota inventory SQL against the managed MariaDB schema
+      run: make test-virtualmin-quota-sql
+
   platform-security:
     runs-on: ubuntu-latest
 

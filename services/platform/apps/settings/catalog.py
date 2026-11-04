@@ -3189,6 +3189,20 @@ CATALOG: tuple[SettingDef, ...] = (
         validation={"min": 0},
     ),
     SettingDef(
+        key="virtualmin.disk_free_reserve_mb",
+        data_type="integer",
+        default=1024,
+        group="virtualmin",
+        section=_("Quotas"),
+        label=_("Node free-space reserve"),
+        help_text=_(
+            "Keep this much free space outside pending native quota reservations before accepting a positive cap change."
+        ),
+        unit="MiB",
+        input_kind="number",
+        validation={"min": 0},
+    ),
+    SettingDef(
         key="virtualmin.max_retries",
         data_type="integer",
         default=3,

@@ -406,7 +406,9 @@ def _validate_service_for_provisioning_secure(service_id: str) -> dict[str, Any]
         if service.customer_id != customer.pk:
             return {"success": False, "error": "Service customer changed during provisioning"}
         service.customer = customer
-        service.service_plan = ServicePlan.objects.select_for_update(of=("self",), no_key=True).get(pk=service.service_plan_id)
+        service.service_plan = ServicePlan.objects.select_for_update(of=("self",), no_key=True).get(
+            pk=service.service_plan_id
+        )
     except (Service.DoesNotExist, Customer.DoesNotExist):
         error_msg = f"Service {service_id} not found"
         logger.error(f"❌ [VirtualminTask] {error_msg}")
@@ -871,7 +873,11 @@ def _queue_reconcile_after_pair(job: VirtualminProvisioningJob, params: dict[str
     service is active. It is queued only once the job is terminal, because reconcile yields to a
     running restore.
     """
-    if str(params.get("restore_mode", "")) == "pair" and job.account is not None and job.account.service_id:
+    if (
+        (str(params.get("restore_mode", "")) == "pair" or params.get("managed_single_restore") is True)
+        and job.account is not None
+        and job.account.service_id
+    ):
         reconcile_virtualmin_service_state_async(str(job.account.service_id))
 
 
@@ -924,6 +930,9 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
     deadline = timezone.now() + timedelta(seconds=budget)
     if not VirtualminProvisioningJob.claim_execution(job.pk, token, deadline):
         return {"status": "stale", "job_id": job_id}
+    # Preserve THIS worker's CAS-owned token for quota's parent authority.
+    # Reloading a later rotated token could steal a replacement worker's claim.
+    job.execution_token = token
     # Audit the pending->running claim too, so the trail shows execution began.
     _audit_job(job.pk)
 
@@ -980,6 +989,7 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
             differential_backup_id=str(params.get("differential_backup_id", "")) if pair else "",
             pair_token=str(params.get("pair_token", "")),
             pair_step_hold_seconds=int(params.get("pair_step_hold_seconds", 0) or 0),
+            managed_single=params.get("managed_single_restore") is True,
             restore_email=bool(params.get("restore_email", True)),
             restore_databases=bool(params.get("restore_databases", True)),
             restore_files=bool(params.get("restore_files", True)),
@@ -994,6 +1004,7 @@ def _run_backup_restore_job(job_id: str, operation: str) -> dict[str, Any]:  # n
             progress_key=str(job.pk),
             ownership=owns,
             note_sink=persist_note,
+            quota_parent_job=job,
         )
 
     if result.is_err():
@@ -1951,7 +1962,7 @@ def _recover_expired_claims(now: datetime) -> int:
 def _due_retry_jobs(now: datetime, observed_job_id: str) -> models.QuerySet[VirtualminProvisioningJob]:
     jobs = VirtualminProvisioningJob.objects.filter(
         status="failed", retry_count__lt=models.F("max_retries"), next_retry_at__lte=now
-    )
+    ).exclude(operation="apply_hosting_limits")
     if observed_job_id:
         # Staff observation still uses the ordinary bounded claim/nonce. The
         # consumer rechecks policy before any new native creation.
@@ -2167,6 +2178,16 @@ def delete_virtualmin_account_async(account_id: str) -> str:
 def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
     """Set up all Virtualmin scheduled tasks."""
     tasks_created = {}
+    _, created = ScheduleModel.objects.update_or_create(
+        name="hosting-limits-dispatch",
+        defaults={
+            "func": "apps.provisioning.hosting_limit_tasks.dispatch_hosting_limits",
+            "schedule_type": "I",
+            "minutes": 5,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["hosting_limits"] = "created" if created else "updated"
     _, created = ScheduleModel.objects.update_or_create(
         name="virtualmin-usage-sync",
         defaults={

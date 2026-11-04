@@ -63,7 +63,7 @@ class TestAuditEventCategorizationModel(TestCase):
             is_sensitive=True,
             requires_review=True,
             content_type=ContentType.objects.get_for_model(User),
-            object_id='1',
+            object_id=str(self.user.pk),
             description='Test audit event',
             ip_address='192.168.1.1'
         )
@@ -80,7 +80,7 @@ class TestAuditEventCategorizationModel(TestCase):
             user=self.user,
             action='test_action',
             content_type=ContentType.objects.get_for_model(User),
-            object_id='1',
+            object_id=str(self.user.pk),
             description='Test audit event'
         )
 

@@ -1,7 +1,7 @@
 # CrowdSec implementation ledger
 
 Original baseline: `9fd0d62fcbb288e9e766e6ede9403a4b2745f3eb`.
-Integrated master: `516855878c567906f308c104f43f0fdffcbadfc1`.
+Integrated master: `5107c72377a0c53d3b81aad9b3bd8e39bb9452d9`.
 Updated: 2026-11-04. Design: [ADR-0067](../ADRs/ADR-0067-crowdsec-independent-host-protection.md).
 
 ## Current boundary
@@ -245,6 +245,24 @@ existing translations and ship compiled runtime catalogs. The current master's
 read-only catalog guard is retained alongside the native CrowdSec CI target.
 
 ## Integration findings to preserve
+
+Master's assigned-hosting-limits change (#849) landed while this implementation
+was queued. The integration retains its current-row/batched connection identities,
+original-key authority, quota fields and native acceptance gates alongside the
+CrowdSec profile, artifact/key bindings and one-way legacy retirement. Additive
+`0037_merge_crowdsec_hosting_limits` joins both provisioning branches; neither
+parent's frozen migrations changed. All 166 checksums and schema checks pass
+against both parents. Focused behavior, audit, scheduler, controller and workflow
+checks pass, as do complete lint/types (789 Platform and 113 Portal files).
+
+The reviewed catalog merge preserves runtime translations from both parents and
+passes compilation and fresh extraction with 7,339 active Platform entries.
+Collection after integration proves 44 dedicated native cases plus 1,636 aggregate
+cases exactly cover the full 1,680-case selection. Actual SQLite/PostgreSQL
+initialization, existing CrowdSec forward/reverse identity guards and legacy
+admission checks pass; the additional branch-order history checks were still
+running at publication. Required PR and queued-commit checks run on the combined
+tree before merging.
 
 - Persist a selected profile on `VirtualminServer`, independently of synchronization;
   bind it in connection identity and carry it through review/execution/admission.

@@ -1,0 +1,25 @@
+---
+- name: Prepare only the explicitly reviewed inspection helper bundle
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Validate fixed preparation action
+      ansible.builtin.assert:
+        that:
+          - hosting_action in ['prepare', 'fence']
+          - hosting_request is mapping
+    - name: Install or fence the reviewed synchronous helper bundle
+      ansible.builtin.command:
+        argv:
+          - /usr/bin/python3
+          - -c
+          - "{{ lookup('ansible.builtin.file', 'files/praho_hosting_prepare.py') }}"
+        stdin: "{{ {'action': 'install' if hosting_action == 'prepare' else 'fence', 'request': hosting_request} | to_json }}"
+        stdin_add_newline: false
+      register: hosting_result
+      no_log: true
+      changed_when: true
+    - name: Return fenced bundle evidence
+      ansible.builtin.debug:
+        msg: "PRAHO_HOSTING_RESULT={{ hosting_result.stdout | trim | b64encode }}"

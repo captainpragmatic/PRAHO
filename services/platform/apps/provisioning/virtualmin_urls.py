@@ -7,6 +7,7 @@ from django.urls import path
 from . import (
     component_migration_views,
     hosted_domain_dns_views,
+    hosting_node_views,
     virtualmin_drain_views,
     virtualmin_security_views,
     virtualmin_views,
@@ -16,6 +17,9 @@ from . import (
 # in the main provisioning URLs with the "provisioning" namespace
 
 urlpatterns = [
+    path(
+        "servers/<uuid:server_id>/hosting-policy/", hosting_node_views.node_hosting_policy, name="node_hosting_policy"
+    ),
     path(
         "accounts/<uuid:account_id>/migrate-components/",
         component_migration_views.component_migration,

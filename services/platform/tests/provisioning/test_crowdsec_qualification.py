@@ -68,6 +68,19 @@ class CrowdSecProfileAdmissionTests(TestCase):
         self.attest_base()
         self.assertIsNone(destination_refusal(self.server))
 
+    def test_batch_identity_keeps_current_crowdsec_binding_without_per_node_queries(self) -> None:
+        security.select_security_profile(self.server, EXTENSION, self.admin, configuration_digest="c" * 64)
+        self.server.refresh_from_db()
+        expected = security.connection_identity(self.server)
+        self.server.security_configuration_digest = "d" * 64
+        with self.assertNumQueries(3):
+            observed = security.connection_identities([self.server, self.server])
+        self.assertEqual(observed, {self.server.pk: expected})
+        VirtualminServer.objects.filter(pk=self.server.pk).update(security_configuration_digest="d" * 64)
+        with self.assertNumQueries(3):
+            updated = security.connection_identities([self.server])
+        self.assertNotEqual(updated[self.server.pk], expected)
+
     def test_explicit_adoption_persists_and_withdraws_earlier_attestation(self) -> None:
         proof = self.attest_base()
         identity = security.connection_identity(self.server)

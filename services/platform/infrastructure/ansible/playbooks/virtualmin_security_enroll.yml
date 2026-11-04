@@ -13,17 +13,8 @@
           - node_admin_allowed_cidrs | length > 0
       no_log: true
 
-    - name: Install native API enrollment helper
-      ansible.builtin.copy:
-        src: files/praho-webmin-api-user.pl
-        dest: /usr/local/sbin/praho-webmin-api-user
-        mode: '0700'
-
-    - name: Enroll the durable dedicated API credential
-      ansible.builtin.command:
-        argv: "{{ ['/usr/bin/perl', '/usr/local/sbin/praho-webmin-api-user', praho_api_user] + node_admin_allowed_cidrs }}"
-        stdin: "{{ praho_api_password }}"
-      no_log: true
+    - name: Enroll the PRAHO API user through the shared installed-panel tasks
+      ansible.builtin.import_tasks: virtualmin_api_user_tasks.yml
 
     - name: Read the panel TLS certificate through the enrolled SSH connection
       ansible.builtin.command:

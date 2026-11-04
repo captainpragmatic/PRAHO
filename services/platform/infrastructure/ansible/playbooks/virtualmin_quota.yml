@@ -1,0 +1,22 @@
+---
+- name: Execute an admitted token-fenced hosting quota operation
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Validate fixed quota action
+      ansible.builtin.assert:
+        that:
+          - quota_action in ['probe', 'apply', 'fence']
+          - quota_request is mapping
+    - name: Run synchronous installed quota coordinator
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/praho/praho_quota.py, "{{ quota_action }}"]
+        stdin: "{{ quota_request | to_json }}"
+        stdin_add_newline: false
+      register: quota_result
+      changed_when: quota_action != 'probe'
+      no_log: true
+    - name: Return bounded quota receipt
+      ansible.builtin.debug:
+        msg: "PRAHO_QUOTA_RESULT={{ quota_result.stdout | trim | b64encode }}"

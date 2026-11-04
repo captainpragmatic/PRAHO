@@ -34,6 +34,7 @@ EXPECTED_CREATION_SITES = frozenset(
         "apps/common/management/commands/generate_sample_data.py:_create_customer_permutations:manager_user",
         "apps/common/management/commands/setup_test_users.py:_create_test_admin:_create_test_admin",
         "apps/provisioning/management/commands/_virtualmin_lab.py:ensure_lab_staff:user",
+        "apps/infrastructure/native_workflow.py:native_fixture_actor:actor",
         "scripts/setup_test_data.py:create_test_data:superuser",
         "scripts/setup_test_data.py:create_test_data:e2e_admin",
     }
@@ -47,7 +48,7 @@ EXPECTED_IS_STAFF_MUTATIONS = frozenset(
     }
 )
 
-NEWEST_KNOWN_CREATION_SITE = "apps/provisioning/management/commands/_virtualmin_lab.py:ensure_lab_staff:user"
+NEWEST_KNOWN_CREATION_SITE = "apps/infrastructure/native_workflow.py:native_fixture_actor:actor"
 
 
 @dataclass(frozen=True)
@@ -192,7 +193,11 @@ def _find_is_staff_mutations() -> set[str]:
 
             scope = _enclosing_scope(node, parents)
             for target in node.targets:
-                if isinstance(target, ast.Attribute) and target.attr == "is_staff" and isinstance(target.value, ast.Name):
+                if (
+                    isinstance(target, ast.Attribute)
+                    and target.attr == "is_staff"
+                    and isinstance(target.value, ast.Name)
+                ):
                     mutations.add(f"{relative_path}:{scope}:{target.value.id}")
 
     return mutations
@@ -204,14 +209,12 @@ class BareIsStaffCreationGuardrailTests(SimpleTestCase):
         identifiers = {site.identifier for site in sites}
 
         # Structural-Helper Integrity: exact count plus newest-site canary.
-        self.assertEqual(len(sites), 7)
+        self.assertEqual(len(sites), 8)
         self.assertEqual(identifiers, EXPECTED_CREATION_SITES)
         self.assertIn(NEWEST_KNOWN_CREATION_SITE, identifiers)
 
         unsafe_sites = [
-            f"{site.identifier}:{site.line_number}"
-            for site in sites
-            if not (site.has_staff_role or site.is_superuser)
+            f"{site.identifier}:{site.line_number}" for site in sites if not (site.has_staff_role or site.is_superuser)
         ]
         self.assertEqual(
             unsafe_sites,

@@ -698,7 +698,7 @@ def virtualmin_bridge_control(request: HttpRequest, account_id: str) -> HttpResp
 @user_passes_test(is_staff_or_superuser)
 @require_http_methods(["POST"])
 @audit_service_call("virtualmin_job_resolve")
-def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
+def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:  # noqa: PLR0912 -- Dedicated native proof before generic resolution.
     """Operator terminal resolution of an attention (uncertain) backup/restore job."""
     job = get_object_or_404(VirtualminProvisioningJob, pk=job_id)
     raw_note = request.POST.get("note", "").strip()
@@ -720,6 +720,14 @@ def virtualmin_job_resolve(request: HttpRequest, job_id: str) -> HttpResponse:
         if resolved_off.is_err():
             messages.error(request, resolved_off.unwrap_err())
             return redirect("provisioning:virtualmin_job_status", job_id=job.pk)
+        rows = 1
+    elif job.operation == "apply_hosting_limits":
+        from .hosting_limit_execution import resolve_quota_job  # noqa: PLC0415 -- Dedicated permanent native fence.
+
+        resolved_quota = resolve_quota_job(job, resolved_by=str(actor), note=str(note))
+        if resolved_quota.is_err():
+            messages.error(request, resolved_quota.unwrap_err())
+            return _page_redirect(request, "provisioning:virtualmin_job_status", job_id=job.pk)
         rows = 1
     elif creation_review.unwrap():
         rows = 1
@@ -780,7 +788,13 @@ def virtualmin_job_node_lost(request: HttpRequest, job_id: str) -> HttpResponse:
     job = get_object_or_404(VirtualminProvisioningJob.objects.select_related("server", "account"), pk=job_id)
     note = request.POST.get("note", "").strip() or _("operator confirmed the node is lost")
     actor = request.user.email if request.user.is_authenticated else "system"
-    if is_pair_job(job.operation, job.parameters or {}):
+    if job.operation == "apply_hosting_limits":
+        from .hosting_limit_provider_recovery import (  # noqa: PLC0415
+            resolve_provider_destroyed_quota,
+        )
+
+        resolved = resolve_provider_destroyed_quota(job, resolved_by=str(actor), note=str(note))
+    elif is_pair_job(job.operation, job.parameters or {}):
         resolved = resolve_pair_job_node_lost(job, resolved_by=actor, note=str(note))
     else:
         resolved = resolve_chain_job_node_lost(job, resolved_by=actor, note=str(note))
@@ -2153,7 +2167,11 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                 try:
                     # Check if account already exists in PRAHO
                     account = VirtualminAccount.objects.get(virtualmin_username=username)
-                    if account_has_active_migration(account):
+                    from .hosting_limit_execution import (  # noqa: PLC0415
+                        account_has_active_quota,
+                    )
+
+                    if account_has_active_migration(account) or account_has_active_quota(account):
                         logger.info("✅ [AccountSync] Migration lock: account=%s", account.pk)
                         continue
                     if account.server_id != server.pk and account.server.status == "active":
@@ -2173,8 +2191,10 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                         if locked is None:
                             continue
                         account = locked.account  # Its server is read after the lock.
-                        if account_has_active_migration(account) or (
-                            account.server_id != server.pk and account.server.status == "active"
+                        if (
+                            account_has_active_migration(account)
+                            or account_has_active_quota(account)
+                            or (account.server_id != server.pk and account.server.status == "active")
                         ):
                             continue
                         if account.server_id != server.pk:
@@ -2214,8 +2234,9 @@ def virtualmin_accounts_sync(  # noqa: C901, PLR0912, PLR0915  # Complexity: mul
                             service.domain = account_data["primary_domain"]
                             service.save(update_fields=["domain", "updated_at"])
 
-                        disk_quota_mb = (service.service_plan.disk_space_gb or 0) * 1024
-                        bandwidth_quota_mb = (service.service_plan.bandwidth_gb or 0) * 1024
+                        limits = getattr(service, "hosting_limits", None)
+                        disk_quota_mb = limits.disk_allowance_mib if limits is not None else None
+                        bandwidth_quota_mb = limits.bandwidth_allowance_mib if limits is not None else None
 
                         # Create VirtualminAccount linked to the Service
                         VirtualminAccount.objects.create(

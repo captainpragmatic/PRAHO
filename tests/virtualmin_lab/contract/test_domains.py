@@ -187,7 +187,12 @@ def test_modify_domain(lab: Lab) -> None:
     )
     (restore,) = sent
     assert restore.program == "modify-domain"
-    assert set(restore.params) == {"domain", "quota", "bw"}, restore.params
+    assert restore.params == {
+        "domain": SANDBOX_DOMAIN,
+        "quota": "2097152",
+        "uquota": "2097152",
+        "bw": "104857600",
+    }, restore.params
     lab.record(restore, "success", "disaster recovery's quota restore: the bandwidth limit is --bw on modify-domain")
     assert_accepted(restore)
 

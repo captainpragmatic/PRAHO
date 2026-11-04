@@ -13,6 +13,7 @@ import secrets
 from collections.abc import Iterator
 
 import pytest
+from django_q.models import OrmQ
 
 from apps.provisioning.virtualmin_backup_service import REMOTE_ARCHIVE_DIR
 from apps.provisioning.virtualmin_drain_service import NodeDrainService
@@ -48,7 +49,10 @@ def test_migration_moves_an_account_and_its_data_from_a_to_b(bench: Bench, movin
     assert started.is_ok(), started
     migration = started.unwrap()
     assert migration.status == "pending"
-    assert bench.queued() == ["run_virtualmin_migration"]
+    assert bench.queued() == ["apply_hosting_limits", "run_virtualmin_migration"]
+    quota_task = OrmQ.objects.order_by("id").first()
+    assert quota_task is not None
+    assert quota_task.task["args"] == (migration.pre_migration_snapshot["hosting_limits"]["application_id"],)
     runs = bench.run_queue()
     assert [run.error for run in runs if run.error] == []
 
