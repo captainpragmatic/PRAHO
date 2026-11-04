@@ -4,6 +4,7 @@ from django.core import mail
 from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import TransactionTestCase, override_settings
+from django.utils import translation
 
 from apps.audit.services import GDPRDeletionService
 from apps.billing.plan_change_notice_models import PlanChangeNotice
@@ -18,7 +19,7 @@ from apps.billing.services import ProformaConversionService
 from apps.billing.signals import _send_invoice_issued_email, _send_payment_received_email
 from apps.notifications.models import EmailLog, EmailPreference, EmailTemplate
 from apps.notifications.tasks import send_email_task
-from apps.users.models import CustomerMembership
+from apps.users.models import CustomerMembership, UserProfile
 from tests.billing import test_plan_change_lifecycle as lifecycle_tests
 from tests.billing.test_plan_change_operations import PlanOperationFixture
 
@@ -154,6 +155,45 @@ class FinancialPlanChangeNoticeTests(PlanOperationFixture, TransactionTestCase):
     def process_notices(self, change):
         for notice in change.phase_notices.filter(state="pending").order_by("created_at"):
             self.assertTrue(process_plan_change_notice(notice.pk), notice.phase)
+
+    def queued_proforma_for_locale(self, locale: str, *, worker_locale: str) -> tuple[str, EmailLog]:
+        membership = CustomerMembership.objects.get(customer=self.customer, user=self.actor)
+        membership.is_primary = True
+        membership.save(update_fields=["is_primary"])
+        profile, _created = UserProfile.objects.get_or_create(user=self.actor)
+        profile.preferred_language = locale
+        profile.save(update_fields=["preferred_language"])
+        change = self.confirm(self.quote())
+        with translation.override(worker_locale):
+            self.assertEqual(dispatch_plan_change_notices(), 1)
+            self.assertEqual(translation.get_language(), worker_locale)
+        notice = change.phase_notices.get(phase="proforma")
+        self.assertEqual(notice.state, "linked")
+        log = notice.email_log
+        assert log is not None
+        self.assertEqual((log.template_key, log.customer_id), ("proforma", self.customer.pk))
+        self.assertEqual(log.status, "queued")
+        proforma = change.proforma
+        assert proforma is not None
+        return proforma.number, log
+
+    def test_durable_english_worker_stores_the_primary_users_romanian_proforma(self):
+        number, log = self.queued_proforma_for_locale("ro", worker_locale="en")
+        self.assertEqual(log.subject, f"Factură proforma {number}")
+        body = log.get_decrypted_body_text()
+        self.assertIn(f"Găsiți atașată factura proforma {number}.", body)
+        self.assertIn("Checkout target: 20 GiB", body)
+        self.assertNotIn("Please find attached", body)
+        self.assertEqual(log.attachment_refs.get(source_type="proforma_pdf").language, "ro")
+
+    def test_durable_romanian_worker_preserves_the_primary_users_english_proforma(self):
+        number, log = self.queued_proforma_for_locale("en", worker_locale="ro")
+        self.assertEqual(log.subject, f"Proforma Invoice {number}")
+        body = log.get_decrypted_body_text()
+        self.assertIn(f"Please find attached proforma invoice {number}.", body)
+        self.assertIn("Checkout target: 20 GiB", body)
+        self.assertNotIn("Găsiți atașată", body)
+        self.assertEqual(log.attachment_refs.get(source_type="proforma_pdf").language, "en")
 
     def test_actual_legal_issuance_sends_before_money_convergence_binds_the_plan_invoice(self):
         change = self.confirm(self.quote())

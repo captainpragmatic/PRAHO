@@ -210,6 +210,7 @@ def _scheduled_resource_refusal(change: PlanChange, service: Service) -> str | N
         resource_refusal = _("Another resource assignment superseded the accepted downgrade; review its limits.")
     elif (
         not plan.is_active
+        or products[change.from_product_id].default_service_plan_id is None
         or products[change.to_product_id].default_service_plan_id != change.to_plan_id
         or {"source": _profile(change.from_product_id), "target": _profile(change.to_product_id)}
         != change.quote_snapshot.get("catalog_profile")
