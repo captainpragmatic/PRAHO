@@ -406,7 +406,7 @@ class NodeDeploymentService:
                 NodeDeploymentLog,  # Circular: cross-app  # Deferred: avoids circular import
             )
 
-            getattr(logger, level.lower())(f"[Deployment:{deployment.hostname}] {message}")
+            getattr(logger, level)(f"[Deployment:{deployment.hostname}] {message}")
             NodeDeploymentLog.objects.create(
                 deployment=deployment,
                 level=level.upper(),
@@ -451,8 +451,7 @@ class NodeDeploymentService:
                     "The node firewall drops Platform's connections from these addresses, so a deploy that connects "
                     "from one of them fails at hardening."
                 )
-                log_deployment("WARNING", warning)
-                logger.warning("⚠️ [Deployment] %s", warning)
+                log_deployment("warning", warning)
 
             # Validate DNS config presence BEFORE any paid/external resource is created, so a
             # missing token/zone fails before the VM (#347 GAP 3; codex C2). Runs after the

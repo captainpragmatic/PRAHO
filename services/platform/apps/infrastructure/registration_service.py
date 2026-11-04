@@ -22,6 +22,7 @@ from apps.common.types import Err, Ok, Result
 if TYPE_CHECKING:
     from apps.infrastructure.deployment_lifecycle import OperationLease
     from apps.infrastructure.models import NodeDeployment
+    from apps.provisioning.virtualmin_gateway import PanelCheckFailure
     from apps.provisioning.virtualmin_models import VirtualminServer
     from apps.users.models import User
 
@@ -88,20 +89,18 @@ class NodeRegistrationService:
         )
         result = VirtualminGateway(config).check_api()
         if result.is_err():
-            failure = result.unwrap_err()
-            failure_messages = {
-                "unreachable": (
-                    f"The panel at {config.server.hostname}:{config.server.api_port} could not be reached "
-                    f"({failure.detail}); root access has not been restricted"
-                ),
-                "rejected": (
-                    "The durable dedicated API credential did not authenticate; root access has not been restricted"
-                ),
-                "refused": "The panel refused the API check; root access has not been restricted",
-                "failed": f"The panel check failed ({failure.detail}); root access has not been restricted",
-            }
-            return Err(failure_messages[failure.kind])
+            return Err(self._panel_check_message(result.unwrap_err(), f"{deployment.fqdn}:10000"))
         return Ok(True)
+
+    @staticmethod
+    def _panel_check_message(failure: PanelCheckFailure, panel: str) -> str:
+        if failure.kind == "unreachable":
+            return f"The panel at {panel} could not be reached ({failure.detail}); root access has not been restricted"
+        if failure.kind == "rejected":
+            return "The durable dedicated API credential did not authenticate; root access has not been restricted"
+        if failure.kind == "refused":
+            return f"The panel refused the API check ({failure.detail}); root access has not been restricted"
+        return f"The panel check failed ({failure.detail}); root access has not been restricted"
 
     @staticmethod
     def _registration_validation_error(deployment: NodeDeployment) -> str | None:

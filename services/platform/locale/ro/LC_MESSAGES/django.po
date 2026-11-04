@@ -32207,8 +32207,9 @@ msgid "The panel at %(host)s:%(port)s could not be reached (%(detail)s); interac
 msgstr "Panoul de la %(host)s:%(port)s nu a putut fi contactat (%(detail)s); accesul interactiv nu a fost restricționat"
 
 #: apps/provisioning/virtualmin_security_apply.py
-msgid "The panel refused the API check; interactive access has not been restricted"
-msgstr "Panoul a refuzat verificarea API; accesul interactiv nu a fost restricționat"
+#, python-format
+msgid "The panel refused the API check (%(detail)s); interactive access has not been restricted"
+msgstr "Panoul a refuzat verificarea API (%(detail)s); accesul interactiv nu a fost restricționat"
 
 #: apps/provisioning/virtualmin_security_apply.py
 #, python-format
@@ -32221,8 +32222,9 @@ msgid "The panel could not be reached after hardening (%(detail)s)."
 msgstr "Panoul nu a putut fi contactat după securizare (%(detail)s)."
 
 #: apps/provisioning/virtualmin_security_execution.py
-msgid "The panel refused the API check after hardening."
-msgstr "Panoul a refuzat verificarea API după securizare."
+#, python-format
+msgid "The panel refused the API check after hardening (%(detail)s)."
+msgstr "Panoul a refuzat verificarea API după securizare (%(detail)s)."
 
 #: apps/provisioning/virtualmin_security_execution.py
 #, python-format

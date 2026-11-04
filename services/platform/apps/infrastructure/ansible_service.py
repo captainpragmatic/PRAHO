@@ -124,19 +124,14 @@ def platform_source_addresses() -> list[str]:
 
 
 def uncovered_platform_egress() -> list[str]:
-    """Warn about likely firewall drops; prerequisite validation owns invalid policy."""
+    """Platform's own source addresses that the node admin allowlist does not cover.
+
+    A warning heuristic, never a gate: behind NAT or in a container the kernel reports a
+    private address, which is skipped, so an empty result does not prove coverage.
+    """
     if getattr(settings, "NODE_ADMIN_EGRESS_CHECK", True) is False:
         return []
-    try:
-        allowed = node_admin_allowed_cidrs()
-    except ValueError:
-        return []
-    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
-    for entry in allowed:
-        try:
-            networks.append(ipaddress.ip_network(entry, strict=False))
-        except ValueError:
-            continue
+    networks = [ipaddress.ip_network(entry) for entry in node_admin_allowed_cidrs()]
     return [
         address
         for address in platform_source_addresses()

@@ -24,6 +24,7 @@ from apps.provisioning.virtualmin_gateway import (
     VirtualminRateLimitedError,
     VirtualminResponse,
     VirtualminTransientError,
+    VirtualminUnreachableError,
     explicit_rejection,
     get_virtualmin_timeouts,
 )
@@ -76,7 +77,8 @@ class VirtualminGatewayTransportCoverageTests(TestCase):
 
     def test_check_api_preserves_typed_failures(self) -> None:
         for error, kind in (
-            (VirtualminTransientError("connect timed out"), "unreachable"),
+            (VirtualminUnreachableError("connect timed out"), "unreachable"),
+            (VirtualminTransientError("Server error: HTTP 503", http_status=503), "failed"),
             (VirtualminAuthError("HTTP 401"), "rejected"),
             (VirtualminAuthorizationError("HTTP 403"), "rejected"),
             (VirtualminAPIError("panel policy failed"), "failed"),
@@ -89,6 +91,29 @@ class VirtualminGatewayTransportCoverageTests(TestCase):
                 self.assertEqual(result.unwrap_err().detail, str(error))
                 self.assertEqual(call.call_args.args, ("info",))
                 self.assertTrue(call.call_args.kwargs["correlation_id"].startswith("health_check_"))
+
+    def test_check_api_unreachable_only_when_the_connection_failed(self) -> None:
+        prepared = requests.Request("POST", "https://[2001:db8::1]:10000/virtual-server/remote.cgi").prepare()
+        for outcome, kind, detail in (
+            (requests.exceptions.ConnectTimeout("fixture", request=prepared), "unreachable", "Connection timeout to"),
+            (requests.exceptions.ConnectionError("fixture", request=prepared), "unreachable", "Connection error to"),
+            (requests.exceptions.ReadTimeout("fixture", request=prepared), "failed", "Read timeout from"),
+            (http_response("Service Unavailable", status=503), "failed", "Server error: HTTP 503"),
+        ):
+
+            def respond(*_args: object, outcome: object = outcome, **_kwargs: object) -> object:
+                if isinstance(outcome, Exception):
+                    raise outcome
+                return outcome
+
+            with (
+                self.subTest(outcome=type(outcome).__name__),
+                patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=respond),
+            ):
+                result = self.gateway.check_api()
+                self.assertTrue(result.is_err())
+                self.assertEqual(result.unwrap_err().kind, kind)
+                self.assertIn(detail, result.unwrap_err().detail)
 
     def test_check_api_requires_affirmative_success(self) -> None:
         for success in (True, False):

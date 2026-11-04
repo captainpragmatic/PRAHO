@@ -56,34 +56,27 @@ class PlatformSourceAddressTests(SimpleTestCase):
 
 
 @override_settings(NODE_ADMIN_EGRESS_CHECK=True)
-class UncoveredPlatformEgressTests(SimpleTestCase):
+class UncoveredPlatformEgressTests(TestCase):
+    def setUp(self) -> None:
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _uncovered(self, allowlist, sources):
+        result = SettingsService.update_setting("infrastructure.node_admin_allowed_cidrs", allowlist)
+        self.assertTrue(result.is_ok(), result)
+        with patch("apps.infrastructure.ansible_service.platform_source_addresses", return_value=sources):
+            return ansible_service.uncovered_platform_egress()
+
     def test_ipv6_missing_from_allowlist_is_reported(self):
-        with (
-            patch(
-                "apps.infrastructure.ansible_service.platform_source_addresses",
-                return_value=["8.8.8.8", "2a01:4f9:c015:4d96::1"],
-                create=True,
-            ),
-            patch(
-                "apps.infrastructure.ansible_service.node_admin_allowed_cidrs",
-                return_value=["8.8.8.8/32", "not-a-network"],
-            ),
-        ):
-            self.assertEqual(ansible_service.uncovered_platform_egress(), ["2a01:4f9:c015:4d96::1"])
+        self.assertEqual(
+            self._uncovered(["8.8.8.8/32"], ["8.8.8.8", "2a01:4f9:c015:4d96::1"]),
+            ["2a01:4f9:c015:4d96::1"],
+        )
 
     def test_ipv6_covered_by_a_64_is_not_reported(self):
-        with (
-            patch(
-                "apps.infrastructure.ansible_service.platform_source_addresses",
-                return_value=["2a01:4f9:c015:4d96::1"],
-                create=True,
-            ),
-            patch(
-                "apps.infrastructure.ansible_service.node_admin_allowed_cidrs",
-                return_value=["2a01:4f9:c015:4d96::1234/64"],
-            ),
-        ):
-            self.assertEqual(ansible_service.uncovered_platform_egress(), [])
+        self.assertEqual(
+            self._uncovered(["8.8.8.8", "2a01:4f9:c015:4d96::/64"], ["8.8.8.8", "2a01:4f9:c015:4d96::1"]), []
+        )
 
     @override_settings(NODE_ADMIN_EGRESS_CHECK=False)
     def test_disabled_check_does_not_touch_sockets_or_policy(self):
@@ -94,14 +87,6 @@ class UncoveredPlatformEgressTests(SimpleTestCase):
             self.assertEqual(ansible_service.uncovered_platform_egress(), [])
         factory.assert_not_called()
         allowed.assert_not_called()
-
-    def test_invalid_allowlist_is_left_to_the_existing_prerequisite(self):
-        with (
-            patch("apps.infrastructure.ansible_service.node_admin_allowed_cidrs", side_effect=ValueError("invalid")),
-            patch("apps.infrastructure.ansible_service.socket.socket") as factory,
-        ):
-            self.assertEqual(ansible_service.uncovered_platform_egress(), [])
-        factory.assert_not_called()
 
 
 class AllowlistValidationTests(TestCase):
@@ -140,8 +125,13 @@ class AllowlistReachesThePlaybooksTests(TestCase):
     @staticmethod
     def _deployment() -> Any:
         return SimpleNamespace(
-            id=1, hostname="prd-sha-het-de-fsn1-001", dns_zone=None, fqdn="", ssh_port=9876,
-            panel_type=SimpleNamespace(panel_type="virtualmin"), virtualmin_server_id=None,
+            id=1,
+            hostname="prd-sha-het-de-fsn1-001",
+            dns_zone=None,
+            fqdn="",
+            ssh_port=9876,
+            panel_type=SimpleNamespace(panel_type="virtualmin"),
+            virtualmin_server_id=None,
         )
 
     def test_every_playbook_gets_the_entries_as_networks(self) -> None:

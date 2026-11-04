@@ -15,7 +15,7 @@ from apps.provisioning.virtualmin_gateway import (
     VirtualminAuthError,
     VirtualminConfig,
     VirtualminGateway,
-    VirtualminTransientError,
+    VirtualminUnreachableError,
 )
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_security import connection_identity, record_inspection
@@ -258,7 +258,7 @@ class SecurityExecutionTests(TestCase):
         self.assertEqual(decision.action, "verify_policy")
         self.assertEqual(decision.actor, reviewer)
 
-    def _api_failure_message(self, error):
+    def _api_failure_message(self, outcome):
         run = self.claim()
         evidence = self.hardened_evidence()
         self.server.refresh_from_db()
@@ -273,7 +273,7 @@ class SecurityExecutionTests(TestCase):
                 "apps.provisioning.virtualmin_security_execution.node_admin_allowed_cidrs",
                 return_value=ADMIN_NETWORKS,
             ),
-            patch("apps.provisioning.virtualmin_gateway.VirtualminGateway.call", return_value=Err(error)) as call,
+            patch("apps.provisioning.virtualmin_gateway.VirtualminGateway.call", return_value=outcome) as call,
             self.assertRaises(ValidationError) as caught,
         ):
             complete_hardening(run.pk, evidence)
@@ -285,11 +285,21 @@ class SecurityExecutionTests(TestCase):
         return caught.exception.messages[0]
 
     def test_failed_api_proof_does_not_release_exclusion_or_grant_verification(self):
-        message = self._api_failure_message(VirtualminAuthError("HTTP 401"))
+        message = self._api_failure_message(Err(VirtualminAuthError("HTTP 401")))
         self.assertEqual(message, "The dedicated API identity did not authenticate after hardening.")
 
+    def test_refused_panel_check_does_not_grant_verification(self):
+        message = self._api_failure_message(
+            Ok(
+                SimpleNamespace(
+                    success=False, data={"error": "ACL denies info"}, execution_time=0, server_hostname="node"
+                )
+            )
+        )
+        self.assertEqual(message, "The panel refused the API check after hardening (ACL denies info).")
+
     def test_unreachable_panel_is_not_reported_as_bad_credentials(self):
-        message = self._api_failure_message(VirtualminTransientError("IPv6 connect timed out"))
+        message = self._api_failure_message(Err(VirtualminUnreachableError("IPv6 connect timed out")))
         self.assertEqual(message, "The panel could not be reached after hardening (IPv6 connect timed out).")
         self.assertNotIn("did not authenticate", message)
 

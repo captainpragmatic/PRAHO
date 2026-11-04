@@ -402,7 +402,10 @@ class TestDeployNodeReachesCompletedThroughFSM(TestCase):
         self.assertIn("2a01:4f9:c015:4d96::1", warning.message)
         self.assertIn("firewall drops Platform's connections", warning.message)
         self.assertIn("fails at hardening", warning.message)
-        self.assertTrue(any("⚠️ [Deployment] " + warning.message in line for line in captured.output))
+        self.assertEqual(
+            [line for line in captured.output if warning.message in line],
+            [f"WARNING:apps.infrastructure.deployment_service:[Deployment:{deployment.hostname}] {warning.message}"],
+        )
         gateway.create_server.assert_called_once()
         service._registration.verify_and_activate.assert_called_once_with(registered)
 

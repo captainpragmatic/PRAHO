@@ -225,7 +225,9 @@ def complete_hardening(
         if failure.kind == "rejected":
             raise ValidationError(_("The dedicated API identity did not authenticate after hardening."))
         if failure.kind == "refused":
-            raise ValidationError(_("The panel refused the API check after hardening."))
+            raise ValidationError(
+                _("The panel refused the API check after hardening (%(detail)s).") % {"detail": failure.detail}
+            )
         raise ValidationError(_("The panel check failed after hardening (%(detail)s).") % {"detail": failure.detail})
     with transaction.atomic():
         server = VirtualminServer.objects.select_for_update().get(pk=server.pk)

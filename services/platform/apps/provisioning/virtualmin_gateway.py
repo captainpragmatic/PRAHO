@@ -538,6 +538,10 @@ class VirtualminTransientError(VirtualminAPIError):
     default_retriability = Retriability.UNKNOWN
 
 
+class VirtualminUnreachableError(VirtualminTransientError):
+    """The connection to the panel could not be made, so the panel never answered."""
+
+
 class VirtualminQuotaExceededError(VirtualminAPIError):
     """Server quota exceeded - try different server"""
 
@@ -1140,7 +1144,7 @@ class VirtualminGateway:
             return response
 
         except requests.exceptions.ConnectTimeout as e:
-            raise VirtualminTransientError(
+            raise VirtualminUnreachableError(
                 f"Connection timeout to {self.server.hostname}{_transport_address_suffix(e)}",
                 self.server.hostname,
                 retriability=Retriability.RETRIABLE,
@@ -1160,7 +1164,7 @@ class VirtualminGateway:
                 retriability=Retriability.NOT_RETRIABLE,
             ) from e
         except requests.exceptions.ConnectionError as e:
-            raise VirtualminTransientError(
+            raise VirtualminUnreachableError(
                 f"Connection error to {self.server.hostname}: {e}{_transport_address_suffix(e)}", self.server.hostname
             ) from e
         except OutboundSecurityError as e:
@@ -1293,7 +1297,7 @@ class VirtualminGateway:
             if result.is_err():
                 error = result.unwrap_err()
                 kind: Literal["unreachable", "rejected", "refused", "failed"]
-                if isinstance(error, VirtualminTransientError):
+                if isinstance(error, VirtualminUnreachableError):
                     kind = "unreachable"
                 elif isinstance(error, VirtualminAuthError):
                     kind = "rejected"

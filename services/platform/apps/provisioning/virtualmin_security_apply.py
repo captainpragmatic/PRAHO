@@ -104,7 +104,10 @@ def _panel_check_error(failure: PanelCheckFailure, server: VirtualminServer) -> 
     if failure.kind == "rejected":
         return ValidationError(_("Dedicated API authentication failed; interactive access has not been restricted."))
     if failure.kind == "refused":
-        return ValidationError(_("The panel refused the API check; interactive access has not been restricted"))
+        return ValidationError(
+            _("The panel refused the API check (%(detail)s); interactive access has not been restricted")
+            % {"detail": failure.detail}
+        )
     return ValidationError(
         _("The panel check failed (%(detail)s); interactive access has not been restricted")
         % {"detail": failure.detail}

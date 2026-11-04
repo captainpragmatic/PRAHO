@@ -9,7 +9,7 @@ from django.test import TestCase, override_settings
 from apps.common.credential_vault import CredentialVault, EncryptedCredential
 from apps.common.types import Err, Ok
 from apps.infrastructure.ansible_service import AnsibleResult
-from apps.provisioning.virtualmin_gateway import VirtualminAuthError, VirtualminTransientError
+from apps.provisioning.virtualmin_gateway import VirtualminAuthError, VirtualminUnreachableError
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.provisioning.virtualmin_security import connection_identity, record_inspection
 from apps.provisioning.virtualmin_security_apply import apply_hardening
@@ -59,7 +59,7 @@ class SecurityApplyTests(TestCase):
         self.assertEqual(self.server.api_username, "root")
         self.assertEqual(self.server.get_api_password(), "original-root-rescue-password")
 
-    def _api_failure_message(self, error):
+    def _api_failure_message(self, outcome):
         self.server.refresh_from_db()
         self.assertEqual(self.server.security_operation, self.run.pk)
         self.assertEqual(self.server.get_api_password(), "original-root-rescue-password")
@@ -71,9 +71,7 @@ class SecurityApplyTests(TestCase):
             patch(
                 "apps.provisioning.virtualmin_security_apply._run", return_value="PRAHO_PANEL_CERT=" + "a" * 64
             ) as remote,
-            patch(
-                "apps.provisioning.virtualmin_security_apply.VirtualminGateway.call", return_value=Err(error)
-            ) as call,
+            patch("apps.provisioning.virtualmin_security_apply.VirtualminGateway.call", return_value=outcome) as call,
             self.assertRaises(ValidationError) as caught,
         ):
             apply_hardening(self.run)
@@ -89,14 +87,27 @@ class SecurityApplyTests(TestCase):
         return caught.exception.messages[0]
 
     def test_failed_api_authentication_prevents_ssh_and_webmin_lockdown(self):
-        message = self._api_failure_message(VirtualminAuthError("HTTP 401"))
+        message = self._api_failure_message(Err(VirtualminAuthError("HTTP 401")))
         self.assertEqual(
             message,
             "Dedicated API authentication failed; interactive access has not been restricted.",
         )
 
+    def test_refused_panel_check_prevents_ssh_and_webmin_lockdown(self):
+        message = self._api_failure_message(
+            Ok(
+                SimpleNamespace(
+                    success=False, data={"error": "ACL denies info"}, execution_time=0, server_hostname="node"
+                )
+            )
+        )
+        self.assertEqual(
+            message,
+            "The panel refused the API check (ACL denies info); interactive access has not been restricted",
+        )
+
     def test_unreachable_panel_is_not_reported_as_bad_credentials(self):
-        message = self._api_failure_message(VirtualminTransientError("IPv6 connect timed out"))
+        message = self._api_failure_message(Err(VirtualminUnreachableError("IPv6 connect timed out")))
         self.assertEqual(
             message,
             f"The panel at {self.server.hostname}:{self.server.api_port} could not be reached "

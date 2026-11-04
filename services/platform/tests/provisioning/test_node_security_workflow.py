@@ -264,6 +264,30 @@ class SecurityWorkflowTests(TestCase):
             transport.return_value.run_server_playbook.return_value = Ok(response)
             evidence = collect_inspection(self.server)
         self.assertIn("Administrative networks: 192.0.2.1/32", evidence["proposed_changes"])
+        self.assertFalse([line for line in evidence["proposed_changes"] if line.startswith("Warning:")])
+
+    def test_collector_warns_when_platform_egress_is_outside_the_administrative_networks(self):
+        encoded = base64.b64encode(json.dumps(self.evidence).encode()).decode()
+        response = AnsibleResult(True, "virtualmin_security_read.yml", "PRAHO_SECURITY_INSPECTION=" + encoded, "", 0)
+        with (
+            patch("apps.provisioning.virtualmin_security_tasks.AnsibleService") as transport,
+            patch(
+                "apps.provisioning.virtualmin_security_tasks.node_admin_allowed_cidrs", return_value=["192.0.2.1/32"]
+            ),
+            patch(
+                "apps.provisioning.virtualmin_security_tasks.uncovered_platform_egress",
+                return_value=["2a01:4f9:c015:4d96::1"],
+            ),
+        ):
+            transport.return_value.run_server_playbook.return_value = Ok(response)
+            evidence = collect_inspection(self.server)
+        proposals = evidence["proposed_changes"]
+        networks = proposals.index("Administrative networks: 192.0.2.1/32")
+        self.assertEqual(
+            proposals[networks + 1],
+            "Warning: Platform source addresses outside the administrative networks: 2a01:4f9:c015:4d96::1. "
+            "The node firewall will drop Platform's connections from them.",
+        )
 
     def test_collector_refuses_multiple_envelopes(self):
         response = AnsibleResult(
