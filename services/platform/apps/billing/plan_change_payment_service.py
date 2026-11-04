@@ -209,6 +209,7 @@ def _claim_submission(attempt_id: UUID | str) -> PlanPaymentResult | tuple[UUID,
             # Payment success alone does not certify document conversion. A
             # lost commit callback must remain discoverable by the sweep.
             if attempt.state != "succeeded":
+                # fsm-bypass: CharField attempt; locked paid facts await document convergence.
                 attempt.state = "review"
             attempt.save(update_fields=["state", "updated_at"])
             return _result(attempt, change)
@@ -272,9 +273,11 @@ def submit_plan_change_payment(attempt_id: UUID | str) -> PlanPaymentResult:
                     attempt.client_secret_ciphertext = encrypt_sensitive_data(
                         secret, aad=f"plan-payment:{attempt.pk}".encode()
                     )
+                # fsm-bypass: CharField attempt; exact submission lease binds the original provider intent.
                 attempt.state = "succeeded" if payment.status == "succeeded" else "ready"
                 attempt.last_error = ""
         else:
+            # fsm-bypass: CharField attempt; exact submission lease records uncertain/refused provider issuance.
             attempt.state = "unknown" if response.get("retryable", True) else "refused"
             attempt.last_error = (
                 "Provider submission is uncertain" if attempt.state == "unknown" else "Provider refused checkout"
@@ -332,6 +335,7 @@ def stage_plan_change_settlement(payment: Payment) -> None:
         raise RuntimeError("The paid plan recovery journal requires its gateway-fact transaction")
     attempt = PlanChangePaymentAttempt.objects.select_for_update(of=("self",)).get(payment_id=payment.pk)
     _identity(attempt, payment, attempt.change)
+    # fsm-bypass: CharField attempt; locked recovery journal defers document effects until commit.
     attempt.state = "review"
     attempt.last_error = "Payment received; original document convergence pending"
     attempt.lease_token = attempt.lease_expires_at = None
@@ -370,11 +374,13 @@ def observe_plan_change_intent(gateway_intent_id: str, intent: Mapping[str, Any]
                 # Do not run Payment failure signals while the webhook owns
                 # Payment ahead of Customer. Retain the verified provider fact
                 # durably; terminal local effects use document-first recovery.
+                # fsm-bypass: CharField attempt; locked verified cancellation awaits document-first recovery.
                 attempt.state = "review"
                 attempt.last_error = "Provider cancellation verified; local terminal convergence pending"
                 attempt.lease_token = attempt.lease_expires_at = None
                 transaction.on_commit(lambda: _close_cancelled_change(attempt.pk), robust=True)
             elif attempt.state not in {"review", "cancelled", "refused"}:
+                # fsm-bypass: CharField attempt; locked verified live intent remains available for its next card step.
                 attempt.state = "ready"
             attempt.save(
                 update_fields=[
@@ -422,6 +428,7 @@ def _finish_cancelled(
     if payment.status != "pending":
         raise ValidationError(_("A settled or disputed payment cannot be cancelled by checkout."))
     payment.apply_gateway_event("failed", {"plan_change_terminal_proof": proof})
+    # fsm-bypass: CharField attempt; locked document context records provider/never-issued terminal proof.
     attempt.state = "cancelled"
     attempt.provider_status = "not_submitted" if not_submitted else "canceled"
     attempt.lease_token = attempt.lease_expires_at = None
@@ -514,6 +521,7 @@ def _converge_recovered_success(
                     attempt.save()
                     return _result(attempt, change)
     with _locked_attempt(attempt_id) as (attempt, payment, change):
+        # fsm-bypass: CharField attempt; locked recovery journal records the verified convergence outcome.
         attempt.state = "succeeded" if settled.is_ok() else "review"
         attempt.last_error = "" if settled.is_ok() else "Verified provider facts require payment review"
         attempt.lease_token = attempt.lease_expires_at = None
@@ -529,6 +537,7 @@ def _recover_paid_document(attempt_id: UUID | str, payment: Payment) -> PlanPaym
         str(payment.proforma_id), payment.amount_cents, "stripe", existing_payment=payment
     )
     with _locked_attempt(attempt_id) as (attempt, _payment, change):
+        # fsm-bypass: CharField attempt; locked recovery journal records fiscal conversion or retained review.
         attempt.state = "succeeded" if converted.is_ok() else "review"
         attempt.last_error = "" if converted.is_ok() else "Payment received; original document conversion pending"
         attempt.lease_token = attempt.lease_expires_at = None
@@ -560,6 +569,7 @@ def _store_recovered_status(attempt_id: UUID | str, token: UUID, facts: Mapping[
                     attempt, payment, change, not_submitted=False, expired=timezone.now() >= change.authority_expires_at
                 )
                 return _result(attempt, change)
+            # fsm-bypass: CharField attempt; exact recovery lease preserves the same verified live provider intent.
             attempt.state = "ready"
         else:
             attempt.state, attempt.last_error = "unknown", "Original provider status remains uncertain"

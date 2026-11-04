@@ -302,7 +302,7 @@ def dispatch_hosting_safety_observations() -> int:
         if job.execution_deadline is None or job.execution_deadline <= now:
             VirtualminProvisioningJob.objects.filter(
                 pk=job.pk, status=job.status, execution_token=job.execution_token
-            ).update(
+            ).update(  # fsm-bypass: CharField job; exact status/token CAS expires only this read-only observation.
                 status="failed",
                 completed_at=now,
                 status_message=str(_("Read-only observation execution budget expired.")),
