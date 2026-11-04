@@ -1,6 +1,7 @@
 # CrowdSec implementation ledger
 
-Baseline: `9fd0d62fcbb288e9e766e6ede9403a4b2745f3eb`.
+Original baseline: `9fd0d62fcbb288e9e766e6ede9403a4b2745f3eb`.
+Integrated master: `516855878c567906f308c104f43f0fdffcbadfc1`.
 Updated: 2026-11-04. Design: [ADR-0067](../ADRs/ADR-0067-crowdsec-independent-host-protection.md).
 
 ## Current boundary
@@ -14,22 +15,23 @@ license/source archive. The complete shared-role trajectory now passes, includin
 acquisition, convergence, enforcing/simulation transitions, UFW reload, container
 reboot and interrupted-apply/rollback repair. The default CI target uses locked
 bytes; the rejected package remains an explicit negative reproduction.
-Foundation delivery is verified at the userspace/runner-kernel boundary. The
-fenced mirror and database-only Security page are integrated; no production
-enablement follows.
+Host protection, the fenced mirror, audited actions, qualified copying and Portal
+instrumentation are integrated. Native evidence is at the userspace/runner-kernel
+boundary; actual staging enrollment and production enablement remain operational
+acceptance gates.
 
 | Order | Outcome | State |
 |---|---|---|
 | 1 | KB decisions, ADR-0067, exact package/Hub/build lock, gateway contract | Recorded; both remedies tested; patched build selected |
 | 2 | Optional persistent qualification profile and all consumers | Implemented; base preservation, exact native evidence and one-way legacy retirement verified |
-| 3 | Shared simulation role | Complete native installation/convergence/acquisition/lifecycle and failure-repair trajectory passes |
-| 4 | Read-only restricted gateway | 86 unit and 14 native SSH/schema/identity/privacy cases pass; strict applied-state witnesses |
-| 5 | Mirror, coalesced work, fencing and retention | Integrated; 31 tests pass on real PostgreSQL, including seven ownership/concurrency cases |
-| 6 | Read-only Security page | Integrated; 12 view tests and 14 subtests pass, with real Chromium layout/navigation checks at 390/820/1280 px |
-| 7 | Audited actions and uncertain-result reconciliation | Pending mirror/gateway |
-| 8 | Qualified replication and revoke races | Pending actions |
-| 9 | Portal sanitized instrumentation/customer observations | Pending foundation |
-| 10 | Staging source, separately qualified Portal protection | Pending #767; production also #769 |
+| 3 | Shared simulation role | Complete native installation/convergence/acquisition/lifecycle, interrupted repair and explicit installation-bound fail2ban retirement pass |
+| 4 | Bounded restricted gateway | Strict schema/identity/privacy checks, supported LAPI mutations, immutable receipts, late-create repair and applied-state witnesses pass unit/native qualification |
+| 5 | Mirror, coalesced work, fencing and retention | Integrated; independent PostgreSQL connections prove ownership, connection/generation fencing, catch-up and retention |
+| 6 | Database-only Security page | Explicit shared navigation/RBAC policy, source management, filters, separate freshness/health and Chromium checks at 390/820/1280 px |
+| 7 | Audited actions and uncertain-result reconciliation | Integrated; issuance precedes I/O, immutable request identities and per-target results preserve unknown outcomes; native receipts and actual transport adapter verified |
+| 8 | Qualified replication and revoke races | Integrated; exact scenario/acquisition/ingress approvals, no loops, fixed Portal admission expiry and delayed-create/revoke races pass PostgreSQL checks |
+| 9 | Portal sanitized instrumentation/customer observations | Integrated; real middleware/MFA/outage paths, concurrent rotation, signed successful-login IPs, CRITICAL matching, export and both erasure race orders verified |
+| 10 | Staging source, separately qualified Portal protection | Local staging enrollment UI/settings/role and native Portal qualification implemented; actual enrollment/observation pending, production also requires #769 |
 
 ## Native rejection evidence
 
@@ -86,6 +88,73 @@ after the four signed foundation commits, scanning 15 changed service files with
 was not counted as security evidence. All 34 native cases pass (33 final-suite
 cases plus the full role trajectory).
 
+## Integrated application verification
+
+The combined PostgreSQL run passes **350 tests**, including Security, Portal
+authentication/MFA, customer observations and current master's teardown
+regressions. A broader authentication/users/audit/qualification selection passes
+**2,694 tests**; the complete final Security app passes **170 tests**. Security
+tests use independent connections and observed blocking for
+duplicate work, publication drift, admission/revoke, delayed remote creation,
+receipt reconciliation, erasure and retention refresh. Network calls hold no
+source database locks. Both new schema branches migrate forward and reverse,
+then merge without losing either feature's tables.
+
+The complete native CrowdSec run passes **43 cases**, including eight mutation
+cases and the Portal role trajectory. Positive HTTPS controls precede actual
+IPv4/IPv6 drops; protected access continues, simulation clears owned bans and
+does not reuse historical simulated alerts for enforcement. These fixtures
+generate contract-shaped Portal events; actual application middleware/auth paths
+are exercised separately. They do not run the complete deployed two-service
+Portal stack or prove synchronized production clocks.
+
+The Portal suite passes **2,231 tests and 1,588 subtests** (three existing skips,
+four existing deselections). The integrated root run needed a focused rerun of
+eight sandbox socket failures; all ten tests in those two modules passed with
+local socket access. The non-Docker CrowdSec suite passes **277 tests**, and all
+**25 existing SSH tests** pass. Full type checks pass for **762 Platform** and
+**113 Portal** files. Final required gates pass on the frozen implementation:
+
+| Check | Result |
+|---|---|
+| `make test-integration` (Docker excluded and run separately) | 1,523 passed; 961 subtests passed; 11 existing skips; 108 deselections |
+| `make test-deploy` | 622 passed; 33 subtests passed |
+| `make test-deploy-docker` | 29 passed, including real HTTPS forwarding-header replacement |
+| `make lint` and `make check-types` | All phases pass; 762 Platform and 113 Portal files type-check |
+| `make test-i18n` and `make i18n-check` | 144 tests pass; complete, compiled, extraction-stable Romanian catalogs |
+| `make check-migrations` | 156 checksums verified, model state unchanged, table names/comments preserved |
+| `make test-security` | Portal business-data/import isolation passes |
+| Strict committed-code Semgrep against integrated master | 72 changed files, 1,072 configured rules, zero introduced findings; no rule timeouts |
+| Real Chromium Security surfaces | 24 cases at 390/820/1280 px; 44 px effective targets, 16 px fields, local table scrolling |
+
+The existing full native run covers 43 cases; after adding explicit fail2ban
+retirement, the complete affected role trajectory passes again (695.59 seconds).
+Simulation preserves active legacy protection; qualified enforcing adoption
+records durable intent before purging it. Ordinary deploys, queued handlers,
+interrupted apply, rollback and later simulation cannot revive retired protection.
+The helper separately passes strict typing and lint. No helper/artifact pin changed
+for this retirement extension.
+
+The first aggregate integration run identified missing `InterfaceError` fallback
+handling and an ambiguous transport method name. Fault tests were observed red
+before fixing the internal recorder and both queue handlers; 39 focused SQLite
+tests and 14 subtests then pass, followed by the complete PostgreSQL and integration
+runs above. The outer authentication boundary already preserved valid sessions.
+The adapter now uses `send_request`, preserving the Virtualmin coverage guard.
+Uniform credential-refusal tests retain identical signed responses across unknown,
+inactive, locked and wrong-password cases, including their fixed private category.
+The code-derived audit document is regenerated; audit fixtures resolve the actual
+model ContentType instead of assuming database ID 1.
+
+Both scanner false positives are explained at their exact sites: SQLite timeout
+PRAGMAs accept only the fixed integer or an integer read from that connection,
+and the source form has its CSRF token as the first child. CSRF denial paths pass.
+These are narrow annotations, not disabled guards or test suppressions.
+
+Romanian catalog additions use the standard gettext extraction names, retain
+existing translations and ship compiled runtime catalogs. The current master's
+read-only catalog guard is retained alongside the native CrowdSec CI target.
+
 ## Integration findings to preserve
 
 - Persist a selected profile on `VirtualminServer`, independently of synchronization;
@@ -110,12 +179,30 @@ cases plus the full role trajectory).
   during failure, and B-start/crash followed by rollback to A.
 - CLI policy guards must resolve pinned Cobra aliases and interposed global flags.
   Native tests verify refusal of singular mutation aliases and preserve reads.
+- Supported native LAPI creates can assign their own decision UUID and accept a
+  manual POST despite allowlist membership. Bind results to observed native
+  decision IDs/UUIDs, persist intent before dispatch and preserve pending-create
+  barriers before declaring revoke/allowlist repair complete.
+- Coverage approvals bind the exact acquired journal/listener and separately
+  proven administrative-only SSH/customer-SFTP exclusion. A familiar scenario or
+  journal name alone never authorizes propagation.
+- The optional customer observation runs after the successful authentication
+  transaction commits, then re-locks the current user in a bounded independent
+  transaction. Deferred commit errors cannot undo a valid session; erasure in
+  either lock order leaves no revived observation.
+- Portal events use a six-field whitelist and daily keyed account pseudonyms.
+  A private interprocess lock and reopen-before-write preserve current rotated
+  files across workers. Outages do not count as attacks, and recording failure
+  degrades status without introducing a login refusal.
 
 ## Remaining gates
 
 The candidate blocker is resolved; see [the comparison](crowdsec-bouncer-trials.md).
-Foundation userspace integration and final trusted-manifest binding are verified.
-Later gates include the complete PostgreSQL race suite, UI/Portal paths,
-48-hour simulation, enforcing canary and actual
-Ubuntu 26.04 production-kernel qualification. No deployment or production claim
-follows from the documentation, signed artifacts, host controls or existing tests.
+Userspace integration and trusted-manifest binding are verified. Actual-host
+gates remain: enroll the selected staging installation, prove synchronized
+clocks and real acquisition/ingress, rehearse console recovery, observe
+simulation for 48 hours, then one enforcing node for 24 hours. Portal is qualified
+separately and production requires #769's split-host topology and the actual
+Ubuntu 26.04 kernel. Both architecture binaries are reproducible; local native
+runtime evidence is arm64 only. No deployment or production acceptance follows
+from documentation, signed artifacts, host controls or runner-kernel tests.
