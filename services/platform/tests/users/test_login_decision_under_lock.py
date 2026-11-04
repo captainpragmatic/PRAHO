@@ -104,14 +104,20 @@ class PortalLoginDecisionTests(HMACTestMixin, TestCase):
                 with authenticate_then("apps.api.users.views", change):
                     response = self.portal_post("/api/users/login/", {"email": user.email, "password": PASSWORD})
                 self.assertEqual(response.status_code, 401, response.content)
-                self.assertEqual(response.json(), {"success": False, "error": "Invalid email or password"})
+                self.assertEqual(
+                    response.json(),
+                    {"success": False, "error": "Invalid email or password", "failure_category": "credentials"},
+                )
 
     def test_enrolment_after_the_password_check_requires_the_code(self) -> None:
         user = User.objects.create_user(email="portal-enrols@example.ro", password=PASSWORD)
         with authenticate_then("apps.api.users.views", enrol):
             response = self.portal_post("/api/users/login/", {"email": user.email, "password": PASSWORD})
         self.assertEqual(response.status_code, 401, response.content)
-        self.assertEqual(response.json(), {"success": False, "error": "Invalid authentication code"})
+        self.assertEqual(
+            response.json(),
+            {"success": False, "error": "Invalid authentication code", "failure_category": "second_factor"},
+        )
 
     def test_regression_guard_success_returns_the_locked_rows_hash(self) -> None:
         user = User.objects.create_user(email="portal-ok@example.ro", password=PASSWORD)

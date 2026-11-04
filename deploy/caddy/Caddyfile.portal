@@ -50,7 +50,19 @@
     }
 
     handle /status/ {
-        reverse_proxy portal:8701
+        reverse_proxy portal:8701 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+            header_up -Forwarded
+            header_up -X-Cluster-Client-IP
+            header_up -CF-Connecting-IP
+            header_up -CF-Connecting-IPv6
+            header_up -CF-Pseudo-IPv4
+            header_up -CF-Ray
+            header_up -True-Client-IP
+        }
     }
 
     handle {
@@ -64,6 +76,14 @@
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+            header_up -Forwarded
+            header_up -X-Cluster-Client-IP
+            header_up -CF-Connecting-IP
+            header_up -CF-Connecting-IPv6
+            header_up -CF-Pseudo-IPv4
+            header_up -CF-Ray
+            header_up -True-Client-IP
             # Read the whole request before passing it on (the buffer is above the 5MB cap, so any
             # accepted body is complete), and up to 10MiB of the response before sending it: a slow
             # client then holds Caddy, not a portal thread.

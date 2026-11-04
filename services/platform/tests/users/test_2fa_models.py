@@ -20,6 +20,7 @@ from freezegun import freeze_time
 
 from apps.users.mfa import (
     MFAService,
+    MFAStoreUnavailable,
     TOTPService,
     WebAuthnCredential,
     WebAuthnService,
@@ -311,10 +312,8 @@ class EnhancedTOTPServiceTest(TestCase):
         mock_verify.side_effect = Exception("TOTP verification failed")
 
         secret = "JBSWY3DPEHPK3PXP"  # Valid base32 secret
-        is_valid = self.totp_service.verify_token(secret, "123456")
-
-        # Should handle exceptions gracefully
-        self.assertFalse(is_valid)
+        with self.assertRaises(MFAStoreUnavailable):
+            self.totp_service.verify_token(secret, "123456")
 
     @patch("qrcode.QRCode")
     def test_generate_qr_code_image_exception_handling(self, mock_qrcode: Mock) -> None:
@@ -656,6 +655,7 @@ class EnhancedMFAServiceTest(TestCase):
             self.assertNotIn("webauthn", self.mfa_service.get_enabled_methods(self.user))
         with patch("apps.users.mfa.webauthn", Mock()):
             self.assertIn("webauthn", self.mfa_service.get_enabled_methods(self.user))
+
 
 class MFAIntegrationTest(TestCase):
     """Integration tests for MFA components"""

@@ -1,0 +1,7 @@
+name: praho_local_remediation
+filters:
+  - Alert.Remediation == true && (Alert.GetScope() == "Ip" || Alert.GetScope() == "Range")
+decisions:
+  - type: ban
+    duration: {{ '5m' if crowdsec_host_kind == 'portal' else '4h' }}
+on_success: break

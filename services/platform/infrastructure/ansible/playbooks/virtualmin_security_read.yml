@@ -6,7 +6,11 @@
   tasks:
     - name: Read bounded native security observations
       ansible.builtin.script:
-        cmd: "files/praho-node-security-inspect.py {{ security_identity }}"
+        cmd: >-
+          files/praho-node-security-inspect.py {{ security_identity }} {{ security_policy_version | default('virtualmin-web-only-v2') }}
+          {% if security_policy_version | default('virtualmin-web-only-v2') == 'virtualmin-web-only-v2+crowdsec-v1' %}
+          {{ security_crowdsec_helper_sha256 }} {{ security_crowdsec_lock_sha256 }}
+          {% endif %}
         executable: /usr/bin/python3
       register: security_observations
       changed_when: false

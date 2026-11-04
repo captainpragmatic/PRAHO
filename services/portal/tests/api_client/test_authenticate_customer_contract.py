@@ -67,7 +67,6 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
         }
 
         with patch("apps.api_client.services.portal_request", return_value=response):
-
             result = self.api_client.authenticate_customer("a@b.com", "pw")
 
         self.assertEqual(
@@ -85,7 +84,6 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
                 "session_idle_deadline": "2026-11-05T10:00:00+00:00",
                 "step_up_at": "2026-10-29T10:00:00+00:00",
             },
-
         )
 
     def test_the_signed_body_says_whether_to_remember_the_session(self) -> None:
@@ -94,9 +92,50 @@ class AuthenticateCustomerContractTests(SimpleTestCase):
         response.headers = {"Content-Type": "application/json"}
         response.json.return_value = {"success": False}
         for remember, sent in ((True, True), (False, False), ("yes", False)):
-            with self.subTest(remember=remember), patch(
-                "apps.api_client.services.portal_request", return_value=response
-            ) as request:
+            with (
+                self.subTest(remember=remember),
+                patch("apps.api_client.services.portal_request", return_value=response) as request,
+            ):
                 self.api_client.authenticate_customer("a@b.com", "pw", remember_me=remember)  # type: ignore[arg-type]  # a non-boolean on purpose
                 body = json.loads(request.call_args.kwargs["data"])
                 self.assertIs(body["remember_me"], sent)
+
+    def test_private_failure_category_survives_both_normalization_layers(self) -> None:
+        for category in ("credentials", "second_factor", "policy_refusal"):
+            with self.subTest(category=category):
+                response = Mock()
+                response.status_code = 401
+                response.headers = {"Content-Type": "application/json"}
+                response.json.return_value = {
+                    "success": False,
+                    "error": "Invalid email or password",
+                    "failure_category": category,
+                }
+                with patch("apps.api_client.services.portal_request", return_value=response):
+                    result = self.api_client.authenticate_customer("private@example.test", "private-password")
+                self.assertEqual(result, {"valid": False, "failure_category": category})
+
+    def test_unrecognized_private_category_does_not_echo_upstream_data(self) -> None:
+        response = Mock()
+        response.status_code = 401
+        response.headers = {"Content-Type": "application/json"}
+        response.json.return_value = {
+            "success": False,
+            "error": "Invalid email or password",
+            "failure_category": {"account": "private@example.test", "password": "private-password"},
+        }
+        with patch("apps.api_client.services.portal_request", return_value=response):
+            self.assertIsNone(self.api_client.authenticate_customer("private@example.test", "private-password"))
+
+    def test_observation_recording_health_survives_success_normalization(self) -> None:
+        response = Mock()
+        response.status_code = 200
+        response.headers = {"Content-Type": "application/json"}
+        response.json.return_value = {
+            "success": True,
+            "user": {"id": 7},
+            "security_observation": {"enabled": True, "recorded": False, "degraded": True},
+        }
+        with patch("apps.api_client.services.portal_request", return_value=response):
+            result = self.api_client.authenticate_customer("private@example.test", "private-password")
+        self.assertEqual(result["security_observation"], {"enabled": True, "recorded": False, "degraded": True})

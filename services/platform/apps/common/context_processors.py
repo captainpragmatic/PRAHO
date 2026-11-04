@@ -184,10 +184,17 @@ def navigation_dropdowns(request: HttpRequest) -> dict[str, Any]:
             {"text": "Audit Logs", "url": "/audit/logs/", "icon": "chart"},
         ]
 
+        from apps.security.permissions import can_view_security  # noqa: PLC0415 -- same explicit policy as mobile/view
+
+        security_allowed = can_view_security(request.user)
+        if security_allowed:
+            support_items.append({"text": _("Security"), "url": "/security/", "icon": "shield"})
+
         return {
             "business_items": business_items,
             "support_items": support_items,
             "nav_invoices_locked": invoices_locked,
+            "can_view_security": security_allowed,
         }
 
     # Customer User Navigation Items

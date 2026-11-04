@@ -13,6 +13,7 @@ from django.utils import timezone
 from django.utils.translation import get_language, override
 
 from apps.common import system_status as status
+from apps.common.context_processors import navigation_dropdowns
 from apps.common.localisation import LocalisationDefaults, resolve_display
 from apps.common.system_status_probes import ProbeBudget, ProbeCode
 from config.settings.test import LOCMEM_TEST_CACHE
@@ -378,9 +379,22 @@ class StatusRefreshViewTests(SimpleTestCase):
 
     def _request(self, *, staff: bool = True):
         request = self.factory.post("/dashboard/system-status/refresh/")
-        request.user = SimpleNamespace(is_active=True, is_staff=staff, is_staff_user=staff, is_authenticated=True, pk=1)
+        request.user = SimpleNamespace(
+            is_active=True,
+            is_staff=staff,
+            is_staff_user=staff,
+            is_authenticated=True,
+            is_superuser=False,
+            staff_role="",
+            pk=1,
+        )
         request.localisation = resolve_display(LocalisationDefaults(), None, staff=True)
         return request
+
+    def test_staff_status_access_does_not_grant_security_navigation(self) -> None:
+        context = navigation_dropdowns(self._request())
+        self.assertFalse(context["can_view_security"])
+        self.assertNotIn("/security/", [item.get("url") for item in context["support_items"]])
 
     @patch("apps.common.counters.increment", side_effect=[1, 2])
     @patch("django_q.tasks.async_task", return_value="queued")

@@ -12,14 +12,14 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.credential_vault import CredentialData, get_credential_vault
 from apps.common.ssh import parse_ssh_host_keys
-from apps.infrastructure.ansible_service import AnsibleService
+from apps.infrastructure.ansible_service import AnsibleService, node_admin_allowed_cidrs
 from apps.infrastructure.imported_backup_transport import imported_identity
 
 from .virtualmin_gateway import VirtualminConfig, VirtualminGateway
 from .virtualmin_models import VirtualminServer
-from .virtualmin_security import connection_identity
+from .virtualmin_security import connection_identity, selected_profile
 from .virtualmin_security_execution import complete_hardening, owns_hardening
-from .virtualmin_security_policy import verify_network_ingress
+from .virtualmin_security_policy import verify_selected_network
 
 if TYPE_CHECKING:
     from .virtualmin_security_models import NodeSecurityExecution, NodeSecurityReview
@@ -100,7 +100,12 @@ def apply_hardening(run: NodeSecurityExecution) -> NodeSecurityReview:
     server = VirtualminServer.objects.get(pk=run.server_id)
     if not owns_hardening(server, str(run.pk)):
         raise ValidationError(_("Hardening execution ownership changed."))
-    verify_network_ingress(cast("list[str]", run.decision.review.evidence["firewall"]))
+    verify_selected_network(
+        run.decision.review.evidence,
+        selected_profile(server),
+        server.security_configuration_digest,
+        node_admin_allowed_cidrs(),
+    )
     username = dedicated_username(server)
     try:
         AnsibleService.operator_public_keys()
