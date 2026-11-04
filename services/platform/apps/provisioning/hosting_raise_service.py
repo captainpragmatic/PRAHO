@@ -87,14 +87,17 @@ def compose_assignment_raise(service: Service, assigned_mib: int | None) -> Rais
     bound = maximum_raise_mib(assigned_mib)
     changed = False
     if row.owner_id != service.customer_id:
+        # fsm-bypass: CharField raise; caller-held Service lock revokes the former owner's allowance.
         row.owner_id, row.extra_mib, row.status = service.customer_id, 0, "revoked"
         changed = True
     elif row.status == "active" and row.expires_at <= now:
+        # fsm-bypass: CharField raise; caller-held Service lock records the elapsed deadline.
         row.status = "expired"
         changed = True
     elif row.status == "active" and row.extra_mib > bound:
         row.extra_mib = bound
         if not bound:
+            # fsm-bypass: CharField raise; caller-held Service lock revokes a zero-clamped allowance.
             row.status = "revoked"
         changed = True
     if changed:
@@ -276,6 +279,7 @@ def grant_hosting_raise(  # noqa: PLR0913 -- Explicit staff, ticket, versions, e
         row = row or ServiceHostingRaise(service=locked)
         row.revision = expected_overlay_revision + 1
         row.owner_id, row.extra_mib = locked.customer_id, extra_mib
+        # fsm-bypass: CharField raise; reviewed grant is serialized by Service lock and guarded save.
         row.first_granted_at, row.expires_at, row.status = first, expiry, "active"
         _save_raise(row)
         limits.verified_at = None
@@ -306,6 +310,7 @@ def expire_hosting_raise(service_id: int) -> HostingLimitApplication | None:
             return None
         revoked = row.status == "revoked"
         row.revision += 1
+        # fsm-bypass: CharField raise; Service lock records preauthorized expiry before guarded save.
         row.status = "expired"
         _save_raise(row)
         limits = ServiceHostingLimits.objects.get(service=service)
