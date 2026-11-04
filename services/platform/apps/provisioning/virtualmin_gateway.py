@@ -1314,7 +1314,9 @@ class VirtualminGateway:
                 return Err(PanelCheckFailure(kind, str(error)), retriability=retriability_of(result))
             response = result.unwrap()
             if response.success is not True:
-                detail = str(response.data.get("error") or "API check was not successful")
+                detail = str(
+                    response.data.get("error") or response.data.get("message") or "API check was not successful"
+                )
                 return Err(PanelCheckFailure("refused", detail))
             return Ok(None)
         except Exception as error:

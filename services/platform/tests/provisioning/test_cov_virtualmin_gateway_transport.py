@@ -145,6 +145,23 @@ class VirtualminGatewayTransportCoverageTests(TestCase):
                     self.assertEqual(result.unwrap_err().kind, "refused")
                     self.assertEqual(result.unwrap_err().detail, "policy refusal")
 
+    def test_check_api_refusal_keeps_the_panel_reason_from_either_field(self) -> None:
+        for data in ({"error": "ACL denies info"}, {"status": "failure", "message": "ACL denies info"}):
+            response = VirtualminResponse(
+                success=False,
+                data=data,
+                raw_response="",
+                http_status=200,
+                execution_time=0.0,
+                program="info",
+                server_hostname=self.gateway.server.hostname,
+            )
+            with self.subTest(data=data), patch.object(self.gateway, "call", return_value=Ok(response)):
+                result = self.gateway.check_api()
+                self.assertTrue(result.is_err())
+                self.assertEqual(result.unwrap_err().kind, "refused")
+                self.assertEqual(result.unwrap_err().detail, "ACL denies info")
+
     def test_check_api_unexpected_exception_is_failed(self) -> None:
         with patch.object(self.gateway, "call", side_effect=RuntimeError("unexpected transport failure")):
             result = self.gateway.check_api()
