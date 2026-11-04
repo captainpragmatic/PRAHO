@@ -223,6 +223,13 @@ guard was observed failing before the scoped exclusion; all 52 CI-contract
 tests pass afterward. The revised required job must still finish on its final
 head and queued commit.
 
+A Linux control also reproduced immediate inode reuse in a replacement fixture:
+unlinking the database and writing invalid bytes reached SQLite's corruption
+error instead of the expected identity error. The CLI already rejects both.
+The fixture now creates a valid copy while the original inode remains allocated,
+atomically replaces it, verifies the unchanged machine marker, and requires the
+exact changed-witness refusal. Production protection remains unchanged.
+
 GitGuardian's GitHub App flags two public
 `CROWDSEC_SSH_CONFIG_DIGESTS` values as generic high-entropy secrets. These are
 SHA-256 fingerprints of the complete canonical sshd configurations for the two

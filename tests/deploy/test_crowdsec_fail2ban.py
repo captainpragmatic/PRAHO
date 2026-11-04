@@ -140,9 +140,20 @@ def test_symlink_and_duplicate_json_keys_are_not_retirement_evidence(state) -> N
 
 def test_marker_cannot_follow_a_replaced_database(state) -> None:
     write_marker(state)
-    state.DATABASE.unlink()
-    state.DATABASE.write_bytes(b"replacement")
-    with pytest.raises(ValueError):
+    original = state.DATABASE.stat()
+    replacement = state.DATABASE.with_suffix(".replacement")
+    # Keep the old inode allocated until the valid replacement exists. Both databases
+    # contain the same machine marker, so rejection must come from the physical witness.
+    replacement.write_bytes(state.DATABASE.read_bytes())
+    replacement.chmod(0o640)
+    changed = replacement.stat()
+    assert (changed.st_dev, changed.st_ino) != (original.st_dev, original.st_ino)
+    replacement.replace(state.DATABASE)
+    with closing(sqlite3.connect(state.DATABASE.as_uri() + "?mode=ro", uri=True)) as connection:
+        assert connection.execute("SELECT machine_id FROM machines").fetchall() == [
+            ("praho-installation-" + INSTALLATION,)
+        ]
+    with pytest.raises(ValueError, match="Installation database changed"):
         state.inspect_state()
 
 
