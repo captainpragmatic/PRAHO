@@ -1058,7 +1058,10 @@ def mfa_verify_api(request: HttpRequest, user: User) -> Response:
     )
     if result.status != "enabled" or result.user is None:
         code, message = _ENROLMENT_REFUSALS.get(result.status, _ENROLMENT_REFUSALS["incorrect"])
-        return Response({"success": False, "code": code, "error": str(message)}, status=status.HTTP_400_BAD_REQUEST)
+        answer = {"success": False, "code": code, "error": str(message)}
+        if result.failure_category is not None:
+            answer["failure_category"] = result.failure_category
+        return Response(answer, status=status.HTTP_400_BAD_REQUEST)
     logger.info("✅ [2FA] Two-factor authentication enabled")
     return Response(
         {
@@ -1102,7 +1105,9 @@ def mfa_disable_api(request: HttpRequest, user: User) -> Response:
             result["session_auth_hash"] = user.get_session_auth_hash()
             _keep_calling_session(request)(before, result["session_auth_hash"])
             return Response(result)
-        errors = serializer.errors
+        errors = dict(serializer.errors)
+        if serializer.failure_category is not None:
+            errors["failure_category"] = serializer.failure_category
     # Answered after the transaction ends, not raised inside it, so the failed attempt's audit
     # row is committed rather than rolled back with the change that did not happen.
     return Response(errors, status=status.HTTP_400_BAD_REQUEST)
@@ -1679,6 +1684,8 @@ def mfa_regenerate_backup_codes_api(request: HttpRequest, user: User) -> Respons
         if serializer.is_valid():
             codes = MFAService.generate_backup_codes(user, request, origin=_browser_origin(request))
             return Response({"success": True, "backup_codes": codes})
-        errors = serializer.errors
+        errors = dict(serializer.errors)
+        if serializer.failure_category is not None:
+            errors["failure_category"] = serializer.failure_category
     # As for disable: the refusal is answered outside the transaction so its audit row stays.
     return Response(errors, status=status.HTTP_400_BAD_REQUEST)
