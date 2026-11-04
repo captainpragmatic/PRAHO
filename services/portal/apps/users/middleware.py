@@ -117,6 +117,8 @@ class PortalAuthenticationMiddleware:
     # CommonMiddleware adds the slash only for a 404, so they would otherwise get the login redirect.
     PUBLIC_EXACT_URLS: ClassVar[frozenset[str]] = frozenset(
         {
+            # Platform authenticates this exact callback with HMAC, timestamp and replay checks.
+            "/order/payment/webhook/",
             # Customer view handoff (ADR-0065): arrives with no portal session; checked by exact Origin.
             "/customer-view/redeem/",
             "/terms/",

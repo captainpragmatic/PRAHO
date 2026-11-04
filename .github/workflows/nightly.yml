@@ -233,6 +233,16 @@ jobs:
         DB_HOST: localhost
       run: make test-integration
 
+    - name: Native deployment acceptance
+      run: make test-native-deploy
+
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.13.5
+
+    - name: Native infrastructure adoption safety
+      run: make test-native-infra
+
     - name: Cache and security tests
       env:
         DJANGO_SETTINGS_MODULE: config.settings.ci

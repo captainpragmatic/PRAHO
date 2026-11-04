@@ -1,0 +1,247 @@
+---
+- name: Validate every native target before mutation
+  hosts: praho
+  become: true
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - name: Validate native runtime and root SSH access
+      assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version is version('24.04', '>=')
+          - ansible_user == 'root'
+          - native_operation in ['deploy', 'rollback', 'edge', 'ssh', 'backup']
+    - name: Inspect prior checkout
+      stat:
+        path: "{{ project_root }}/src/.git"
+      register: native_checkout
+    - name: Inspect the existing edge before any host mutation
+      stat:
+        path: /etc/caddy/Caddyfile
+      register: native_existing_edge
+      when: native_operation in ['deploy', 'rollback']
+    - name: Require maintenance-aware Caddy before coordinating an existing origin
+      command: /usr/bin/grep -q /etc/praho-native /etc/caddy/Caddyfile
+      changed_when: false
+      when: native_operation in ['deploy', 'rollback'] and native_existing_edge.stat.exists
+    - name: Read prior release
+      command: git -C {{ project_root }}/src rev-parse HEAD
+      become_user: "{{ project_user }}"
+      changed_when: false
+      register: native_prior_release
+      when: native_checkout.stat.exists
+    - name: Report host release before deployment
+      debug:
+        msg: "{{ inventory_hostname }}: {{ native_prior_release.stdout | default('clean target') }} -> {{ deploy_git_version | default('configuration only') }}"
+    - name: Reject aliased split hosts
+      assert:
+        that:
+          - native_topology != 'split' or hostvars[groups.praho_platform[0]].ansible_machine_id != hostvars[groups.praho_portal[0]].ansible_machine_id
+      run_once: true
+    - name: Read the owned Portal configuration for read-only preflight
+      set_fact:
+        deployed_env: "{{ lookup('native_env', native_platform_env_file if inventory_hostname in groups.praho_platform else native_portal_env_file)['env'] }}"
+      no_log: true
+      when: native_operation in ['deploy', 'rollback'] and inventory_hostname in groups.praho_portal
+    - name: Validate existing Portal state before any host mutation
+      include_role:
+        name: praho-native
+        tasks_from: portal-preflight
+      when: native_operation in ['deploy', 'rollback'] and inventory_hostname in groups.praho_portal
+    - name: Inspect Portal contamination
+      stat:
+        path: "{{ item }}"
+        follow: false
+      loop:
+        - /opt/praho/.env
+        - /opt/praho/credentials
+        - /opt/praho/media
+        - /var/lib/postgresql
+        - /etc/systemd/system/praho-platform.service
+        - /etc/systemd/system/praho-qcluster.service
+        - /etc/praho/operator_authorized_keys
+        - /opt/praho-ansible
+        - /root/.ssh/praho-node-operator
+      register: native_contamination
+      when: native_topology == 'split' and inventory_hostname in groups.praho_portal
+    - name: Refuse contaminated Portal targets without deleting their data
+      assert:
+        that:
+          - native_contamination.results | default([]) | selectattr('stat', 'defined') | selectattr('stat.exists') | list | length == 0
+        fail_msg: "Portal target contains Platform state or tooling. Select a clean host; no contents were removed."
+
+- name: Prepare verified SSH access independently on both hosts
+  hosts: praho
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Prepare SSH
+      include_role:
+        name: ssh-hardening
+      when: native_operation == 'ssh'
+
+- name: Persist maintenance and writer holds before deployment
+  hosts: praho
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Establish durable native hold
+      include_tasks: native/hold.yml
+      when: native_operation in ['deploy', 'rollback']
+
+- name: Drain Platform workers and active backups before stopping web writers
+  hosts: praho_platform
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Hold and drain background work
+      include_tasks: native/drain.yml
+      when: native_operation in ['deploy', 'rollback']
+
+- name: Stop Portal web writers before Platform web writers
+  hosts: praho
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Stop current and former local Portal services
+      systemd:
+        name: praho-portal.service
+        state: stopped
+        enabled: false
+      when: native_operation in ['deploy', 'rollback'] and 'praho-portal.service' in ansible_facts.services
+
+- name: Quiesce Platform writers and capture a recovery pair
+  hosts: praho_platform
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Drain Platform and back up
+      include_tasks: native/quiesce.yml
+      when: native_operation in ['deploy', 'rollback']
+
+- name: Protect applied Portal migrations before rollback checkout
+  hosts: praho_portal
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Validate Portal code rollback compatibility
+      include_tasks: native/portal-rollback.yml
+      when: native_operation == 'rollback' and native_checkout.stat.exists
+
+- name: Deploy Platform at the pinned SHA
+  hosts: praho_platform
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    native_role_env_file: "{{ native_platform_env_file }}"
+  tasks:
+    - name: Deploy Platform responsibilities
+      include_tasks: native/deploy.yml
+      when: native_operation in ['deploy', 'rollback']
+
+- name: Deploy clean Portal at the same pinned SHA
+  hosts: praho_portal:!praho_platform
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    native_role_env_file: "{{ native_portal_env_file }}"
+  tasks:
+    - name: Deploy Portal responsibilities
+      include_tasks: native/deploy.yml
+      when: native_operation in ['deploy', 'rollback']
+
+- name: Update Caddy without clearing any hold
+  hosts: praho
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  vars:
+    native_role_env_file: "{{ native_platform_env_file if inventory_hostname in groups.praho_platform else native_portal_env_file }}"
+  tasks:
+    - name: Discover existing edge origin ownership
+      service_facts:
+      when: native_operation == 'edge'
+    - name: Preserve a former local Portal maintenance origin during edge-only updates
+      set_fact:
+        native_legacy_portal_origin: "{{ inventory_hostname in groups.praho_platform and inventory_hostname not in groups.praho_portal and 'praho-portal.service' in ansible_facts.services }}"
+      when: native_operation == 'edge'
+    - name: Load only this host's configuration
+      set_fact:
+        deployed_env: "{{ lookup('native_env', native_role_env_file)['env'] }}"
+      no_log: true
+      when: native_operation == 'edge'
+    - name: Apply Caddy configuration
+      include_role:
+        name: praho-native
+        tasks_from: edge
+      when: native_operation == 'edge'
+
+- name: Verify both origins before releasing writers
+  hosts: praho
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Verify the pair
+      include_tasks: native/verify.yml
+      when: native_operation in ['deploy', 'rollback']
+
+- name: Reopen authenticated Portal callbacks before provider ingress
+  hosts: praho_portal
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Enable the authenticated callback handler
+      file:
+        path: /etc/praho-native/hold-callbacks
+        state: absent
+      when: native_operation in ['deploy', 'rollback']
+
+- name: Verify Platform to Portal HTTPS authentication
+  hosts: praho_platform
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Verify callback authentication without creating a payment
+      command: "/usr/local/lib/praho/native_exec.sh {{ project_root }}/.platform-deploy.env -- {{ project_root }}/.venv-linux/bin/python /usr/local/lib/praho/native_probe.py callback"
+      become_user: "{{ project_user }}"
+      no_log: true
+      changed_when: false
+      when: native_operation in ['deploy', 'rollback']
+
+- name: Restore provider ingress, workers and backup scheduling
+  hosts: praho_platform
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Release Platform
+      include_tasks: native/release.yml
+      when: native_operation in ['deploy', 'rollback']
+
+- name: Reopen customer traffic last
+  hosts: praho_portal
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Clear the customer traffic gate after pair verification
+      file:
+        path: /etc/praho-native/hold-portal
+        state: absent
+      when: native_operation in ['deploy', 'rollback']
+
+- name: Run an operator-requested Platform backup
+  import_playbook: backup.yml
+  when: native_operation == 'backup'

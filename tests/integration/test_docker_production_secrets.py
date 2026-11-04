@@ -282,7 +282,9 @@ class TestNativeMigrateEnvironment:
     def _environment_for(self, task_name: str, deployed_env: dict[str, str], module: str) -> dict[str, str]:
         import ast  # noqa: PLC0415
 
-        task = next(t for t in yaml.safe_load(self.TASKS.read_text()) if t.get("name") == task_name)
+        from tests.native_role_helpers import native_tasks  # noqa: PLC0415
+
+        task = next(t for t in native_tasks(self.TASKS) if t.get("name") == task_name)
         jinja = Environment(autoescape=False)  # noqa: S701  # Ansible facts, not HTML.
         jinja.filters["combine"] = lambda base, extra: {**base, **extra}
         jinja.filters["dict2items"] = lambda d: [{"key": k, "value": v} for k, v in d.items()]
@@ -290,6 +292,7 @@ class TestNativeMigrateEnvironment:
         context: dict[str, Any] = {
             "project_root": "/opt/praho",
             "portal_state_directory": "/var/lib/praho-portal",
+            "native_topology": "combined",
             "platform_port": 8700,
             "deployed_env": deployed_env,
             "django_settings_module": f"config.settings.{module}",

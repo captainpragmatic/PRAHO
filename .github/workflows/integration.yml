@@ -257,6 +257,16 @@ jobs:
     - name: Integration test suite (make test-integration)
       run: make test-integration
 
+    - name: Native split and combined deployment acceptance
+      run: make test-native-deploy
+
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.13.5
+
+    - name: Native infrastructure topology and adoption safety
+      run: make test-native-infra
+
     - name: Upload integration test reports
       uses: actions/upload-artifact@v4
       if: always()

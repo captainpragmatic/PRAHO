@@ -1,0 +1,29 @@
+---
+- name: Create isolated Portal group
+  group:
+    name: "{{ portal_group }}"
+    system: true
+
+- name: Create isolated Portal user
+  user:
+    name: "{{ portal_user }}"
+    group: "{{ portal_group }}"
+    system: true
+    create_home: false
+    home: "{{ portal_state_directory }}"
+    shell: /usr/sbin/nologin
+
+- name: Create private Portal writable directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ portal_user }}"
+    group: "{{ portal_group }}"
+    mode: "0700"
+  loop:
+    - "{{ portal_state_directory }}"
+    - /var/log/praho/portal
+
+# ---------------------------------------------------------------------------
+# 1. PostgreSQL 16
+# ---------------------------------------------------------------------------

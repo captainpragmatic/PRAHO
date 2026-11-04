@@ -1,0 +1,27 @@
+---
+- name: Inspect legacy Portal session store
+  stat:
+    path: "{{ deployed_env.SESSION_DB_PATH | default(project_root + '/src/services/portal/portal.sqlite3') }}"
+  register: legacy_portal_session
+
+- name: Require explicit Portal state migration on existing hosts
+  assert:
+    that:
+      - not legacy_portal_session.stat.exists or (deployed_env.SESSION_DB_PATH | default('')) == portal_state_directory + '/portal.sqlite3'
+      - (deployed_env.SESSION_DB_PATH | default(portal_state_directory + '/portal.sqlite3')) == portal_state_directory + '/portal.sqlite3'
+    fail_msg: "Move Portal state while stopped and set SESSION_DB_PATH as described in docs/deployment/DEPLOYMENT.md before changing its OS identity."
+
+- name: Inspect existing Portal log ownership
+  find:
+    paths: /var/log/praho/portal
+    recurse: false
+    file_type: any
+    hidden: true
+  register: legacy_portal_logs
+
+- name: Require explicit Portal log migration on existing hosts
+  assert:
+    that:
+      - legacy_portal_logs.files | rejectattr('pw_name', 'equalto', portal_user) | list | length == 0
+      - not legacy_portal_session.stat.exists or legacy_portal_session.stat.pw_name == portal_user
+    fail_msg: "Stop Portal and migrate its session/log ownership according to docs/deployment/DEPLOYMENT.md before deploying the isolated identity."

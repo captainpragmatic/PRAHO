@@ -25,10 +25,13 @@
       - ca-certificates
       - gnupg
       - lsb-release
+      - cron
+      - util-linux-extra
     state: present
 
 - name: Configure the staging and production swap buffer
   ansible.builtin.include_tasks: swap.yml
+  when: native_manage_swap | default(true) | bool
 
 - name: Create project group
   group:
@@ -52,11 +55,8 @@
     group: "{{ project_group }}"
     mode: "0755"
   loop:
-    - "{{ project_root }}"
-    - "{{ project_root }}/deploy"
-    - "{{ project_root }}/backups"
-    - "{{ project_root }}/logs"
-    - "{{ project_root }}/scripts"
+    "{{ [project_root, project_root + '/deploy', project_root + '/logs', project_root + '/scripts'] +
+        ([project_root + '/backups'] if inventory_hostname in groups.get('praho_platform', groups.get('praho', [])) else []) }}"
 
 - name: Configure firewall (UFW)
   when: firewall_enabled | default(true) | bool
@@ -90,4 +90,4 @@
 
 - name: Set timezone
   community.general.timezone:
-    name: UTC
+    name: Etc/UTC

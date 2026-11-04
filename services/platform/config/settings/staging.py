@@ -177,9 +177,12 @@ SESSION_SAVE_EVERY_REQUEST = True
 
 # Staging: Configure for your staging load balancer/proxy setup
 IPWARE_TRUSTED_PROXY_LIST = [
-    # Staging proxy/LB IP ranges
-    # Add your staging load balancer IP ranges here
-    # Example: "10.0.0.0/24", "172.16.0.0/16"
+    cidr.strip() for cidr in _os.environ.get("PLATFORM_TRUSTED_PROXY_CIDRS", "").split(",") if cidr.strip()
+]
+INTERNAL_SERVICE_ALLOWED_DOMAINS = [
+    domain.strip()
+    for domain in _os.environ.get("INTERNAL_SERVICE_ALLOWED_DOMAINS", "localhost").split(",")
+    if domain.strip()
 ]
 
 # ===============================================================================

@@ -9,6 +9,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.native_role_helpers import native_tasks
+
 ROOT = Path(__file__).resolve().parents[2]
 STUB = """#!{python}
 import json,os,sys
@@ -64,7 +66,7 @@ def test_fresh_compose_defaults_and_native_cluster_gate_select_16() -> None:
     for name in ("single-server", "platform-only", "dev"):
         image = yaml.safe_load((ROOT / f"deploy/docker-compose.{name}.yml").read_text())["services"]["db"]["image"]
         assert image in {"postgres:16", "postgres:16-alpine"}
-    tasks = yaml.safe_load((ROOT / "deploy/ansible/roles/praho-native/tasks/main.yml").read_text())
+    tasks = native_tasks(ROOT / "deploy/ansible/roles/praho-native/tasks/main.yml")
     names = [task["name"] for task in tasks]
     assert names.index("Refuse implicit native PostgreSQL major upgrades") < names.index("Install PostgreSQL 16")
     gate = tasks[names.index("Refuse implicit native PostgreSQL major upgrades")]["assert"]
@@ -79,7 +81,7 @@ def test_real_native_preflight_checks_clusters_before_mutation(
 ) -> None:
     import shutil  # noqa: PLC0415
 
-    tasks = yaml.safe_load((ROOT / "deploy/ansible/roles/praho-native/tasks/main.yml").read_text())
+    tasks = native_tasks(ROOT / "deploy/ansible/roles/praho-native/tasks/main.yml")
     selected = [
         task
         for task in tasks

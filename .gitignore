@@ -215,4 +215,5 @@ output/playwright/
 output/e2e-media/
 output/screenshot-diff/
 output/virtualmin-lab/
+output/native-deploy/
 scripts/_trusted_*.py

@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+from tests.native_role_helpers import native_tasks
+
 ROOT = Path(__file__).resolve().parents[2]
 ROLE = ROOT / "deploy/ansible/roles/praho-native"
 
@@ -13,8 +15,8 @@ def test_identity_and_filesystem_boundaries_cover_every_portal_writer() -> None:
     assert "User={{ portal_user }}" in unit and "Group={{ portal_group }}" in unit
     assert "ProtectSystem=strict" in unit and "ProtectHome=yes" in unit
     assert "ReadWritePaths=/var/log/praho/portal {{ portal_state_directory }}" in unit
-    assert "InaccessiblePaths={{ project_root }}/.env {{ project_root }}/credentials {{ project_root }}/media" in unit
-    tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+    assert "InaccessiblePaths=-{{ project_root }}/.env -{{ project_root }}/credentials -{{ project_root }}/media" in unit
+    tasks = native_tasks(ROLE / "tasks/main.yml")
     named = {task["name"]: task for task in tasks}
     state = named["Create private Portal writable directories"]
     assert state["file"]["owner"] == "{{ portal_user }}" and state["file"]["mode"] == "0700"
@@ -29,7 +31,7 @@ def test_identity_and_filesystem_boundaries_cover_every_portal_writer() -> None:
 
 
 def test_legacy_state_and_log_gates_precede_host_mutation() -> None:
-    tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+    tasks = native_tasks(ROLE / "tasks/main.yml")
     names = [task["name"] for task in tasks]
     gate = names.index("Require explicit Portal log migration on existing hosts")
     assert gate < names.index("Create isolated Portal group") < names.index("Create keyrings directory")
@@ -45,7 +47,7 @@ def test_real_preflight_refuses_legacy_state_before_any_host_change(tmp_path: Pa
     import shutil  # noqa: PLC0415
     import subprocess  # noqa: PLC0415
 
-    tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+    tasks = native_tasks(ROLE / "tasks/main.yml")
     names = {task["name"]: task for task in tasks}
     selected = [names["Inspect legacy Portal session store"], names["Require explicit Portal state migration on existing hosts"]]
     legacy = tmp_path / "src/services/portal/portal.sqlite3"
@@ -56,7 +58,7 @@ def test_real_preflight_refuses_legacy_state_before_any_host_change(tmp_path: Pa
     path = tmp_path / "preflight.yml"
     path.write_text(yaml.safe_dump(play))
     command = [shutil.which("ansible-playbook") or "ansible-playbook", "-i", "localhost,", "-c", "local", str(path)]
-    environment = {**os.environ, "ANSIBLE_LOCAL_TEMP": str(tmp_path / "ansible"), "ANSIBLE_NOCOLOR": "1"}
+    environment = {**os.environ, "ANSIBLE_LOCAL_TEMP": str(tmp_path / "ansible"), "ANSIBLE_NOCOLOR": "1", "ANSIBLE_REMOTE_TEMP": str(tmp_path / "remote")}
     fresh = subprocess.run(command, env=environment, capture_output=True, text=True, check=False, timeout=40)  # noqa: S603
     assert fresh.returncode == 0, fresh.stdout + fresh.stderr
     (tmp_path / "mutation").unlink()

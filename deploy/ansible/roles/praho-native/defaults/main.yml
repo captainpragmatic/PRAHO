@@ -35,3 +35,8 @@ platform_allowed_ips: "{{ (deployed_env.PLATFORM_ALLOWED_CIDRS | default('') | t
 portal_user: praho-portal
 portal_group: praho-portal
 portal_state_directory: /var/lib/praho-portal
+
+native_topology: combined
+native_coordinated: false
+native_platform: "{{ inventory_hostname in groups.get('praho_platform', groups.get('praho', [])) }}"
+native_portal: "{{ inventory_hostname in groups.get('praho_portal', groups.get('praho', [])) }}"

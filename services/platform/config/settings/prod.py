@@ -397,11 +397,7 @@ INTERNAL_SERVICE_ALLOWED_DOMAINS = [
 # Example: If using Cloudflare, use CF edge ranges
 # Replace empty list with actual production proxy/LB CIDR blocks
 IPWARE_TRUSTED_PROXY_LIST = [
-    # Production proxy/LB IP ranges will be configured here
-    # Common patterns:
-    # - AWS ALB: Private subnet ranges (10.0.0.0/8, 172.16.0.0/12)
-    # - Cloudflare: CF edge IP ranges
-    # - Internal LB: Private network ranges (192.168.0.0/16)
+    cidr.strip() for cidr in os.environ.get("PLATFORM_TRUSTED_PROXY_CIDRS", "").split(",") if cidr.strip()
 ]
 
 

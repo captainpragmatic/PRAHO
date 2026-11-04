@@ -20,7 +20,7 @@ BACKUP_FILE="${BACKUP_DIR}/praho_backup_${TIMESTAMP}_$$.dump"
 PARTIAL_FILE="${BACKUP_FILE}.partial"
 # MEDIA_ROOT (uploads and generated documents, such as ANAF's e-Factura response archives) is
 # archived next to its dump, so a restore finds the pair by name.
-MEDIA_ROOT="{{ project_root }}/media"
+MEDIA_ROOT="${MEDIA_ROOT:-{{ project_root }}/media}"
 MEDIA_FILE="${BACKUP_FILE%.dump}.media.tar.gz"
 MEDIA_PARTIAL="${MEDIA_FILE}.partial"
 OFFSITE_HANDLED=0
@@ -66,6 +66,10 @@ find "$BACKUP_DIR" -maxdepth 1 -type f -user "$(id -un)" \
 find "${BACKUP_DIR}" -maxdepth 1 -type f -user "$(id -un)" -name "praho_backup_*.partial" -mmin +1440 -delete
 
 # Direct pg_dump (no Docker)
+if [ ! -d "$MEDIA_ROOT" ] || [ -L "$MEDIA_ROOT" ]; then
+    echo 'ERROR: Media directory is missing or linked; no recovery pair was created' >&2
+    exit 1
+fi
 pg_dump \
     -h {{ deployed_env.DB_HOST | default('localhost') | quote }} \
     -p {{ deployed_env.DB_PORT | default('5432') | quote }} \

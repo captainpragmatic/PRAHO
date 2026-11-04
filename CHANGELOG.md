@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Native production deployment can place Portal and Platform on separate hosts, with filtered Portal credentials, peer-restricted HTTPS APIs, coordinated maintenance and code rollback. New staging defaults to one host; combined production requires an explicit topology selection. See [the native operations guide](docs/deployment/NATIVE_TOPOLOGY.md) before adoption or cutover.
+
 - Customer maintenance windows (#780): staff can schedule work in each node's permitted calendar, record manual outcomes and run supported managed adapters. Customers see current service-scoped notices and 24-hour outcomes in the Portal; Romanian/English emails announce, correct and report qualifying outcomes. Execution ownership and operator reconciliation fence concurrent operations, stale queued work and uncertain provider results. See [the operator runbook](docs/deployment/NODE_MAINTENANCE.md).
 
 - Measured hosting usage (#782): hourly owner-scoped file/database and web response-byte observations, source times, independent stale/unknown states, disk breakdown and history in the portal. Usage remains observational. `provisioning.usage_sync_enabled` is on by default: new nodes install the collector during deployment, and nodes deployed earlier need the usage playbook. Legacy usage writers and the Virtualmin billing collector are retired; see ADR-0068 for rollout and period semantics.
@@ -35,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verified off-server Platform database/media backup pairs, native systemd backup scheduling, Docker streaming publication and bounded Platform-managed customer backups. Imported Virtualmin servers support explicit root-key archive transport with enrolled host trust.
 
 ### Fixed
+
+- Signed Platform payment callbacks reach Portal's HMAC verifier without a browser login. The exact callback path keeps signature, timestamp and replay checks; adjacent order routes remain private.
 
 - **Destroying a Hetzner node no longer stops at its primary IPs.** Hetzner deletes a server's auto-delete primary IPs with the server, so teardown now only confirms they are gone instead of sending its own DELETE, which could collide with the provider's cleanup. A provider delete that errors is read once more and counts as done when the resource is gone, and cleanup messages now name the provider's error code (for example `APIException (locked)`) instead of only the exception class.
 - Complete Romanian translations across Platform, Portal and shared UI, preserving existing reviewed translations. Full lint now rejects incomplete catalogs, stale compiled translations and source extraction drift before they reach customers or staff (#822).
