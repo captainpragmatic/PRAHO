@@ -455,37 +455,8 @@
     # therefore creates a Webmin user whose ONLY Webmin module is virtual-server,
     # with Virtualmin master rights in it. On a re-deploy it resets the password
     # to the vault's, so node and vault converge.
-    - name: Install the PRAHO API user helper
-      ansible.builtin.copy:
-        src: files/praho-webmin-api-user.pl
-        dest: /usr/local/sbin/praho-webmin-api-user
-        owner: root
-        group: root
-        mode: '0700'
-      when: praho_api_user is defined and praho_api_password is defined
-
-    # The API user is a Virtualmin master administrator (ADR-0060), so it may
-    # log in only from the node admin allowlist: Platform's egress addresses
-    # plus the operators' admin networks. An empty list would leave the
-    # credential usable from anywhere, so the deploy stops instead.
-    - name: Refuse an empty node admin allowlist
-      ansible.builtin.assert:
-        that:
-          - node_admin_allowed_cidrs is defined
-          - node_admin_allowed_cidrs | length > 0
-        fail_msg: >-
-          infrastructure.node_admin_allowed_cidrs is empty; set Platform's egress
-          addresses and the admin networks before deploying a node.
-      when: praho_api_user is defined and praho_api_password is defined
-
-    - name: Create or update the PRAHO API user
-      ansible.builtin.command:
-        argv: "{{ ['/usr/local/sbin/praho-webmin-api-user', praho_api_user] + node_admin_allowed_cidrs }}"
-        stdin: "{{ praho_api_password }}"
-      when: praho_api_user is defined and praho_api_password is defined
-      no_log: true
-      register: praho_admin_result
-      changed_when: true
+    - name: Enroll the PRAHO API user through the shared installed-panel tasks
+      ansible.builtin.import_tasks: virtualmin_api_user_tasks.yml
 
     - name: Create PRAHO tracking file
       ansible.builtin.copy:
