@@ -1,16 +1,17 @@
 """Reconcile committed plan changes from current native proof, outside native lanes."""
 
+from __future__ import annotations
+
 import logging
 from datetime import timedelta
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
-from apps.customers.models import Customer
 from apps.provisioning.hosting_limit_selectors import hosting_limits_summary, prime_current_verification
-from apps.provisioning.models import Service, VirtualminAccount, VirtualminProvisioningJob
 
 from .plan_change_escalation import escalate_scheduled_attention
 from .plan_change_financial import validate_preserved_plan_coverage
@@ -19,6 +20,10 @@ from .plan_change_models import PlanChange
 from .plan_change_notices import dispatch_plan_change_notices
 from .plan_change_settlement import resume_scheduled_plan_limits
 from .subscription_models import Subscription
+
+if TYPE_CHECKING:
+    from apps.provisioning.models import Service
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +85,12 @@ def _attention(change: PlanChange, reason: str) -> None:
 
 def _reconcile_native_proof(change: PlanChange, service: Service) -> None:
     """Caller holds the commercial context and already checked paid coverage."""
+
+    from apps.provisioning.models import (  # noqa: PLC0415  # ADR-0007: runtime model.
+        VirtualminAccount,
+        VirtualminProvisioningJob,
+    )
+
     application = change.limit_application
     limits = service.hosting_limits
     if (
@@ -109,6 +120,9 @@ def _reconcile_native_proof(change: PlanChange, service: Service) -> None:
 
 
 def reconcile_plan_change_operation(change_id: UUID | str) -> PlanChange:
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.provisioning.models import Service  # noqa: PLC0415  # ADR-0007: runtime model.
+
     with _cancel_context(change_id) as change:
         if change.status not in {"applying_limits", "limits_attention"}:
             return change

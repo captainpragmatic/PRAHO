@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -10,12 +11,8 @@ from django.db.models import Q
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from apps.customers.models import Customer
-from apps.provisioning.hosting_limit_models import ServiceHostingLimits
 from apps.provisioning.hosting_limit_policy import HostingAssignmentTerms
-from apps.provisioning.models import Service, VirtualminAccount
 from apps.settings.services import SettingsService
-from apps.users.models import CustomerMembership, User
 
 from .metering_models import BillingCycle
 from .payment_models import Payment
@@ -23,6 +20,10 @@ from .plan_change_coverage import load_plan_coverage
 from .plan_change_models import PlanChange
 from .subscription_currency_models import SubscriptionCurrencyTransition
 from .subscription_models import Subscription
+
+if TYPE_CHECKING:
+    from apps.customers.models import Customer
+    from apps.provisioning.models import Service
 
 
 class PlanChangeConflict(ValidationError):  # noqa: N818 -- Stable API conflict alongside ValidationError.
@@ -36,6 +37,8 @@ def require_plan_change_acceptance() -> None:
 
 
 def _validate_native_claim(service: Service) -> None:
+    from apps.provisioning.models import VirtualminAccount  # noqa: PLC0415  # ADR-0007: runtime model.
+
     account = VirtualminAccount.objects.filter(service=service).first()
     if account is None or not getattr(account, "quota_managed", False) or account.status != "active":
         raise ValidationError(_("This service has no current managed quota capability."))
@@ -89,6 +92,9 @@ def _validate_collection_boundary(subscription: Subscription) -> None:
 
 
 def validate_customer_actor(customer_id: int, actor_id: int) -> Customer:
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.users.models import CustomerMembership, User  # noqa: PLC0415  # ADR-0007: runtime model.
+
     actor = User.objects.get(pk=actor_id)
     if (
         not actor.is_active
@@ -130,6 +136,10 @@ def validate_payment_claim(change: PlanChange, *, at: datetime | None = None) ->
     A replay of an already durable provider attempt must use its frozen payload,
     rather than reprice or reserve again through this first-claim validator.
     """
+
+    from apps.provisioning.hosting_limit_models import ServiceHostingLimits  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.provisioning.models import Service  # noqa: PLC0415  # ADR-0007: runtime model.
+
     if not transaction.get_connection(change._state.db).in_atomic_block:
         raise RuntimeError("The first payment claim requires its document-context transaction")
     require_plan_change_acceptance()

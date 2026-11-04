@@ -1,17 +1,21 @@
 """Final plan-change mail authority checks, with no locks spanning provider I/O."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from django.db import transaction
 from django.utils import timezone
 
-from apps.customers.models import Customer
 from apps.notifications.delivery import mark_permanent
-from apps.notifications.models import EmailLog
 
 from .plan_change_lifecycle import _cancel_context
 from .plan_change_notice_models import PlanChangeNotice
 from .plan_change_notices import OPERATIONAL_PHASES, notice_refusal
+
+if TYPE_CHECKING:
+    from apps.notifications.models import EmailLog
 
 
 def _valid_claim(log: EmailLog, token: UUID | None) -> bool:
@@ -26,6 +30,10 @@ def _valid_claim(log: EmailLog, token: UUID | None) -> bool:
 
 def plan_change_dispatch_allowed(email_log_id: str, claim_token: UUID | None) -> bool:
     """The stored recipient and phase must still be current immediately before send."""
+
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: runtime model.
+    from apps.notifications.models import EmailLog  # noqa: PLC0415  # ADR-0007: runtime model.
+
     try:
         log_id = UUID(email_log_id)
     except ValueError:

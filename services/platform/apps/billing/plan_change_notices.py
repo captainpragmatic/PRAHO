@@ -1,27 +1,29 @@
 """Phase intentions reuse the existing durable mail delivery and retry subsystem."""
 
+from __future__ import annotations
+
 import logging
 from datetime import timedelta
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from apps.customers.models import Customer
 from apps.customers.services import get_customer_locale
-from apps.notifications.models import EmailPreference
 from apps.notifications.services import EmailResult, EmailService, EmailSuppressionService
 from apps.provisioning.hosting_limit_policy import HostingAssignmentTerms
 from apps.provisioning.hosting_limit_selectors import hosting_limits_summary, prime_current_verification
-from apps.provisioning.models import Service, VirtualminAccount
 
 from .invoice_models import Invoice
 from .plan_change_lifecycle import _cancel_context
 from .plan_change_models import PlanChange
 from .plan_change_notice_models import PlanChangeNotice
+
+if TYPE_CHECKING:
+    from apps.customers.models import Customer
 
 
 def publish_plan_change_notice(change: PlanChange, phase: str) -> PlanChangeNotice:
@@ -122,6 +124,8 @@ def plan_change_notice_context(change: PlanChange, customer: Customer) -> dict[s
 
 
 def _preference_allows(customer: Customer, phase: str) -> bool:
+    from apps.notifications.models import EmailPreference  # noqa: PLC0415  # ADR-0007: runtime model.
+
     if phase not in OPERATIONAL_PHASES:
         return True  # The existing fiscal document pipeline owns its category policy.
     preference = EmailPreference.objects.filter(customer=customer).first() or EmailPreference(customer=customer)
@@ -163,6 +167,8 @@ def _fiscal_phase_refusal(change: PlanChange, phase: str) -> str | None:
 
 
 def notice_refusal(change: PlanChange, phase: str, customer: Customer) -> str | None:  # noqa: PLR0911 -- Separate current lifecycle, preference, phase and verification refusals.
+    from apps.provisioning.models import Service, VirtualminAccount  # noqa: PLC0415  # ADR-0007: runtime model.
+
     service = Service.objects.select_related("hosting_limits").get(pk=change.service_id)
     if (
         customer.deleted_at is not None
@@ -204,6 +210,8 @@ def notice_refusal(change: PlanChange, phase: str, customer: Customer) -> str | 
 
 
 def process_plan_change_notice(notice_id: UUID | str) -> bool:
+    from apps.customers.models import Customer  # noqa: PLC0415  # ADR-0007: runtime model.
+
     hint = PlanChangeNotice.objects.get(pk=notice_id)
     with _cancel_context(hint.change_id) as change:
         notice = PlanChangeNotice.objects.select_for_update(of=("self",)).get(pk=notice_id)
