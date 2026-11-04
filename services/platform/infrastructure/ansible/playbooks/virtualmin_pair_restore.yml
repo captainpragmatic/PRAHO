@@ -22,6 +22,7 @@
     pair_base_sha: ""
     pair_diff_sha: ""
     pair_recovery: false
+    pair_single: false
     pair_web_only: true
     pair_restore_configuration: false
   tasks:
@@ -36,10 +37,11 @@
           - pair_lock_wait_seconds | string is match('^[0-9]{1,4}$')
           - pair_step_hold_seconds | string is match('^[0-9]{1,2}$')
           - not (pair_restore_configuration | bool) or not (pair_recovery | bool)
+          - not (pair_single | bool) or (pair_web_only | bool and not pair_recovery | bool and pair_diff_archive == '' and pair_diff_sha == '')
           - pair_action == 'release' or pair_base_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$') or (pair_recovery | bool and pair_base_archive == 'migration_' ~ chain_token ~ '.tar.gz' and pair_diff_archive == '')
-          - pair_action == 'release' or (pair_recovery | bool and pair_diff_archive == '') or pair_diff_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
+          - pair_action == 'release' or (pair_single | bool and pair_diff_archive == '') or (pair_recovery | bool and pair_diff_archive == '') or pair_diff_archive is match('^virtualmin_backup_[0-9a-f]{32}\.tar\.gz$')
           - pair_action == 'release' or pair_base_sha is match('^[0-9a-f]{64}$')
-          - pair_action == 'release' or (pair_recovery | bool and pair_diff_archive == '' and pair_diff_sha == '') or pair_diff_sha is match('^[0-9a-f]{64}$')
+          - pair_action == 'release' or (pair_single | bool and pair_diff_sha == '') or (pair_recovery | bool and pair_diff_archive == '' and pair_diff_sha == '') or pair_diff_sha is match('^[0-9a-f]{64}$')
 
     - name: Keep the recovery certificate adapter private
       ansible.builtin.file:
@@ -78,6 +80,7 @@
         cmd: files/praho-pair-restore.sh
       environment:
         PRAHO_PAIR_ACTION: "{{ pair_action }}"
+        PRAHO_SINGLE: "{{ (pair_single | bool) | ternary('1', '0') }}"
         PRAHO_DOMAIN: "{{ chain_domain }}"
         PRAHO_DOMAIN_ID: "{{ chain_domain_id }}"
         PRAHO_CHAIN_TOKEN: "{{ chain_token }}"

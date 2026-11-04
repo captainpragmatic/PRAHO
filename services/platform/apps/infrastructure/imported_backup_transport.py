@@ -23,6 +23,7 @@ BACKUP_PLAYBOOKS = frozenset(
     {
         "virtualmin_usage_read.yml",
         "virtualmin_security_read.yml",
+        "virtualmin_hosting_read.yml",
         "virtualmin_backup_fetch.yml",
         "virtualmin_backup_push.yml",
         "virtualmin_remote_cleanup.yml",
@@ -35,6 +36,12 @@ BACKUP_PLAYBOOKS = frozenset(
 # The recovery playbook's other actions mutate a held target. Over the archive transport only the
 # owner-aging capture that precedes a recovery-capable backup may run.
 ACTION_SCOPED_PLAYBOOKS: dict[str, tuple[str, frozenset[str]]] = {
+    "virtualmin_hosting_policy.yml": (
+        "hosting_action",
+        frozenset({"handover", "fence", "quota_policy", "quota_fence", "requalify", "requalify_fence"}),
+    ),
+    "virtualmin_hosting_prepare.yml": ("hosting_action", frozenset({"prepare", "fence"})),
+    "virtualmin_quota.yml": ("quota_action", frozenset({"probe", "apply", "fence"})),
     "virtualmin_component_bridge.yml": (
         "component_bridge_action",
         frozenset({"prepare", "origin_install", "origin_verify", "install", "verify", "remove", "origin_remove"}),

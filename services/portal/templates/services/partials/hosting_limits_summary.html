@@ -1,0 +1,7 @@
+{% load i18n ui_components %}
+{% if limits %}
+<p class="text-xs text-slate-400 mt-1">
+  {% trans "Disk:" %} {% if limits.operational.disk_mib is None %}{% trans "Unknown" %}{% elif limits.operational.disk_mib == 0 %}{% trans "Unlimited" %}{% else %}{{ limits.operational.disk_gib|floatformat:"-3" }} GiB{% endif %}
+  {% if limits.state == 'pending' %} · {% trans "Limits pending" as pending_label %}{% badge pending_label variant="warning" %}{% elif limits.state != 'verified' %} · {% trans "Not yet verified" %}{% endif %}
+</p>
+{% endif %}

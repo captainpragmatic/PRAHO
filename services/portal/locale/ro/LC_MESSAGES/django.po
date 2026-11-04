@@ -8384,3 +8384,81 @@ msgstr[2] "Acum %(hours)s de ore"
 #: templates/services/plans_list.html:154
 msgid "Coming soon: upgrade from the portal. To change plans now, open a ticket."
 msgstr "În curând: upgrade din portal. Pentru a schimba planul acum, deschideți un tichet."
+
+#: templates/services/partials/hosting_limits.html:3
+#| msgid "Hosting name"
+msgid "Hosting allowances"
+msgstr "Limite incluse în găzduire"
+
+#: templates/services/partials/hosting_limits.html:4
+msgid "Operational allowance"
+msgstr "Limită inclusă în vigoare"
+
+#: templates/services/partials/hosting_limits.html:6
+#: templates/services/partials/hosting_limits.html:16
+#: templates/services/partials/hosting_limits.html:27
+#: templates/services/partials/hosting_limits_summary.html:4
+msgid "Disk:"
+msgstr "Disc:"
+
+#: templates/services/partials/hosting_limits.html:7
+#: templates/services/partials/hosting_limits.html:9
+#: templates/services/partials/hosting_limits.html:16
+#: templates/services/partials/hosting_limits.html:17
+#: templates/services/partials/hosting_limits.html:27
+#: templates/services/partials/hosting_limits.html:28
+#: templates/services/partials/hosting_limits_summary.html:4
+msgid "Unknown"
+msgstr "Necunoscut"
+
+#: templates/services/partials/hosting_limits.html:7
+#: templates/services/partials/hosting_limits.html:9
+#: templates/services/partials/hosting_limits.html:16
+#: templates/services/partials/hosting_limits.html:17
+#: templates/services/partials/hosting_limits.html:27
+#: templates/services/partials/hosting_limits.html:28
+#: templates/services/partials/hosting_limits_summary.html:4
+msgid "Unlimited"
+msgstr "Nelimitat"
+
+#: templates/services/partials/hosting_limits.html:8
+#: templates/services/partials/hosting_limits.html:17
+#: templates/services/partials/hosting_limits.html:28
+#| msgid "Monthly bandwidth is incomplete."
+msgid "Monthly bandwidth:"
+msgstr "Trafic lunar:"
+
+#: templates/services/partials/hosting_limits.html:12
+msgid "This account has not been adopted for managed native quotas. Recorded allowances do not prove native enforcement."
+msgstr "Acest cont nu a fost preluat pentru gestionarea cotelor native. Limitele înregistrate nu confirmă aplicarea lor efectivă la nivelul sistemului."
+
+#: templates/services/partials/hosting_limits.html:15
+#| msgid "Request failed"
+msgid "Requested allowance"
+msgstr "Limită inclusă solicitată"
+
+#: templates/services/partials/hosting_limits.html:19
+msgid "The requested limits are not yet verified. Usage percentages still use the operational allowance."
+msgstr "Limitele solicitate nu sunt încă verificate. Procentele de utilizare se raportează în continuare la limita inclusă în vigoare."
+
+#: templates/services/partials/hosting_limits.html:21
+msgid "Native limits verified. Writes may fail when the enforced disk cap is reached."
+msgstr "Limitele de la nivelul sistemului sunt verificate. Scrierile pot eșua când este atins plafonul aplicat spațiului pe disc."
+
+#: templates/services/partials/hosting_limits.html:23
+msgid "Native limits are not yet verified. Reaching the allowance means usage needs review."
+msgstr "Limitele de la nivelul sistemului nu sunt încă verificate. Atingerea limitei incluse impune verificarea utilizării."
+
+#: templates/services/partials/hosting_limits.html:26
+msgid "Last verified allowance"
+msgstr "Ultima limită inclusă verificată"
+
+#: templates/services/partials/hosting_limits_summary.html:5
+#| msgid "Import pending"
+msgid "Limits pending"
+msgstr "Limite în așteptare"
+
+#: templates/services/partials/hosting_limits_summary.html:5
+#| msgid "Not specified"
+msgid "Not yet verified"
+msgstr "Încă neverificate"

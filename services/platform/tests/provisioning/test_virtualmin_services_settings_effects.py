@@ -7,6 +7,7 @@ from decimal import Decimal
 from io import StringIO
 from typing import cast
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.core.cache import cache
 from django.core.management import call_command
@@ -15,6 +16,8 @@ from requests import Response
 
 from apps.billing.models import Currency
 from apps.customers.models import Customer
+from apps.provisioning.hosting_limit_models import ServiceHostingLimits
+from apps.provisioning.hosting_limit_policy import effective_disk_limit
 from apps.provisioning.models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_service import VirtualminProvisioningService
@@ -69,6 +72,31 @@ class VirtualminServicesSettingsEffectsTests(TestCase):
         result = SettingsService.update_setting(key, value)
         self.assertTrue(result.is_ok(), result)
 
+    def fresh_account(self) -> None:
+        """Create the entitlement AFTER choosing defaults, as an actual order would."""
+        source = self.account.service
+        suffix = uuid4().hex[:10]
+        service = Service.objects.create(
+            customer=source.customer,
+            service_plan=source.service_plan,
+            currency=source.currency,
+            service_name=f"assigned-{suffix}",
+            domain=f"assigned-{suffix}.example.test",
+            username=f"assigned_{suffix}",
+            billing_cycle="monthly",
+            price=10,
+            status="pending",
+        )
+        self.account = VirtualminAccount.objects.create(
+            service=service,
+            server=self.server,
+            domain=service.domain,
+            virtualmin_username=service.username,
+            template_name="Default",
+        )
+        self.account.set_password("AccountFixture123!")
+        self.account.save()
+
     def http_response(self, method: str, url: str, **kwargs: object) -> Response:
         self.assertEqual(method, "GET")
         self.assertEqual(url, self.server.api_url)
@@ -93,9 +121,12 @@ class VirtualminServicesSettingsEffectsTests(TestCase):
     def create_domain(self, *, disk_mb: int | None, bandwidth_mb: int | None) -> VirtualminProvisioningJob:
         self.sent.clear()
         self.account.disk_quota_mb = disk_mb
+        self.account.effective_disk_quota_mb = None
         self.account.bandwidth_quota_mb = bandwidth_mb
         self.account.status = "provisioning"
-        self.account.save(update_fields=["disk_quota_mb", "bandwidth_quota_mb", "status", "updated_at"])
+        self.account.save(
+            update_fields=["disk_quota_mb", "effective_disk_quota_mb", "bandwidth_quota_mb", "status", "updated_at"]
+        )
         job = VirtualminProvisioningJob.objects.create(
             account=self.account, server=self.server, operation="create_domain"
         )
@@ -108,7 +139,7 @@ class VirtualminServicesSettingsEffectsTests(TestCase):
         self.assertEqual(job.status, "completed")
         return job
 
-    def test_catalog_sync_keeps_virtualmin_limits_when_quota_defaults_have_no_override(self) -> None:
+    def test_new_service_without_a_stored_default_is_explicitly_unlimited(self) -> None:
         keys = ("virtualmin.domain_quota_default_mb", "virtualmin.bandwidth_quota_default_mb")
         SystemSetting.objects.filter(key__in=keys).delete()
         call_command("setup_default_settings", stdout=StringIO())
@@ -119,9 +150,18 @@ class VirtualminServicesSettingsEffectsTests(TestCase):
             (keys[1], "bandwidth", "bandwidth_quota_mb"),
         ):
             with self.subTest(key=key):
-                self.assertNotIn(parameter, params)
-                self.assertIsNone(getattr(self.account, field))
+                self.assertEqual(params[parameter], "0")
+                self.assertEqual(getattr(self.account, field), 0)
                 self.assertFalse(SystemSetting.objects.filter(key=key).exists())
+
+    def test_legacy_service_without_known_assignment_preserves_native_template_limits(self) -> None:
+        ServiceHostingLimits.objects.filter(service=self.account.service).delete()
+        self.create_domain(disk_mb=None, bandwidth_mb=None)
+        self.assertNotIn("quota", self.creation_params())
+        self.assertNotIn("uquota", self.creation_params())
+        self.assertNotIn("bandwidth", self.creation_params())
+        self.assertIsNone(self.account.disk_quota_mb)
+        self.assertIsNone(self.account.bandwidth_quota_mb)
 
     def creation_params(self) -> dict[str, object]:
         requests = [params for params in self.sent if params["program"] == "create-domain"]
@@ -132,8 +172,11 @@ class VirtualminServicesSettingsEffectsTests(TestCase):
         for configured in (37, 41, 0):
             with self.subTest(configured=configured):
                 self.set_value("virtualmin.domain_quota_default_mb", configured)
+                self.fresh_account()
+                self.set_value("virtualmin.domain_quota_default_mb", 97)
                 self.create_domain(disk_mb=None, bandwidth_mb=0)
-                self.assertEqual(self.creation_params().get("quota"), str(configured * 1024))
+                self.assertEqual(self.creation_params().get("quota"), str(effective_disk_limit(configured) * 1024))
+                self.assertEqual(self.creation_params().get("uquota"), self.creation_params()["quota"])
                 self.assertEqual(self.account.disk_quota_mb, configured)
         self.set_value("virtualmin.domain_quota_default_mb", 97)
         for explicit in (13, 0):
@@ -142,14 +185,17 @@ class VirtualminServicesSettingsEffectsTests(TestCase):
                 self.assertEqual(self.creation_params().get("quota"), str(explicit * 1024))
                 self.assertEqual(self.account.disk_quota_mb, explicit)
         SystemSetting.objects.filter(key="virtualmin.domain_quota_default_mb").delete()
+        self.fresh_account()
         self.create_domain(disk_mb=None, bandwidth_mb=0)
-        self.assertNotIn("quota", self.creation_params())
-        self.assertIsNone(self.account.disk_quota_mb)
+        self.assertEqual(self.creation_params()["quota"], "0")
+        self.assertEqual(self.account.disk_quota_mb, 0)
 
     def test_bandwidth_quota_default_reaches_http_and_is_pinned_on_the_account(self) -> None:
         for configured in (53, 59, 0):
             with self.subTest(configured=configured):
                 self.set_value("virtualmin.bandwidth_quota_default_mb", configured)
+                self.fresh_account()
+                self.set_value("virtualmin.bandwidth_quota_default_mb", 97)
                 self.create_domain(disk_mb=0, bandwidth_mb=None)
                 self.assertEqual(self.creation_params().get("bandwidth"), str(configured * 1024 * 1024))
                 self.assertNotIn("bw-limit", self.creation_params())
@@ -161,17 +207,22 @@ class VirtualminServicesSettingsEffectsTests(TestCase):
                 self.assertEqual(self.creation_params().get("bandwidth"), str(max(0, explicit) * 1024 * 1024))
                 self.assertEqual(self.account.bandwidth_quota_mb, explicit)
         SystemSetting.objects.filter(key="virtualmin.bandwidth_quota_default_mb").delete()
+        self.fresh_account()
         self.create_domain(disk_mb=0, bandwidth_mb=None)
-        self.assertNotIn("bandwidth", self.creation_params())
-        self.assertIsNone(self.account.bandwidth_quota_mb)
+        self.assertEqual(self.creation_params()["bandwidth"], "0")
+        self.assertEqual(self.account.bandwidth_quota_mb, 0)
 
     def test_domain_quota_default_is_checked_against_nested_health_data(self) -> None:
         self.set_value("virtualmin.domain_quota_default_mb", 37)
-        for available in (36, 37, 38):
+        self.fresh_account()
+        for available in (40, 41, 42):
             with self.subTest(available=available):
                 self.account.disk_quota_mb = None
+                self.account.effective_disk_quota_mb = None
                 self.account.bandwidth_quota_mb = 0
-                self.account.save(update_fields=["disk_quota_mb", "bandwidth_quota_mb", "updated_at"])
+                self.account.save(
+                    update_fields=["disk_quota_mb", "effective_disk_quota_mb", "bandwidth_quota_mb", "updated_at"]
+                )
                 job = VirtualminProvisioningJob.objects.create(
                     account=self.account, server=self.server, operation="create_domain"
                 )
@@ -180,12 +231,12 @@ class VirtualminServicesSettingsEffectsTests(TestCase):
                 with patch("apps.provisioning.virtualmin_gateway.safe_request", side_effect=self.http_response):
                     result = self.provisioner._execute_domain_creation(self.account, job)
                 job.refresh_from_db()
-                if available < 37:
+                if available < 41:
                     self.assertTrue(result.is_err(), result)
-                    self.assertIn("36MB available, 37MB requested", result.unwrap_err())
+                    self.assertIn("40MB available, 41MB requested", result.unwrap_err())
                     self.assertEqual(job.status, "failed")
                     self.assertEqual([params["program"] for params in self.sent], ["info"])
                 else:
                     self.assertTrue(result.is_ok(), result)
                     self.assertEqual(job.status, "completed")
-                    self.assertEqual(self.creation_params().get("quota"), "37888")
+                    self.assertEqual(self.creation_params().get("quota"), "41984")

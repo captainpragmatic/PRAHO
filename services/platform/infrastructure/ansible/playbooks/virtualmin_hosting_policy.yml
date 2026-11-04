@@ -1,0 +1,23 @@
+---
+- name: Hand customer operational notification ownership to Platform
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Validate fixed admitted hosting action
+      ansible.builtin.assert:
+        that:
+          - hosting_action in ['handover', 'fence', 'quota_policy', 'quota_fence', 'requalify', 'requalify_fence']
+          - hosting_request is mapping
+          - hosting_request.token is defined
+    - name: Run synchronous token-fenced node policy adapter
+      ansible.builtin.command:
+        argv: [/usr/bin/python3, /usr/local/lib/praho/praho_hosting_node.py, "{{ hosting_action }}"]
+        stdin: "{{ hosting_request | to_json }}"
+        stdin_add_newline: false
+      register: hosting_result
+      changed_when: true
+      no_log: true
+    - name: Return native handover evidence
+      ansible.builtin.debug:
+        msg: "PRAHO_HOSTING_RESULT={{ hosting_result.stdout | trim | b64encode }}"

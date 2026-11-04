@@ -4,6 +4,7 @@
 
 import logging
 from decimal import Decimal
+from typing import Any
 
 from django.core.paginator import Paginator
 from django.db import transaction
@@ -25,6 +26,12 @@ from apps.billing.currency_policy import get_selling_currency_policy
 from apps.billing.recurring_locking import lock_recurring_collection_customer
 from apps.billing.services import preview_customer_vat_rate
 from apps.customers.models import Customer
+from apps.provisioning.hosting_limit_selectors import (
+    allowance_gib,
+    hosting_limits_summary,
+    operational_allowances,
+    usage_percentage,
+)
 from apps.provisioning.service_models import Service, ServicePlan
 
 from .serializers import (
@@ -36,6 +43,7 @@ from .serializers import (
 )
 
 logger = logging.getLogger(__name__)
+USAGE_WARNING_PERCENT = 80
 
 
 @api_view(["POST"])
@@ -80,7 +88,9 @@ def customer_services_api(request: HttpRequest, customer: Customer) -> Response:
         request_data = request.data if hasattr(request, "data") else {}
 
         # Build base queryset for the authenticated customer
-        queryset = Service.objects.filter(customer=customer).select_related("customer", "service_plan", "currency")
+        queryset = Service.objects.filter(customer=customer).select_related(
+            "customer", "service_plan", "currency", "hosting_limits"
+        )
 
         # Apply filters from request body
         status_filter = request_data.get("status")
@@ -182,7 +192,7 @@ def customer_service_detail_api(request: HttpRequest, customer: Customer, servic
     try:
         # Get service with customer access control for the authenticated customer
         try:
-            service = Service.objects.select_related("customer", "service_plan", "currency").get(
+            service = Service.objects.select_related("customer", "service_plan", "currency", "hosting_limits").get(
                 id=service_id, customer=customer
             )
         except Service.DoesNotExist:
@@ -258,7 +268,9 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
     """
     try:
         # Get services for the authenticated customer
-        services = Service.objects.filter(customer=customer).select_related("service_plan", "currency")
+        services = Service.objects.filter(customer=customer).select_related(
+            "customer", "service_plan", "currency", "hosting_limits"
+        )
 
         # Calculate stats
         now = timezone.now()
@@ -430,7 +442,7 @@ def update_service_auto_renew_api(request: HttpRequest, customer: Customer, serv
     try:
         # Get service with customer access control for the authenticated customer
         try:
-            service = Service.objects.select_related("customer", "service_plan", "currency").get(
+            service = Service.objects.select_related("customer", "service_plan", "currency", "hosting_limits").get(
                 id=service_id, customer=customer
             )
         except Service.DoesNotExist:
@@ -512,7 +524,7 @@ def service_usage_stats_api(request: HttpRequest, customer: Customer, service_id
     try:
         # Get service with customer access control for the authenticated customer
         try:
-            service = Service.objects.select_related("customer", "service_plan", "currency").get(
+            service = Service.objects.select_related("customer", "service_plan", "currency", "hosting_limits").get(
                 id=service_id, customer=customer
             )
         except Service.DoesNotExist:
@@ -522,24 +534,24 @@ def service_usage_stats_api(request: HttpRequest, customer: Customer, service_id
         request_data = request.data if hasattr(request, "data") else {}
         period = request_data.get("period", "30d")
 
-        # In production, this would query actual usage metrics from monitoring system
-        # For now, return current usage statistics
-        usage_data = {
+        from apps.provisioning.virtualmin_usage_service import (  # noqa: PLC0415
+            observations_apply,
+            prime_service_usage,
+            public_usage,
+            usage_history,
+        )
+
+        prime_service_usage([service])
+        disk_allowance, bandwidth_allowance = operational_allowances(service)
+        usage_data: dict[str, Any] = {
+            "hosting_limits": hosting_limits_summary(service),
             "current_usage": {
                 "disk_usage_gb": round(service.disk_usage_mb / 1024, 2),
-                "disk_limit_gb": service.service_plan.disk_space_gb,
-                "disk_usage_percentage": round(
-                    (service.disk_usage_mb / 1024) / (service.service_plan.disk_space_gb or 1) * 100, 1
-                )
-                if service.service_plan.disk_space_gb
-                else 0,
+                "disk_limit_gb": allowance_gib(disk_allowance),
+                "disk_usage_percentage": usage_percentage(service.disk_usage_mb, disk_allowance),
                 "bandwidth_usage_gb": round(service.bandwidth_usage_mb / 1024, 2),
-                "bandwidth_limit_gb": service.service_plan.bandwidth_gb,
-                "bandwidth_usage_percentage": round(
-                    (service.bandwidth_usage_mb / 1024) / (service.service_plan.bandwidth_gb or 1) * 100, 1
-                )
-                if service.service_plan.bandwidth_gb
-                else 0,
+                "bandwidth_limit_gb": allowance_gib(bandwidth_allowance),
+                "bandwidth_usage_percentage": usage_percentage(service.bandwidth_usage_mb, bandwidth_allowance),
                 "email_accounts_used": service.email_accounts_used,
                 "email_accounts_limit": service.service_plan.email_accounts,
                 "databases_used": service.databases_used,
@@ -554,13 +566,6 @@ def service_usage_stats_api(request: HttpRequest, customer: Customer, service_id
             "alerts": [],  # Would include usage warnings, limits exceeded, etc.
         }
 
-        # Add usage alerts
-        from apps.provisioning.virtualmin_usage_service import (  # noqa: PLC0415
-            observations_apply,
-            public_usage,
-            usage_history,
-        )
-
         measured = public_usage(service) if observations_apply(service) else None
         if measured is not None:
             usage_data["current_usage"].update(measured)
@@ -568,19 +573,21 @@ def service_usage_stats_api(request: HttpRequest, customer: Customer, service_id
             usage_data["historical_usage"].update(
                 usage_history(service, {"7d": 7, "30d": 30, "90d": 90}.get(period, 30))
             )
+        disk_percentage = usage_data["current_usage"]["disk_usage_percentage"]
         if (
             (measured is None or measured["usage_state"] == "fresh")
-            and service.service_plan.disk_space_gb
-            and (service.disk_usage_mb / 1024) > (service.service_plan.disk_space_gb * 0.8)
+            and disk_percentage is not None
+            and disk_percentage > USAGE_WARNING_PERCENT
         ):
             usage_data["alerts"].append(
                 {"type": "warning", "message": "Disk usage is above 80% of limit", "resource": "disk"}
             )
 
+        bandwidth_percentage = usage_data["current_usage"]["bandwidth_usage_percentage"]
         if (
             (measured is None or measured["bandwidth_state"] == "fresh")
-            and service.service_plan.bandwidth_gb
-            and (service.bandwidth_usage_mb / 1024) > (service.service_plan.bandwidth_gb * 0.8)
+            and bandwidth_percentage is not None
+            and bandwidth_percentage > USAGE_WARNING_PERCENT
         ):
             usage_data["alerts"].append(
                 {"type": "warning", "message": "Bandwidth usage is above 80% of limit", "resource": "bandwidth"}

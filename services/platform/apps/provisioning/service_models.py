@@ -25,7 +25,7 @@ from apps.common.model_secrets import (
 )
 from apps.common.utils import operator_local_date
 
-from .hosted_zone_ownership import ServiceOwnershipQuerySet, remember_ownership, save_with_ownership
+from .hosted_zone_ownership import ServiceOwnershipQuerySet, remember_ownership
 
 
 class ServicePlan(models.Model):
@@ -458,12 +458,17 @@ class Service(ConcurrentTransitionMixin, models.Model):
         return f"{self.service_name} - {self.customer.get_display_name()}"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
-        save_with_ownership(self, "service", super().save, args, kwargs)
+        from .hosting_limit_assignments import save_service_with_limits  # noqa: PLC0415 -- Model save boundary.
+
+        save_service_with_limits(self, super().save, args, kwargs)
 
     @classmethod
     def from_db(cls, db: str | None, field_names: Collection[str], values: Collection[Any]) -> Service:
         instance = super().from_db(db, field_names, values)
         remember_ownership(instance, "service")
+        from .hosting_limit_assignments import remember_plan  # noqa: PLC0415 -- Model load boundary.
+
+        remember_plan(instance)
         return instance
 
     def get_next_billing_date(self) -> Any | None:
@@ -520,6 +525,10 @@ class Service(ConcurrentTransitionMixin, models.Model):
             super().refresh_from_db(using=using, fields=fields, from_queryset=from_queryset)
             if fields is None or {"customer", "customer_id"}.intersection(fields):
                 remember_ownership(self, "service")
+            if fields is None or {"service_plan", "service_plan_id"}.intersection(fields):
+                from .hosting_limit_assignments import remember_plan  # noqa: PLC0415 -- Model load boundary.
+
+                remember_plan(self)
         except Exception:
             self.__dict__.update(saved)
             raise

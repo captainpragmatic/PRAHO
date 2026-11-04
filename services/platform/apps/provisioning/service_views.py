@@ -29,7 +29,10 @@ from apps.common.http import page_redirect
 from apps.customers.models import Customer
 from apps.users.models import User
 
+from .hosting_limit_override_service import can_override_hosting_resources
+from .hosting_limit_selectors import allowance_gib, hosting_limits_summary, operational_allowances
 from .service_models import Service, ServicePlan, ServicePlanPrice
+from .virtualmin_usage_service import prime_service_usage
 
 
 def _plan_options(currency_code: str) -> list[dict[str, Any]]:
@@ -71,7 +74,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
     customer_ids = _get_accessible_customer_ids(user)
     services = (
         Service.objects.filter(customer_id__in=customer_ids)
-        .select_related("customer", "service_plan")
+        .select_related("customer", "service_plan", "hosting_limits")
         .order_by("-created_at")
     )
 
@@ -92,6 +95,11 @@ def service_list(request: HttpRequest) -> HttpResponse:
     paginator = Paginator(filtered_services, 25)
     page_number = request.GET.get("page")
     services_page = paginator.get_page(page_number)
+    records = list(services_page.object_list)
+    prime_service_usage(records)
+    for service in records:
+        service.__dict__["hosting_allowance_display"] = hosting_limits_summary(service)
+    services_page.object_list = records
 
     # Only staff can manage services (edit/suspend)
     can_manage_services = user.is_staff_user
@@ -123,7 +131,7 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
     """🚀 Display service details and configuration"""
     # Type guard: @login_required ensures authenticated user
     user = cast(User, request.user)
-    service = get_object_or_404(Service, pk=pk)
+    service = get_object_or_404(Service.objects.select_related("customer", "service_plan", "hosting_limits"), pk=pk)
 
     # Security check
     if not user.can_access_customer(service.customer):
@@ -132,6 +140,7 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
     # Only staff can manage services (edit/suspend)
     can_manage = user.is_staff_user and service.status in ["active", "suspended"]
+    prime_service_usage([service])
 
     # A hosting failure leaves the Service active and fails its order line; cancellation and historical
     # generic jobs can fail the Service itself. The order line decides whether retry is safe.
@@ -149,6 +158,10 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
 
     context = {
         "service": service,
+        "hosting_limits": hosting_limits_summary(service),
+        "operational_disk_gib": allowance_gib(operational_allowances(service)[0]),
+        "operational_bandwidth_gib": allowance_gib(operational_allowances(service)[1]),
+        "can_override_resources": can_override_hosting_resources(user),
         "can_manage": can_manage,
         "failed_line": failed_line,
         "cancelled_with_order": cancelled_with_order,
@@ -255,14 +268,20 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
         customers = Customer.objects.filter(id__in=[c.id for c in accessible_customers])
     else:
         customers = accessible_customers  # type: ignore[unreachable]
-    plans = ServicePlan.objects.filter(is_active=True)
-
     if request.method == "POST":
         customer_id = request.POST.get("customer_id")
-        plan_id = request.POST.get("plan_id")
+        plan_id = request.POST.get("plan_id", str(service.service_plan_id))
         domain = request.POST.get("domain")
 
-        if customer_id and plan_id and domain:
+        if plan_id != str(service.service_plan_id):
+            messages.error(
+                request,
+                _(
+                    "Use the separate resource-only exception workflow to change hosting resources. Billing requires a commercial plan change."
+                ),
+            )
+            response_status = 409
+        elif customer_id and domain:
             customer = get_object_or_404(Customer, pk=customer_id)
 
             # Security check
@@ -271,19 +290,14 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
                 messages.error(request, _("❌ You do not have permission to move services to this customer."))
                 return redirect("provisioning:service_detail", pk=pk)
 
-            plan = get_object_or_404(ServicePlan, pk=plan_id)
-
             # Update service
             service.customer = customer
-            service.service_plan = plan
             service.domain = domain
             try:
-                service.save()
-            except ValidationError:
+                service.save(update_fields=["customer", "domain", "updated_at"])
+            except ValidationError as error:
                 service.refresh_from_db()
-                messages.warning(
-                    request, _("The service's owner changed. Review the current details before submitting again.")
-                )
+                messages.warning(request, " ".join(error.messages))
                 response_status = 409
             else:
                 messages.success(request, _("✅ Service {domain} has been updated!").format(domain=domain))
@@ -294,8 +308,7 @@ def service_edit(request: HttpRequest, pk: int) -> HttpResponse:
     context = {
         "service": service,
         "customers": customers,
-        "plans": plans,
-        "plan_options": _plan_options(service.currency_id),
+        "can_override_resources": can_override_hosting_resources(user),
         "is_edit": True,
     }
 
@@ -369,8 +382,10 @@ def service_activate(request: HttpRequest, pk: int) -> HttpResponse:
             else:
                 messages.error(
                     request,
-                    _("A failed service can't be activated here. "
-                      "Review its provisioning history and native state before any repair."),
+                    _(
+                        "A failed service can't be activated here. "
+                        "Review its provisioning history and native state before any repair."
+                    ),
                 )
             return _back_to_service(request, pk)
         try:

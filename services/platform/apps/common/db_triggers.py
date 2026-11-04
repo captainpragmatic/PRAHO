@@ -67,3 +67,16 @@ def drop_context_immutability_trigger(schema_editor: Any, *, table: str, name: s
         schema_editor.execute(f"DROP FUNCTION IF EXISTS {quote(name)}()")
     else:
         schema_editor.execute(f"DROP TRIGGER IF EXISTS {quote(name)}")
+
+
+def restore_sqlite_context_immutability_trigger(
+    schema_editor: Any,
+    *,
+    table: str,
+    column: str,
+    name: str,
+) -> None:
+    """Reinstall the guard after a SQLite table rebuild; PostgreSQL keeps its trigger."""
+    if schema_editor.connection.vendor == "sqlite":
+        drop_context_immutability_trigger(schema_editor, table=table, name=name)
+        create_context_immutability_trigger(schema_editor, table=table, column=column, name=name)

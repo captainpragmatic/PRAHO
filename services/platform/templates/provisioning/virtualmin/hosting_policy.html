@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Hosting policy review" %}{% endblock %}
+{% block content %}
+<div class="space-y-6">
+  <h1 class="text-2xl font-bold">{% trans "Hosting policy review" %}: {{ server.hostname }}</h1>
+  <p>{% trans "Import and inspection are read-only. Quota adoption and customer notification handover are separate decisions." %}</p>
+  <p>{% trans "Managed quotas" %}: {% if readiness.quota_ready %}{% trans "Verified" %}{% else %}{{ readiness.quota_reason }}{% endif %}</p>
+  <p>{% trans "Customer operational emails" %}: {% if readiness.platform_notifications %}{% trans "Platform owns delivery" %}{% else %}{% trans "Native ownership has not been handed over" %}{% endif %}</p>
+  {% if handover_refusal %}<p>{{ handover_refusal }}</p>{% endif %}
+  {% if last_task %}<p>{% trans "Last operation result" %}: {{ last_task.result }}</p>{% endif %}
+  {% if policy.operation %}<p role="alert">{% trans "A held operation must be reconciled before other native work." %}</p>{% endif %}
+  <form method="post">{% csrf_token %}<input type="hidden" name="action" value="inspect">{% trans "Inspect without changes" as inspect_label %}{% button inspect_label type="submit" variant="secondary" %}</form>
+  {% if review %}
+  <p>{% trans "Inventory reviewed at" %} {{ review.created_at }}</p>
+  <p>{% trans "Inventory digest" %}: {{ review.digest }}</p>
+  <pre class="whitespace-pre-wrap">{{ review.evidence }}</pre>
+  {% endif %}
+  <p>{% trans "Inspection helper release" %}: {{ helper_bundle_digest }}</p>
+  <form method="post" class="space-y-4">{% csrf_token %}{{ form.as_p }}{% trans "Queue reviewed action" as action_label %}{% button action_label type="submit" variant="primary" %}</form>
+</div>
+{% endblock %}

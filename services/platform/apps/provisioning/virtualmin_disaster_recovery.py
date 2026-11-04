@@ -150,12 +150,14 @@ class VirtualminDisasterRecoveryService:
 
                         # Apply quotas if they existed (use `is not None` to allow zero = unlimited)
                         if account.disk_quota_mb is not None or account.bandwidth_quota_mb is not None:
-                            self._restore_quotas(
+                            repaired = self._restore_quotas(
                                 target_server,
                                 account.domain,
                                 account.disk_quota_mb,
                                 account.bandwidth_quota_mb,
                             )
+                            if repaired.is_err():
+                                raise ValueError("Native quota repair was not verified: " + repaired.unwrap_err())
 
                         rebuild_results.append(
                             {
@@ -413,8 +415,21 @@ class VirtualminDisasterRecoveryService:
         domain: str,
         disk_quota_mb: int | None,
         bandwidth_quota_mb: int | None,
-    ) -> None:
+    ) -> Result[None, str]:
         """Restore disk and bandwidth quotas for a rebuilt domain via Virtualmin API."""
+        if isinstance(server, VirtualminServer):
+            from .hosting_node_policy_models import (  # noqa: PLC0415 -- Explicit managed-node capability boundary.
+                NodeHostingPolicy,
+            )
+
+            if NodeHostingPolicy.objects.filter(server_id=server.pk, quota_adopted=True).exists():
+                from .hosting_limit_execution import ensure_managed_limits  # noqa: PLC0415
+
+                account = VirtualminAccount.objects.filter(server_id=server.pk, domain=domain).first()
+                if account is None:
+                    return Err("The managed recovery target has no canonical PRAHO account.")
+                verified = ensure_managed_limits(account)
+                return Ok(None) if verified.is_ok() else Err(verified.unwrap_err())
         # The same conversion create-domain applies: disk in KiB, bandwidth in bytes, -1 sent as 0.
         params: dict[str, str] = {"domain": domain, **modify_quota_parameters(disk_quota_mb, bandwidth_quota_mb)}
 
@@ -424,17 +439,21 @@ class VirtualminDisasterRecoveryService:
             result = gateway.call("modify-domain", params)
             if result.is_err():
                 logger.warning(f"⚠️ [DisasterRecovery] Failed to restore quotas for {domain}: {result.unwrap_err()}")
+                return Err(str(result.unwrap_err()))
             elif not has_explicit_success(result.unwrap()):
                 # A refusal is an answer, not a transport error: Virtualmin replies 200 with a failure envelope.
                 refusal = explicit_rejection(result.unwrap().raw_response) or "no explicit success in the response"
                 logger.warning(f"⚠️ [DisasterRecovery] Failed to restore quotas for {domain}: {refusal}")
+                return Err(refusal)
             else:
                 logger.info(
                     f"✅ [DisasterRecovery] Restored quotas for {domain}: "
                     f"disk={disk_quota_mb}MB, bandwidth={bandwidth_quota_mb}MB"
                 )
+                return Ok(None)
         except Exception as e:
             logger.warning(f"⚠️ [DisasterRecovery] Quota restoration error for {domain}: {e}")
+            return Err(str(e))
 
     def _get_integrity_recommendations(self, issues: list[dict[str, Any]], *, ready: bool | None = None) -> list[str]:
         """Get recommendations based on integrity issues"""
