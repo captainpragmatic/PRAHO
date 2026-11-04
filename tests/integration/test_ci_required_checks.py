@@ -149,7 +149,7 @@ def test_crowdsec_native_qualification_runs_once_before_the_aggregate() -> None:
     # Derive the native files from the actual Make recipe so a stale CI exclusion cannot
     # silently miss new suites or suppress unrelated Docker coverage.
     makefile = (REPO / "Makefile").read_text(encoding="utf-8")
-    recipe = re.search(r"^test-crowdsec-docker:\n((?:\t[^\n]*\n)+)", makefile, re.MULTILINE)
+    recipe = re.search(r"^test-crowdsec-docker:[^\n]*\n((?:\t[^\n]*\n)+)", makefile, re.MULTILINE)
     assert recipe is not None
     (native_glob,) = re.findall(r"tests/deploy/[^\s]+_docker\.py", recipe.group(1))
     native_files = set(REPO.glob(native_glob))

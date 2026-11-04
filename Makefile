@@ -562,11 +562,14 @@ build-crowdsec-patched:
 test-crowdsec:
 	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_crowdsec*.py -m 'not docker' -q
 
-test-crowdsec-docker:
+.PHONY: prepare-crowdsec-test-artifacts
+prepare-crowdsec-test-artifacts:
 	@if [ -z "$${CROWDSEC_BOUNCER_BINARY:-}" ] && [ "$${CROWDSEC_BOUNCER_REJECTED_PACKAGE:-0}" != 1 ] && \
 		{ [ ! -f build/crowdsec-patched/crowdsec-firewall-bouncer-amd64 ] || [ ! -f build/crowdsec-patched/crowdsec-firewall-bouncer-arm64 ]; }; then \
 		$(MAKE) build-crowdsec-patched; \
 	fi
+
+test-crowdsec-docker: prepare-crowdsec-test-artifacts
 	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_crowdsec*_docker.py -m docker -q
 
 test-ssh:
@@ -590,7 +593,7 @@ test-deploy:
 test-deploy-docker:
 	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_caddy_routing.py -m docker -q
 
-test-integration:
+test-integration: prepare-crowdsec-test-artifacts
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🧪 Running counter store tests on the configured database..."
