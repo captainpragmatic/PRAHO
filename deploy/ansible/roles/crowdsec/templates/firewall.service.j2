@@ -1,0 +1,13 @@
+[Unit]
+Description=PRAHO-owned CrowdSec INPUT policy
+ConditionPathExists=/etc/praho-crowdsec/config.json
+After=network-pre.target
+Before=network.target crowdsec-firewall-bouncer.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/libexec/praho-crowdsec-firewall
+
+[Install]
+WantedBy=multi-user.target

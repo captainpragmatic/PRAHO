@@ -1,0 +1,31 @@
+---
+- name: Verify applied replacement and record durable retirement intent before removal
+  ansible.builtin.script: '{{ role_path }}/../common/files/fail2ban_state.py begin'
+  register: crowdsec_fail2ban_intent
+  changed_when: crowdsec_fail2ban_intent.rc == 0 and (crowdsec_fail2ban_intent.stdout | trim | from_json).changed
+
+- name: Inspect installed legacy service before stopping it
+  ansible.builtin.service_facts:
+
+- name: Stop and disable legacy protection after qualified replacement
+  ansible.builtin.systemd_service:
+    name: fail2ban.service
+    state: stopped
+    enabled: false
+  when: "'fail2ban.service' in ansible_facts.services"
+
+- name: Purge explicitly retired legacy protection
+  ansible.builtin.apt:
+    name: fail2ban
+    state: absent
+    purge: true
+
+- name: Remove the retired PRAHO legacy jail
+  ansible.builtin.file:
+    path: /etc/fail2ban/jail.local
+    state: absent
+
+- name: Verify retirement and preserve the installation-bound completion witness
+  ansible.builtin.script: '{{ role_path }}/../common/files/fail2ban_state.py complete'
+  register: crowdsec_fail2ban_complete
+  changed_when: crowdsec_fail2ban_complete.rc == 0 and (crowdsec_fail2ban_complete.stdout | trim | from_json).changed

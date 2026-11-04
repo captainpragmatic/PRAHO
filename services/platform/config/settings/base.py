@@ -48,6 +48,7 @@ LOCAL_APPS: list[str] = [
     "apps.billing",
     "apps.tickets",
     "apps.provisioning",
+    "apps.security",  # Local mirrors of independently protected CrowdSec installations
     "apps.infrastructure",  # 🖥️ Cloud infrastructure & node deployment
     "apps.products",
     "apps.orders",
@@ -504,6 +505,13 @@ STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 # Visit: /app/settings/dashboard/ → Provisioning & Infrastructure
 # Credentials are stored in the encrypted credential vault.
 PRAHO_SSH_KNOWN_HOSTS_PATH = os.environ.get("PRAHO_SSH_KNOWN_HOSTS_PATH", "")
+PRAHO_CROWDSEC_SSH_PUBLIC_KEY_PATH = os.environ.get("PRAHO_CROWDSEC_SSH_PUBLIC_KEY_PATH", "")
+PRAHO_CROWDSEC_SSH_PRIVATE_KEY_PATH = os.environ.get("PRAHO_CROWDSEC_SSH_PRIVATE_KEY_PATH", "")
+PRAHO_CROWDSEC_SYNC_ENABLED = os.environ.get("PRAHO_CROWDSEC_SYNC_ENABLED", "false").lower() == "true"
+PRAHO_CROWDSEC_LOCAL_SOURCE_ENABLED = os.environ.get("PRAHO_CROWDSEC_LOCAL_SOURCE_ENABLED", "false").lower() == "true"
+PRAHO_CROWDSEC_ACTIONS_ENABLED = os.environ.get("PRAHO_CROWDSEC_ACTIONS_ENABLED", "false").lower() == "true"
+PRAHO_CROWDSEC_REPLICATION_ENABLED = os.environ.get("PRAHO_CROWDSEC_REPLICATION_ENABLED", "false").lower() == "true"
+CROWDSEC_CUSTOMER_IP_OBSERVATIONS_ENABLED = os.environ.get("CROWDSEC_CUSTOMER_IP_OBSERVATIONS_ENABLED", "false").lower() == "true"
 VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH = os.environ.get("VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH", "")
 
 # e-Factura API settings

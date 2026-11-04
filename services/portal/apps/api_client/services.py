@@ -184,6 +184,21 @@ def _read_body_within(response: requests.Response, deadline: _CallDeadline) -> N
 
 
 _MAX_USER_AGENT_LENGTH = 512
+AUTH_FAILURE_CATEGORIES = frozenset({"credentials", "second_factor", "policy_refusal"})
+
+
+def _valid_observation_state(value: object) -> bool:
+    return (
+        isinstance(value, dict)
+        and set(value) == {"enabled", "recorded", "degraded"}
+        and all(type(field) is bool for field in value.values())
+    )
+
+
+def _private_auth_category(payload: object) -> str | None:
+    """Only this fixed HMAC API contract may influence local attack detection."""
+    value = payload.get("failure_category") if isinstance(payload, dict) else None
+    return value if isinstance(value, str) and value in AUTH_FAILURE_CATEGORIES else None
 
 
 def _browser_payload(client_ip: str, user_agent: str) -> dict[str, str]:
@@ -685,10 +700,12 @@ class PlatformAPIClient:
                     if not isinstance(error_data, dict):
                         error_data = {"error": "Authentication failed"}
                     error_msg = self._extract_error_message(error_data)
+                    category = _private_auth_category(error_data)
                     return {
                         "success": False,
                         "authenticated": False,
                         "error": error_msg,
+                        **({"failure_category": category} if category else {}),
                     }
 
                 return self._handle_api_response(response, endpoint)
@@ -878,8 +895,14 @@ class PlatformAPIClient:
                     "session_idle_deadline": data.get("session_idle_deadline"),
                     # The 300 s window login opened, echoed by every later call (section 7).
                     "step_up_at": data.get("step_up_at"),
+                    **(
+                        {"security_observation": data["security_observation"]}
+                        if _valid_observation_state(data.get("security_observation"))
+                        else {}
+                    ),
                 }
-            return None
+            category = _private_auth_category(data)
+            return {"valid": False, "failure_category": category} if category else None
 
         except PlatformAPIError as e:
             # Master's predicate, kept over this branch's `is_degraded`, because it is strictly
@@ -890,8 +913,9 @@ class PlatformAPIClient:
             # rather than an answer. A `status_code` of None (transport failure) also raises.
             if e.is_rate_limited or e.is_unavailable or e.status_code not in {400, 401, 403}:
                 raise  # Throttles and outages are the caller's to report, not a wrong password
-            logger.warning(f"⚠️ [API Client] Customer authentication failed for {email}: {e}")
-            return None
+            logger.warning("⚠️ [API Client] Customer authentication was refused")
+            category = _private_auth_category(e.response_data)
+            return {"valid": False, "failure_category": category} if category else None
         finally:
             elapsed = time.perf_counter() - start_time
             if 0 < min_duration < elapsed and _login_floor_overrun_log_gate.should_log():

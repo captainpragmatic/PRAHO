@@ -1009,7 +1009,7 @@ class StoreUnavailableMiddleware:
 
         if not isinstance(exception, MFAStoreUnavailable):
             return None
-        logger.error("🔥 [MFA] Counter store unavailable during a second-factor check on %s", request.path)
+        logger.error("🔥 [MFA] Second-factor verification unavailable on %s", request.path)
         if request.path.startswith("/api/"):
             return store_unavailable_response()
         # Inline, like MaintenanceModeMiddleware: rendering base.html while the database is

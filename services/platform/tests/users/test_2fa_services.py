@@ -29,6 +29,7 @@ from apps.common.constants import MAX_LOGIN_ATTEMPTS
 from apps.users.mfa import (
     BackupCodeService,
     MFAService,
+    MFAStoreUnavailable,
     TOTPService,
     WebAuthnCredential,
     WebAuthnService,
@@ -234,9 +235,8 @@ class TOTPServiceTestCase(TestCase):
         self.user.save()
 
         request = self.factory.get("/")
-        result = TOTPService.verify_token(self.user, "123456", request)
-
-        self.assertFalse(result)
+        with self.assertRaises(MFAStoreUnavailable):
+            TOTPService.verify_token(self.user, "123456", request)
         mock_logger.error.assert_called_once()
 
     def test_generate_qr_code(self):
@@ -778,9 +778,8 @@ class MFASecurityTestCase(TestCase):
         self.user.save()
 
         request = self.factory.get("/")
-        result = TOTPService.verify_token(self.user, "123456", request)
-
-        self.assertFalse(result)
+        with self.assertRaises(MFAStoreUnavailable):
+            TOTPService.verify_token(self.user, "123456", request)
         mock_logger.error.assert_called_once()
 
     def test_backup_codes_format_validation(self):

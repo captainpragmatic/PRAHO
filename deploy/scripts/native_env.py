@@ -63,6 +63,9 @@ PORTAL_KEYS = frozenset(
         "PORTAL_GUNICORN_WORKER_CLASS",
         "PORTAL_GUNICORN_WORKERS",
         "PORTAL_GUNICORN_THREADS",
+        "CROWDSEC_AUTH_EVENTS_ENABLED",
+        "CROWDSEC_AUTH_PSEUDONYM_KEY",
+        "CROWDSEC_AUTH_LOG_PATH",
         "SESSION_DB_PATH",
         "HSTS_POLICY",
         "ACME_EMAIL",
@@ -85,6 +88,14 @@ def runtime_environments(values: dict[str, str], environment: str, mode: str) ->
     key = values.get("PORTAL_DJANGO_SECRET_KEY", "")
     if not key or key == values.get("DJANGO_SECRET_KEY", ""):
         raise ValueError("Portal requires a distinct PORTAL_DJANGO_SECRET_KEY")
+    auth_log_path = values.get("CROWDSEC_AUTH_LOG_PATH", "/var/log/praho/portal/portal-auth.jsonl")
+    if values.get("CROWDSEC_AUTH_EVENTS_ENABLED", "false").lower() == "true" and (
+        auth_log_path != "/var/log/praho/portal/portal-auth.jsonl"
+    ):
+        raise ValueError(
+            "Enabled native detection requires the qualified Portal authentication log path "
+            "/var/log/praho/portal/portal-auth.jsonl"
+        )
     platform = dict(values)
     platform.update(
         {
@@ -101,6 +112,7 @@ def runtime_environments(values: dict[str, str], environment: str, mode: str) ->
         }
     )
     portal = {key: value for key, value in values.items() if key in PORTAL_KEYS}
+    portal.setdefault("CROWDSEC_AUTH_LOG_PATH", auth_log_path)
     portal.update(
         {
             "DJANGO_SECRET_KEY": key,

@@ -1,0 +1,9 @@
+---
+- name: Re-read retirement after queued notifications
+  ansible.builtin.import_tasks: fail2ban_state.yml
+
+- name: Restart only protection that has not been retired
+  ansible.builtin.service:
+    name: fail2ban
+    state: restarted
+  when: praho_fail2ban_state.state == 'absent'

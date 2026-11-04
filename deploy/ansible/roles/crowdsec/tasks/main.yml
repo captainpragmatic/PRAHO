@@ -1,0 +1,4 @@
+---
+- name: Adopt CrowdSec only with explicit enablement
+  ansible.builtin.include_tasks: install.yml
+  when: crowdsec_enabled | bool

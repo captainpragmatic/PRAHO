@@ -20,7 +20,6 @@
       - htop
       - vim
       - ufw
-      - fail2ban
       - unzip
       - ca-certificates
       - gnupg
@@ -81,12 +80,9 @@
         policy: deny
         direction: incoming
 
-- name: Configure fail2ban
-  template:
-    src: jail.local.j2
-    dest: /etc/fail2ban/jail.local
-    mode: "0644"
-  notify: restart fail2ban
+- name: Converge legacy protection without reviving a retired installation
+  ansible.builtin.import_tasks: fail2ban.yml
+  tags: [fail2ban]
 
 - name: Set timezone
   community.general.timezone:

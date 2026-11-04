@@ -78,7 +78,19 @@ or ('max-age=3600' if (praho_env | default('prod')) == 'staging' else 'max-age=3
         handle @portal_health {
             @health_denied not remote_ip {{ (deployed_env.PRAHO_MONITORING_CIDRS | default('')).split() | join(' ') }} 127.0.0.1/32 ::1/128
             respond @health_denied "Access denied" 403
-            reverse_proxy 127.0.0.1:{{ portal_port }}
+            reverse_proxy 127.0.0.1:{{ portal_port }} {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+                header_up X-Forwarded-Host {host}
+                header_up -Forwarded
+                header_up -X-Cluster-Client-IP
+                header_up -CF-Connecting-IP
+                header_up -CF-Connecting-IPv6
+                header_up -CF-Pseudo-IPv4
+                header_up -CF-Ray
+                header_up -True-Client-IP
+            }
         }
         @callback path /order/payment/webhook /order/payment/webhook/*
         handle @callback {
@@ -93,7 +105,19 @@ or ('max-age=3600' if (praho_env | default('prod')) == 'staging' else 'max-age=3
             request_body {
                 max_size 5MB
             }
-            reverse_proxy 127.0.0.1:{{ portal_port }}
+            reverse_proxy 127.0.0.1:{{ portal_port }} {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+                header_up X-Forwarded-Host {host}
+                header_up -Forwarded
+                header_up -X-Cluster-Client-IP
+                header_up -CF-Connecting-IP
+                header_up -CF-Connecting-IPv6
+                header_up -CF-Pseudo-IPv4
+                header_up -CF-Ray
+                header_up -True-Client-IP
+            }
         }
         {% if (praho_env | default('prod')) == 'staging' %}
         # Staging customer pages remain restricted; monitoring and peer callbacks have their own gates.
@@ -121,6 +145,14 @@ or ('max-age=3600' if (praho_env | default('prod')) == 'staging' else 'max-age=3
                 header_up X-Real-IP {remote_host}
                 header_up X-Forwarded-For {remote_host}
                 header_up X-Forwarded-Proto {scheme}
+                header_up X-Forwarded-Host {host}
+                header_up -Forwarded
+                header_up -X-Cluster-Client-IP
+                header_up -CF-Connecting-IP
+                header_up -CF-Connecting-IPv6
+                header_up -CF-Pseudo-IPv4
+                header_up -CF-Ray
+                header_up -True-Client-IP
                 # Read the whole request before passing it on (the buffer is above the 5MB cap, so any
                 # accepted body is complete), and up to 10MiB of the response before sending it: a slow
                 # client then holds Caddy, not a portal thread.
