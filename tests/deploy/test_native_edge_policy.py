@@ -7,6 +7,8 @@ from pathlib import Path
 import pytest
 from jinja2 import Environment, StrictUndefined
 
+from tests.native_role_helpers import INVALID_CADDY_SITE
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -89,3 +91,12 @@ def test_caddy_validates_role_specific_origins_and_address_pair(platform: bool, 
                              "public.ecr.aws/docker/library/caddy:2-alpine", "caddy", "validate", "--config", "/dev/stdin", "--adapter", "caddyfile"],
                             input=render(platform, portal, legacy), capture_output=True, text=True, check=False)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.docker
+def test_invalid_caddy_acceptance_fixture_is_an_actual_parser_failure() -> None:
+    result = subprocess.run([shutil.which("docker") or "docker", "run", "--rm", "-i", "--tmpfs", "/var/log/caddy",  # noqa: S603 -- known invalid fixture, no shell
+                             "public.ecr.aws/docker/library/caddy:2-alpine", "caddy", "validate", "--config", "/dev/stdin", "--adapter", "caddyfile"],
+                            input=render(True, False) + INVALID_CADDY_SITE, capture_output=True, text=True, check=False)
+    assert result.returncode != 0
+    assert "unrecognized directive: invalid_native_fixture_directive" in result.stdout + result.stderr

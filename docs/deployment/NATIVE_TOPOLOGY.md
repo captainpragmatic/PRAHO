@@ -82,6 +82,8 @@ pass. Reboots must retain maintenance and worker holds until a coherent pair is 
 
 `make rollback-native ENV=prod VERSION=<prior full SHA>` uses the same downtime and verification
 sequence. An applied business migration missing from the target revision refuses code-only rollback.
+The same compatibility guard applies to an ordinary deployment, so selecting an older version with
+`make deploy-prod` cannot bypass it.
 No reverse migrations run automatically. For data recovery, validate the explicit database/media pair
 and its provenance, keep both origins and workers held, and follow the [native restore guide](PLATFORM_RESTORE.md#native-restore).
 Use `restore-platform.sh --leave-stopped <dump>` on Platform. This takes its safety backup as the

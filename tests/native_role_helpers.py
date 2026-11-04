@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+INVALID_CADDY_SITE = "\n:443 {\n    invalid_native_fixture_directive\n}\n"
+
 
 def native_tasks(path: Path) -> list[dict]:
     tasks = []

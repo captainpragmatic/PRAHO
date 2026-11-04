@@ -22,6 +22,8 @@ from uuid import uuid4
 
 import pytest
 
+from tests.native_role_helpers import INVALID_CADDY_SITE
+
 ROOT = Path(__file__).resolve().parents[2]
 IMAGE = "praho-native-acceptance:26.04"
 SPLIT = ("prod", "split")
@@ -592,7 +594,7 @@ class Migration(migrations.Migration):
             lab.execute(lab.portal, "rm", "-f", "/var/log/praho/portal/native-startup-failed")
             lab.sha = lab.revision({"services/portal/config/wsgi.py": "from pathlib import Path\nPath('/var/log/praho/portal/native-startup-failed').write_text('intentional native acceptance fault')\nraise RuntimeError('Native acceptance Portal startup fault')\n"})
         elif fault == "caddy":
-            docker("exec", "-i", lab.controller, "tee", template, data=original + "\ninvalid_native_fixture_directive\n")
+            docker("exec", "-i", lab.controller, "tee", template, data=original + INVALID_CADDY_SITE)
         elif fault == "certificate":
             lab.execute(lab.portal, "rm", "/usr/local/share/ca-certificates/native-fixture.crt")
             lab.execute(lab.portal, "update-ca-certificates", "--fresh")
@@ -684,20 +686,21 @@ class Migration(migrations.Migration):
            "from django.db.migrations.recorder import MigrationRecorder; "
            f"assert MigrationRecorder.Migration.objects.filter(app='common', name={migration!r}).exists()")
     current = lab.sha
-    lab.sha = previous
-    refused = lab.deploy(rollback=True)
-    assert refused.returncode != 0
-    expected = ("Check rollback migration compatibility before checkout" if service == "platform"
-                else "Check Portal rollback migrations using its installed private environment")
-    assert _failed_task(refused) == expected
-    reason = docker("exec", "--user", owner, "-e", f"PYTHONPATH=/opt/praho/src/services/{service}",
-                    "-e", "PRAHO_NATIVE_SOURCE_ROOT=/opt/praho/src", host,
-                    "/usr/local/lib/praho/native_exec.sh", environment, "--", "/opt/praho/.venv-linux/bin/python",
-                    "/usr/local/lib/praho/native_migration_guard.py", "--service", service, "--no-fetch", previous, check=False)
-    assert reason.returncode != 0 and "Code-only rollback would discard applied migrations:" in reason.stderr
-    assert "common." + migration in reason.stderr
-    lab.sha = current
-    lab.assert_coherent()
-    lab.assert_held()
-    retry = lab.deploy()
-    assert retry.returncode == 0, retry.stdout[-10000:] + retry.stderr[-2000:]
+    for rollback in (False, True):
+        lab.sha = previous
+        refused = lab.deploy(rollback=rollback)
+        assert refused.returncode != 0
+        expected = ("Check rollback migration compatibility before checkout" if service == "platform"
+                    else "Check Portal rollback migrations using its installed private environment")
+        assert _failed_task(refused) == expected
+        reason = docker("exec", "--user", owner, "-e", f"PYTHONPATH=/opt/praho/src/services/{service}",
+                        "-e", "PRAHO_NATIVE_SOURCE_ROOT=/opt/praho/src", host,
+                        "/usr/local/lib/praho/native_exec.sh", environment, "--", "/opt/praho/.venv-linux/bin/python",
+                        "/usr/local/lib/praho/native_migration_guard.py", "--service", service, "--no-fetch", previous, check=False)
+        assert reason.returncode != 0 and "Code-only rollback would discard applied migrations:" in reason.stderr
+        assert "common." + migration in reason.stderr
+        lab.sha = current
+        lab.assert_coherent()
+        lab.assert_held()
+        retry = lab.deploy()
+        assert retry.returncode == 0, retry.stdout[-10000:] + retry.stderr[-2000:]

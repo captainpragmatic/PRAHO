@@ -125,7 +125,7 @@
       include_tasks: native/quiesce.yml
       when: native_operation in ['deploy', 'rollback']
 
-- name: Protect applied Portal migrations before rollback checkout
+- name: Protect applied Portal migrations before code checkout
   hosts: praho_portal
   become: true
   gather_facts: false
@@ -133,7 +133,7 @@
   tasks:
     - name: Validate Portal code rollback compatibility
       include_tasks: native/portal-rollback.yml
-      when: native_operation == 'rollback' and native_checkout.stat.exists
+      when: native_operation in ['deploy', 'rollback'] and native_checkout.stat.exists
 
 - name: Deploy Platform at the pinned SHA
   hosts: praho_platform

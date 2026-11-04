@@ -2,13 +2,58 @@
 
 import io
 import json
+import os
+import shutil
+import subprocess
+import sys
 import tarfile
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+import yaml
 
 from deploy.scripts import native_env
+
+
+def test_deploy_cannot_skip_migration_compatibility_without_a_rollback_flag(tmp_path: Path) -> None:
+    # Exercise the actual orchestration condition. A working explicit rollback
+    # is the positive control for the same known migration refusal during deploy.
+    root = tmp_path / "host"
+    (root / "src").mkdir(parents=True)
+    (root / ".venv-linux/bin").mkdir(parents=True)
+    (root / ".venv-linux/bin/python").symlink_to(sys.executable)
+    (root / ".env").write_text("")
+    invoked, mutated = tmp_path / "guard-invoked", tmp_path / "checkout-mutated"
+    helper = tmp_path / "guard.py"
+    helper.write_text(
+        f"import sys\nsys.path.insert(0, {str(native_env.ROOT)!r})\n"
+        "from pathlib import Path\nfrom deploy.scripts.native_env import validate_rollback_migrations\n"
+        f"Path({str(invoked)!r}).touch()\n"
+        "validate_rollback_migrations({('common', '0002')}, {'services/platform/apps/common/migrations/0001.py'})\n"
+    )
+    tasks = yaml.safe_load((native_env.ROOT / "deploy/ansible/playbooks/native/quiesce.yml").read_text())
+    guard = next(task for task in tasks if task["name"] == "Check rollback migration compatibility before checkout")
+    guard.pop("become_user")
+    guard["shell"] = guard["shell"].replace("/usr/local/lib/praho/native_migration_guard.py", str(helper))
+    controller = Path(sys.executable).with_name("ansible-playbook")
+    executable = str(controller) if controller.is_file() else (shutil.which("ansible-playbook") or "ansible-playbook")
+    for operation in ("rollback", "deploy"):
+        invoked.unlink(missing_ok=True)
+        playbook = tmp_path / "play.yml"
+        playbook.write_text(yaml.safe_dump([{
+            "hosts": "localhost", "gather_facts": False,
+            "vars": {"project_root": str(root), "native_operation": operation,
+                     "native_checkout": {"stat": {"exists": True}}, "django_settings_module": "config.settings.test",
+                     "praho_git_repo": str(tmp_path), "deploy_git_version": "a" * 40},
+            "tasks": [guard, {"copy": {"content": "checkout happened", "dest": str(mutated)}}],
+        }]))
+        result = subprocess.run([executable, "-i", "localhost,", "-c", "local", str(playbook)],  # noqa: S603 -- actual local task, known refusal and disposable paths.
+                                capture_output=True, text=True, check=False,
+                                env={**os.environ, "ANSIBLE_LOCAL_TEMP": str(tmp_path / "local"),
+                                     "ANSIBLE_REMOTE_TEMP": str(tmp_path / "remote")})
+        assert result.returncode != 0, f"{operation} bypassed the migration guard and changed its checkout"
+        assert invoked.exists() and not mutated.exists(), result.stdout + result.stderr
 
 
 def test_rollback_rejects_applied_migrations_absent_from_target_revision() -> None:

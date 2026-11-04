@@ -70,4 +70,4 @@
     executable: /bin/bash
   no_log: true
   become_user: "{{ project_user }}"
-  when: native_operation == 'rollback'
+  when: native_checkout.stat.exists
