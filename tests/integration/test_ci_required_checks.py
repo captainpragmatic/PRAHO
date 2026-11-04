@@ -109,6 +109,8 @@ def test_every_required_check_runs_on_every_pull_request(context: str) -> None:
     assert "strategy" not in job, f"{workflow}:{context}: a matrix renames the check, which then never reports"
     if context in SELECTIVE_JOBS:
         assert job["if"] == SELECTIVE_JOBS[context], f"{workflow}:{context} must skip only on an explicit 'false'"
+    elif context == "browser-e2e":
+        assert job["if"] == "always()", "The required browser result must report failed/cancelled upstream checks"
     else:
         assert "if" not in job, f"{workflow}:{context} can be skipped, and a skipped job reports success"
     if context not in STEP_CONDITIONS_ALLOWED:
@@ -243,7 +245,9 @@ def test_only_a_real_trailer_signs_a_description_or_a_squash(tmp_path: Path, bod
     assert _dco(tmp_path, "pull_request", signed, signed, body=body) != 0
     assert _dco(tmp_path, "merge_group", base, squash) != 0
     # GitHub keeps the carriage returns of a description typed in the browser.
-    assert _dco(tmp_path, "pull_request", signed, signed, body="Summary.\r\n\r\nSigned-off-by: A <a@example.com>\r\n") == 0
+    assert (
+        _dco(tmp_path, "pull_request", signed, signed, body="Summary.\r\n\r\nSigned-off-by: A <a@example.com>\r\n") == 0
+    )
 
 
 def test_a_changed_description_is_checked_again() -> None:
@@ -288,7 +292,14 @@ def test_no_workflow_runs_pull_request_code_on_a_comment() -> None:
         (["README.md", "deploy/virtualmin-lab/compose.yml"], True),
         # Imported by provisioning, and nobody had listed them: an allowlist of what reaches the lab goes stale.
         (["services/platform/apps/orders/tasks.py", "services/platform/apps/tickets/models.py"], True),
-        (["services/platform/tests/billing/test_x.py", "tests/integration/test_y.py", ".github/rulesets/master.json"], False),
+        (
+            [
+                "services/platform/tests/billing/test_x.py",
+                "tests/integration/test_y.py",
+                ".github/rulesets/master.json",
+            ],
+            False,
+        ),
     ],
 )
 def test_the_lab_selection_fails_open(changed: list[str], expected: bool) -> None:
@@ -302,7 +313,7 @@ class TestReleaseCandidate:
     def test_only_a_master_dispatch_may_vouch_for_a_commit(self) -> None:
         assert list(self.workflow["on"]) == ["workflow_dispatch"]
         script = str(self.jobs["resolve"]["steps"])
-        assert 'refs/heads/master' in script and "merge-base --is-ancestor" in script
+        assert "refs/heads/master" in script and "merge-base --is-ancestor" in script
 
     def test_the_candidate_is_verified_by_the_tested_script(self) -> None:
         # tests/integration/test_verify_release_candidate.py drives the script's decisions.
@@ -346,3 +357,42 @@ def test_browser_jobs_always_stop_their_stack(job_id: str) -> None:
     stops = [step for step in steps if step.get("run") == "make stop-e2e"]
 
     assert len(stops) == 1 and stops[0]["if"] == "always()", job_id
+
+
+def test_full_hosting_checkout_is_a_required_browser_dependency() -> None:
+    jobs = load_workflow(WORKFLOWS / "browser.yml")["jobs"]
+    assert set(jobs) == {"browser-e2e", "browser-csp", "browser-hosting-checkout"}
+    full = jobs["browser-hosting-checkout"]  # Final-job canary: inventory must include the new gate.
+    assert full["env"]["DB_PORT"] == "5432"
+    makefile = (REPO / "Makefile").read_text()
+    assert "DB_PORT=$(HOSTING_BROWSER_DB_PORT)" in makefile
+    assert "DB_NAME=hosting_browser DB_HOST=127.0.0.1" in makefile
+    assert any(
+        step.get("run") == 'make test-hosting-plan-checkout-full HOSTING_BROWSER_DB_PORT="$DB_PORT"'
+        for step in full["steps"]
+    )
+    stops = [step for step in full["steps"] if step.get("run") == "make ci-postgres-stop"]
+    assert len(stops) == 1 and stops[0]["if"] == "always()"
+    assert any("make test-hosting-plan-checkout-full" in step.get("run", "") for step in full["steps"])
+    assert any("make ci-postgres-start CI_POSTGRES_IMAGE_TAG=16" in step.get("run", "") for step in full["steps"])
+    assert full.get("continue-on-error") is not True
+    assert all(step.get("continue-on-error") is not True for step in full["steps"])
+    required = jobs["browser-e2e"]
+    assert required["needs"] == ["browser-hosting-checkout"]
+    assert required["if"] == "always()"
+    guard = required["steps"][0]
+    assert guard["env"]["HOSTING_CHECKOUT_RESULT"] == "${{ needs.browser-hosting-checkout.result }}"
+    assert "if" not in guard
+
+
+@pytest.mark.parametrize("upstream", ["success", "failure", "cancelled", "skipped"])
+def test_required_browser_guard_rejects_every_unsuccessful_full_checkout(upstream: str) -> None:
+    guard = load_workflow(WORKFLOWS / "browser.yml")["jobs"]["browser-e2e"]["steps"][0]
+    completed = subprocess.run(  # noqa: S603 -- Execute the actual fixed CI guard against synthetic job results.
+        ["/bin/bash", "-c", guard["run"]],
+        check=False,
+        env={**os.environ, "HOSTING_CHECKOUT_RESULT": upstream},
+        capture_output=True,
+        text=True,
+    )
+    assert (completed.returncode == 0) is (upstream == "success"), completed.stderr
