@@ -179,7 +179,13 @@ on unavailable prerequisites, empty collection, skips, failures and errors. Inte
 invoke it explicitly; generic integration collection excludes it. Container tests use host-managed
 swap and do not establish a production VPS's kernel, external routing or console behavior.
 
-The required `integration-test` check waits for both the general suite and native qualification,
-which run in parallel. Failure, cancellation or skipping either job fails that check. Nightly
-qualifies all three native topologies once from the workflow revision alongside its branch suites,
-so an older staging checkout need not already contain the native qualification targets.
+The required `integration-test` check waits for both the general suite and native qualification.
+Integration CI qualifies `split-prod`, `combined-staging` and `combined-prod` in parallel so the
+independent topologies fit the merge queue deadline. All three profiles must pass; their 17, 6 and
+6 cases partition the complete 29-case gate without duplication. Failure, cancellation or skipping
+any profile fails the required check. Each runner rejects incomplete reports and unknown profiles.
+
+The default `make test-native-deploy` and nightly still run all 29 cases. For targeted diagnosis,
+set `PRAHO_NATIVE_ACCEPTANCE_PROFILE` to one of the three profile names; a partial profile is not a
+complete qualification. Nightly uses the workflow revision alongside its branch suites, so an older
+staging checkout need not already contain the native qualification targets.

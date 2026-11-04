@@ -290,6 +290,12 @@ jobs:
   # the general suite instead of consuming the merge queue's deadline serially.
   native-deploy:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [split-prod, combined-staging, combined-prod]
+    env:
+      PRAHO_NATIVE_ACCEPTANCE_PROFILE: ${{ matrix.profile }}
     steps:
     - uses: actions/checkout@v4
       with:

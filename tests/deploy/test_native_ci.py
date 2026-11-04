@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parents[2]
 def native_nightly_jobs() -> tuple[dict, dict]:
     jobs = yaml.safe_load((ROOT / ".github/workflows/nightly.yml").read_text())["jobs"]
     native = {
-        name: job for name, job in jobs.items()
+        name: job
+        for name, job in jobs.items()
         if any("make test-native-deploy" in step.get("run", "") for step in job.get("steps", []))
     }
     assert len(native) == 1, "Every active nightly run must qualify native deployment exactly once"
@@ -25,7 +26,9 @@ def test_native_nightly_uses_workflow_harness_when_staging_predates_the_make_tar
     jobs, native = native_nightly_jobs()
     job = next(iter(native.values()))
     checkout = next(step for step in job["steps"] if step.get("uses", "").startswith("actions/checkout@"))
-    assert checkout["with"]["ref"] == "${{ github.workflow_sha }}", "Older app refs cannot supply the new native harness"
+    assert checkout["with"]["ref"] == "${{ github.workflow_sha }}", (
+        "Older app refs cannot supply the new native harness"
+    )
     assert "matrix" not in job.get("strategy", {}), "The native harness already qualifies all three topologies"
     assert job["if"] == jobs["nightly"]["if"], "Native qualification must run for every active nightly"
 
@@ -38,11 +41,13 @@ def test_native_nightly_failure_reaches_the_existing_scheduled_failure_notificat
 def test_required_integration_check_waits_for_parallel_native_and_general_suites() -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows/integration.yml").read_text())["jobs"]
     native = {
-        name for name, job in jobs.items()
+        name
+        for name, job in jobs.items()
         if any("make test-native-deploy" in step.get("run", "") for step in job.get("steps", []))
     }
     general = {
-        name for name, job in jobs.items()
+        name
+        for name, job in jobs.items()
         if any("make test-integration" in step.get("run", "") for step in job.get("steps", []))
     }
     assert native.isdisjoint(general), "Serial native qualification needlessly consumes the merge queue deadline"
@@ -57,6 +62,14 @@ def test_required_integration_check_waits_for_parallel_native_and_general_suites
         for step in job["steps"]:
             assert "continue-on-error" not in step
             assert step.get("if") in (None, "always()"), "Upstream work must not silently skip"
+
+
+def test_native_ci_qualifies_each_topology_in_parallel_with_no_missing_profile() -> None:
+    native = yaml.safe_load((ROOT / ".github/workflows/integration.yml").read_text())["jobs"]["native-deploy"]
+    strategy = native.get("strategy", {})
+    assert strategy.get("matrix", {}).get("profile") == ["split-prod", "combined-staging", "combined-prod"]
+    assert strategy.get("fail-fast") is False
+    assert native.get("env", {}).get("PRAHO_NATIVE_ACCEPTANCE_PROFILE") == "${{ matrix.profile }}"
 
 
 @pytest.mark.parametrize("general", ["success", "failure", "cancelled", "skipped"])
