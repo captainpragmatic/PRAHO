@@ -59,6 +59,27 @@ absolute dependency cache directory, without changing `uv sync --frozen`.
 
 ## Maintenance and recovery
 
+Every native operation acquires an atomic, root-owned lock on Platform at
+`/etc/praho-native-operation` before changing either host. Independent controllers share this lock.
+The controller retains it through reopening traffic or its failure-recovery attempt, verifies its
+owner before releasing shared holds, and removes only its own lock when finished. An abrupt controller
+loss leaves the lock in place across reboot; neither an edge update nor another deployment clears it.
+
+For an orphaned lock, first stop every controller that could still be running the operation. Record
+the lock's `owner` value and the observed host SHAs. Through verified SSH or console access, verify
+maintenance on both origins, stopped qcluster and backup scheduling, and no active backup or migration.
+Do not infer this from a lock's age or a controller PID on a different machine. Only after these checks,
+remove `/etc/praho-native-operation/owner` and the now-empty lock directory as root on Platform, keeping
+all maintenance gates intact, then retry the coordinated launcher. If either host cannot be inspected,
+keep the lock and recover console access first.
+
+An interrupted initial checkout can be retried before application data exists. The controller inspects
+the installed PostgreSQL catalog, media and private Portal session state rather than treating `.git`
+as proof of a recoverable installation. Existing data with missing backup or migration prerequisites,
+or an unreadable database, fails closed and requires repair. Recovery tooling is installed before the
+first business migration can write data. Fresh origins retry certificate readiness for a bounded period;
+each probe still requires verified HTTPS and an exact 503 response.
+
 Before upgrading an existing origin, apply the maintenance-aware edge with `make deploy-caddy ENV=…`.
 An existing older edge is refused during coordinated deployment. `/etc/praho-native/hold-platform`,
 `hold-portal`, `hold-callbacks`, and `hold-workers` are root-owned persistent gates outside the checkout.

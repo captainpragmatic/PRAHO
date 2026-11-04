@@ -1,4 +1,6 @@
 ---
+- name: Verify the operation owner before releasing Platform holds
+  include_tasks: lock-owner.yml
 - name: Reopen provider callbacks after Portal authentication is verified
   file:
     path: /etc/praho-native/hold-platform

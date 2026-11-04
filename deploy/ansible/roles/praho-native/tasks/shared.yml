@@ -75,6 +75,13 @@
     - restart praho-portal
     - restart praho-qcluster
 
+- name: Set source ownership
+  file:
+    path: "{{ project_root }}/src"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    recurse: yes
+
 - name: Get deployed git SHA
   command: git rev-parse HEAD
   args:
@@ -89,13 +96,6 @@
     that: deployed_sha.stdout == deploy_git_version
     fail_msg: "Host checkout differs from the controller's pinned release SHA"
   when: native_coordinated | bool
-
-- name: Set source ownership
-  file:
-    path: "{{ project_root }}/src"
-    owner: "{{ project_user }}"
-    group: "{{ project_group }}"
-    recurse: yes
 
 # ---------------------------------------------------------------------------
 # 5. Virtual environment + dependencies

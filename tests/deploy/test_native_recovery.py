@@ -44,7 +44,8 @@ def test_deploy_cannot_skip_migration_compatibility_without_a_rollback_flag(tmp_
         playbook.write_text(yaml.safe_dump([{
             "hosts": "localhost", "gather_facts": False,
             "vars": {"project_root": str(root), "native_operation": operation,
-                     "native_checkout": {"stat": {"exists": True}}, "django_settings_module": "config.settings.test",
+                     "native_checkout": {"stat": {"exists": True}}, "native_platform_state": True,
+                     "django_settings_module": "config.settings.test",
                      "praho_git_repo": str(tmp_path), "deploy_git_version": "a" * 40},
             "tasks": [guard, {"copy": {"content": "checkout happened", "dest": str(mutated)}}],
         }]))

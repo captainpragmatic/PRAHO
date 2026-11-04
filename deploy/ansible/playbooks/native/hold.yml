@@ -84,9 +84,12 @@
   # Upgrade the edge first with make deploy-caddy; a deploy must not stop writers behind an old edge.
 - name: Verify existing ingress returns maintenance over trusted HTTPS
   command:
-    argv: [curl, --silent, --show-error, --noproxy, '*', --output, /dev/null, --write-out, '%{http_code}', --resolve, "{{ item }}:443:127.0.0.1", "https://{{ item }}/"]
+    argv: [curl, --silent, --show-error, --noproxy, '*', --output, /dev/null, --write-out, '%{http_code}', --connect-timeout, '5', --max-time, '10', --resolve, "{{ item }}:443:127.0.0.1", "https://{{ item }}/"]
   loop: "{{ ([lookup('native_env', native_platform_env_file)['env'].PLATFORM_DOMAIN] if inventory_hostname in groups.praho_platform else []) + ([lookup('native_env', native_portal_env_file)['env'].PORTAL_DOMAIN] if inventory_hostname in groups.praho_portal else []) }}"
   no_log: true
   changed_when: false
   register: native_hold_check
   failed_when: native_hold_check.rc != 0 or native_hold_check.stdout != '503'
+  until: native_hold_check.rc == 0 and native_hold_check.stdout == '503'
+  retries: 12
+  delay: 5

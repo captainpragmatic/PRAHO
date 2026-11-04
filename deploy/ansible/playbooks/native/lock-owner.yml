@@ -1,0 +1,10 @@
+---
+- name: Read the Platform operation owner before changing shared holds
+  slurp:
+    src: "{{ native_operation_lock_directory }}/owner"
+  register: native_operation_owner
+  delegate_to: "{{ groups.praho_platform[0] }}"
+- name: Require this controller to own the operation
+  assert:
+    that: native_operation_owner.content | b64decode | trim == native_operation_token
+    fail_msg: "This controller no longer owns the Platform operation lock; shared holds were not changed."

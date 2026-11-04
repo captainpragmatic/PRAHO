@@ -298,6 +298,24 @@ def image(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
     return images
 
 
+def _prove_bootstrap_retry(instance: NativeLab) -> NativeLab:
+    if instance.mode != "split":
+        return instance
+    # Fail frozen dependency installation after checkout and PostgreSQL setup,
+    # before any business migration or environment installation can succeed.
+    previous = instance.sha
+    instance.sha = instance.revision({"uv.lock": "invalid dependency release = [\n"})
+    incomplete = instance.deploy()
+    assert incomplete.returncode != 0, incomplete.stdout[-10000:]
+    assert failed_ansible_task(incomplete.stdout) == "praho-native : Install dependencies with uv", incomplete.stdout[-10000:]
+    instance.execute(instance.platform, "test", "-d", "/opt/praho/src/.git")
+    instance.execute(instance.platform, "test", "!", "-e", "/opt/praho/.env")
+    instance.assert_held()
+    instance.sha = previous
+    instance.execute(instance.controller, "git", "-C", "/fixture/repo", "reset", "--hard", previous)
+    return instance
+
+
 @pytest.fixture(scope="module", params=[SPLIT, ("staging", "combined"), ("prod", "combined")])
 def lab(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory, image: dict[str, str]) -> Iterator[NativeLab]:
     environment, mode = request.param
@@ -349,6 +367,7 @@ def lab(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
             "PRAHO_SSH_PORT": "22", "PRAHO_SSH_KEY": "/fixture/controller",
             "PRAHO_SSH_PUBLIC_KEYS_FILE": "/fixture/controller.pub", "PRAHO_DEPLOY_KNOWN_HOSTS_FILE": "/fixture/known_hosts",
             "PLATFORM_DOMAIN": "staff.native.test", "PORTAL_DOMAIN": "portal.native.test", "PRAHO_GIT_REPO": "file:///fixture/repo",
+            "PLATFORM_API_BASE_URL": "https://staff.native.test/api",
             "PORTAL_ID": "portal-001", "PORTAL_HMAC_SECRET": portal_key, "PORTAL_HMAC_MODE": "enforce",
             "PORTAL_HMAC_CREDENTIALS": json.dumps({"portal-001": portal_key}),
             "PRAHO_ADDRESS_IPV4_DOMAIN": "v4.native.test", "PRAHO_ADDRESS_IPV6_DOMAIN": "v6.native.test",
@@ -372,7 +391,7 @@ def lab(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
         encoded = "".join(f"{key}={shlex.quote(value)}\n" for key, value in values.items())
         docker("exec", "-i", controller, "tee", "/fixture/environment", data=encoded)
         docker("exec", controller, "chmod", "600", "/fixture/environment")
-        instance = NativeLab(controller, platform, portal, monitor, outsider, environment, mode, sha, ips, directory)
+        instance = _prove_bootstrap_retry(NativeLab(controller, platform, portal, monitor, outsider, environment, mode, sha, ips, directory))
         deployed = instance.deploy()
         assert deployed.returncode == 0, deployed.stdout[-15000:] + deployed.stderr[-3000:]
         yield instance
@@ -389,6 +408,11 @@ def lab(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
 def test_real_services_use_one_sha_and_portal_has_no_platform_state(lab: NativeLab) -> None:
     for host in dict.fromkeys((lab.platform, lab.portal)):
         assert lab.execute(host, "runuser", "-u", "praho", "--", "git", "-C", "/opt/praho/src", "rev-parse", "HEAD").stdout.strip() == lab.sha
+    effective = lab.execute(lab.portal, "/usr/bin/python3", "-c",
+        "import sys; sys.path.insert(0, '/usr/local/lib/praho'); from native_env import read_env; "
+        "print(read_env(__import__('pathlib').Path('/opt/praho/.portal.env'))['PLATFORM_API_BASE_URL'])").stdout.strip()
+    assert effective == ("https://staff.native.test/api" if lab.mode == "split" else "http://127.0.0.1:8700/api")
+    assert lab.execute(lab.platform, "test", "!", "-e", "/etc/praho-native-operation", check=False).returncode == 0
     if lab.mode == "split":
         for path in ("/opt/praho/.env", "/opt/praho/.platform-deploy.env", "/opt/praho/credentials", "/opt/praho/media", "/var/lib/postgresql",
                      "/etc/praho/operator_authorized_keys", "/opt/praho-ansible", "/opt/controller",
@@ -507,6 +531,9 @@ def test_caddy_updates_preserve_maintenance_and_reboot_holds(lab: NativeLab) -> 
     assert restored.returncode == 0, restored.stdout[-4000:] + restored.stderr[-2000:]
     assert "coordinated maintenance remains active" in restored.stdout
     lab.assert_held()
+    if lab.environment == "staging":
+        lab.execute(lab.controller, "/opt/controller/bin/python", "-c",
+            "from pathlib import Path; path=Path('/fixture/environment'); path.write_text(path.read_text()+'DEPLOY_METHOD=rsync\\n')")
     recovered = lab.deploy()
     assert recovered.returncode == 0, recovered.stdout[-12000:] + recovered.stderr[-3000:]
 
@@ -622,6 +649,19 @@ class Migration(migrations.Migration):
     assert lab.http(lab.outsider, "portal.native.test", "/login/")[0] == 200
 
 
+def _deploy_while_refusing_a_competing_controller(lab: NativeLab) -> subprocess.CompletedProcess[str]:
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        pending = executor.submit(lab.deploy)
+        lab.wait_for_phase("PLAY [Drain Platform workers and active backups before stopping web writers]")
+        owner = lab.execute(lab.platform, "cat", "/etc/praho-native-operation/owner").stdout
+        assert lab.execute(lab.platform, "stat", "-c", "%U:%G:%a", "/etc/praho-native-operation").stdout.strip() == "root:root:700"
+        concurrent = lab.execute(lab.controller, "/opt/controller/bin/python", "/work/deploy/scripts/native_env.py", "run",
+            "--env", lab.environment, "--env-file", "/fixture/environment", "--version", lab.sha, "--rollback", check=False, timeout=180)
+        assert concurrent.returncode != 0 and "Native operation lock exists on Platform" in concurrent.stdout, concurrent.stdout[-10000:]
+        assert lab.execute(lab.platform, "cat", "/etc/praho-native-operation/owner").stdout == owner
+        return pending.result(timeout=1800)
+
+
 @pytest.mark.parametrize("lab", [SPLIT], indirect=True)
 def test_actual_queue_work_drains_before_the_recovery_backup(lab: NativeLab) -> None:
     lab.sha = lab.revision({"services/platform/apps/common/native_acceptance_task.py": """
@@ -638,7 +678,7 @@ def drain():
     Path('/opt/praho/logs/native-task-finished').write_text(str(time.time()))
     return 'drained'
 """})
-    deployed = lab.deploy()
+    deployed = _deploy_while_refusing_a_competing_controller(lab)
     assert deployed.returncode == 0, deployed.stdout[-10000:] + deployed.stderr[-2000:]
     lab.management("from django_q.tasks import async_task; print(async_task('apps.common.native_acceptance_task.drain', task_name='native-drain-fixture'))")
     deadline = time.monotonic() + 120

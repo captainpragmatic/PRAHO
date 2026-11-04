@@ -12,7 +12,7 @@
     owner: root
     group: root
     mode: '0755'
-  when: native_checkout.stat.exists
+  when: native_platform_state
 - name: Transfer controller recovery checks without application configuration
   copy:
     src: "{{ playbook_dir }}/../../scripts/{{ item }}"
@@ -21,7 +21,7 @@
     group: root
     mode: '0644'
   loop: [native_env.py, native_backup_pair.py, native_migration_guard.py]
-  when: native_checkout.stat.exists
+  when: native_platform_state
 - name: Run and validate the pre-deploy recovery pair with the installed environment
   shell: |
     set -eu
@@ -35,7 +35,7 @@
   become_user: "{{ project_user }}"
   register: native_backup
   no_log: true
-  when: native_checkout.stat.exists
+  when: native_platform_state
 - name: Validate the fresh exact recovery pair and record source release provenance
   command:
     argv:
@@ -46,7 +46,7 @@
       - "{{ native_prior_release.stdout }}"
   become_user: "{{ project_user }}"
   no_log: true
-  when: native_checkout.stat.exists
+  when: native_platform_state
 - name: Prove a fresh database and media pair was produced
   assert:
     that:
@@ -55,7 +55,7 @@
       - "'Backup completed successfully' in native_backup.stdout"
     fail_msg: "A validated fresh recovery pair is required; all holds remain active."
   no_log: true
-  when: native_checkout.stat.exists
+  when: native_platform_state
 - name: Check rollback migration compatibility before checkout
   shell: |
     set -eu
@@ -70,4 +70,4 @@
     executable: /bin/bash
   no_log: true
   become_user: "{{ project_user }}"
-  when: native_checkout.stat.exists
+  when: native_platform_state

@@ -60,6 +60,7 @@ def _render_native_env(tmp_path: Path, configured: dict[str, str]):
         "PORTAL_DJANGO_SECRET_KEY": "portal-key-" + marker,
         "PORTAL_DOMAIN": "portal.example.test",
         "PLATFORM_DOMAIN": "staff.example.test",
+        "PLATFORM_API_BASE_URL": "https://staff.example.test/api",
         **configured,
     }
     playbook = tmp_path / "play.yml"

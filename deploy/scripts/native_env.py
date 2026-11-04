@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import uuid
 from collections.abc import Callable
 from contextlib import suppress
 from dataclasses import dataclass, replace
@@ -605,6 +606,8 @@ def run_native(  # noqa: PLR0913 -- Keep the established launcher API while expo
             "fetch_backup": fetch_backup or "false",
             "env_file_path": str(path),
             "native_journal_directory": str(directory),
+            "native_operation_token": uuid.uuid4().hex,
+            "native_operation_lock_directory": "/etc/praho-native-operation",
             "ansible_pipelining": True,
             "native_manage_swap": values.get("PRAHO_NATIVE_MANAGE_SWAP", "true").lower() not in {"false", "0", "no"},
         }
@@ -649,7 +652,7 @@ def run_native(  # noqa: PLR0913 -- Keep the established launcher API while expo
             result = subprocess.run(command, cwd=ROOT / "deploy/ansible", env=dict(os.environ), check=False).returncode
         except KeyboardInterrupt:
             result, interrupted = 130, True
-        if (result or interrupted) and operation in {"deploy", "rollback"} and list(directory.glob("held-*")):
+        if (directory / "operation-acquired").is_file() or list(directory.glob("held-*")):
             recovered_targets = []
             for target in dict.fromkeys((topology.platform, topology.portal)):
                 connection = {
@@ -663,6 +666,7 @@ def run_native(  # noqa: PLR0913 -- Keep the established launcher API while expo
                 try:
                     recover_ssh_port(connection, environment)
                 except (OSError, ValueError, subprocess.TimeoutExpired):
+                    result = result or 1
                     print(
                         "A target's SSH recovery could not be verified; inspect its persistent holds using console access",
                         file=sys.stderr,
@@ -670,6 +674,7 @@ def run_native(  # noqa: PLR0913 -- Keep the established launcher API while expo
                 recovered_targets.append(replace(target, port=int(connection["PRAHO_SSH_PORT"])))
             topology = replace(topology, platform=recovered_targets[0], portal=recovered_targets[-1])
             inventory.write_text(json.dumps(topology.inventory()), encoding="utf-8")
+        if (result or interrupted) and operation in {"deploy", "rollback"} and list(directory.glob("held-*")):
             recovery_command = [*command]
             recovery_command[recovery_command.index("playbooks/native.yml")] = "playbooks/native-hold.yml"
             recovery = subprocess.run(recovery_command, cwd=ROOT / "deploy/ansible", env=dict(os.environ), check=False)
@@ -677,6 +682,16 @@ def run_native(  # noqa: PLR0913 -- Keep the established launcher API while expo
                 f"Native {operation} failed at pinned SHA {release}; maintenance recovery exit={recovery.returncode}",
                 file=sys.stderr,
             )
+        if (directory / "operation-acquired").is_file():
+            unlock_command = [*command]
+            unlock_command[unlock_command.index("playbooks/native.yml")] = "playbooks/native-unlock.yml"
+            unlocked = subprocess.run(unlock_command, cwd=ROOT / "deploy/ansible", env=dict(os.environ), check=False)
+            if unlocked.returncode:
+                print(
+                    "Platform operation lock could not be released; follow the documented lock recovery procedure",
+                    file=sys.stderr,
+                )
+                result = result or unlocked.returncode
         return result
 
 

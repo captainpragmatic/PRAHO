@@ -5,6 +5,8 @@
   gather_facts: false
   ignore_unreachable: true
   tasks:
+    - name: Verify this controller owns failure recovery
+      include_tasks: native/lock-owner.yml
     - name: Reestablish the durable gate directory on reachable hosts
       file:
         path: /etc/praho-native

@@ -21,6 +21,7 @@ def main() -> int:
             capture_output=True,
             text=True,
             check=False,
+            cwd=Path(__file__).resolve().parents[1] / "terraform",
         )
         if result.returncode:
             raise ValueError("Cannot decode the saved Terraform plan")

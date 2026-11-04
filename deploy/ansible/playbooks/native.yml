@@ -71,6 +71,25 @@
           - native_contamination.results | default([]) | selectattr('stat', 'defined') | selectattr('stat.exists') | list | length == 0
         fail_msg: "Portal target contains Platform state or tooling. Select a clean host; no contents were removed."
 
+- name: Serialize native operations across independent controllers
+  hosts: praho_platform
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Acquire the operation lock before any host changes
+      include_tasks: native/lock.yml
+
+- name: Distinguish incomplete bootstrap from protected application state
+  hosts: praho
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Inspect installed state without changing application data
+      include_tasks: native/install-state.yml
+      when: native_operation in ['deploy', 'rollback']
+
 - name: Prepare verified SSH access independently on both hosts
   hosts: praho
   become: true
@@ -133,7 +152,7 @@
   tasks:
     - name: Validate Portal code rollback compatibility
       include_tasks: native/portal-rollback.yml
-      when: native_operation in ['deploy', 'rollback'] and native_checkout.stat.exists
+      when: native_operation in ['deploy', 'rollback'] and native_portal_state
 
 - name: Deploy Platform at the pinned SHA
   hosts: praho_platform
@@ -201,7 +220,11 @@
   gather_facts: false
   any_errors_fatal: true
   tasks:
+    - name: Require ownership before enabling callbacks
+      include_tasks: native/lock-owner.yml
+      when: native_operation in ['deploy', 'rollback']
     - name: Enable the authenticated callback handler
+      # The lock stays owned through callback verification and customer reopening.
       file:
         path: /etc/praho-native/hold-callbacks
         state: absent
@@ -236,6 +259,9 @@
   gather_facts: false
   any_errors_fatal: true
   tasks:
+    - name: Require ownership before reopening customer traffic
+      include_tasks: native/lock-owner.yml
+      when: native_operation in ['deploy', 'rollback']
     - name: Clear the customer traffic gate after pair verification
       file:
         path: /etc/praho-native/hold-portal
