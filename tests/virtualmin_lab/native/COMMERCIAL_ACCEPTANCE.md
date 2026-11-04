@@ -332,7 +332,7 @@ ten-emitter/retained SMTP+IMAP fixture proof. Do not copy its
 `mixed-configured` marker onto either VM or claim that container ran a kernel test.
 
 Delete only these disposable accounts through the public lifecycle, resolve their
-retained migration/bridge/backup holds, and stop the owned UI/capture processes.
+retained migration/bridge/backup holds, and stop the owned worker, UI and capture processes.
 Then run `make native-peer-destroy` followed by `make native-vm-fresh-destroy`.
 Both use public exact-resource destruction approval; workload protection and
 uncertain ownership still refuse. Cleanup may use expired authority only for the

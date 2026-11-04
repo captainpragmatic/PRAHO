@@ -4,6 +4,7 @@ import json
 import os
 from copy import deepcopy
 from pathlib import Path
+from typing import cast
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -24,7 +25,12 @@ NATIVE_UI_PORTAL_ID = "native-" + _ui["instance"]
 MIDDLEWARE = list(_base.MIDDLEWARE)
 PASSWORD_HASHERS = list(_base.PASSWORD_HASHERS)
 CACHES = deepcopy(_base.CACHES)
-REST_FRAMEWORK = deepcopy(_base.REST_FRAMEWORK)
+_rest_framework_defaults = deepcopy(_base.REST_FRAMEWORK)
+REST_FRAMEWORK = {
+    "DEFAULT_THROTTLE_CLASSES": list(cast("list[str]", _rest_framework_defaults.pop("DEFAULT_THROTTLE_CLASSES"))),
+    "DEFAULT_THROTTLE_RATES": _rest_framework_defaults.pop("DEFAULT_THROTTLE_RATES"),
+}
+REST_FRAMEWORK.update(_rest_framework_defaults)
 SESSION_ENGINE = _base.SESSION_ENGINE
 AUTHENTICATION_BACKENDS = list(_base.AUTHENTICATION_BACKENDS)
 RATE_LIMITING_ENABLED = True

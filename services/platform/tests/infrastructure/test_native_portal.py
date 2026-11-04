@@ -139,7 +139,21 @@ class NativePortalAuthorityTests(SimpleTestCase):
                         "DB_PASSWORD": "fixture-only",
                     },
                 )
-                code = "import django; django.setup(); from django.conf import settings; assert settings.STRIPE_SECRET_KEY is None; assert settings.STRIPE_PUBLISHABLE_KEY is None; assert settings.TESTING is False; assert settings.CACHES['default']['BACKEND'].endswith('DatabaseCache'); print('Actual native Platform startup qualified')"
+                code = (
+                    "import django; django.setup(); from django.conf import settings; "
+                    "from config.settings import base; "
+                    "assert settings.STRIPE_SECRET_KEY is None; assert settings.STRIPE_PUBLISHABLE_KEY is None; "
+                    "assert settings.TESTING is False; "
+                    "assert settings.CACHES['default']['BACKEND'].endswith('DatabaseCache'); "
+                    "assert settings.REST_FRAMEWORK == base.REST_FRAMEWORK; "
+                    "assert len(settings.REST_FRAMEWORK['DEFAULT_THROTTLE_CLASSES']) == 4; "
+                    "assert settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']; "
+                    "assert settings.REST_FRAMEWORK['DEFAULT_THROTTLE_CLASSES'] "
+                    "is not base.REST_FRAMEWORK['DEFAULT_THROTTLE_CLASSES']; "
+                    "assert settings.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'] "
+                    "is not base.REST_FRAMEWORK['DEFAULT_THROTTLE_RATES']; "
+                    "print('Actual native Platform startup qualified')"
+                )
                 result = subprocess.run(  # noqa: S603 -- Actual profile/app startup, synthetic closed-port DB authority; no queries expected.
                     [sys.executable, "-c", code],
                     cwd=root / "services/platform",
