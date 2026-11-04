@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 from django.conf import settings
 from django.http import HttpResponse
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from apps.billing.models import (
@@ -201,6 +201,7 @@ class BillingPDFGeneratorsComprehensiveCoverageTestCase(TestCase):
             self.assertEqual(company_info['cui'], 'RO87654321')
             self.assertEqual(company_info['email'], 'custom@example.com')
 
+    @override_settings(COMPANY_ADDRESS="", COMPANY_CITY="", COMPANY_COUNTRY="")
     def test_base_generator_get_company_info_never_invents_an_address(self) -> None:
         """An unconfigured seller address stays blank: no placeholder street, city or country."""
         generator = RomanianInvoicePDFGenerator(self.invoice)

@@ -31,6 +31,7 @@ OPERATIONS = {
 }
 PORTAL_CONSUMER = r"""
 import io,json,logging,sys
+from pathlib import Path
 from unittest.mock import patch
 import django
 django.setup()
@@ -41,6 +42,8 @@ from django.urls import reverse
 from requests import Response
 from apps.api_client.services import PlatformAPIError,api_client
 from apps.common.auth_events import EVENT_LOGGER,SecurityEventStreamHandler
+from apps.users import views as portal_views
+assert Path(portal_views.__file__).resolve() == Path.cwd() / 'apps/users/views.py'
 setup_test_environment()
 rows=json.load(sys.stdin)
 output=[]
@@ -69,7 +72,7 @@ with override_settings(
    api_client._handle_api_response(response,'/users/mfa/refusal-fixture/')
   except PlatformAPIError as error:
    normalized_message=str(error)
-  with patch.object(EVENT_LOGGER,'handlers',[handler]),patch.object(EVENT_LOGGER,'level',logging.INFO),patch.object(EVENT_LOGGER,'disabled',False),patch.object(EVENT_LOGGER,'propagate',False),patch('apps.api_client.services.portal_request',return_value=response),patch('apps.users.views.api_client.get_customer_profile',return_value={'mfa_enabled':True,'backup_codes_count':5}),patch('apps.users.views.api_client.setup_totp_mfa',return_value={'secret':'fixture-display-only','qr_code':'','provisioning_uri':''}):
+  with patch.object(EVENT_LOGGER,'handlers',[handler]),patch.object(EVENT_LOGGER,'level',logging.INFO),patch.object(EVENT_LOGGER,'disabled',False),patch.object(EVENT_LOGGER,'propagate',False),patch('apps.api_client.services.portal_request',return_value=response),patch.object(portal_views.api_client,'get_customer_profile',return_value={'mfa_enabled':True,'backup_codes_count':5}),patch.object(portal_views.api_client,'setup_totp_mfa',return_value={'secret':'fixture-display-only','qr_code':'','provisioning_uri':''}):
    result=client.post(reverse(row['view']),row['form'],HTTP_X_FORWARDED_FOR='198.51.100.29')
   html=result.content.decode()
   form=result.context['form'] if result.context is not None and 'form' in result.context else None
@@ -126,7 +129,12 @@ class MFAAuthenticationDetectionTests(HMACTestMixin, TestCase):
         }
 
     def consume(self, rows: list[dict[str, object]]) -> list[dict[str, object]]:
-        environment = {**os.environ, "PYTHONPATH": "", "DJANGO_SETTINGS_MODULE": "config.settings.dev"}
+        environment = {
+            **os.environ,
+            "PYTHONPATH": "",
+            "PYTHONNOUSERSITE": "1",
+            "DJANGO_SETTINGS_MODULE": "config.settings.dev",
+        }
         result = subprocess.run(  # noqa: S603 -- fixed interpreter and repository-owned Portal process
             [sys.executable, "-c", PORTAL_CONSUMER],
             cwd=PORTAL_ROOT,

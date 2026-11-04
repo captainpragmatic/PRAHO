@@ -189,6 +189,27 @@ The focused Platform suite passes 91 tests and 83 subtests, and Portal regressio
 passes 33 tests and 19 subtests. Validation, policy, limit and infrastructure
 refusals remain excluded from authentication-failure counts.
 
+The real Platform-to-Portal refusal test also requires Portal's declared
+dependencies. An isolated Platform/dev-only environment reproduced the remote
+failure as a missing `altcha` import. The two Platform test jobs and full-suite
+release-candidate job now include the Portal dependency group; service import
+isolation remains enforced. The same isolated environment with that declaration
+passes six refusal/trajectory tests and 26 subtests. Existing credential tests
+assert the two exact private categories separately and retain the identical
+public error envelope, audit count and enabled-factor assertions.
+
+A local whole-Platform run exposed one fixture that claimed an unconfigured
+seller address without overriding inherited company settings. Explicit injected
+address settings reproduced it; blank settings on that single case preserve its
+assertions, and the complete PDF module passes 41 tests under the injected
+environment. A separate two-process cold-open probe reproduced local Darwin
+`ENOENT` during simultaneous creation of the same lock inode, while the directory
+remained linked. The concurrent-rotation fixture initializes the private lock
+through the real handler and closes it before forking. It retains all 100 exact
+worker events, requires actual rotation and verifies that the shared inode stays
+stable. No writer retry, timeout budget or runtime protection changed. Final
+required checks still run on the published head and its queued squash commit.
+
 GitGuardian's GitHub App flags two public
 `CROWDSEC_SSH_CONFIG_DIGESTS` values as generic high-entropy secrets. These are
 SHA-256 fingerprints of the complete canonical sshd configurations for the two

@@ -380,6 +380,18 @@ class CrowdSecAuthenticationEventsTests(TestCase):
     def test_independent_workers_retain_every_event_through_concurrent_rotation(self) -> None:
         with TemporaryDirectory() as directory:
             folder = Path(directory)
+            # Initialize a stable shared inode before testing concurrent rotation.
+            # Release the parent's lock descriptors before either child forks.
+            bootstrap = SecurityEventFileHandler(folder / "auth.jsonl", maxBytes=128, backupCount=100, delay=True)
+            try:
+                with bootstrap._writer_lock():
+                    pass
+            finally:
+                bootstrap.close()
+            lock_path = folder / "auth.jsonl.lock"
+            self.assertTrue(lock_path.is_file(), "The parent must initialize the shared lock before workers fork")
+            lock_info = lock_path.stat()
+            self.assertEqual(stat.S_IMODE(lock_info.st_mode), 0o600)
             context = multiprocessing.get_context("fork")
             ready = context.Barrier(3)
             workers = [
@@ -389,10 +401,13 @@ class CrowdSecAuthenticationEventsTests(TestCase):
             try:
                 for worker in workers:
                     worker.start()
+                self.assertEqual(len({worker.pid for worker in workers}), 2)
                 ready.wait(timeout=10)
                 for worker in workers:
                     worker.join(timeout=15)
                     self.assertEqual(worker.exitcode, 0)
+                self.assertEqual(lock_path.stat().st_ino, lock_info.st_ino)
+                self.assertTrue((folder / "auth.jsonl.1").is_file(), "The independent writers must actually rotate")
                 records = [json.loads(line) for path in folder.iterdir() for line in path.read_text().splitlines()]
                 self.assertEqual(len(records), 100)
                 self.assertEqual(
