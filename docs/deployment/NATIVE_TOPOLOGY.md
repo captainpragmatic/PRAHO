@@ -178,3 +178,8 @@ Python 3.13, frozen dependencies, real Django/Gunicorn processes, DNS and a trus
 on unavailable prerequisites, empty collection, skips, failures and errors. Integration CI and nightly
 invoke it explicitly; generic integration collection excludes it. Container tests use host-managed
 swap and do not establish a production VPS's kernel, external routing or console behavior.
+
+The required `integration-test` check waits for both the general suite and native qualification,
+which run in parallel. Failure, cancellation or skipping either job fails that check. Nightly
+qualifies all three native topologies once from the workflow revision alongside its branch suites,
+so an older staging checkout need not already contain the native qualification targets.

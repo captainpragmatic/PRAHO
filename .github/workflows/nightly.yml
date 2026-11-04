@@ -99,6 +99,40 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
+  # Native qualification uses the workflow revision. An older staging checkout
+  # need not contain its Make targets; all three deployment topologies run here.
+  # ---------------------------------------------------------------------------
+  native-deploy:
+    needs: check-activity
+    if: needs.check-activity.outputs.branches != '[]'
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.workflow_sha }}
+        fetch-depth: 0
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Install the frozen qualification dependencies
+      run: |
+        uv python install
+        uv sync --all-groups --frozen
+
+    - name: Native deployment acceptance
+      run: make test-native-deploy
+
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.13.5
+
+    - name: Native infrastructure adoption safety
+      run: make test-native-infra
+
+  # ---------------------------------------------------------------------------
   # Full nightly suite (only if activity detected)
   # ---------------------------------------------------------------------------
   nightly:
@@ -219,7 +253,7 @@ jobs:
         DJANGO_SETTINGS_MODULE: config.settings.dev
       run: |
         cd services/portal
-        PYTHONPATH= PYTHONNOUSERSITE=1 "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest -v
+        PYTHONPATH='' PYTHONNOUSERSITE=1 "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest -v
 
     - name: Install the browser the page-monitor self-tests drive
       run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
@@ -232,16 +266,6 @@ jobs:
         DB_PASSWORD: test
         DB_HOST: localhost
       run: make test-integration
-
-    - name: Native deployment acceptance
-      run: make test-native-deploy
-
-    - uses: hashicorp/setup-terraform@v3
-      with:
-        terraform_version: 1.13.5
-
-    - name: Native infrastructure adoption safety
-      run: make test-native-infra
 
     - name: Cache and security tests
       env:
@@ -408,7 +432,7 @@ jobs:
   # Dispatched runs are attended, so they never notify.
   # ---------------------------------------------------------------------------
   notify-scheduled-failure:
-    needs: [check-activity, nightly, nightly-e2e]
+    needs: [check-activity, nightly, nightly-e2e, native-deploy]
     if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
     runs-on: ubuntu-latest
     permissions:
