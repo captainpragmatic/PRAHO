@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Hosting usage warnings and temporary disk relief (#783): owner-scoped 80/95/100-percent warnings, optional-mail preferences, current and pending allowance details, and staff delivery history. Audited raises expire against the current operational limit without changing billing. Platform owns warning delivery after explicit native mail handover; activation remains gated by native acceptance.
+
 - Assigned hosting allowances and verified Virtualmin quota applications (#776). Catalog edits no longer change an existing service's allowance. Explicit adoption, node qualification, fenced application and recovery, capacity reservations and staff resource overrides retain desired and last verified limits separately. Native policy activation remains gated by the documented Ubuntu acceptance checks; existing accounts are not automatically converted.
 
 - Customer maintenance windows (#780): staff can schedule work in each node's permitted calendar, record manual outcomes and run supported managed adapters. Customers see current service-scoped notices and 24-hour outcomes in the Portal; Romanian/English emails announce, correct and report qualifying outcomes. Execution ownership and operator reconciliation fence concurrent operations, stale queued work and uncertain provider results. See [the operator runbook](docs/deployment/NODE_MAINTENANCE.md).

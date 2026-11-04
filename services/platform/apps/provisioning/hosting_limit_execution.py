@@ -331,13 +331,9 @@ def _lock_context(execution: HostingLimitExecution) -> tuple[VirtualminAccount, 
 
 
 def _commercial_refusal(application: HostingLimitApplication, parent: dict[str, Any]) -> str | None:
-    if application.authority.get("kind") not in {"paid_plan_change", "zero_due_plan_change", "scheduled_plan_change"}:
-        return None
-    from apps.billing.plan_change_financial import (  # noqa: PLC0415 -- Optional source-specific authority.
-        plan_change_native_refusal,
-    )
+    from .hosting_limit_commercial import quota_dispatch_refusal  # noqa: PLC0415 -- DB-only composed base provenance.
 
-    return plan_change_native_refusal(application, parent=parent)
+    return quota_dispatch_refusal(application, parent)
 
 
 def _authority_refusal(  # noqa: C901, PLR0911, PLR0912 -- Independent owner, base/overlay, native-lane, provider and adopted-policy refusals.

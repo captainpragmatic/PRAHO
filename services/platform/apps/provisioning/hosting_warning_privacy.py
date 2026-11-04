@@ -31,6 +31,25 @@ class WarningAudience:
     node_mail: dict[UUID, bool] = field(default_factory=dict)
     optional_mail: dict[int, bool] = field(default_factory=dict)
     raises: dict[int, dict[str, object] | None] = field(default_factory=dict)
+    desired: dict[int, dict[str, int] | None] = field(default_factory=dict)
+
+
+def pending_desired_limits(limits: ServiceHostingLimits | None) -> dict[str, int] | None:
+    """Closed resource-only context from the existing batch, with no financial claim."""
+    if (
+        limits is None
+        or limits.operational_revision is None
+        or limits.revision <= limits.operational_revision
+        or limits.disk_allowance_mib is None
+        or limits.bandwidth_allowance_mib is None
+    ):
+        return None
+    return {
+        "base_revision": limits.revision,
+        "operational_revision": limits.operational_revision,
+        "disk_mib": limits.disk_allowance_mib,
+        "bandwidth_mib": limits.bandwidth_allowance_mib,
+    }
 
 
 def load_warning_audience(intents: list[HostingWarningIntent], *, at: datetime | None = None) -> WarningAudience:
@@ -60,6 +79,7 @@ def load_warning_audience(intents: list[HostingWarningIntent], *, at: datetime |
     prime_current_verification(records, {row.service_id: row for row in audience.accounts.values()}, at=instant)
     prime_hosting_raises(records, at=instant)
     for service in records:
+        audience.desired[service.pk] = pending_desired_limits(audience.limits.get(service.pk))
         state = service_raise_public_state(service, at=instant)
         audience.raises[service.pk] = (
             None

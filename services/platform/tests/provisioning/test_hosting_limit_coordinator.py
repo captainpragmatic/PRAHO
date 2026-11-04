@@ -243,9 +243,9 @@ class QuotaCoordinatorTests(SimpleTestCase):
 
     def test_real_waiting_native_writer_rechecks_expiry_after_exact_flock_block(self):
         self.coordinator()
-        context = multiprocessing.get_context("fork")
-        blocked, expired = context.Event(), context.Event()
-        outcome, written = self.root / "outcome", self.root / "mutation"
+        blocked, expired, outcome, written = (
+            self.root / name for name in ("blocked", "expired", "outcome", "mutation")
+        )
         expiry = datetime.now(UTC) + timedelta(hours=1)
         request = {
             **self.request,
@@ -263,48 +263,56 @@ class QuotaCoordinatorTests(SimpleTestCase):
         real_flock = fcntl.flock
         real_flock(descriptor, fcntl.LOCK_EX)
 
-        def waiting_writer():
-            os.close(descriptor)
-
-            def observe_lock(fd, mode):
-                try:
-                    return real_flock(fd, mode)
-                except BlockingIOError:
-                    blocked.set()
-                    raise
-
-            self.backend.apply.side_effect = lambda *args, **kwargs: written.write_text("expired write")
-            with (
-                patch.object(self.module.fcntl, "flock", side_effect=observe_lock),
-                patch.object(self.module, "datetime") as clock,
-            ):
-                clock.fromisoformat = datetime.fromisoformat
-                clock.now.side_effect = lambda _: (
-                    expiry + timedelta(seconds=1) if expired.is_set() else expiry - timedelta(seconds=1)
-                )
-                try:
-                    self.coordinator().perform("apply", request)
-                    outcome.write_text("applied")
-                except ValueError as error:
-                    outcome.write_text(str(error))
-
-        process = context.Process(target=waiting_writer)
-        process.start()
+        # An independent interpreter works inside Django's daemon parallel
+        # workers and does not inherit the parent's held flock descriptor.
+        runner = self.root / "waiting_writer.py"
+        runner.write_text(
+            "import fcntl, importlib.util, json, sys\nfrom datetime import datetime, timedelta\nfrom pathlib import Path\n"
+            "spec = importlib.util.spec_from_file_location('coordinator', sys.argv[1])\n"
+            "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)\n"
+            "root = Path(sys.argv[2]); request = json.loads(sys.argv[3])\n"
+            "expiry = datetime.fromisoformat(request['policy']['expires_at'])\n"
+            "real_flock = fcntl.flock\n"
+            "def observe_lock(fd, mode):\n"
+            " try: return real_flock(fd, mode)\n"
+            " except BlockingIOError:\n"
+            "  (root / 'blocked').touch(); raise\n"
+            "class Clock:\n"
+            " fromisoformat = staticmethod(datetime.fromisoformat)\n"
+            " @staticmethod\n"
+            " def now(zone):\n"
+            "  return expiry + timedelta(seconds=1) if (root / 'expired').exists() else expiry - timedelta(seconds=1)\n"
+            "class Backend:\n"
+            " def apply(self, *args, **kwargs): (root / 'mutation').write_text('expired write')\n"
+            " def probe(self, request): return {}\n"
+            "module.fcntl.flock = observe_lock; module.datetime = Clock\n"
+            "try:\n"
+            " module.QuotaCoordinator(root, Backend()).perform('apply', request)\n"
+            " (root / 'outcome').write_text('applied')\n"
+            "except ValueError as error: (root / 'outcome').write_text(str(error))\n"
+        )
+        process = subprocess.Popen(  # noqa: S603 -- Fixed interpreter, repository module and private fixture paths.
+            [sys.executable, str(runner), str(self.module.__file__), str(self.root), json.dumps(request)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
         try:
-            self.assertTrue(blocked.wait(10), "The writer never attempted the held native account flock")
+            poll, deadline = Event(), monotonic() + 10
+            while not blocked.exists() and monotonic() < deadline and process.poll() is None:
+                poll.wait(0.01)
+            self.assertTrue(blocked.exists(), "The writer never attempted the held native account flock")
             self.assertFalse(outcome.exists())
-            expired.set()
+            expired.touch()
             real_flock(descriptor, fcntl.LOCK_UN)
-            process.join(timeout=10)
-            self.assertFalse(process.is_alive())
-            self.assertEqual(process.exitcode, 0)
+            process.wait(timeout=10)
+            self.assertEqual(process.returncode, 0)
             self.assertIn("expired", outcome.read_text())
             self.assertFalse(written.exists())
         finally:
             os.close(descriptor)
-            if process.is_alive():
+            if process.poll() is None:
                 process.kill()
-                process.join(timeout=5)
+                process.wait(timeout=5)
 
     def test_killing_the_coordinator_cannot_release_an_issued_native_writer(self):
         """Observe the real flock while a real child remains poised to mutate."""

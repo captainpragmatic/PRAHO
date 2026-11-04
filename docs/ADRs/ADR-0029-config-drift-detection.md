@@ -34,6 +34,17 @@ verified. Corrections use the explicit qualified-node quota application and
 fencing services (#776); ambiguous native outcomes retain their reservation and
 require reconciliation. No drift remedy enables a suspended service implicitly.
 
+Temporary relief adds an independently versioned, expiring overlay to that base.
+Drift compares the actual composed cap and both UID/GID identities, while retaining
+desired and operational base states separately. A later pending paid assignment
+cannot authorize its larger cap during cleanup of an older operational raise.
+Expiry removes only the authorized overlay on the current canonical node; it does
+not restore a historical catalog default, undo a newer applied base or change
+billing. Current protocol-2 evidence and native fencing remain required.
+Usage warning thresholds continue to use purchased operational allowances, not
+the composed enforcement cap; stale warning context cannot certify native state.
+See [the warning and relief runbook](../deployment/HOSTING_USAGE_WARNINGS.md).
+
 Account usage is reconciled separately by the hourly, observational
 `virtualmin-usage-sync` task (ADR-0068). Missing or unassigned account observations
 raise staff attention; they do not import customers, change quotas or remediate

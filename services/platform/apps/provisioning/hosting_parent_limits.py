@@ -181,8 +181,10 @@ def frozen_parent_application(job: VirtualminProvisioningJob) -> HostingLimitApp
 
 def mark_parent_limits_issued(job: VirtualminProvisioningJob) -> bool:  # noqa: PLR0911 -- Explicit scope, nonce, lease and installed-node refusals.
     """Commit exact resource dispatch authority immediately before native mutation."""
-    from .hosting_limit_execution import _commercial_refusal  # noqa: PLC0415  # Runtime cycle.
+    from .hosting_limit_commercial import parent_dispatch_refusal  # noqa: PLC0415
+    from .hosting_limit_review import reviewed_job_application  # noqa: PLC0415
     from .hosting_node_policy import current_quota_identity  # noqa: PLC0415
+    from .service_models import Service  # noqa: PLC0415
     from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer  # noqa: PLC0415
 
     if job.account_id is None:
@@ -197,8 +199,9 @@ def mark_parent_limits_issued(job: VirtualminProvisioningJob) -> bool:  # noqa: 
             .filter(pk__in=(account.server_id, job.server_id))
             .order_by("pk")
         )
+        Service.objects.select_for_update(of=("self",), no_key=True).get(pk=account.service_id)
         current = VirtualminProvisioningJob.objects.select_for_update(of=("self",)).get(pk=job.pk)
-        application = frozen_parent_application(current)
+        application = reviewed_job_application(current)
         if (
             current.status != "running"
             or current.started_at is None
@@ -210,13 +213,15 @@ def mark_parent_limits_issued(job: VirtualminProvisioningJob) -> bool:  # noqa: 
             current.execution_deadline is None or current.execution_deadline <= timezone.now()
         ):
             return False
-        if _commercial_refusal(
+        if parent_dispatch_refusal(
             application,
             {
                 "job_id": str(current.pk),
                 "token": str(current.execution_token or ""),
                 "account_server_id": str(account.server_id),
                 "native_server_id": str(current.server_id),
+                "approved_application_id": str(current.hosting_limit_application_id),
+                "frozen_application_id": str(application.pk),
             },
         ):
             return False

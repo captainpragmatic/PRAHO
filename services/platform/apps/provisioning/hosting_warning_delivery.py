@@ -39,6 +39,7 @@ TEMPLATE_KEY = "hosting_usage_warning"
 SCHEDULE_NAME = "hosting-warning-deliveries"
 SWEEP_FUNCTION = "apps.provisioning.hosting_warning_delivery.sweep_hosting_warnings"
 MAX_DELIVERY_PARTS = 100
+DELIVERY_SNAPSHOT_SCHEMA = 2
 ACCEPTED_EMAIL_STATES = frozenset({"sent", "delivered", "opened", "clicked", "bounced", "complained", "unsubscribed"})
 
 
@@ -138,14 +139,14 @@ def setup_warning_pipeline() -> dict[str, str]:
         (
             "en",
             "Hosting allowance warning",
-            "Your hosting usage has reached an included allowance.",
-            "Review your usage or choose a suitable hosting plan.",
+            "Your hosting usage has reached a warning threshold.",
+            "Review your usage or contact support.",
         ),
         (
             "ro",
             "Avertizare privind limita găzduirii",
-            "Utilizarea găzduirii a atins o limită inclusă.",
-            "Verificați utilizarea sau alegeți un abonament de găzduire potrivit.",
+            "Utilizarea găzduirii a atins un prag de avertizare.",
+            "Verificați utilizarea sau contactați echipa de asistență.",
         ),
     ):
         EmailTemplate.objects.get_or_create(
@@ -206,16 +207,33 @@ def _locked_intents(ids: list[UUID]) -> list[HostingWarningIntent]:
     )
 
 
-def _warning_line(name: str, intent: HostingWarningIntent, current: dict[str, object], locale: str) -> str:
+def _warning_line(
+    name: str, intent: HostingWarningIntent, current: dict[str, object], locale: str, *, pending: bool = False
+) -> str:
     allowance, observed, used = current["operational_allowance_mib"], current["observed_at"], current["used_bytes"]
     if locale == "ro":
         label = "spațiu pe disc" if intent.resource == "disk" else "trafic lunar"
-        line = f"{name[:96]}: {label} a atins cel puțin {intent.threshold}% din limita inclusă ({allowance} MiB); {used} octeți măsurați la {observed}."
+        basis = "limita operațională actuală" if pending else "limita inclusă"
+        line = f"{name[:96]}: {label} a atins cel puțin {intent.threshold}% din {basis} ({allowance} MiB); {used} octeți măsurați la {observed}."
         partial = " Acoperirea traficului este parțială; valoarea măsurată este o limită inferioară."
     else:
-        line = f"{name[:96]}: {intent.resource} has reached at least {intent.threshold}% of the included allowance ({allowance} MiB); {used} bytes measured at {observed}."
+        basis = "currently operational allowance" if pending else "included allowance"
+        line = f"{name[:96]}: {intent.resource} has reached at least {intent.threshold}% of the {basis} ({allowance} MiB); {used} bytes measured at {observed}."
         partial = " Bandwidth coverage is partial; measured bytes are a lower bound."
     return line + (partial if current["availability"] == "partial" else "")
+
+
+def _desired_line(data: dict[str, int] | None, resource: str, locale: str) -> str:
+    if data is None:
+        return ""
+    amount = data["disk_mib" if resource == "disk" else "bandwidth_mib"]
+    if amount <= 0:
+        return ""  # No unlimited or unknown capacity is advertised as a finite request.
+    if locale == "ro":
+        label = "spațiul pe disc" if resource == "disk" else "traficul lunar"
+        return f"Limita solicitată pentru {label}: {amount} MiB; verificarea este în așteptare. Limita solicitată nu este încă verificată."
+    label = "disk" if resource == "disk" else "monthly bandwidth"
+    return f"Requested {label} allowance: {amount} MiB; verification is pending. The requested allowance is not yet verified."
 
 
 def _raise_line(data: dict[str, object] | None, locale: str) -> str:
@@ -236,6 +254,17 @@ def _raise_line(data: dict[str, object] | None, locale: str) -> str:
         "expired": "The temporary disk raise expired.",
     }
     return f"{descriptions[str(data['state'])]} Expiry: {data['expires_at']}. Warnings remain based on the purchased allowance."
+
+
+def _warning_entries(
+    name: str, intent: HostingWarningIntent, current: dict[str, object], locale: str, snapshot: dict[str, object]
+) -> list[str]:
+    desired = _desired_line(cast("dict[str, int] | None", snapshot["desired"]), intent.resource, locale)
+    lines = [_warning_line(name, intent, current, locale, pending=bool(desired))]
+    lines.extend(
+        extra for extra in (desired, _raise_line(cast("dict[str, object] | None", snapshot["raise"]), locale)) if extra
+    )
+    return lines
 
 
 def _link_customer(customer_id: int, at: datetime) -> int:
@@ -275,19 +304,18 @@ def _link_customer(customer_id: int, at: datetime) -> int:
             )
             selected.append(intent)
             raised = audience.raises.get(service.pk) if intent.resource == "disk" else None
-            snapshots.append(
-                {
-                    "id": str(intent.pk),
-                    "identity": intent.identity,
-                    "threshold": intent.threshold,
-                    "allowance_mib": current["operational_allowance_mib"],
-                    "scope": intent.scope_snapshot,
-                    "raise": raised,
-                }
-            )
-            lines.append(_warning_line(service.service_name, intent, current, locale))
-            if raised:
-                lines.append(_raise_line(raised, locale))
+            desired = audience.desired.get(service.pk)
+            snapshot: dict[str, object] = {
+                "id": str(intent.pk),
+                "identity": intent.identity,
+                "threshold": intent.threshold,
+                "allowance_mib": current["operational_allowance_mib"],
+                "scope": intent.scope_snapshot,
+                "raise": raised,
+                "desired": desired,
+            }
+            snapshots.append(snapshot)
+            lines.extend(_warning_entries(service.service_name, intent, current, locale, snapshot))
         if not selected:
             return 0
         lines = [cast("str", validate_template_context({"line": line})["line"]) for line in lines]
@@ -308,7 +336,7 @@ def _link_customer(customer_id: int, at: datetime) -> int:
             recipient_hash=recipient_hash(customer.primary_email),
             parent=previous,
             version=previous.version + 1 if previous else 1,
-            intent_snapshot={"version": 1, "parts": snapshots},
+            intent_snapshot={"version": DELIVERY_SNAPSHOT_SCHEMA, "parts": snapshots},
         )
         HostingWarningDeliveryPart.objects.bulk_create(
             [HostingWarningDeliveryPart(delivery=delivery, intent=intent) for intent in selected]
@@ -377,13 +405,22 @@ def _orphan_dispatch_allowed(email_log_id: str, claim_token: UUID | None) -> boo
         return False
 
 
+def _valid_desired(value: object) -> bool:
+    return value is None or (
+        isinstance(value, dict)
+        and set(value) == {"base_revision", "operational_revision", "disk_mib", "bandwidth_mib"}
+        and all(type(item) is int and item >= 0 for item in value.values())
+        and 1 <= value["operational_revision"] < value["base_revision"]
+    )
+
+
 def _snapshot_parts(delivery: HostingWarningDelivery) -> dict[str, dict[str, object]] | None:
     raw = delivery.intent_snapshot
     if (
         not isinstance(raw, dict)
         or set(raw) != {"version", "parts", "body_hash"}
         or type(raw["version"]) is not int
-        or raw["version"] != 1
+        or raw["version"] != DELIVERY_SNAPSHOT_SCHEMA
     ):
         return None
     if not isinstance(raw["parts"], list) or not raw["parts"]:
@@ -398,11 +435,17 @@ def _snapshot_parts(delivery: HostingWarningDelivery) -> dict[str, dict[str, obj
                 "allowance_mib",
                 "scope",
                 "raise",
+                "desired",
             }:
                 return None
             key = str(UUID(part["id"]))
             scope_from_snapshot(part["scope"])
-            if key in result or type(part["threshold"]) is not int or part["threshold"] not in {80, 95, 100}:
+            if (
+                key in result
+                or type(part["threshold"]) is not int
+                or part["threshold"] not in {80, 95, 100}
+                or not _valid_desired(part["desired"])
+            ):
                 return None
             result[key] = part
     except (ValueError, TypeError, AttributeError):
@@ -429,6 +472,8 @@ def _binding_refusal(
             return "warning_allowance_changed"
         if intent.resource == "disk" and snapshot.get("raise") != audience.raises.get(service.pk):
             return "warning_raise_changed"
+        if snapshot.get("desired") != audience.desired.get(service.pk):
+            return "warning_desired_changed"
     return None
 
 
@@ -450,7 +495,11 @@ def _delivery_refusal(
         return "warning_recipient_changed"
     snapshots = _snapshot_parts(delivery)
     if snapshots is None or set(snapshots) != {str(intent.pk) for intent in intents}:
-        return "warning_intent_missing"
+        return (
+            "warning_snapshot_obsolete"
+            if isinstance(delivery.intent_snapshot, dict) and delivery.intent_snapshot.get("version") == 1
+            else "warning_intent_missing"
+        )
     if log.template_key != TEMPLATE_KEY or _body_hash(log) != delivery.intent_snapshot.get("body_hash"):
         return "warning_body_changed"
     audience = load_warning_audience(intents, at=at)

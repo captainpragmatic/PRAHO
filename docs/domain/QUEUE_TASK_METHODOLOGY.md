@@ -189,6 +189,25 @@ Use the domain's durable claim/reconciliation protocol for chargeable or destruc
 a lease alone cannot guarantee exactly-once effects. Store errors as errors, retain ambiguous
 provider outcomes for review, and keep credentials and personal payloads out of queue logs.
 
+## Hosting warnings and raise expiry
+
+The hourly usage publisher creates owner-scoped warning intents inside its account
+transaction. It does not lock customers or delivery logs there. The separate
+five-minute `hosting-warning-deliveries` sweep groups eligible intents and links
+each delivery version to one encrypted EmailLog before queueing on commit. Final
+dispatch rechecks current owner, source period, preferences, hard suppression,
+operational and pending limits, native mail ownership and the exact stored body.
+Refuse and rebuild only proven undispatched versions; uncertain provider acceptance
+retains its original obligation.
+
+The existing hosting-limit dispatcher materializes due raise expiry before
+selecting pending applications, including when new raises are disabled. Native
+work uses current canonical ownership, immutable issuance, capacity reservations
+and fencing. Expiry removes only preauthorized temporary capacity and never
+reenables an account or changes billing. Follow the
+[warning and relief runbook](../deployment/HOSTING_USAGE_WARNINGS.md) for enablement,
+delivery diagnosis and recovery.
+
 ## Monitoring and Troubleshooting
 
 Open Platform **Settings → Automation & Schedules** at `/settings/automation/`.

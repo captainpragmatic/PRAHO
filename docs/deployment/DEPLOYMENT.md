@@ -1544,7 +1544,9 @@ Rollout for #782 / ADR-0068 is additive and disabled by default:
 
 Bandwidth is HTTP response-body bytes, not interface bytes or a billable quantity.
 The operator month never changes subscription billing periods. Usage does not create
-metering events, charges, email warnings or quota enforcement. Existing backup sizing
+metering events, charges or quota enforcement. The separate warning policy consumes
+accepted observations; delivery requires explicit native mail handover and current
+Platform delivery authority. Existing backup sizing
 remains an estimate; telemetry availability does not gate backup/restore and archive
 size/free-space checks still apply.
 
@@ -1555,3 +1557,18 @@ root-controlled log configuration so the loss interval is explicit on resumption
 Do not restore legacy commands or the billing collector. Resetting/replacing a node
 installation identity requires explicit operator reconciliation; an old binding is
 never silently trusted under a new installation UUID.
+
+### Hosting warnings and temporary disk relief
+
+Follow [the warning and relief runbook](HOSTING_USAGE_WARNINGS.md) after deploying
+the additive schema, workers, templates and Portal surfaces. Keep new raises off
+during qualification. Warning-pipeline enablement for the isolated native canary
+precedes reviewed node mail handover; per-node ownership still blocks Platform
+warning sends until handover. Broad activation requires the full native, mail-sink
+and integrated paid-change checks. Neither a setting nor a database receipt proves
+these acceptance checks ran.
+
+Disabling new raises preserves expiry and fenced recovery. Stopping new warning
+delivery preserves linked EmailLogs, refusal history and uncertain provider
+acceptance. Do not rewind paid terms, clear reservations or turn off kernel quotas
+as a feature rollback.

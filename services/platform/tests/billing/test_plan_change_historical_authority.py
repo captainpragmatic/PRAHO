@@ -21,8 +21,7 @@ from tests.provisioning.test_hosting_limit_execution import HostingLimitWorkerFi
 from tests.provisioning.test_managed_single_restore_limits import ManagedSingleRestoreFixture
 
 
-@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
-class HistoricalAuthorityRestoreTests(ManagedSingleRestoreFixture, StripeCoverageFixture, TransactionTestCase):
+class HistoricalAuthorityRestoreFixture(ManagedSingleRestoreFixture, StripeCoverageFixture):
     def setUp(self):
         ManagedSingleRestoreFixture.setUp(self)
         self.setup_commercial_fixture()
@@ -52,13 +51,6 @@ class HistoricalAuthorityRestoreTests(ManagedSingleRestoreFixture, StripeCoverag
         PlanOperationFixture.apply(self, change)
         self.assertEqual(reconcile_plan_change_operation(change.pk).status, "completed")
         return change
-
-    def test_visible_dispute_before_a_new_public_restore_never_issues_the_archive_writer(self):
-        self.completed_change()
-        self.dispute("pi_original_paid_coverage", amount=8000)
-        job, outcome = self.execute_restore()
-        self.assertNotEqual(outcome["status"], "completed", (outcome, job.status))
-        self.assertEqual(self.node_variables, [], "A visible dispute must refuse before destructive restore issuance")
 
     def change_currency_through_notified_renewals(self):
         Currency.objects.get_or_create(code="EUR", defaults={"symbol": "EUR"})
@@ -103,6 +95,16 @@ class HistoricalAuthorityRestoreTests(ManagedSingleRestoreFixture, StripeCoverag
         self.service.refresh_from_db()
         self.assertEqual((self.subscription.currency_id, self.service.currency_id), ("EUR", "EUR"))
         return cycle.period_start + timedelta(minutes=1)
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend")
+class HistoricalAuthorityRestoreTests(HistoricalAuthorityRestoreFixture, TransactionTestCase):
+    def test_visible_dispute_before_a_new_public_restore_never_issues_the_archive_writer(self):
+        self.completed_change()
+        self.dispute("pi_original_paid_coverage", amount=8000)
+        job, outcome = self.execute_restore()
+        self.assertNotEqual(outcome["status"], "completed", (outcome, job.status))
+        self.assertEqual(self.node_variables, [], "A visible dispute must refuse before destructive restore issuance")
 
     def test_legitimate_later_currency_transition_does_not_revoke_the_existing_native_restore_authority(self):
         change = self.completed_change()
