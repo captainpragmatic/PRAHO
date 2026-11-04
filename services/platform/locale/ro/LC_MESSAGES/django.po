@@ -28217,9 +28217,6 @@ msgstr "DNS"
 #~ msgid "RON"
 #~ msgstr "RON"
 
-#~ msgid "Reset"
-#~ msgstr "Resetați"
-
 #, python-format
 #~ msgid ""
 #~ "\n"
@@ -32282,3 +32279,491 @@ msgid ""
 msgstr ""
 "Soluționați încercarea curentă de securizare înainte de a schimba politica "
 "de securitate."
+
+#: apps/security/apps.py:8
+#| msgid "Most secure"
+msgid "Host security"
+msgstr "Securitatea gazdei"
+
+#: apps/security/forms.py:19
+#| msgid "IP address of event source"
+msgid "IP address or network"
+msgstr "Adresă IP sau rețea"
+
+#: apps/security/forms.py:20 templates/security/dashboard.html:65
+msgid "Scenario"
+msgstr "Scenariu"
+
+#: apps/security/forms.py:23
+#| msgid "All Types"
+msgid "All scopes"
+msgstr "Toate domeniile de aplicare"
+
+#: apps/security/forms.py:23
+#| msgid "IP Addresses"
+msgid "IP addresses"
+msgstr "Adrese IP"
+
+#: apps/security/forms.py:23
+#| msgid "Network"
+msgid "Networks"
+msgstr "Rețele"
+
+#: apps/security/forms.py:29
+#| msgid "Active coupons"
+msgid "Active decisions"
+msgstr "Decizii active"
+
+#: apps/security/forms.py:29
+#| msgid "Recorded VAT decision"
+msgid "Ended decisions"
+msgstr "Decizii încheiate"
+
+#: apps/security/forms.py:29
+#| msgid "All Actions"
+msgid "All decisions"
+msgstr "Toate deciziile"
+
+#: apps/security/forms.py:34
+#| msgid "All Users"
+msgid "All alerts"
+msgstr "Toate alertele"
+
+#: apps/security/forms.py:34
+#| msgid "Related Alerts"
+msgid "Simulated alerts"
+msgstr "Alerte simulate"
+
+#: apps/security/forms.py:34
+#| msgid "Other reports"
+msgid "Other alerts"
+msgstr "Alte alerte"
+
+#: apps/security/forms.py:35 templates/security/dashboard.html:26
+#: templates/security/dashboard.html:41
+#| msgid "View Alerts"
+msgid "Alerts"
+msgstr "Alerte"
+
+#: apps/security/forms.py:55
+#| msgid "Enter a valid trade registry number."
+msgid "Enter a valid IPv4 or IPv6 address or network."
+msgstr "Introduceți o adresă sau o rețea IPv4 ori IPv6 validă."
+
+#: apps/security/locks.py:36
+#| msgid ""
+#| "The enrolled source connection or native domain changed during inspection."
+msgid "The source node binding changed during ownership acquisition"
+msgstr ""
+"Asocierea nodului sursă s-a schimbat în timpul preluării responsabilității"
+
+#: apps/security/locks.py:39
+#| msgid "Whether bundle is available"
+msgid "The bound node is unavailable"
+msgstr "Nodul asociat nu este disponibil"
+
+#: apps/security/models.py:13
+msgid "A complete lowercase SHA-256 digest is required."
+msgstr "Este necesară o amprentă SHA-256 completă, cu litere mici."
+
+#: apps/security/models.py:26 apps/security/source_forms.py:30
+#| msgid "Port"
+msgid "Portal"
+msgstr "Portal"
+
+#: apps/security/models.py:27 apps/security/source_forms.py:32
+#| msgid "SSL"
+msgid "SSH"
+msgstr "SSH"
+
+#: apps/security/models.py:27
+#| msgid "Locale"
+msgid "Local"
+msgstr "Local"
+
+#: apps/security/presentation.py:48 templates/security/dashboard.html:79
+#| msgid "Retained source:"
+msgid "Retired source"
+msgstr "Sursă retrasă"
+
+#: apps/security/presentation.py:51
+#| msgid "Schematron enabled"
+msgid "Synchronization disabled"
+msgstr "Sincronizare dezactivată"
+
+#: apps/security/presentation.py:53
+msgid "Never synchronized"
+msgstr "Nesincronizată până acum"
+
+#: apps/security/presentation.py:55
+#| msgid "Durable snapshot retained"
+msgid "Degraded; last snapshot retained"
+msgstr "Stare degradată; ultimul instantaneu este păstrat"
+
+#: apps/security/presentation.py:57
+msgid "Stale"
+msgstr "Date învechite"
+
+#: apps/security/presentation.py:57
+#| msgid "Decision reason"
+msgid "Decisions current"
+msgstr "Decizii actualizate"
+
+#: apps/security/presentation.py:60 apps/security/presentation.py:65
+#| msgid "Not confirmed"
+msgid "Unconfirmed"
+msgstr "Neconfirmat"
+
+#: apps/security/presentation.py:62
+#| msgid "Repointing"
+msgid "Reported running"
+msgstr "Raportat ca pornit"
+
+#: apps/security/presentation.py:62
+#| msgid "Confirm stopped"
+msgid "Reported stopped"
+msgstr "Raportat ca oprit"
+
+#: apps/security/presentation.py:68
+msgid "Simulation; bans cleared"
+msgstr "Simulare; blocări eliminate"
+
+#: apps/security/presentation.py:70
+msgid "Bouncer process reported running"
+msgstr "Procesul de aplicare a blocărilor este raportat ca pornit"
+
+#: apps/security/presentation.py:71
+msgid "Qualified"
+msgstr "Validat"
+
+#: apps/security/presentation.py:71
+msgid "Unqualified or unknown"
+msgstr "Nevalidat sau necunoscut"
+
+#: apps/security/presentation.py:73
+#| msgid "pending"
+msgid "Catch-up pending"
+msgstr "Recuperarea datelor este în așteptare"
+
+#: apps/security/presentation.py:75
+msgid "Caught up"
+msgstr "Date recuperate la zi"
+
+#: apps/security/presentation.py:77
+#| msgid "Current"
+msgid "Not current"
+msgstr "Neactualizat"
+
+#: apps/security/repos.py:189
+#| msgid "Billing cycle end must be after its start"
+msgid "An active decision must expire after its observation"
+msgstr "O decizie activă trebuie să expire după momentul observării sale"
+
+#: apps/security/repos.py:196
+msgid "A decision ID changed its immutable payload"
+msgstr "Datele fixe ale unui identificator de decizie s-au schimbat"
+
+#: apps/security/repos.py:214
+msgid "An alert ID changed its immutable payload"
+msgstr "Datele fixe ale unui identificator de alertă s-au schimbat"
+
+#: apps/security/services.py:39
+#| msgid ""
+#| "An active staff operator with deployment permission is required."
+msgid "An active security administrator is required."
+msgstr "Este necesar un administrator de securitate activ."
+
+#: apps/security/services.py:78
+msgid "CrowdSec synchronization requires an explicit boolean."
+msgstr "Sincronizarea CrowdSec necesită o valoare booleană explicită."
+
+#: apps/security/services.py:108
+#| msgid ""
+#| "The service's owner changed. Review the current details before submitting "
+#| "again."
+msgid "The source changed. Reload its current configuration before editing."
+msgstr ""
+"Sursa s-a schimbat. Reîncărcați configurația curentă înainte de editare."
+
+#: apps/security/services.py:114
+msgid "Retired or replacement installations require a new enrollment."
+msgstr "Instalările retrase sau înlocuitoare necesită o înregistrare nouă."
+
+#: apps/security/services.py:140
+#| msgid ""
+#| "The Terms of Service have changed. Please read them again before ordering."
+msgid "The source changed. Reload its current configuration before retiring."
+msgstr ""
+"Sursa s-a schimbat. Reîncărcați configurația curentă înainte de retragere."
+
+#: apps/security/source_forms.py:30
+#| msgid "Source Node"
+msgid "Source kind"
+msgstr "Tipul sursei"
+
+#: apps/security/source_forms.py:32
+#| msgid "Removing source"
+msgid "Local staging source"
+msgstr "Sursă locală de preproducție"
+
+#: apps/security/source_forms.py:34
+msgid "Enrolled hostname"
+msgstr "Numele de gazdă înregistrat"
+
+#: apps/security/source_forms.py:35
+msgid "SSH port (0 for local)"
+msgstr "Port SSH (0 pentru acces local)"
+
+#: apps/security/source_forms.py:39
+msgid "Independently enrolled SSH host keys"
+msgstr "Chei SSH de gazdă înregistrate independent"
+
+#: apps/security/source_forms.py:43
+#| msgid "Virtualmin Jobs"
+msgid "Virtualmin node"
+msgstr "Nod Virtualmin"
+
+#: apps/security/source_forms.py:45
+msgid "Physical installation UUID"
+msgstr "UUID-ul instalării fizice"
+
+#: apps/security/source_forms.py:47
+#| msgid "Invalid configuration"
+msgid "Qualified configuration SHA-256"
+msgstr "Amprenta SHA-256 a configurației validate"
+
+#: apps/security/source_forms.py:49
+#| msgid "Enable auto-renewal for this domain"
+msgid "Enable synchronization for this source"
+msgstr "Activați sincronizarea pentru această sursă"
+
+#: apps/security/source_views.py:33 templates/security/source_form.html:3
+#: templates/security/source_form.html:7
+#| msgid "Security Measures"
+msgid "Security source"
+msgstr "Sursă de securitate"
+
+#: apps/security/transport.py:59
+#| msgid ""
+#| "The dedicated CrowdSec SSH public identity is unavailable or invalid."
+msgid "The separately enrolled CrowdSec gateway identity is unavailable."
+msgstr ""
+"Identitatea înregistrată separat a gateway-ului CrowdSec nu este "
+"disponibilă."
+
+#: apps/security/transport.py:66
+msgid "Portal sources cannot use a Virtualmin node binding."
+msgstr "Sursele Portal nu pot fi asociate unui nod Virtualmin."
+
+#: apps/security/transport.py:80
+msgid ""
+"The node must explicitly select the matching CrowdSec qualification profile."
+msgstr ""
+"Nodul trebuie să selecteze explicit profilul de validare CrowdSec "
+"corespunzător."
+
+#: apps/security/transport.py:97
+msgid ""
+"A local CrowdSec source requires the explicitly enabled staging Portal "
+"installation."
+msgstr ""
+"O sursă CrowdSec locală necesită instalarea Portal de preproducție activată "
+"explicit."
+
+#: apps/security/transport.py:105
+#| msgid "Server hostname is required"
+msgid "An enrolled CrowdSec SSH hostname is required."
+msgstr "Este necesar numele de gazdă SSH înregistrat pentru CrowdSec."
+
+#: apps/security/transport.py:109
+msgid "Strict independently enrolled CrowdSec SSH host keys are required."
+msgstr ""
+"Sunt necesare chei SSH de gazdă CrowdSec înregistrate independent și "
+"verificate strict."
+
+#: apps/security/transport.py:111
+#| msgid ""
+#| "The dedicated CrowdSec SSH public identity is unavailable or invalid."
+msgid "The enrolled CrowdSec SSH port is invalid."
+msgstr "Portul SSH înregistrat pentru CrowdSec nu este valid."
+
+#: apps/security/transport.py:115
+#| msgid "The selected node security policy is unsupported."
+msgid "The CrowdSec source transport is unsupported."
+msgstr "Metoda de conectare a sursei CrowdSec nu este acceptată."
+
+#: apps/security/transport.py:119
+msgid ""
+"CrowdSec transport or node qualification changed; explicitly review the "
+"enrollment."
+msgstr ""
+"Metoda de conectare CrowdSec sau validarea nodului s-a schimbat; verificați "
+"explicit înregistrarea."
+
+#: templates/components/mobile_header.html:82
+#| msgid "Automation & schedule health"
+msgid "Decisions & source health"
+msgstr "Decizii și starea surselor"
+
+#: templates/security/dashboard.html:10
+msgid "Recorded decisions, simulated detections and source health."
+msgstr "Decizii înregistrate, detecții simulate și starea surselor."
+
+#: templates/security/dashboard.html:11
+msgid "Enroll source"
+msgstr "Înregistrați sursa"
+
+#: templates/security/dashboard.html:15
+#| msgid "Source Node"
+msgid "Source health"
+msgstr "Starea surselor"
+
+#: templates/security/dashboard.html:21
+#| msgid "Manager"
+msgid "Manage source"
+msgstr "Gestionați sursa"
+
+#: templates/security/dashboard.html:23
+#| msgid "Drift detection history"
+msgid "Detection (last report)"
+msgstr "Detecție (ultimul raport)"
+
+#: templates/security/dashboard.html:24
+msgid "Enforcement (last report)"
+msgstr "Aplicare (ultimul raport)"
+
+#: templates/security/dashboard.html:25
+msgid "Clock"
+msgstr "Ceas"
+
+#: templates/security/dashboard.html:27
+msgid "Last decision snapshot"
+msgstr "Ultimul instantaneu al deciziilor"
+
+#: templates/security/dashboard.html:31
+#| msgid "No services found"
+msgid "No sources enrolled"
+msgstr "Nicio sursă înregistrată"
+
+#: templates/security/dashboard.html:34
+msgid ""
+"Process and firewall reports do not confirm recent bouncer pulls or complete"
+" enforcement. Stale sources retain their last recorded results."
+msgstr ""
+"Rapoartele proceselor și ale firewall-ului nu confirmă preluări recente de "
+"către procesul de aplicare a blocărilor sau aplicarea completă. Sursele cu "
+"date învechite își păstrează ultimele rezultate înregistrate."
+
+#: templates/security/dashboard.html:38
+#| msgid "Recent Activity"
+msgid "Recorded activity"
+msgstr "Activitate înregistrată"
+
+#: templates/security/dashboard.html:39
+#| msgid "Security Alerts"
+msgid "Security records"
+msgstr "Înregistrări de securitate"
+
+#: templates/security/dashboard.html:40
+#| msgid "Descriptions"
+msgid "Decisions"
+msgstr "Decizii"
+
+#: templates/security/dashboard.html:55
+msgid "Reset"
+msgstr "Resetați"
+
+#: templates/security/dashboard.html:59
+#| msgid "Node security review"
+msgid "Recorded security activity"
+msgstr "Activitate de securitate înregistrată"
+
+#: templates/security/dashboard.html:64
+#| msgid "Network"
+msgid "IP / network"
+msgstr "IP / rețea"
+
+#: templates/security/dashboard.html:66
+#| msgid "Moderate"
+msgid "Mode"
+msgstr "Mod"
+
+#: templates/security/dashboard.html:71
+#| msgid "events"
+msgid "Events"
+msgstr "Evenimente"
+
+#: templates/security/dashboard.html:82
+msgid "Simulated"
+msgstr "Simulat"
+
+#: templates/security/dashboard.html:82
+#| msgid "VAT Report"
+msgid "Reported"
+msgstr "Raportat"
+
+#: templates/security/dashboard.html:92
+#| msgid "Not recorded"
+msgid "No matching records"
+msgstr "Nicio înregistrare corespunzătoare"
+
+#: templates/security/dashboard.html:97
+#| msgid "DNS record pages"
+msgid "Security record pages"
+msgstr "Paginile înregistrărilor de securitate"
+
+#: templates/security/dashboard.html:98
+#, python-format
+#| msgid "Page %(num)s of %(total)s"
+msgid "Page %(number)s of %(total)s"
+msgstr "Pagina %(number)s din %(total)s"
+
+#: templates/security/source_form.html:7
+#| msgid "Node security review"
+msgid "Enroll security source"
+msgstr "Înregistrați o sursă de securitate"
+
+#: templates/security/source_form.html:8
+msgid ""
+"Use the physical installation UUID, configuration digest and host keys "
+"verified during qualification. Source enrollment schedules background reads;"
+" local transport requires explicit staging configuration."
+msgstr ""
+"Folosiți UUID-ul instalării fizice, amprenta configurației și cheile gazdei "
+"verificate la validare. Înregistrarea sursei programează citiri în fundal; "
+"conectarea locală necesită configurarea explicită a mediului de "
+"preproducție."
+
+#: templates/security/source_form.html:11
+msgid ""
+"This source is retired. A replacement installation needs a new enrollment."
+msgstr ""
+"Această sursă este retrasă. O instalare înlocuitoare necesită o înregistrare"
+" nouă."
+
+#: templates/security/source_form.html:26
+#| msgid "Save price"
+msgid "Save source"
+msgstr "Salvați sursa"
+
+#: templates/security/source_form.html:31
+msgid "Retire physical installation"
+msgstr "Retrageți instalarea fizică"
+
+#: templates/security/source_form.html:32
+msgid ""
+"Retirement stops synchronization and retains history. Existing local bans "
+"continue until they expire or are revoked."
+msgstr ""
+"Retragerea oprește sincronizarea și păstrează istoricul. Blocările locale "
+"existente continuă până la expirare sau revocare."
+
+#: templates/security/source_form.html:37
+#| msgid "Retained source:"
+msgid "Retire source"
+msgstr "Retrageți sursa"
+
+#: templates/security/source_form.html:41
+#| msgid "Back to Service"
+msgid "Back to Security"
+msgstr "Înapoi la Securitate"

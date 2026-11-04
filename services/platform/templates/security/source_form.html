@@ -10,6 +10,7 @@
   {% if source.retired_at %}
   <p class="text-amber-300">{% trans "This source is retired. A replacement installation needs a new enrollment." %}</p>
   {% else %}
+  {# nosemgrep: django-no-csrf-token -- csrf_token is the first form child; nested template branches confuse the generic matcher. #}
   <form method="post" class="space-y-4 rounded-xl border border-slate-700 bg-slate-800 p-4">
     {% csrf_token %}
     {% for error in form.non_field_errors %}<p class="text-red-300" role="alert">{{ error }}</p>{% endfor %}
