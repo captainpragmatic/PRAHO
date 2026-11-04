@@ -32767,3 +32767,161 @@ msgstr "Retrageți sursa"
 #| msgid "Back to Service"
 msgid "Back to Security"
 msgstr "Înapoi la Securitate"
+
+#: apps/security/action_repos.py:48
+msgid "An enrolled physical security source is unavailable."
+msgstr "O sursă fizică de securitate înregistrată nu este disponibilă."
+
+#: apps/security/action_repos.py:52
+#| msgid "The source node binding changed during ownership acquisition"
+msgid "The physical node binding changed during action acquisition."
+msgstr "Asocierea cu nodul fizic s-a schimbat în timpul preluării acțiunii."
+
+#: apps/security/action_repos.py:56
+#| msgid "The bound node is unavailable"
+msgid "The bound security node is unavailable."
+msgstr "Nodul de securitate asociat nu este disponibil."
+
+#: apps/security/action_repos.py:241
+#| msgid "The original server is no longer registered."
+msgid "The original detection is no longer approved for copying."
+msgstr "Detecția inițială nu mai este aprobată pentru copiere."
+
+#: apps/security/action_repos.py:278
+#| msgid "A decision ID changed its immutable payload"
+msgid "A physical decision ID changed its managed provenance."
+msgstr ""
+"Proveniența gestionată a unui identificator de decizie fizică s-a schimbat."
+
+#: apps/security/action_repos.py:298
+#| msgid "The provider refund does not match the original request."
+msgid "The action receipt does not bind the issued request."
+msgstr "Confirmarea acțiunii nu corespunde cererii emise."
+
+#: apps/security/action_repos.py:303
+msgid "The host cannot extend an issued action's immutable expiry."
+msgstr ""
+"Gazda nu poate prelungi termenul de expirare fix al unei acțiuni emise."
+
+#: apps/security/action_repos.py:306
+#| msgid "The CrowdSec source transport is unsupported."
+msgid "The action result is unsupported."
+msgstr "Rezultatul acțiunii nu este acceptat."
+
+#: apps/security/action_repos.py:321
+msgid ""
+"Only positively observed late decision evidence can authorize an issued "
+"revoke or allowlist repair."
+msgstr ""
+"Doar dovada unei decizii întârziate observate efectiv poate autoriza o "
+"revocare emisă sau repararea listei de permisiuni."
+
+#: apps/security/action_services.py:46
+msgid "Your active staff role cannot issue this security action."
+msgstr ""
+"Rolul dumneavoastră activ de personal nu permite emiterea acestei acțiuni de"
+" securitate."
+
+#: apps/security/action_services.py:51
+msgid ""
+"Host security mutations are disabled; existing uncertain actions remain "
+"readable."
+msgstr ""
+"Modificările de securitate pe gazde sunt dezactivate; acțiunile existente cu"
+" rezultat incert pot fi consultate în continuare."
+
+#: apps/security/action_services.py:56
+#| msgid ""
+#| "Explain responsibility for the retained services (up to 2000 characters)."
+msgid "Explain the security action using up to 2000 characters."
+msgstr "Explicați acțiunea de securitate în cel mult 2000 de caractere."
+
+#: apps/security/action_services.py:77
+msgid "Use a canonical public IP address or a specific canonical CIDR."
+msgstr "Folosiți o adresă IP publică sau un CIDR specific, în formă canonică."
+
+#: apps/security/action_services.py:78
+msgid "Only IP and CIDR security scopes are supported."
+msgstr "Sunt acceptate doar domeniile de aplicare IP și CIDR."
+
+#: apps/security/action_services.py:100
+msgid ""
+"New bans require fresh canonical enforcing protection and qualified clocks."
+msgstr ""
+"Blocările noi necesită protecție activă conform configurației validate, date"
+" recente și ceasuri validate."
+
+#: apps/security/action_services.py:104
+msgid "The requested ban overlaps a staff protected network."
+msgstr "Blocarea solicitată se suprapune cu o rețea protejată de personal."
+
+#: apps/security/action_services.py:151
+#| msgid "This resource already belongs to a different deployment."
+msgid ""
+"This idempotency identity already belongs to a different action payload."
+msgstr ""
+"Acest identificator de idempotență aparține deja unei acțiuni cu alte date."
+
+#: apps/security/action_services.py:198
+msgid "Choose a finite ban duration and a bounded enrolled target list."
+msgstr ""
+"Alegeți o durată finită de blocare și o listă limitată de destinații "
+"înregistrate."
+
+#: apps/security/action_services.py:264
+msgid ""
+"Replica admission changed during revocation; reload and retry this request."
+msgstr ""
+"Admiterea replicilor s-a schimbat în timpul revocării; reîncărcați și "
+"reîncercați cererea."
+
+#: apps/security/action_services.py:283
+msgid ""
+"The original decision summary expired; reconcile this historical managed "
+"record."
+msgstr ""
+"Rezumatul deciziei inițiale a expirat; reconciliați această înregistrare "
+"gestionată din istoric."
+
+#: apps/security/action_services.py:357
+#| msgid "Template variables too large"
+msgid "The complete staff allowlist is too large."
+msgstr "Lista completă de permisiuni a personalului este prea mare."
+
+#: apps/security/action_services.py:361
+#| msgid "Provider resource history cannot be overwritten."
+msgid "Retired source history cannot receive a new allowlist action."
+msgstr ""
+"Istoricul unei surse retrase nu poate primi o nouă acțiune asupra listei de "
+"permisiuni."
+
+#: apps/security/action_services.py:363
+#| msgid "The provided information is invalid."
+msgid "The reviewed staff allowlist revision is invalid."
+msgstr ""
+"Revizia verificată a listei de permisiuni a personalului nu este validă."
+
+#: apps/security/action_services.py:376
+msgid ""
+"The staff allowlist changed since this form was reviewed; reload it before "
+"replacing it."
+msgstr ""
+"Lista de permisiuni a personalului s-a schimbat de la verificarea "
+"formularului; reîncărcați-o înainte de a o înlocui."
+
+#: apps/security/replication.py:119
+msgid "Current native CrowdSec node qualification is required for sharing."
+msgstr ""
+"Partajarea necesită validarea curentă a nodului CrowdSec în mediul nativ."
+
+#: apps/security/replication.py:225
+msgid ""
+"Explicit native detection coverage proof is incomplete or does not match "
+"this enrollment."
+msgstr ""
+"Dovada explicită a acoperirii detecției în mediul nativ este incompletă sau "
+"nu corespunde acestei înregistrări."
+
+#: apps/security/replication.py:243
+msgid "Only exact pinned hostile scenario candidates can be approved."
+msgstr "Pot fi aprobate doar scenariile ostile candidate fixate exact."
