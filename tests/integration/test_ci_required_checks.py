@@ -110,7 +110,10 @@ def test_every_required_check_runs_on_every_pull_request(context: str) -> None:
     if context in SELECTIVE_JOBS:
         assert job["if"] == SELECTIVE_JOBS[context], f"{workflow}:{context} must skip only on an explicit 'false'"
     else:
-        assert "if" not in job, f"{workflow}:{context} can be skipped, and a skipped job reports success"
+        # always() forces a dependency gate to run even when an upstream job fails or skips.
+        assert job.get("if") in (None, "always()"), (
+            f"{workflow}:{context} can be skipped, and a skipped job reports success"
+        )
     if context not in STEP_CONDITIONS_ALLOWED:
         for step in job.get("steps", []):
             condition = step.get("if")

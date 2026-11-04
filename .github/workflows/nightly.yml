@@ -102,7 +102,7 @@ jobs:
   # Native qualification uses the workflow revision. An older staging checkout
   # need not contain its Make targets; all three deployment topologies run here.
   # ---------------------------------------------------------------------------
-  native-deploy:
+  nightly-native-deploy:
     needs: check-activity
     if: needs.check-activity.outputs.branches != '[]'
     runs-on: ubuntu-24.04
@@ -432,7 +432,7 @@ jobs:
   # Dispatched runs are attended, so they never notify.
   # ---------------------------------------------------------------------------
   notify-scheduled-failure:
-    needs: [check-activity, nightly, nightly-e2e, native-deploy]
+    needs: [check-activity, nightly, nightly-e2e, nightly-native-deploy]
     if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
     runs-on: ubuntu-latest
     permissions:

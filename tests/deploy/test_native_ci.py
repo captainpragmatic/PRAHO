@@ -51,6 +51,12 @@ def test_required_integration_check_waits_for_parallel_native_and_general_suites
     assert set(gate["needs"]) == native | general
     assert gate["if"] == "always()", "Failure and skip results must reach the required gate"
     assert all(not jobs[name].get("needs") for name in native | general)
+    for name in native | general:
+        job = jobs[name]
+        assert "if" not in job and "continue-on-error" not in job
+        for step in job["steps"]:
+            assert "continue-on-error" not in step
+            assert step.get("if") in (None, "always()"), "Upstream work must not silently skip"
 
 
 @pytest.mark.parametrize("general", ["success", "failure", "cancelled", "skipped"])
