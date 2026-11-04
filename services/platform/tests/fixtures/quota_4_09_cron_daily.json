@@ -1,0 +1,7 @@
+{
+  "source_url": "https://archive.ubuntu.com/ubuntu/pool/main/q/quota/quota_4.09-1build1.debian.tar.xz",
+  "archive_sha256": "09f63e11efdbeb2a0ddd71f9c445c690bde1ee6e38afa33d5b9be67b2187599a",
+  "member": "debian/cron.daily",
+  "sha256": "e34d72322f0a58df9d06a0bfd68709efc4801964a8c9b64a7bc0b6e19d9e0f35",
+  "source": "#! /bin/sh\n\n# check if quota package is available\ntest -x /usr/sbin/warnquota || exit 0\n\n# check if warnquota run is configured\ntest -f /etc/default/quota || exit 0\n. /etc/default/quota\n\nif [ \"$run_warnquota\" = \"true\" ]; then\n\t# check if quotas are enabled\n\tif grep -q '^[^#]*quota' /etc/fstab; then\n        \t/usr/sbin/warnquota -ug\n\tfi\t\nfi\n\nexit 0\n"
+}

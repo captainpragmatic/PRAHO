@@ -92,8 +92,13 @@ class HostingNodeEvidenceTests(SimpleTestCase):
             changed["emitters"][emitter] = False
             with self.subTest(emitter=emitter), self.assertRaises(ValidationError):
                 verify_notification_evidence(changed, "a" * 64)
-        self.assertEqual(len(NOTIFICATION_EMITTERS), 10)
+        self.assertEqual(len(NOTIFICATION_EMITTERS), 11)
         self.assertIn("status_monitors", NOTIFICATION_EMITTERS)
+        self.assertIn("os_quota_warnings", NOTIFICATION_EMITTERS)
+        old = deepcopy(evidence)
+        old["emitters"].pop("os_quota_warnings")
+        with self.assertRaises(ValidationError):
+            verify_notification_evidence(old, "a" * 64)
 
     def test_uninspected_or_enabled_native_bandwidth_actions_never_qualify_managed_quota_readiness(self):
         evidence = quota_evidence()
