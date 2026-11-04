@@ -1,0 +1,34 @@
+{% if crowdsec_ssh_acquisition == 'journalctl' %}
+source: journalctl
+journalctl_filter:
+  - _SYSTEMD_UNIT=ssh.service
+labels:
+  type: syslog
+{% else %}
+filenames:
+  - /var/log/auth.log
+labels:
+  type: syslog
+{% endif %}
+---
+{% if crowdsec_host_kind == 'node' %}
+filenames:
+  - /var/log/virtualmin/*_access_log
+labels:
+  type: apache2
+---
+filenames:
+  - /var/webmin/webmin.log
+labels:
+  type: webmin
+{% else %}
+filenames:
+  - /var/log/caddy/portal-access.log
+labels:
+  type: caddy
+---
+filenames:
+  - /var/log/praho/portal/portal-auth.jsonl
+labels:
+  type: praho_portal_auth
+{% endif %}

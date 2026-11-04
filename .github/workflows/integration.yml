@@ -254,7 +254,22 @@ jobs:
     - name: Install the browser the page-monitor self-tests drive
       run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
 
+    - name: CrowdSec native artifact qualification
+      run: make test-crowdsec-docker
+
+    - name: Preserve CrowdSec binaries and build provenance
+      uses: actions/upload-artifact@v4
+      with:
+        name: crowdsec-bouncer-${{ github.sha }}
+        path: build/crowdsec-patched/
+        if-no-files-found: error
+        retention-days: 30
+
     - name: Integration test suite (make test-integration)
+      env:
+        # The required native step above already executes these suites. Keep every other
+        # Docker suite in the aggregate and leave local Make defaults unchanged.
+        PYTEST_ADDOPTS: --ignore-glob=tests/deploy/test_crowdsec*_docker.py
       run: make test-integration
 
     - name: Upload integration test reports

@@ -1,0 +1,704 @@
+---
+- name: Require the qualified host and explicit protection policy
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.distribution == 'Ubuntu'
+      - ansible_facts.distribution_version == '26.04'
+      - ansible_facts.architecture in ['x86_64', 'aarch64']
+      - crowdsec_simulation is boolean
+      - crowdsec_retire_fail2ban is boolean
+      - not crowdsec_retire_fail2ban or (not crowdsec_simulation and crowdsec_enforcement_qualified | bool)
+      - crowdsec_policy_preview is boolean
+      - crowdsec_host_kind in ['node', 'portal']
+      - crowdsec_ssh_acquisition in ['journalctl', 'file']
+      - crowdsec_protected_cidrs is sequence and crowdsec_protected_cidrs is not string
+      - crowdsec_protected_cidrs | length > 0
+      - >-
+        crowdsec_gateway_public_key | trim is match('^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp256) [A-Za-z0-9+/=]+(?: [^\r\n]*)?$')
+      - crowdsec_policy_preview or crowdsec_simulation or crowdsec_enforcement_qualified | bool
+      - not crowdsec_local_reader_user or (crowdsec_host_kind == 'portal' and crowdsec_staging_local_source | bool)
+      - not crowdsec_local_reader_user or crowdsec_local_reader_user is match('^[a-z_][a-z0-9_-]{0,31}$')
+      - crowdsec_local_reader_user not in ['root', 'praho-crowdsec']
+    fail_msg: Explicit protected inventory, a dedicated gateway key and fresh enforcement qualification are required.
+
+- name: Load immutable controller artifacts
+  ansible.builtin.set_fact:
+    crowdsec_lock: "{{ lookup('ansible.builtin.file', crowdsec_artifact_lock_path, rstrip=false) | from_json }}"
+    crowdsec_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts.architecture] }}"
+    crowdsec_managed_hashes: {}
+
+- name: Refuse changed artifact families or mutable upstream choices
+  ansible.builtin.assert:
+    that:
+      - crowdsec_lock.repository.primary_fingerprint == '6A89E3C2303A901A889971D3376ED5326E93CD0C'
+      - crowdsec_lock.packages[crowdsec_arch].crowdsec.version == '1.8.2'
+      - crowdsec_lock.packages[crowdsec_arch]['crowdsec-firewall-bouncer-nftables'].version == '0.0.36'
+      - crowdsec_lock.bouncer_build.nftables.set_only_intervals | bool
+      - crowdsec_lock.hub.commit == '58d35d108bb310f2ca0bf16c043715f15477adc1'
+
+- name: Verify actual repository fingerprint and signed artifact provenance on the controller
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -I
+      - "{{ crowdsec_artifact_lock_path | dirname }}/verify_artifacts.py"
+      - "{{ crowdsec_artifact_lock_path }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: crowdsec_artifact_verification
+
+- name: Require complete signed package and scoped Hub verification
+  ansible.builtin.assert:
+    that:
+      - (crowdsec_artifact_verification.stdout | from_json).verified
+      - (crowdsec_artifact_verification.stdout | from_json).package_count == 4
+      - (crowdsec_artifact_verification.stdout | from_json).hub_leaf_count == 14
+
+- name: Normalize protected inventory before changing the host
+  ansible.builtin.command:
+    argv:
+      - "{{ ansible_playbook_python }}"
+      - -I
+      - -c
+      - >-
+        import ipaddress,json,sys;
+        values=json.loads(sys.argv[1]);
+        assert all(isinstance(v,str) and '%' not in v for v in values);
+        networks=[ipaddress.ip_network(v,strict=True) for v in values];
+        assert all(v.prefixlen>0 for v in networks);
+        result=sorted({str(v) for v in networks}|{'127.0.0.1/32','::1/128'});
+        assert len(result)<=256;
+        print(json.dumps(result))
+      - "{{ crowdsec_protected_cidrs | to_json }}"
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: crowdsec_inventory_result
+
+- name: Freeze selected leaves and canonical inventory
+  ansible.builtin.set_fact:
+    crowdsec_inventory: "{{ crowdsec_inventory_result.stdout | from_json }}"
+    crowdsec_hub_leaves: "{{ crowdsec_lock.hub.files | selectattr('host_kinds', 'contains', crowdsec_host_kind) | list }}"
+
+- name: Require the restricted SSH context before creating a login principal
+  ansible.builtin.command:
+    argv: [/usr/sbin/sshd, -T, -C, 'user=praho-crowdsec,host=localhost,addr=127.0.0.1']
+  changed_when: false
+  register: crowdsec_ssh_context
+
+- name: Refuse a gateway key before effective SSH restrictions exist
+  ansible.builtin.assert:
+    that:
+      - "'forcecommand sudo -n /usr/local/libexec/praho-crowdsec-gateway' in crowdsec_ssh_context.stdout_lines"
+      - "'disableforwarding yes' in crowdsec_ssh_context.stdout_lines"
+      - "'permittty no' in crowdsec_ssh_context.stdout_lines"
+      - "'allowtcpforwarding no' in crowdsec_ssh_context.stdout_lines"
+      - "'allowstreamlocalforwarding no' in crowdsec_ssh_context.stdout_lines"
+      - "'allowagentforwarding no' in crowdsec_ssh_context.stdout_lines"
+    fail_msg: Apply and prove the SSH CrowdSec extension before adopting its working-shell principal.
+
+- name: Verify an explicitly configured staging reader exists and is nonroot
+  ansible.builtin.command:
+    argv: [/usr/bin/id, -u, '{{ crowdsec_local_reader_user }}']
+  changed_when: false
+  register: crowdsec_local_reader_uid
+  when: crowdsec_local_reader_user | length > 0
+  failed_when: crowdsec_local_reader_uid.rc != 0 or crowdsec_local_reader_uid.stdout | int == 0
+
+- name: Refuse database replacement before persistent changes
+  ansible.builtin.script:
+    cmd: files/enroll.py check
+    executable: /usr/bin/python3
+  changed_when: false
+
+- name: Inspect existing enrollment ownership
+  ansible.builtin.stat:
+    path: /var/lib/praho-crowdsec/installation.json
+  register: crowdsec_prior_installation
+
+- name: Inspect an existing local CLI before adopting a previously managed host
+  ansible.builtin.stat:
+    path: /usr/bin/cscli
+    checksum_algorithm: sha256
+  register: crowdsec_prior_cli
+
+- name: Refuse an unmanaged CrowdSec installation before changing configuration
+  ansible.builtin.assert:
+    that:
+      - not crowdsec_prior_cli.stat.exists or crowdsec_prior_installation.stat.exists or (crowdsec_prior_cli.stat.checksum | default('')) == (lookup('ansible.builtin.file', role_path + '/files/cli_guard.py', rstrip=false) | hash('sha256'))
+    fail_msg: Existing CrowdSec installation is not enrolled; inspect and explicitly reenroll it before adoption.
+
+- name: Refuse unreviewed acquisitions overrides fragments and Hub leaves
+  ansible.builtin.script:
+    cmd: "files/preflight.py {{ ((crowdsec_hub_leaves | map(attribute='installed_path') | list) + (crowdsec_portal_rendered_files | map(attribute='path') | list if crowdsec_host_kind == 'portal' else [])) | to_json | b64encode }}"
+    executable: /usr/bin/python3
+  changed_when: false
+  register: crowdsec_preflight
+
+- name: Read the controller's qualified bouncer bytes
+  ansible.builtin.stat:
+    path: "{{ crowdsec_repository_root }}/{{ crowdsec_lock.bouncer_build.binaries[crowdsec_arch].file }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: crowdsec_bouncer_artifact
+
+- name: Require exact reproducible bouncer bytes before adoption
+  ansible.builtin.assert:
+    that:
+      - crowdsec_bouncer_artifact.stat.isreg | default(false)
+      - crowdsec_bouncer_artifact.stat.checksum == crowdsec_lock.bouncer_build.binaries[crowdsec_arch].sha256
+
+- name: Read the controller's deterministic license and source-notice bundle
+  ansible.builtin.stat:
+    path: "{{ crowdsec_repository_root }}/{{ crowdsec_lock.bouncer_build.notices.file }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  become: false
+  register: crowdsec_notices_artifact
+
+- name: Require exact licensed build outputs before any persistent mutation
+  ansible.builtin.assert:
+    that:
+      - crowdsec_lock.bouncer_build.notices.file == 'build/crowdsec-patched/license-notices.tar.gz'
+      - crowdsec_notices_artifact.stat.isreg | default(false)
+      - crowdsec_notices_artifact.stat.checksum == crowdsec_lock.bouncer_build.notices.sha256
+      - crowdsec_notices_artifact.stat.size == crowdsec_lock.bouncer_build.notices.size
+
+- name: Hash exact desired controller-rendered configuration
+  ansible.builtin.set_fact:
+    crowdsec_managed_hashes: "{{ crowdsec_managed_hashes | combine({item.path: item.content | hash('sha256')}) }}"
+  loop: "{{ crowdsec_rendered_files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Bind every active pinned parser and scenario leaf
+  ansible.builtin.set_fact:
+    crowdsec_managed_hashes: "{{ crowdsec_managed_hashes | combine({item.installed_path: item.sha256}) }}"
+  loop: "{{ crowdsec_hub_leaves }}"
+  loop_control:
+    label: "{{ item.installed_path }}"
+
+- name: Freeze the complete desired policy before changing effective host state
+  ansible.builtin.set_fact:
+    crowdsec_policy:
+      schema: 1
+      host_kind: "{{ crowdsec_host_kind }}"
+      simulation: "{{ crowdsec_simulation }}"
+      protected_cidrs: "{{ crowdsec_inventory }}"
+      artifact_lock_sha256: "{{ lookup('ansible.builtin.file', crowdsec_artifact_lock_path, rstrip=false) | hash('sha256') }}"
+      bouncer_binary_sha256: "{{ crowdsec_lock.bouncer_build.binaries[crowdsec_arch].sha256 }}"
+      managed_files: "{{ crowdsec_managed_hashes }}"
+
+- name: Compute the canonical configuration digest
+  ansible.builtin.set_fact:
+    crowdsec_configuration_digest: "{{ crowdsec_policy | to_json(sort_keys=true, separators=[',', ':'], ensure_ascii=false, allow_nan=false) | hash('sha256') }}"
+
+- name: Require a supplied reviewed configuration to match exactly
+  ansible.builtin.assert:
+    that:
+      - crowdsec_policy_preview or crowdsec_simulation or crowdsec_expected_configuration_digest | length > 0
+      - crowdsec_policy_preview or not crowdsec_expected_configuration_digest or crowdsec_expected_configuration_digest == crowdsec_configuration_digest
+    fail_msg: The desired CrowdSec configuration changed; obtain fresh qualification evidence.
+
+- name: Preview the desired policy without changing host state
+  ansible.builtin.debug:
+    msg:
+      - "PRAHO_CROWDSEC_CONFIGURATION_DIGEST={{ crowdsec_configuration_digest }}"
+      - "PRAHO_CROWDSEC_RETIRE_FAIL2BAN={{ crowdsec_retire_fail2ban | lower }}"
+  when: crowdsec_policy_preview
+
+- name: End the preview before any persistent host mutation
+  ansible.builtin.meta: end_host
+  when: crowdsec_policy_preview
+
+- name: Inspect the deployed Portal's private event directory
+  ansible.builtin.stat:
+    path: /var/log/praho/portal
+    follow: false
+  register: crowdsec_portal_log_directory
+  when: crowdsec_host_kind == 'portal'
+
+- name: Require the isolated Portal identity and its existing private directory
+  ansible.builtin.assert:
+    that:
+      - crowdsec_portal_log_directory.stat.isdir | default(false)
+      - not crowdsec_portal_log_directory.stat.islnk | default(false)
+      - crowdsec_portal_log_directory.stat.pw_name == crowdsec_portal_user
+      - crowdsec_portal_log_directory.stat.uid != 0
+      - crowdsec_portal_log_directory.stat.mode == '0700'
+    fail_msg: Deploy the isolated Portal service identity and private log directory before adopting Portal protection.
+  when: crowdsec_host_kind == 'portal'
+
+- name: Inspect an existing Portal authentication event file
+  ansible.builtin.stat:
+    path: /var/log/praho/portal/portal-auth.jsonl
+    follow: false
+  register: crowdsec_portal_event_file
+  when: crowdsec_host_kind == 'portal'
+
+- name: Refuse an unsafe existing Portal authentication event file
+  ansible.builtin.assert:
+    that:
+      - >-
+        not crowdsec_portal_event_file.stat.exists or
+        (crowdsec_portal_event_file.stat.isreg | default(false) and
+         not crowdsec_portal_event_file.stat.islnk | default(false) and
+         crowdsec_portal_event_file.stat.uid == crowdsec_portal_log_directory.stat.uid and
+         crowdsec_portal_event_file.stat.nlink == 1 and
+         crowdsec_portal_event_file.stat.mode == '0600')
+  when: crowdsec_host_kind == 'portal'
+
+- name: Create the Portal-owned bounded authentication event file
+  ansible.builtin.file:
+    path: /var/log/praho/portal/portal-auth.jsonl
+    state: touch
+    owner: "{{ crowdsec_portal_user }}"
+    group: "{{ crowdsec_portal_log_directory.stat.gid }}"
+    mode: '0600'
+    access_time: preserve
+    modification_time: preserve
+  when: crowdsec_host_kind == 'portal' and not crowdsec_portal_event_file.stat.exists
+
+- name: Freeze the previously applied runtime policy witnesses
+  ansible.builtin.set_fact:
+    crowdsec_applied_stamps: "{{ (crowdsec_preflight.stdout | trim | from_json).applied_stamps }}"
+
+- name: Withdraw superseded runtime witnesses before writing any desired policy
+  ansible.builtin.file:
+    path: "/var/lib/praho-crowdsec/{{ item }}-applied.sha256"
+    state: absent
+  loop: [engine, bouncer]
+  when: crowdsec_applied_stamps[item] != crowdsec_configuration_digest + '\n'
+
+- name: Inspect existing enforcement before a simulated transition
+  ansible.builtin.command:
+    argv: [/usr/bin/systemctl, is-active, crowdsec-firewall-bouncer]
+  register: crowdsec_prior_bouncer_runtime
+  changed_when: false
+  failed_when: crowdsec_prior_bouncer_runtime.rc not in [0, 3, 4]
+  when: crowdsec_simulation and crowdsec_prior_installation.stat.exists
+
+- name: Invalidate an existing runtime witness before stopping enforcement
+  ansible.builtin.file:
+    path: /var/lib/praho-crowdsec/bouncer-applied.sha256
+    state: absent
+  when:
+    - crowdsec_simulation and crowdsec_prior_installation.stat.exists
+    - crowdsec_prior_bouncer_runtime.stdout | trim != 'inactive'
+
+- name: Stop existing enforcement before writing a simulated policy
+  ansible.builtin.systemd_service:
+    name: crowdsec-firewall-bouncer
+    state: stopped
+  when:
+    - crowdsec_simulation and crowdsec_prior_installation.stat.exists
+    - crowdsec_prior_bouncer_runtime.rc != 4
+
+- name: Withdraw existing enforcement permission before writing simulation configuration
+  ansible.builtin.file:
+    path: /etc/praho-crowdsec/enforcement-ready
+    state: absent
+  when: crowdsec_simulation and crowdsec_prior_installation.stat.exists
+
+- name: Create private role state and public root-owned configuration directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: /etc/praho-crowdsec, mode: '0700'}
+    - {path: /var/lib/praho-crowdsec, mode: '0700'}
+    - {path: /var/cache/praho-crowdsec, mode: '0700'}
+    - {path: /var/lib/crowdsec/data, mode: '0700'}
+    - {path: /etc/crowdsec, mode: '0755'}
+    - {path: /etc/crowdsec/bouncers, mode: '0755'}
+    - {path: /etc/crowdsec/acquis.d, mode: '0755'}
+    - {path: /etc/crowdsec/hub, mode: '0755'}
+    - {path: /etc/crowdsec/notifications, mode: '0755'}
+    - {path: /etc/crowdsec/parsers/s00-raw, mode: '0755'}
+    - {path: /etc/crowdsec/parsers/s01-parse, mode: '0755'}
+    - {path: /etc/crowdsec/parsers/s02-enrich, mode: '0755'}
+    - {path: /etc/crowdsec/scenarios, mode: '0755'}
+    - {path: /etc/crowdsec/postoverflows, mode: '0755'}
+    - {path: /etc/crowdsec/collections, mode: '0755'}
+    - {path: /etc/systemd/system/crowdsec.service.d, mode: '0755'}
+    - {path: /etc/systemd/system/crowdsec-firewall-bouncer.service.d, mode: '0755'}
+    - {path: /etc/systemd/system/crowdsec-hubupdate.service.d, mode: '0755'}
+    - {path: /etc/systemd/system/crowdsec-hubupdate.timer.d, mode: '0755'}
+    - {path: /usr/local/libexec, mode: '0755'}
+    - {path: /usr/local/share/doc/praho-crowdsec-bouncer, mode: '0755'}
+    - {path: /home/praho-crowdsec, mode: '0755'}
+    - {path: /home/praho-crowdsec/.ssh, mode: '0755'}
+
+- name: Inspect the local CLI diversion
+  ansible.builtin.command:
+    argv: [/usr/bin/dpkg-divert, --list, /usr/bin/cscli]
+  environment:
+    LC_ALL: C
+  changed_when: false
+  register: crowdsec_cli_diversion
+
+- name: Refuse an unrelated CLI diversion
+  ansible.builtin.assert:
+    that:
+      - not crowdsec_cli_diversion.stdout or 'local diversion of /usr/bin/cscli to /usr/bin/cscli.praho-real' in crowdsec_cli_diversion.stdout
+
+- name: Divert the package CLI before any package maintainer script runs
+  ansible.builtin.command:
+    argv: [/usr/bin/dpkg-divert, --add, --rename, --divert, /usr/bin/cscli.praho-real, /usr/bin/cscli]
+  when: crowdsec_cli_diversion.stdout | length == 0
+  changed_when: true
+
+- name: Install hashed configuration guards and helpers before package installation
+  ansible.builtin.copy:
+    content: "{{ item.content }}"
+    dest: "{{ item.path }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop: "{{ crowdsec_rendered_files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: item.path != '/home/praho-crowdsec/.ssh/authorized_keys'
+  register: crowdsec_managed_copy
+
+- name: Validate the exact no-argument sudo contract
+  ansible.builtin.command:
+    argv: [/usr/sbin/visudo, -cf, /etc/sudoers.d/praho-crowdsec]
+  changed_when: false
+
+- name: Create the restricted working-shell gateway principal without a key
+  ansible.builtin.user:
+    name: praho-crowdsec
+    home: /home/praho-crowdsec
+    shell: /bin/sh
+    system: true
+    create_home: false
+    password_lock: true
+
+- name: Keep bootstrap credential paths local and suppress package registration
+  ansible.builtin.copy:
+    dest: "{{ item.path }}"
+    content: "{{ item.content }}"
+    owner: root
+    group: root
+    mode: '0600'
+    force: false
+  loop:
+    - path: /etc/crowdsec/local_api_credentials.yaml
+      content: |
+        url: http://127.0.0.1:8080
+        login: ""
+        password: ""
+    - {path: /etc/crowdsec/online_api_credentials.yaml, content: ''}
+    - {path: /etc/crowdsec/hub/.index.json, content: "{}\n"}
+  no_log: true
+
+- name: Reload systemd after installing pre-start guards
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+
+- name: Install native firewall and package helper dependencies
+  ansible.builtin.apt:
+    name: [nftables, gettext-base]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+    policy_rc_d: 101
+
+- name: Download only signed-index-locked package bytes
+  ansible.builtin.get_url:
+    url: "{{ item.value.url }}"
+    dest: "/var/cache/praho-crowdsec/{{ item.key }}_{{ item.value.version }}_{{ crowdsec_arch }}.deb"
+    checksum: "sha256:{{ item.value.sha256 }}"
+    mode: '0600'
+    owner: root
+    group: root
+    timeout: 120
+  loop: "{{ crowdsec_lock.packages[crowdsec_arch] | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value.version }}"
+  when: not crowdsec_package_cache
+
+- name: Copy an explicitly supplied package cache
+  ansible.builtin.copy:
+    src: "{{ crowdsec_package_cache }}/{{ item.key }}_{{ item.value.version }}_{{ crowdsec_arch }}.deb"
+    dest: "/var/cache/praho-crowdsec/{{ item.key }}_{{ item.value.version }}_{{ crowdsec_arch }}.deb"
+    mode: '0600'
+    owner: root
+    group: root
+  loop: "{{ crowdsec_lock.packages[crowdsec_arch] | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value.version }}"
+  when: crowdsec_package_cache | length > 0
+
+- name: Verify package cache bytes before executing Debian scripts
+  ansible.builtin.stat:
+    path: "/var/cache/praho-crowdsec/{{ item.key }}_{{ item.value.version }}_{{ crowdsec_arch }}.deb"
+    checksum_algorithm: sha256
+  loop: "{{ crowdsec_lock.packages[crowdsec_arch] | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: crowdsec_package_stats
+
+- name: Refuse changed package bytes or lengths
+  ansible.builtin.assert:
+    that:
+      - item.stat.checksum == item.item.value.sha256
+      - item.stat.size == item.item.value.size
+  loop: "{{ crowdsec_package_stats.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+
+- name: Install packages with scoped maintainer guards
+  block:
+    - name: Mark the exact guarded Debian maintainer-script window
+      ansible.builtin.copy:
+        content: "PRAHO pinned package installation\n"
+        dest: /run/praho-crowdsec-maintainer
+        owner: root
+        group: root
+        mode: '0600'
+      changed_when: false
+
+    - name: Install the pinned engine and packaged bouncer units
+      ansible.builtin.apt:
+        deb: "/var/cache/praho-crowdsec/{{ item.key }}_{{ item.value.version }}_{{ crowdsec_arch }}.deb"
+        dpkg_options: force-confdef,force-confold
+        policy_rc_d: 101
+      loop: "{{ crowdsec_lock.packages[crowdsec_arch] | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}={{ item.value.version }}"
+  always:
+    - name: Close the scoped maintainer-script window
+      ansible.builtin.file:
+        path: /run/praho-crowdsec-maintainer
+        state: absent
+      changed_when: false
+
+- name: Hold exactly qualified package versions
+  ansible.builtin.dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  loop: [crowdsec, crowdsec-firewall-bouncer-nftables]
+
+- name: Disable automatic mutable Hub refresh
+  ansible.builtin.systemd_service:
+    name: crowdsec-hubupdate.timer
+    enabled: false
+    state: stopped
+    masked: true
+
+- name: Install each selected pinned Hub leaf directly without collection discovery
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "{{ item.installed_path }}"
+    checksum: "sha256:{{ item.sha256 }}"
+    mode: '0644'
+    owner: root
+    group: root
+    timeout: 60
+  loop: "{{ crowdsec_hub_leaves }}"
+  loop_control:
+    label: "{{ item.installed_path }}"
+  register: crowdsec_hub_copy
+
+- name: Install the qualified bouncer separately from package-owned bytes
+  ansible.builtin.copy:
+    src: "{{ crowdsec_repository_root }}/{{ crowdsec_lock.bouncer_build.binaries[crowdsec_arch].file }}"
+    dest: /usr/local/libexec/praho-crowdsec-bouncer
+    owner: root
+    group: root
+    mode: '0755'
+  register: crowdsec_bouncer_copy
+
+- name: Install the patched bouncer licenses notices and corresponding build inputs
+  ansible.builtin.unarchive:
+    src: "{{ crowdsec_repository_root }}/{{ crowdsec_lock.bouncer_build.notices.file }}"
+    dest: /usr/local/share/doc/praho-crowdsec-bouncer
+    owner: root
+    group: root
+    mode: 'u=rwX,go=rX'
+
+- name: Enroll once and bind exact database incarnation and desired policy
+  ansible.builtin.script:
+    cmd: "files/enroll.py {{ crowdsec_policy | to_json(sort_keys=true, separators=[',', ':'], ensure_ascii=false, allow_nan=false) | b64encode }}"
+    executable: /usr/bin/python3
+  register: crowdsec_enrollment
+  changed_when: (crowdsec_enrollment.stdout | trim | from_json).changed
+
+- name: Keep the local database private
+  ansible.builtin.file:
+    path: /var/lib/crowdsec/data/crowdsec.db
+    owner: root
+    group: root
+    # cscli enforces this native mode on each open; the parent is root-only 0700.
+    mode: '0640'
+
+- name: Stop enforcement before converging simulation
+  ansible.builtin.systemd_service:
+    name: crowdsec-firewall-bouncer
+    state: stopped
+  when: crowdsec_simulation
+
+- name: Remove simulation's enforcement start permission
+  ansible.builtin.file:
+    path: /etc/praho-crowdsec/enforcement-ready
+    state: absent
+  when: crowdsec_simulation
+
+- name: Reconcile only owned dual-stack INPUT policy and simulated ban sets
+  ansible.builtin.command:
+    argv: [/usr/local/libexec/praho-crowdsec-firewall]
+  register: crowdsec_firewall_result
+  changed_when: (crowdsec_firewall_result.stdout | from_json).changed
+
+- name: Enable owned firewall restoration after reboot
+  ansible.builtin.systemd_service:
+    name: praho-crowdsec-firewall
+    daemon_reload: true
+    enabled: true
+    state: started
+
+- name: Validate the fully pinned offline engine configuration
+  ansible.builtin.command:
+    argv: [/usr/bin/crowdsec, -c, /etc/crowdsec/config.yaml, -t, -error]
+  changed_when: false
+
+- name: Permit the configured local engine to start
+  ansible.builtin.copy:
+    content: ''
+    dest: /etc/praho-crowdsec/engine-ready
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Inspect the independent engine before applying its policy
+  ansible.builtin.command:
+    argv: [/usr/bin/systemctl, is-active, crowdsec]
+  register: crowdsec_engine_runtime
+  changed_when: false
+  failed_when: crowdsec_engine_runtime.rc not in [0, 3, 4]
+
+- name: Require restart for changed files unapplied policy or an inactive engine
+  ansible.builtin.set_fact:
+    crowdsec_engine_restart: "{{ crowdsec_managed_copy.changed or crowdsec_hub_copy.changed or crowdsec_applied_stamps.engine != crowdsec_configuration_digest + '\n' or crowdsec_engine_runtime.stdout | trim != 'active' }}"
+
+- name: Invalidate the engine witness before changing its runtime
+  ansible.builtin.file:
+    path: /var/lib/praho-crowdsec/engine-applied.sha256
+    state: absent
+  when: crowdsec_engine_restart
+
+- name: Start the independent loopback engine
+  ansible.builtin.systemd_service:
+    name: crowdsec
+    enabled: true
+    state: "{{ 'restarted' if crowdsec_engine_restart else 'started' }}"
+
+- name: Wait for the local-only LAPI
+  ansible.builtin.wait_for:
+    host: 127.0.0.1
+    port: 8080
+    timeout: 30
+
+- name: Record the successfully applied engine configuration
+  ansible.builtin.copy:
+    content: "{{ crowdsec_configuration_digest }}\n"
+    dest: /var/lib/praho-crowdsec/engine-applied.sha256
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Reconcile immutable inventory protections separately from staff-managed entries
+  ansible.builtin.script:
+    cmd: "files/allowlist.py {{ crowdsec_inventory | to_json | b64encode }}"
+    executable: /usr/bin/python3
+  register: crowdsec_allowlist_result
+  changed_when: (crowdsec_allowlist_result.stdout | trim | from_json).changed
+
+- name: Inspect the private bouncer credential file
+  ansible.builtin.stat:
+    path: /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local
+  register: crowdsec_bouncer_secret
+  no_log: true
+
+- name: Create a private local-only bouncer credential once
+  when: not crowdsec_bouncer_secret.stat.exists
+  no_log: true
+  block:
+    - name: Register the role-owned bouncer through supported cscli
+      ansible.builtin.command:
+        argv: [/usr/bin/cscli, -o, raw, bouncers, add, praho-nftables]
+      register: crowdsec_bouncer_token
+      changed_when: true
+
+    - name: Store only the API key in the explicit private override
+      ansible.builtin.copy:
+        content: "api_key: {{ crowdsec_bouncer_token.stdout | trim | to_json }}\n"
+        dest: /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local
+        owner: root
+        group: root
+        mode: '0600'
+
+- name: Permit enforcement only after explicit qualification
+  ansible.builtin.copy:
+    content: ''
+    dest: /etc/praho-crowdsec/enforcement-ready
+    owner: root
+    group: root
+    mode: '0600'
+  when: not crowdsec_simulation
+
+- name: Inspect enforcement readiness before applying its policy
+  ansible.builtin.command:
+    argv: [/usr/bin/systemctl, is-active, crowdsec-firewall-bouncer]
+  register: crowdsec_bouncer_runtime
+  changed_when: false
+  failed_when: crowdsec_bouncer_runtime.rc not in [0, 3, 4]
+
+- name: Require restart for changed files unapplied policy or inactive enforcement
+  ansible.builtin.set_fact:
+    crowdsec_bouncer_restart: "{{ crowdsec_bouncer_copy.changed or crowdsec_managed_copy.changed or crowdsec_hub_copy.changed or crowdsec_applied_stamps.bouncer != crowdsec_configuration_digest + '\n' or crowdsec_bouncer_runtime.stdout | trim != 'active' }}"
+
+- name: Invalidate enforcement witness before a runtime change
+  ansible.builtin.file:
+    path: /var/lib/praho-crowdsec/bouncer-applied.sha256
+    state: absent
+  when: (not crowdsec_simulation and crowdsec_bouncer_restart) or (crowdsec_simulation and crowdsec_bouncer_runtime.stdout | trim != 'inactive')
+
+- name: Start enforcement only for the qualified enforcing mode
+  ansible.builtin.systemd_service:
+    name: crowdsec-firewall-bouncer
+    enabled: "{{ not crowdsec_simulation }}"
+    state: "{{ 'stopped' if crowdsec_simulation else ('restarted' if crowdsec_bouncer_restart else 'started') }}"
+
+- name: Install the restricted gateway key after helpers sudo and effective SSH proof
+  ansible.builtin.copy:
+    content: "restrict {{ crowdsec_gateway_public_key | trim }}\n"
+    dest: /home/praho-crowdsec/.ssh/authorized_keys
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Record fully converged enforcement or simulation only after runtime success
+  ansible.builtin.copy:
+    content: "{{ crowdsec_configuration_digest }}\n"
+    dest: /var/lib/praho-crowdsec/bouncer-applied.sha256
+    owner: root
+    group: root
+    mode: '0600'
+
+- name: Retire legacy protection only through an explicitly qualified enforcing adoption
+  ansible.builtin.include_tasks: retire_fail2ban.yml
+  when: crowdsec_retire_fail2ban
+
+- name: Return the enrolled installation and reviewed policy without credentials
+  ansible.builtin.debug:
+    msg:
+      - "PRAHO_CROWDSEC_INSTALLATION_ID={{ (crowdsec_enrollment.stdout | trim | from_json).installation_id }}"
+      - "PRAHO_CROWDSEC_CONFIGURATION_DIGEST={{ crowdsec_configuration_digest }}"

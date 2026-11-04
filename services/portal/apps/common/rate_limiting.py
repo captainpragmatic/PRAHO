@@ -8,6 +8,7 @@ import logging
 import random
 import time
 from collections.abc import Callable
+from http import HTTPStatus
 from typing import Any, ClassVar
 
 from django.conf import settings
@@ -19,6 +20,7 @@ from django.utils.cache import add_never_cache_headers
 from django.utils.translation import gettext as _
 
 from apps.common import counters
+from apps.common.auth_events import emit_auth_event
 from apps.common.request_ip import get_safe_client_ip
 from apps.common.store_unavailable import (
     STORE_UNAVAILABLE_RETRY_AFTER_SECONDS,
@@ -279,7 +281,7 @@ class AuthenticationRateLimitMiddleware:
         if email:
             account_attempts = counters.peek(f"auth_account_attempts_{email}")
             if account_attempts >= self.ACCOUNT_RATE_LIMIT:
-                logger.warning("🚨 [RateLimit] Account rate limit exceeded: %s (%s attempts)", email, account_attempts)
+                logger.warning("🚨 [RateLimit] Account rate limit exceeded (%s attempts)", account_attempts)
                 error_msg = _("Account temporarily locked due to too many failed attempts.")
                 return self._rate_limit_response(request, error_msg, self.ACCOUNT_WINDOW_SECONDS, 429)
         return None
@@ -310,6 +312,17 @@ class AuthenticationRateLimitMiddleware:
         self, request: HttpRequest, error_msg: str, retry_after: int, status_code: int
     ) -> HttpResponse:
         """Return appropriate rate limit response based on request type."""
+        if status_code == HTTPStatus.TOO_MANY_REQUESTS:
+            reason = (
+                "reset"
+                if request.path.startswith("/password-reset/")
+                else "mfa"
+                if request.path.startswith(("/mfa/", "/confirm-identity/"))
+                else "registration"
+                if request.path.startswith("/register/")
+                else "login"
+            )
+            emit_auth_event(request, "throttle_refusal", reason)
         recovery = request.path.startswith(LINK_PATHS)
         response: HttpResponse
         if self._is_api_or_htmx_request(request):
@@ -381,8 +394,10 @@ class AuthenticationRateLimitMiddleware:
                 account_attempts = counters.increment(account_cache_key, self.ACCOUNT_WINDOW_SECONDS)
 
                 logger.info(
-                    f"🔒 [RateLimit] Failed auth recorded: IP {client_ip} ({ip_attempts}), "
-                    f"Account {email} ({account_attempts})"
+                    "🔒 [RateLimit] Failed auth recorded: IP %s (%s), account attempts %s",
+                    client_ip,
+                    ip_attempts,
+                    account_attempts,
                 )
             else:
                 logger.info(f"🔒 [RateLimit] Failed auth recorded: IP {client_ip} ({ip_attempts})")
@@ -402,7 +417,7 @@ class AuthenticationRateLimitMiddleware:
             email = self._extract_email_from_request(request)
             if email:
                 counters.reset(f"auth_account_attempts_{email}")
-                logger.info("✅ [RateLimit] Account rate limit cleared for %s", email)
+                logger.info("✅ [RateLimit] Account rate limit cleared")
         except Exception as e:
             logger.error(f"🔥 [RateLimit] Failed to clear rate limits: {e}")
 

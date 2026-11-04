@@ -1,0 +1,10 @@
+[Unit]
+Requires=praho-crowdsec-firewall.service
+After=crowdsec.service praho-crowdsec-firewall.service
+ConditionPathExists=/etc/praho-crowdsec/enforcement-ready
+
+[Service]
+ExecStartPre=
+ExecStartPre=/usr/local/libexec/praho-crowdsec-bouncer -c /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml -t
+ExecStart=
+ExecStart=/usr/local/libexec/praho-crowdsec-bouncer -c /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml

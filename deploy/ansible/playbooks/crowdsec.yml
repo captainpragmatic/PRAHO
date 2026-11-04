@@ -1,0 +1,7 @@
+---
+- name: Adopt explicitly enrolled CrowdSec protection
+  hosts: crowdsec
+  become: true
+  gather_facts: true
+  roles:
+    - crowdsec

@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -133,6 +134,45 @@ def test_every_required_workflow_runs_in_the_merge_queue(workflow: str) -> None:
     )
     types = (triggers["merge_group"] or {}).get("types")
     assert types is None or "checks_requested" in types, workflow
+
+
+def test_crowdsec_native_qualification_runs_once_before_the_aggregate() -> None:
+    workflow = load_workflow(WORKFLOWS / "integration.yml")
+    job = workflow["jobs"]["integration-test"]
+    steps = job["steps"]
+    (native,) = [step for step in steps if step.get("run") == "make test-crowdsec-docker"]
+    (aggregate,) = [step for step in steps if step.get("run") == "make test-integration"]
+    assert steps.index(native) < steps.index(aggregate)
+    for required in (job, native, aggregate):
+        assert "if" not in required and "continue-on-error" not in required
+
+    # Derive the native files from the actual Make recipe so a stale CI exclusion cannot
+    # silently miss new suites or suppress unrelated Docker coverage.
+    makefile = (REPO / "Makefile").read_text(encoding="utf-8")
+    recipe = re.search(r"^test-crowdsec-docker:\n((?:\t[^\n]*\n)+)", makefile, re.MULTILINE)
+    assert recipe is not None
+    (native_glob,) = re.findall(r"tests/deploy/[^\s]+_docker\.py", recipe.group(1))
+    native_files = set(REPO.glob(native_glob))
+    assert native_files, "the required native target must collect real files"
+
+    options = shlex.split(aggregate.get("env", {}).get("PYTEST_ADDOPTS", ""))
+    assert options == [f"--ignore-glob={native_glob}"], (
+        "the aggregate must exclude exactly the already-required CrowdSec native suites"
+    )
+    ignored_files = set(REPO.glob(options[0].split("=", 1)[1]))
+    assert ignored_files == native_files
+    assert "PYTEST_ADDOPTS" not in workflow.get("env", {})
+    assert "PYTEST_ADDOPTS" not in job.get("env", {})
+    for step in steps:
+        if step is not aggregate:
+            assert "--ignore" not in step.get("env", {}).get("PYTEST_ADDOPTS", "")
+
+    other_native_files = set(REPO.glob("tests/deploy/test_*_docker.py")) - native_files
+    assert other_native_files, "unrelated native suites must remain eligible"
+    for relative in ("tests/deploy/test_caddy_routing.py", "tests/deploy/test_ssh_hardening_docker.py"):
+        path = REPO / relative
+        assert path.is_file() and path not in ignored_files
+    assert not other_native_files & ignored_files
 
 
 def test_the_merge_queue_squashes_and_outwaits_the_slowest_job() -> None:

@@ -1,0 +1,17 @@
+---
+- name: Verify persistent protection selection before legacy package or jail changes
+  ansible.builtin.import_tasks: fail2ban_state.yml
+
+- name: Install legacy protection until explicitly retired
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+  when: praho_fail2ban_state.state == 'absent'
+
+- name: Configure fail2ban
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    mode: '0644'
+  when: praho_fail2ban_state.state == 'absent'
+  notify: restart fail2ban
