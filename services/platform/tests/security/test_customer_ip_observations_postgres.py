@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 from django.core.cache import cache
 from django.db import connection, transaction
-from django.db.models import QuerySet
 from django.db.migrations.executor import MigrationExecutor
+from django.db.models import QuerySet
 from django.test import Client, TransactionTestCase, override_settings
 from django.utils import timezone
 
