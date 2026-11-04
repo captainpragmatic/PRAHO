@@ -12,6 +12,8 @@ from django.utils.translation import gettext_lazy as _
 
 from apps.common.secret_urls import secure_logging_config
 
+from .logging_config import add_crowdsec_auth_logging
+
 # ===============================================================================
 # CORE DJANGO SETTINGS
 # ===============================================================================
@@ -478,25 +480,7 @@ IPWARE_TRUSTED_PROXY_LIST: list[str] = [
 CROWDSEC_AUTH_PSEUDONYM_KEY = os.environ.get("CROWDSEC_AUTH_PSEUDONYM_KEY", "")
 CROWDSEC_AUTH_LOG_PATH = os.environ.get("CROWDSEC_AUTH_LOG_PATH", "/var/log/praho/portal/portal-auth.jsonl")
 CROWDSEC_AUTH_EVENTS_ENABLED = os.environ.get("CROWDSEC_AUTH_EVENTS_ENABLED", "false").lower() == "true"
-LOGGING["formatters"]["crowdsec_auth"] = {"format": "%(message)s"}
-LOGGING["handlers"]["crowdsec_auth"] = {
-    "class": "apps.common.auth_events.SecurityEventFileHandler"
-    if CROWDSEC_AUTH_LOG_PATH
-    else "apps.common.auth_events.SecurityEventStreamHandler",
-    "formatter": "crowdsec_auth",
-    **(
-        {
-            "filename": CROWDSEC_AUTH_LOG_PATH,
-            "maxBytes": 10 * 1024 * 1024,
-            "backupCount": 4,
-            "delay": True,
-            "encoding": "utf-8",
-        }
-        if CROWDSEC_AUTH_LOG_PATH
-        else {"stream": "ext://sys.stdout"}
-    ),
-}
-LOGGING["loggers"]["praho.crowdsec.auth"] = {"handlers": ["crowdsec_auth"], "level": "INFO", "propagate": False}
+LOGGING = add_crowdsec_auth_logging(LOGGING, CROWDSEC_AUTH_LOG_PATH)
 
 # Handler filters cover Django request and exception logging as well as app logs.
 

@@ -7,6 +7,7 @@ import multiprocessing
 import os
 import stat
 from datetime import UTC, datetime, timedelta, timezone
+from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
@@ -18,7 +19,12 @@ from django.urls import reverse
 from django.utils import timezone as django_timezone
 from requests import Response
 
-from apps.common.auth_events import SecurityEventFileHandler, account_pseudonym
+from apps.common.auth_events import (
+    EVENT_LOGGER,
+    SecurityEventFileHandler,
+    SecurityEventStreamHandler,
+    account_pseudonym,
+)
 
 
 def _write_worker_events(path, ready, worker):
@@ -35,6 +41,7 @@ def _write_worker_events(path, ready, worker):
 
 @override_settings(
     CROWDSEC_AUTH_EVENTS_ENABLED=True,
+    CROWDSEC_AUTH_LOG_PATH="",
     RATE_LIMITING_ENABLED=True,
     DEBUG=True,
     IPWARE_TRUSTED_PROXY_LIST=["127.0.0.1/32"],
@@ -48,6 +55,29 @@ class CrowdSecAuthenticationEventsTests(TestCase):
         self.addCleanup(cache.clear)
         self.credentials = {"email": "PrivatePerson@example.test", "password": "Private-password-123!"}
         self.address = "198.51.100.29"
+        self.event_stream = StringIO()
+        self.event_handler = SecurityEventStreamHandler(self.event_stream)
+        self.event_handler.setLevel(logging.INFO)
+        self.event_handler.setFormatter(logging.Formatter("%(message)s"))
+        self.addCleanup(self.event_handler.close)
+        self.enterContext(patch.object(EVENT_LOGGER, "handlers", [self.event_handler]))
+        self.enterContext(patch.object(EVENT_LOGGER, "level", logging.INFO))
+        self.enterContext(patch.object(EVENT_LOGGER, "disabled", False))
+        self.enterContext(patch.object(EVENT_LOGGER, "propagate", False))
+
+    def events(self) -> list[dict]:
+        """Read bytes accepted by the real dedicated handler, rather than log-call attempts."""
+        serialized = self.event_stream.getvalue()
+        self.assertNotIn(self.credentials["email"].lower(), serialized.lower())
+        self.assertNotIn(self.credentials["password"], serialized)
+        events = [json.loads(line) for line in serialized.splitlines()]
+        for event in events:
+            self.assertEqual(set(event), {"schema", "timestamp", "event", "ip", "account", "reason"})
+            self.assertEqual(event["schema"], 1)
+            self.assertTrue(event["timestamp"].endswith("Z"))
+            if event["account"] is not None:
+                self.assertRegex(event["account"], r"^[0-9a-f]{64}$")
+        return events
 
     def answer(self, category: str, status: int = 401) -> Response:
         response = Response()
@@ -64,14 +94,11 @@ class CrowdSecAuthenticationEventsTests(TestCase):
         )
 
     def test_middleware_refusals_keep_attacks_visible_after_the_failure_budget(self) -> None:
-        with (
-            patch("apps.api_client.services.portal_request", return_value=self.answer("credentials")) as upstream,
-            self.assertLogs("praho.crowdsec.auth", level="INFO") as recorded,
-        ):
+        with patch("apps.api_client.services.portal_request", return_value=self.answer("credentials")) as upstream:
             responses = [self.submit() for _ in range(7)]
         self.assertEqual(upstream.call_count, 5)
         self.assertEqual([response.status_code for response in responses], [200] * 5 + [429, 429])
-        events = [json.loads(record.getMessage()) for record in recorded.records]
+        events = self.events()
         self.assertEqual([event["event"] for event in events], ["auth_failure"] * 5 + ["throttle_refusal"] * 2)
         self.assertEqual({event["ip"] for event in events}, {self.address})
         self.assertEqual(len({event["account"] for event in events}), 1)
@@ -81,24 +108,20 @@ class CrowdSecAuthenticationEventsTests(TestCase):
         self.assertNotIn("Invalid authentication code", responses[0].content.decode())
 
     def test_a_second_factor_refusal_and_an_outage_are_distinct(self) -> None:
-        with self.assertLogs("praho.crowdsec.auth", level="INFO") as recorded:
-            with patch("apps.api_client.services.portal_request", return_value=self.answer("second_factor")):
-                refused = self.submit()
-            with (
-                patch("apps.api_client.services.portal_request", return_value=self.answer("second_factor", 503)),
-                patch("apps.api_client.services.PlatformAPIClient._retry_wait", return_value=None),
-            ):
-                unavailable = self.submit()
-        events = [json.loads(record.getMessage()) for record in recorded.records]
+        with patch("apps.api_client.services.portal_request", return_value=self.answer("second_factor")):
+            refused = self.submit()
+        with (
+            patch("apps.api_client.services.portal_request", return_value=self.answer("second_factor", 503)),
+            patch("apps.api_client.services.PlatformAPIClient._retry_wait", return_value=None),
+        ):
+            unavailable = self.submit()
+        events = self.events()
         self.assertEqual([event["event"] for event in events], ["mfa_failure", "protection_degraded"])
         self.assertNotIn("Invalid authentication code", refused.content.decode())
         self.assertIn("temporarily unavailable", unavailable.content.decode())
 
     def test_a_forged_cloudflare_pair_never_overrides_caddy_forwarding(self) -> None:
-        with (
-            patch("apps.api_client.services.portal_request", return_value=self.answer("credentials")),
-            self.assertLogs("praho.crowdsec.auth", level="INFO") as recorded,
-        ):
+        with patch("apps.api_client.services.portal_request", return_value=self.answer("credentials")):
             self.client.post(
                 reverse("users:login"),
                 self.credentials,
@@ -106,7 +129,7 @@ class CrowdSecAuthenticationEventsTests(TestCase):
                 HTTP_CF_RAY="attacker-forged-ray",
                 HTTP_CF_CONNECTING_IP="203.0.113.77",
             )
-        event = json.loads(recorded.records[0].getMessage())
+        event = self.events()[0]
         self.assertEqual(event["ip"], self.address)
 
     def test_daily_pseudonyms_rotate_and_do_not_depend_on_local_timezone(self) -> None:
@@ -124,7 +147,7 @@ class CrowdSecAuthenticationEventsTests(TestCase):
     def test_event_writer_failure_exposes_degraded_health_without_a_new_refusal(self) -> None:
         with (
             patch("apps.api_client.services.portal_request", return_value=self.answer("credentials")),
-            patch("apps.common.auth_events.EVENT_LOGGER.info", side_effect=OSError("private-sentinel-secret")),
+            patch.object(self.event_stream, "write", side_effect=OSError("private-sentinel-secret")),
             self.assertLogs("apps.common.auth_events", level="CRITICAL") as fallback,
         ):
             response = self.submit()
@@ -136,24 +159,19 @@ class CrowdSecAuthenticationEventsTests(TestCase):
 
     @override_settings(CROWDSEC_AUTH_EVENTS_ENABLED=False)
     def test_disabled_logging_emits_nothing_and_reports_disabled(self) -> None:
-        with (
-            patch("apps.api_client.services.portal_request", return_value=self.answer("credentials")),
-            self.assertNoLogs("praho.crowdsec.auth", level="INFO"),
-        ):
+        with patch("apps.api_client.services.portal_request", return_value=self.answer("credentials")):
             response = self.submit()
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.events(), [])
         state = self.client.get(reverse("portal_status")).json()["protection"]
         self.assertIs(state["auth_events_enabled"], False)
         self.assertIs(state["auth_events"], False)
 
     def test_mapped_ipv6_events_use_the_actual_ipv4_host_family(self) -> None:
         self.address = "::ffff:198.51.100.29"
-        with (
-            patch("apps.api_client.services.portal_request", return_value=self.answer("credentials")),
-            self.assertLogs("praho.crowdsec.auth", level="INFO") as recorded,
-        ):
+        with patch("apps.api_client.services.portal_request", return_value=self.answer("credentials")):
             self.submit()
-        self.assertEqual(json.loads(recorded.records[0].getMessage())["ip"], "198.51.100.29")
+        self.assertEqual(self.events()[0]["ip"], "198.51.100.29")
 
     def test_event_files_and_rotations_remain_private_under_a_permissive_umask(self) -> None:
         with TemporaryDirectory() as directory:
@@ -214,24 +232,23 @@ class CrowdSecAuthenticationEventsTests(TestCase):
         answer._content = json.dumps(
             {"success": False, "code": "reauth_failed", "failure_category": "second_factor"}
         ).encode()
-        with self.assertLogs("praho.crowdsec.auth", level="INFO") as recorded:
-            with patch("apps.api_client.services.portal_request", return_value=answer):
-                refused = self.client.post(
-                    reverse("users:confirm_identity"),
-                    {"password": self.credentials["password"], "token": "000000"},
-                    HTTP_X_FORWARDED_FOR=self.address,
-                )
-            with (
-                patch("apps.api_client.services.portal_request", return_value=self.answer("second_factor", 503)),
-                patch("apps.api_client.services.PlatformAPIClient._retry_wait", return_value=None),
-            ):
-                unavailable = self.client.post(
-                    reverse("users:confirm_identity"),
-                    {"password": self.credentials["password"], "token": "000000"},
-                    HTTP_X_FORWARDED_FOR=self.address,
-                )
+        with patch("apps.api_client.services.portal_request", return_value=answer):
+            refused = self.client.post(
+                reverse("users:confirm_identity"),
+                {"password": self.credentials["password"], "token": "000000"},
+                HTTP_X_FORWARDED_FOR=self.address,
+            )
+        with (
+            patch("apps.api_client.services.portal_request", return_value=self.answer("second_factor", 503)),
+            patch("apps.api_client.services.PlatformAPIClient._retry_wait", return_value=None),
+        ):
+            unavailable = self.client.post(
+                reverse("users:confirm_identity"),
+                {"password": self.credentials["password"], "token": "000000"},
+                HTTP_X_FORWARDED_FOR=self.address,
+            )
         self.assertEqual(
-            [json.loads(record.getMessage())["event"] for record in recorded.records],
+            [event["event"] for event in self.events()],
             ["mfa_failure", "protection_degraded"],
         )
         self.assertContains(refused, "password or code is not right")
@@ -240,10 +257,7 @@ class CrowdSecAuthenticationEventsTests(TestCase):
     def test_reset_acceptance_and_middleware_refusals_are_separate_events(self) -> None:
         answer = self.answer("", 200)
         answer._content = b'{"success":true}'
-        with (
-            patch("apps.api_client.services.portal_request", return_value=answer) as upstream,
-            self.assertLogs("praho.crowdsec.auth", level="INFO") as recorded,
-        ):
+        with patch("apps.api_client.services.portal_request", return_value=answer) as upstream:
             responses = [
                 self.client.post(
                     reverse("users:password_reset"),
@@ -254,7 +268,7 @@ class CrowdSecAuthenticationEventsTests(TestCase):
             ]
         self.assertEqual([response.status_code for response in responses], [302] * 5 + [429, 429])
         self.assertEqual(upstream.call_count, 5)
-        events = [json.loads(record.getMessage()) for record in recorded.records]
+        events = self.events()
         self.assertEqual(
             [event["event"] for event in events], ["password_reset_request"] * 5 + ["throttle_refusal"] * 2
         )
@@ -264,15 +278,12 @@ class CrowdSecAuthenticationEventsTests(TestCase):
         with (
             patch("apps.api_client.services.portal_request", return_value=self.answer("", 503)),
             patch("apps.api_client.services.PlatformAPIClient._retry_wait", return_value=None),
-            self.assertLogs("praho.crowdsec.auth", level="INFO") as recorded,
         ):
             response = self.client.post(
                 reverse("users:password_reset"), {"email": self.credentials["email"]}, HTTP_X_FORWARDED_FOR=self.address
             )
         self.assertEqual(response.status_code, 503)
-        self.assertEqual(
-            [json.loads(record.getMessage())["event"] for record in recorded.records], ["protection_degraded"]
-        )
+        self.assertEqual([event["event"] for event in self.events()], ["protection_degraded"])
 
     def test_ordinary_authentication_logs_do_not_duplicate_the_account_identifier(self) -> None:
         with (
@@ -303,7 +314,7 @@ class CrowdSecAuthenticationEventsTests(TestCase):
             patch("apps.api_client.services.portal_request", return_value=response),
             patch("apps.users.views._get_user_customer_memberships", return_value=[]),
             patch("apps.users.views.api_client.get_customer_profile", return_value={}),
-            patch("apps.common.auth_events.EVENT_LOGGER.info", side_effect=OSError("private-log-error")),
+            patch.object(self.event_stream, "write", side_effect=OSError("private-log-error")),
         ):
             signed_in = self.submit()
         self.assertEqual(signed_in.status_code, 302)
@@ -319,7 +330,6 @@ class CrowdSecAuthenticationEventsTests(TestCase):
         with (
             patch("apps.api_client.services.portal_request", return_value=self.answer("credentials")),
             patch("apps.common.auth_events.cache", wraps=cache) as health_cache,
-            self.assertLogs("praho.crowdsec.auth", level="INFO"),
         ):
             health_cache.set.side_effect = OSError("private-cache-error")
             response = self.submit()

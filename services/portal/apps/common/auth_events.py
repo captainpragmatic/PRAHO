@@ -137,6 +137,37 @@ class SecurityEventFileHandler(_RaiseHandlerErrors, RotatingFileHandler):
             os.close(directory)
 
 
+def _event_handler() -> SecurityEventFileHandler | SecurityEventStreamHandler | None:
+    if not EVENT_LOGGER.isEnabledFor(logging.INFO) or len(EVENT_LOGGER.handlers) != 1:
+        return None
+    handler = EVENT_LOGGER.handlers[0]
+    if handler.level > logging.INFO or getattr(handler, "_closed", False):
+        return None
+    path = getattr(settings, "CROWDSEC_AUTH_LOG_PATH", "")
+    if path:
+        if isinstance(handler, SecurityEventFileHandler) and handler.baseFilename == os.path.abspath(path):
+            return handler
+    elif isinstance(handler, SecurityEventStreamHandler):
+        return handler
+    return None
+
+
+def _write_auth_event(message: str) -> None:
+    handler = _event_handler()
+    if handler is None:
+        raise OSError("Dedicated security event writer is unavailable")
+    record = EVENT_LOGGER.makeRecord(EVENT_LOGGER.name, logging.INFO, __file__, 0, message, (), None)
+    filtered = EVENT_LOGGER.filter(record)
+    if not filtered:
+        raise OSError("Security event was filtered")
+    if isinstance(filtered, logging.LogRecord):
+        record = filtered
+    # Handle only the approved sink, never an ordinary logger reached by propagation.
+    # Handler.handle() reports filter refusal; the dedicated emitters raise on I/O failure.
+    if not handler.handle(record):
+        raise OSError("Security event was not recorded")
+
+
 def account_pseudonym(value: str, *, at: datetime | None = None) -> str:
     now = (at or timezone.now()).astimezone(UTC)
     secret = getattr(settings, "CROWDSEC_AUTH_PSEUDONYM_KEY", "") or settings.SECRET_KEY
@@ -180,7 +211,9 @@ def recording_health() -> dict[str, bool]:
     try:
         return {
             "auth_events_enabled": enabled,
-            "auth_events": enabled and cache.get(HEALTH_KEYS["auth_events"], False) is True,
+            "auth_events": enabled
+            and _event_handler() is not None
+            and cache.get(HEALTH_KEYS["auth_events"], False) is True,
             "customer_ip_observations_enabled": cache.get("crowdsec:health:customer-ip-enabled", False) is True,
             "customer_ip_observations": cache.get(HEALTH_KEYS["customer_ip_observations"], False) is True,
         }
@@ -240,7 +273,7 @@ def emit_auth_event(request: HttpRequest, event: str, reason: str) -> bool:
             "account": account_pseudonym(account, at=now) if account else None,
             "reason": reason,
         }
-        EVENT_LOGGER.info(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False))
+        _write_auth_event(json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False))
         _health("auth_events", True)
         return True
     except Exception:
