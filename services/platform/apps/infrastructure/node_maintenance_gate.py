@@ -117,6 +117,9 @@ def begin_account_job(
             )
             .exclude(pk=job.pk)
             .exclude(
+                # Missing JSON keys are SQL NULL: only an explicit matching child may bypass this hold.
+                parameters__quota_parent__job_id__isnull=False,
+                parameters__quota_parent__token__isnull=False,
                 parameters__quota_parent__job_id=str(job.pk),
                 parameters__quota_parent__token=str(job.execution_token or ""),
             )
