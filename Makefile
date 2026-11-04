@@ -72,6 +72,8 @@ help:
 	@echo "  VIRTUALMIN_LAB=1 make dev - Platform on :8700 against the Docker Virtualmin lab (starts and registers it if needed)"
 	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
+	@echo "  make test-portal-checkout-browser - Opt-in Chromium checkout boundary acceptance (Platform/Stripe doubled)"
+	@echo "  make test-hosting-plan-checkout-full - Real Portal/Platform payment journey (isolated PostgreSQL, synthetic provider)"
 	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp-bg)"
 	@echo "  make test-e2e-orm      - ORM E2E subset (requires the healthy owned stack)"
 	@echo "  make test-security     - Validate service isolation"
@@ -371,6 +373,23 @@ test-portal-server:
 	@echo "🧪 [Portal] Server acceptance tests (real gunicorn, threaded workers)..."
 	@cd services/portal && PORTAL_SERVER_TESTS=1 PYTHONPATH= PYTHONNOUSERSITE=1 DJANGO_SETTINGS_MODULE="$(PORTAL_DJANGO_SETTINGS_MODULE)" $(PWD)/$(VENV_DIR)/bin/python -m pytest -m server --no-cov -v tests/server
 	@echo "✅ Portal server acceptance tests completed!"
+
+# Real Portal HTTP/render/CSRF/JavaScript, with explicit Platform DTO and Stripe SDK doubles.
+# This is browser boundary acceptance; the separate signed API and native gates remain required.
+.PHONY: test-portal-checkout-browser
+CHECKOUT_BROWSER_ARGS ?=
+test-portal-checkout-browser: build-css
+	@$(PYTHON_PORTAL) -m pytest -o addopts= -m browser --no-cov -v tests/browser/test_plan_change_checkout.py $(CHECKOUT_BROWSER_ARGS)
+
+# Real Portal password/session/HMAC + Platform/finance/webhook, synthetic provider only.
+# This target can create/drop only hosting_browser/test_hosting_browser on loopback PostgreSQL.
+.PHONY: test-hosting-plan-checkout-full
+HOSTING_BROWSER_DB_PORT ?= 35476
+HOSTING_FULL_ARGS ?=
+HOSTING_FULL_ENV = HOSTING_CHECKOUT_FULL=1 DB_NAME=hosting_browser DB_HOST=127.0.0.1 DB_PORT=$(HOSTING_BROWSER_DB_PORT) DB_USER=praho_hosting_test DB_PASSWORD=praho_hosting_local_fixture PRAHO_SKIP_DOTENV=1 PYTHONDONTWRITEBYTECODE=1
+test-hosting-plan-checkout-full: build-css
+	@$(HOSTING_FULL_ENV) $(PYTHON_SHARED) services/platform/tests/browser/bootstrap_database.py
+	@cd services/platform && $(HOSTING_FULL_ENV) PYTHONPATH=$(PWD)/services/platform:$(PWD) $(PWD)/$(VENV_DIR)/bin/python manage.py test tests.browser.test_plan_change_full_chain --settings=tests.browser.full_checkout_driver_settings --noinput --verbosity=2 $(HOSTING_FULL_ARGS)
 
 # ===============================================================================
 # TEST COVERAGE 📊
