@@ -177,6 +177,18 @@ enforcement, stops the writer, and performs the unchanged strict cardinality,
 endpoint and gap checks on stable sets. The affected native test passes; no
 malformed range is accepted, no assertion removed, and no runtime binary changed.
 
+Review also reproduced two Portal gaps: deployed settings replaced the dedicated
+event logger, and MFA-management APIs omitted the privately verified refusal
+category. Shared logging configuration now keeps the approved acquisition sink
+in effective production/staging settings, and recording health requires an
+approved handler to accept the record. Fresh-process logging/settings regressions
+pass 36 tests and 16 subtests; all 18 existing event/privacy/rotation cases pass.
+MFA metadata is assigned at the actual password/code verification boundaries and
+survives both Portal normalizers without changing browser messages or sessions.
+The focused Platform suite passes 91 tests and 83 subtests, and Portal regression
+passes 33 tests and 19 subtests. Validation, policy, limit and infrastructure
+refusals remain excluded from authentication-failure counts.
+
 GitGuardian's GitHub App flags two public
 `CROWDSEC_SSH_CONFIG_DIGESTS` values as generic high-entropy secrets. These are
 SHA-256 fingerprints of the complete canonical sshd configurations for the two
