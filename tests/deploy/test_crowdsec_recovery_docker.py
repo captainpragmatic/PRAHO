@@ -185,6 +185,7 @@ def element_cardinality(value: object) -> int:
 
 
 def test_ten_thousand_disjoint_decisions_fit_one_atomic_kernel_update(bouncer_target: str) -> None:
+    """Check live enforcement, then count the unchanged kernel state with its writer stopped."""
     expect_packets(bouncer_target, set())
     initial = [
         decision(1, "198.51.100.8"),
@@ -210,6 +211,14 @@ for name in ('wmem_max','wmem_default'):
         pytest.fail(
             "10,000-decision capacity failed: " + docker("exec", bouncer_target, "python3", "-c", diagnostics).stdout
         )
+    expect_packets(bouncer_target, {"198.51.100.8", "fd00:767::8"})
+    # Large nft dumps are multipart: concurrent replacements can produce an inconsistent
+    # listing, including inverted ranges, despite valid point lookups and packet enforcement.
+    # The qualified TERM path preserves kernel elements and their original timeouts. Quiesce
+    # that writer before the strict full-cardinality snapshot; never accept malformed ranges.
+    pid = process_id(bouncer_target)
+    docker("exec", bouncer_target, "kill", "-TERM", pid)
+    wait_exited(bouncer_target, pid)
     for family, expected in (("ip", 9998), ("ip6", 2)):
         observed = json.loads(
             docker("exec", bouncer_target, "nft", "--json", "list", "set", family, TABLES[family], "bans").stdout

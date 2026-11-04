@@ -113,7 +113,8 @@ four existing deselections). The integrated root run needed a focused rerun of
 eight sandbox socket failures; all ten tests in those two modules passed with
 local socket access. The non-Docker CrowdSec suite passes **277 tests**, and all
 **25 existing SSH tests** pass. Full type checks pass for **762 Platform** and
-**113 Portal** files. Final required gates pass on the frozen implementation:
+**113 Portal** files. The initial local verification recorded the following
+results; the revised head must also pass the complete remote gates below:
 
 | Check | Result |
 |---|---|
@@ -165,6 +166,16 @@ status-page user fixtures, and customer-IP observation erasure coverage. Those
 failures are merge blockers and require regression verification on the repaired
 head and its queued squash commit. Local amd64-builder emulation is unavailable
 (`exec format error`); GitHub's native amd64 qualification verifies that build.
+
+An additional full native rerun passed 43 cases but found inconsistent interval
+JSON during a concurrent 10,000-decision set dump. Two controlled reproductions
+returned an inverted range with 276 or more seconds of TTL left, while live
+point-membership and HTTPS checks passed. After the qualified stop preserved
+kernel sets, exact cardinalities were 9,998 IPv4 and two IPv6 decisions, with all
+boundaries and protected access intact. The capacity test now proves live
+enforcement, stops the writer, and performs the unchanged strict cardinality,
+endpoint and gap checks on stable sets. The affected native test passes; no
+malformed range is accepted, no assertion removed, and no runtime binary changed.
 
 GitGuardian's GitHub App flags two public
 `CROWDSEC_SSH_CONFIG_DIGESTS` values as generic high-entropy secrets. These are
