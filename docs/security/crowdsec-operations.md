@@ -234,7 +234,9 @@ retirement preserves independent host protection and history.
 
 ## Console recovery
 
-For enforcement recovery, use the console to apply the reviewed simulation policy.
+For enforcement recovery, use the console to apply the reviewed simulation policy
+with `crowdsec_simulation: true` and `crowdsec_retire_fail2ban: false`. The existing
+retirement witness remains effective; recovery does not revive legacy protection.
 The role stops the bouncer, removes its start permission and clears only owned ban
 sets. Protected-address repair remains independent from ban membership. Ordinary
 bouncer stop/restart preserves existing kernel expiry timers; simulation explicitly
