@@ -409,13 +409,17 @@ def _baseline_entries(source: str) -> dict[str, str]:
 class SignalHandlerIsolationTests(SimpleTestCase):
     def test_repository_signal_handlers_are_isolated(self) -> None:
         sources = _signal_sources()
-        self.assertEqual(len(sources), 20)
+        self.assertEqual(len(sources), 24)
         self.assertIn(APP_ROOT / "common/setup_signals.py", sources)
         self.assertIn(APP_ROOT / "provisioning/virtualmin_signals.py", sources)
         self.assertIn(APP_ROOT / "provisioning/account_hostname_signals.py", sources)
         self.assertIn(APP_ROOT / "provisioning/hosting_limit_signals.py", sources)
         self.assertIn(APP_ROOT / "provisioning/hosting_node_policy_signals.py", sources)
         self.assertIn(APP_ROOT / "billing/custom_signals.py", sources)
+        self.assertIn(APP_ROOT / "billing/plan_change_signals.py", sources)
+        self.assertIn(APP_ROOT / "billing/plan_change_payment_signals.py", sources)
+        self.assertIn(APP_ROOT / "billing/plan_change_review_signals.py", sources)
+        self.assertIn(APP_ROOT / "billing/plan_change_notice_signals.py", sources)
         self.assertIn(APP_ROOT / "provisioning/signals.py", sources)
         unmarked: list[str] = []
         exceptions: dict[str, str] = {}

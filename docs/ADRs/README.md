@@ -36,6 +36,7 @@ providing a historical record of why the system is built the way it is.
 
 | # | Title | Status | Date |
 |---|-------|--------|------|
+| [ADR-0074](ADR-0074-paid-hosting-plan-changes.md) | Paid hosting plan changes | Proposed | 2026-11-04 |
 | [ADR-0068](ADR-0068-observational-hosting-usage.md) | Observational hosting usage | Proposed | 2026-10-30 |
 | [ADR-0001](ADR-0001-pytest-playwright-for-e2e-testing.md) | pytest-playwright for E2E Testing | Accepted | 2025-08-25 |
 | [ADR-0002](ADR-0002-strategic-linting-framework.md) | Strategic Linting Framework | Accepted | 2025-08-25 |
@@ -225,6 +226,7 @@ Billing Ownership
 - [ADR-0029](ADR-0029-config-drift-detection.md) — Drift detection and remediation workflow
 - [ADR-0038](ADR-0038-proforma-payment-convergence.md) — Atomic proforma payment and invoice convergence
 - [ADR-0039](ADR-0039-praho-owned-recurring-billing.md) — PRAHO-owned subscriptions, consent, collection, and usage billing
+- [ADR-0074](ADR-0074-paid-hosting-plan-changes.md) — customer-accepted supplement payments, scheduled downgrades, historical coverage and separately verified native fulfilment
 - [ADR-0041](ADR-0041-foreign-currency-efactura-accounting.md) — provenanced FX snapshots and multi-currency e-Factura VAT
 - [ADR-0053](ADR-0053-every-settled-refund-issues-a-storno.md) — every settled refund issues a storno credit note: amount, allocation, numbering, communication, e-Factura gate
 - [ADR-0059](ADR-0059-differential-virtualmin-backups.md) — differential Virtualmin backups: a chain tracked on the account with epoch-fenced transitions, node-side binding under a lock with fingerprints, a two-layer write barrier for pair restores, retention that keeps bases, an hourly scheduler; the flag gates creation only
@@ -233,8 +235,8 @@ Billing Ownership
 
 ## Statistics
 
-- **Total ADRs**: 67 (ADR-0001 through ADR-0066, and ADR-0068)
-- **Active**: 60 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
+- **Total ADRs**: 68 (ADR-0001 through ADR-0066, ADR-0068 and ADR-0074)
+- **Active**: 61 (in the Active Decisions table: Accepted, Active, Implemented or Proposed)
 - **Partially Superseded**: 1
 - **Superseded / Historical**: 5
 - **Next available**: ADR-0067

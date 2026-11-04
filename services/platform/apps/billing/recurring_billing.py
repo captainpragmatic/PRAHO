@@ -20,7 +20,7 @@ from apps.settings.services import SettingsService
 
 from .config import FIXED_RENEWAL_COLLECTION_LEAD_DAYS, get_invoice_generation_lead_days
 from .fiscal_identity import billing_country_code, get_customer_fiscal_identity
-from .plan_change_renewals import renewal_product_identity
+from .plan_change_renewals import renewal_product_identity, with_plan_change_renewal_data
 
 logger = logging.getLogger(__name__)
 
@@ -422,7 +422,9 @@ class RecurringBillingOrchestrator:
                 # subscription, but not eager joined mandate/customer rows.
                 # Lock IDs first, then materialize fresh relations and recheck
                 # the same service eligibility in a new statement.
-                candidate_subscriptions = lock_many_and_load(due_subscriptions, no_key=True)
+                candidate_subscriptions = lock_many_and_load(
+                    with_plan_change_renewal_data(due_subscriptions), no_key=True
+                )
                 result["subscriptions_checked"] = len(candidate_subscriptions)
 
                 groups: dict[tuple[object, ...], list[tuple[Subscription, BillingCycle, datetime]]] = {}

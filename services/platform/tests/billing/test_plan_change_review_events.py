@@ -3,10 +3,12 @@
 from contextlib import ExitStack
 from uuid import uuid4
 
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
 from django.db import connection, transaction
 from django.test import TestCase, TransactionTestCase
 
+from apps.audit.models import AuditEvent
 from apps.billing.models import Payment
 from apps.billing.plan_change_review_models import PlanChangeReviewEvent
 from apps.billing.plan_change_review_service import process_financial_review, sweep_financial_reviews
@@ -149,6 +151,20 @@ class SignedPlanChangeReviewTests(VerifiedPlanChangeCheckoutFixture, Transaction
         event.refresh_from_db()
         self.assertIsNotNone(event.processed_at)
         self.assertEqual(event.reviewed_changes, [str(change.pk)])
+        fact_audit = AuditEvent.objects.get(
+            content_type=ContentType.objects.get_for_model(PlanChangeReviewEvent),
+            object_id=str(event.pk),
+            action="create",
+        )
+        self.assertEqual(fact_audit.new_values["source_id"], "dp_plan_review")
+        self.assertEqual(fact_audit.new_values["reason"], "dispute")
+        transitions = AuditEvent.objects.filter(
+            content_type=ContentType.objects.get_for_model(type(change)),
+            object_id=str(change.pk),
+            action="update",
+            new_values__status="paid_review",
+        )
+        self.assertEqual(transitions.count(), 1)
 
     def test_worker_waits_for_its_document_before_customer_and_sweep_recovers_lost_enqueue(self) -> None:
         if connection.vendor != "postgresql":

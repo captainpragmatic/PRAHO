@@ -174,14 +174,9 @@ class PaymentSuccessService:
                     payment.meta = {**(payment.meta or {}), **meta_update}
                     payment.save(update_fields=["meta", "updated_at"])
 
-                if (payment.meta or {}).get("source") == "hosting_plan_change":
-                    from .plan_change_payment_service import stage_plan_change_settlement  # noqa: PLC0415
+                plan_change_staged = PaymentSuccessService._stage_plan_change_settlement(payment)
 
-                    # Persist required recovery before gateway facts commit.
-                    # An outer webhook/replay transaction may own the locks.
-                    stage_plan_change_settlement(payment)
-
-            if (payment.meta or {}).get("source") == "hosting_plan_change":
+            if plan_change_staged:
                 return Ok(payment)
 
             # Gateway facts commit before document, promotion and gift-card locks.
@@ -201,6 +196,17 @@ class PaymentSuccessService:
             return Err(f"Payment-success convergence failed: {exc}")
 
     @staticmethod
+    def _stage_plan_change_settlement(payment: Payment) -> bool:
+        """Journal required plan recovery before the existing gateway-fact transaction commits."""
+        if (payment.meta or {}).get("source") != "hosting_plan_change":
+            return False
+        from .plan_change_payment_service import stage_plan_change_settlement  # noqa: PLC0415
+
+        # An outer webhook/replay transaction may own the locks and commit callback.
+        stage_plan_change_settlement(payment)
+        return True
+
+    @staticmethod
     def recover_unlinked_recurring_attempt(  # noqa: PLR0911  # Preserve distinct fail-closed rejection reasons
         gateway_txn_id: str,
         gateway_facts: Mapping[str, Any],
@@ -218,34 +224,7 @@ class PaymentSuccessService:
 
             return recover_unlinked_plan_change_attempt(gateway_txn_id, gateway_facts)
         if isinstance(metadata, Mapping) and metadata.get("source") == "gift_card_funding":
-            from apps.promotions.models import GiftCardPurchase  # noqa: PLC0415
-
-            try:
-                purchase = (
-                    GiftCardPurchase.objects.select_related("funding_payment")
-                    .filter(pk=str(metadata.get("purchase_id", "")), customer_id=str(metadata.get("customer_id", "")))
-                    .first()
-                )
-            except (ValueError, ValidationError):
-                purchase = None
-            if purchase is None:
-                return Err("Gift-card funding attempt was not found")
-            payment = lock_one_and_load(
-                Payment.objects.select_related("currency").filter(pk=purchase.funding_payment_id)
-            )
-            if (
-                payment.gateway_txn_id
-                or payment.status != "pending"
-                or payment.payment_method != "stripe"
-                or payment.meta.get("purchase_id") != str(purchase.pk)
-            ):
-                return Err("Gift-card funding attempt is not available for recovery")
-            validation_error = PaymentSuccessService._validate_gateway_facts(payment, gateway_facts)
-            if validation_error:
-                return Err(validation_error)
-            payment.gateway_txn_id = gateway_txn_id
-            payment.save(update_fields=["gateway_txn_id", "updated_at"])
-            return Ok(payment)
+            return PaymentSuccessService._recover_unlinked_gift_funding_attempt(gateway_txn_id, gateway_facts, metadata)
         if not isinstance(metadata, Mapping) or metadata.get("source") != "recurring_billing":
             return Err(f"Payment not found for gateway transaction {gateway_txn_id}")
 
@@ -298,6 +277,40 @@ class PaymentSuccessService:
                 "critical_financial_operation": True,
             },
         )
+        return Ok(payment)
+
+    @staticmethod
+    def _recover_unlinked_gift_funding_attempt(
+        gateway_txn_id: str,
+        gateway_facts: Mapping[str, Any],
+        metadata: Mapping[str, Any],
+    ) -> Result[Payment, str]:
+        """Retain the exact gift owner, pending-payment lock and gateway-fact checks."""
+        from apps.promotions.models import GiftCardPurchase  # noqa: PLC0415
+
+        try:
+            purchase = (
+                GiftCardPurchase.objects.select_related("funding_payment")
+                .filter(pk=str(metadata.get("purchase_id", "")), customer_id=str(metadata.get("customer_id", "")))
+                .first()
+            )
+        except (ValueError, ValidationError):
+            purchase = None
+        if purchase is None:
+            return Err("Gift-card funding attempt was not found")
+        payment = lock_one_and_load(Payment.objects.select_related("currency").filter(pk=purchase.funding_payment_id))
+        if (
+            payment.gateway_txn_id
+            or payment.status != "pending"
+            or payment.payment_method != "stripe"
+            or payment.meta.get("purchase_id") != str(purchase.pk)
+        ):
+            return Err("Gift-card funding attempt is not available for recovery")
+        validation_error = PaymentSuccessService._validate_gateway_facts(payment, gateway_facts)
+        if validation_error:
+            return Err(validation_error)
+        payment.gateway_txn_id = gateway_txn_id
+        payment.save(update_fields=["gateway_txn_id", "updated_at"])
         return Ok(payment)
 
     @staticmethod

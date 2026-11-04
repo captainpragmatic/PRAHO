@@ -61,6 +61,9 @@ class PlanChangePaymentAttempt(models.Model):
 
     class Meta:
         db_table = "billing_plan_change_payment_attempts"
+        db_table_comment = (
+            "Durable on-session payment attempts and provider replay authority for hosting plan agreements."
+        )
         indexes: ClassVar[list[models.Index]] = [models.Index(fields=["state", "lease_expires_at"])]
 
     def save(self, *args: Any, **kwargs: Any) -> None:

@@ -44,7 +44,7 @@ def service_plan_change_proposal(request: HttpRequest, pk: int) -> HttpResponse:
         or customer.anonymized_at is not None
     ):
         return HttpResponseBadRequest(_("This service cannot currently accept a plan proposal."))
-    current = PlanChange.objects.filter(service=service, status__in=PlanChange.ACTIVE_STATES).first()
+    current = PlanChange.objects.filter(service=service, customer=customer, status__in=PlanChange.ACTIVE_STATES).first()
     options = []
     if current is None and SettingsService.get_setting("billing.hosting_plan_changes_enabled", default=False) is True:
         subscription = Subscription.objects.filter(service=service, customer=customer, status="active").first()

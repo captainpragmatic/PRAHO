@@ -62,6 +62,7 @@ SERVICE_NO_AUDIT_ALLOWLIST: dict[str, str] = {
     "apps/billing/numbering_service.py": "consumes an InvoiceSequence number; the Invoice that takes it is audited by its model receiver",
     "apps/billing/recurring_authorization_service.py": "RecurringPaymentAuthorization, Subscription and CustomerPaymentMethod saves are audited by model receivers",
     "apps/billing/recurring_submission_service.py": "RecurringPaymentSubmission saves are audited by its model signal receiver",
+    "apps/billing/plan_change_review_service.py": "PlanChangeReviewEvent facts/progress and PlanChange review transitions are audited by their registered model signal receivers",
     "apps/customers/contact_service.py": "address, payment method and note saves are audited by their model receivers",
     "apps/customers/customer_service.py": "Customer saves are audited by its model signal receiver",
     "apps/customers/profile_service.py": "tax and billing profile saves are audited by their model receivers",
@@ -151,7 +152,7 @@ class AuditCoverageVisitor(ast.NodeVisitor):
         self._check_placeholder_validation(node)
         self.generic_visit(node)
 
-    visit_AsyncFunctionDef = visit_FunctionDef
+    visit_AsyncFunctionDef = visit_FunctionDef  # noqa: N815 -- ast visitor protocol.
 
     def visit_Call(self, node: ast.Call) -> Any:
         self._check_deprecated_audit_api(node)
