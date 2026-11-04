@@ -5,6 +5,13 @@ and private manifest-bound SSH/vault authority. They never select a fleet or a
 customer node. Missing credentials, real test DNS, storage, or native evidence
 fail the gate; no container kernel or successful DNS/provider response is substituted.
 
+For the complete paid upgrade, renewal-boundary downgrade, warnings, temporary
+relief, restore and migration journey, continue with
+[commercial native acceptance](COMMERCIAL_ACCEPTANCE.md) after the foundation
+qualification below. That procedure retains this original database and vault and
+adds an explicitly owned second node, real Portal authentication and a private
+Platform SMTP capture.
+
 Use the root Makefile. Keep `NATIVE_VM_MANIFEST`, `NATIVE_S3_MANIFEST` and
 `NATIVE_MAIL_MANIFEST` outside the checkout in a private directory. Export the
 approved disposable-project `HCLOUD_TOKEN`, narrow `PRAHO_NATIVE_ADMIN_CIDR`,

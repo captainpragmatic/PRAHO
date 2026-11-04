@@ -64,10 +64,11 @@ help:
 	@echo "  make test-virtualmin-lab - Opt-in production-path backup/restore round trip against the lab (+ the contract suite)"
 	@echo "  make test-virtualmin-contract - Opt-in: every allowlisted Virtualmin program against the lab node"
 	@echo "  make test-virtualmin-workflows - Opt-in: provision, suspend, backup, restore, migrate, drain and recover through PRAHO's own services against the lab"
-	@echo "  make test-virtualmin-node-deploy - Nightly, opt-in: virtualmin.yml + virtualmin_harden.yml on the bare Debian node, then the contract smoke checks"
+	@echo "  make test-virtualmin-node-deploy - Explicit owned Ubuntu VM: fresh public deployment, kernel qualification and native lifecycle"
 	@echo "  make test-virtualmin-faults - Nightly, opt-in: stop Webmin, cut the network and time calls out while PRAHO backs up and restores"
 	@echo "  make test-virtualmin-e2e - Opt-in: Playwright smoke tests of the staff pages against the lab (starts and stops its own server; not part of make test-e2e)"
-	@echo "  make test-virtualmin-lab-full - Opt-in, long: test-virtualmin-lab + node-deploy + faults + the browser tests (the nightly run)"
+	@echo "  make test-virtualmin-lab-containers - Routine container suites, faults, browser and Maintenance Portal; no native qualification"
+	@echo "  make test-virtualmin-lab-full - Explicit native-inclusive run: lab + owned Ubuntu node-deploy + faults + browser"
 	@echo "  make test-virtualmin-drift - Opt-in: build the lab from the LATEST Virtualmin (replaces a running lab) and run the contract suite, recording nothing"
 	@echo "  VIRTUALMIN_LAB=1 make dev - Platform on :8700 against the Docker Virtualmin lab (starts and registers it if needed)"
 	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
@@ -1444,12 +1445,111 @@ NATIVE_VM_MANIFEST ?=
 NATIVE_DNS_ZONE ?=
 export NATIVE_VM_MANIFEST NATIVE_DNS_ZONE NATIVE_S3_MANIFEST NATIVE_MAIL_MANIFEST
 
+# These are paths and scalar arguments, including literal dollar signs. Keep
+# GNU Make from interpreting imported values as recursive Make expressions.
+NATIVE_PEER_MANIFEST ?=
+PRAHO_NATIVE_SMTP_MANIFEST ?=
+NATIVE_UI_AUTHORITY ?=
+NATIVE_SMTP_EMAIL_LOG_ID ?=
+NATIVE_BOUNDARY_MINUTES ?= 75
+NATIVE_ACCEPTANCE_LIFETIME_SECONDS ?= 10800
+override NATIVE_VM_MANIFEST := $(value NATIVE_VM_MANIFEST)
+override NATIVE_PEER_MANIFEST := $(value NATIVE_PEER_MANIFEST)
+override PRAHO_NATIVE_SMTP_MANIFEST := $(value PRAHO_NATIVE_SMTP_MANIFEST)
+override NATIVE_UI_AUTHORITY := $(value NATIVE_UI_AUTHORITY)
+override NATIVE_SMTP_EMAIL_LOG_ID := $(value NATIVE_SMTP_EMAIL_LOG_ID)
+override NATIVE_BOUNDARY_MINUTES := $(value NATIVE_BOUNDARY_MINUTES)
+override NATIVE_ACCEPTANCE_LIFETIME_SECONDS := $(value NATIVE_ACCEPTANCE_LIFETIME_SECONDS)
+export NATIVE_PEER_MANIFEST PRAHO_NATIVE_SMTP_MANIFEST NATIVE_UI_AUTHORITY NATIVE_SMTP_EMAIL_LOG_ID
+export NATIVE_BOUNDARY_MINUTES NATIVE_ACCEPTANCE_LIFETIME_SECONDS
+
 # The Platform runner changes cwd. Export the absolute manifest as data before
 # entering it; shell expansion cannot execute metacharacters inside its value.
 define NATIVE_WORKFLOW_ENV
 case "$$NATIVE_VM_MANIFEST" in /*) ;; *) NATIVE_VM_MANIFEST="$$PWD/$$NATIVE_VM_MANIFEST" ;; esac; \
 export NATIVE_VM_MANIFEST PRAHO_NATIVE_LAB=1;
 endef
+
+# Resolve optional paths before PYTHON_PLATFORM_MANAGE changes directory. No
+# eval or unquoted argument expansion is used for manifest names or log IDs.
+define NATIVE_ACCEPTANCE_ENV
+$(NATIVE_WORKFLOW_ENV) \
+case "$$NATIVE_PEER_MANIFEST" in ''|/*) ;; *) NATIVE_PEER_MANIFEST="$$PWD/$$NATIVE_PEER_MANIFEST" ;; esac; \
+case "$$PRAHO_NATIVE_SMTP_MANIFEST" in ''|/*) ;; *) PRAHO_NATIVE_SMTP_MANIFEST="$$PWD/$$PRAHO_NATIVE_SMTP_MANIFEST" ;; esac; \
+case "$$NATIVE_UI_AUTHORITY" in ''|/*) ;; *) NATIVE_UI_AUTHORITY="$$PWD/$$NATIVE_UI_AUTHORITY" ;; esac; \
+export NATIVE_PEER_MANIFEST PRAHO_NATIVE_SMTP_MANIFEST NATIVE_UI_AUTHORITY;
+endef
+
+define NATIVE_ACCEPTANCE_RUN
+$(NATIVE_ACCEPTANCE_ENV) \
+$(if $(filter peer-destroy,$(1)),export PRAHO_NATIVE_CLEANUP_ONLY=1;,unset PRAHO_NATIVE_CLEANUP_ONLY;) \
+set --; if [ -n "$$NATIVE_PEER_MANIFEST" ]; then set -- --peer-manifest "$$NATIVE_PEER_MANIFEST"; fi; \
+$(PYTHON_PLATFORM_MANAGE) hosting_native_acceptance $(1) --manifest "$$NATIVE_VM_MANIFEST" "$$@" \
+    --boundary-minutes "$$NATIVE_BOUNDARY_MINUTES" --settings=config.settings.native
+endef
+
+.PHONY: native-peer-manifest native-smtp-manifest native-ui-authority native-commercial-staff-setup native-commercial-setup native-peer-intent native-peer-create native-peer-export native-commercial-verify native-peer-destroy test-virtualmin-peer-quotas native-smtp-serve native-smtp-verify native-portal-serve native-virtualmin-schedules native-billing-schedules native-worker
+native-peer-manifest:
+	@test -n "$$NATIVE_PEER_MANIFEST" || { echo 'Set NATIVE_PEER_MANIFEST to the private approved child manifest path.' >&2; exit 2; }
+
+native-smtp-manifest:
+	@test -n "$$PRAHO_NATIVE_SMTP_MANIFEST" || { echo 'Set PRAHO_NATIVE_SMTP_MANIFEST to the private owned SMTP capture path.' >&2; exit 2; }
+
+native-ui-authority:
+	@test -n "$$NATIVE_UI_AUTHORITY" || { echo 'Set NATIVE_UI_AUTHORITY to the private two-service authority path.' >&2; exit 2; }
+
+native-commercial-setup: native-vm-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,setup)
+
+native-commercial-staff-setup: native-vm-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,staff-setup)
+
+native-peer-intent: native-vm-manifest native-peer-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,peer-intent)
+
+native-peer-create: native-vm-manifest native-peer-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,create-peer)
+
+native-peer-export: native-vm-manifest native-peer-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,export-peer)
+
+native-commercial-verify: native-vm-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,verify)
+
+native-peer-destroy: native-vm-manifest native-peer-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,peer-destroy)
+
+test-virtualmin-peer-quotas: native-vm-manifest native-peer-manifest
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_SHARED) tests/virtualmin_lab/native/provider_vm.py verify --manifest "$$NATIVE_PEER_MANIFEST"
+
+native-smtp-serve: native-vm-manifest native-smtp-manifest
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_SHARED) tests/virtualmin_lab/native/smtp_capture.py serve --manifest "$$NATIVE_VM_MANIFEST" \
+	    --smtp-manifest "$$PRAHO_NATIVE_SMTP_MANIFEST" --lifetime-seconds "$$NATIVE_ACCEPTANCE_LIFETIME_SECONDS"
+
+native-smtp-verify: native-vm-manifest native-smtp-manifest
+	@test -n "$$NATIVE_SMTP_EMAIL_LOG_ID" || { echo 'Set NATIVE_SMTP_EMAIL_LOG_ID to one recorded native EmailLog UUID.' >&2; exit 2; }
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_SHARED) tests/virtualmin_lab/native/smtp_capture.py verify --manifest "$$NATIVE_VM_MANIFEST" \
+	    --smtp-manifest "$$PRAHO_NATIVE_SMTP_MANIFEST" --email-log-id "$$NATIVE_SMTP_EMAIL_LOG_ID"
+
+native-portal-serve: native-vm-manifest native-ui-authority
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_SHARED) tests/virtualmin_lab/native/portal_runner.py serve --manifest "$$NATIVE_VM_MANIFEST" \
+	    --ui-authority "$$NATIVE_UI_AUTHORITY" --lifetime-seconds "$$NATIVE_ACCEPTANCE_LIFETIME_SECONDS"
+
+native-virtualmin-schedules: native-vm-manifest
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_PLATFORM_MANAGE) setup_scheduled_tasks --virtualmin-only --settings=config.settings.native
+
+native-billing-schedules: native-vm-manifest
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_PLATFORM_MANAGE) setup_scheduled_tasks --billing-only --settings=config.settings.native
+
+native-worker: native-vm-manifest
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.native
 
 .PHONY: native-vm-manifest native-dns-zone native-vm-create native-vm-migrate native-vm-prepare native-vm-register native-vm-destroy native-vm-fresh-intent native-vm-fresh-deploy native-vm-fresh-destroy test-virtualmin-quotas test-virtualmin-native-workflow test-virtualmin-native-fresh-deployment
 native-vm-manifest:
@@ -1533,6 +1633,17 @@ test-virtualmin-faults:
 	@echo "🧪 [Virtualmin lab] Fault injection: Webmin stopped, network cut and calls timed out mid-operation (needs make virtualmin-lab-up)..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@VENV_DIR=$(VENV_DIR) tests/virtualmin_lab/run_faults.sh $(FAULT_ARGS)
+
+.PHONY: test-virtualmin-lab-containers
+# Routine container evidence only. Native deployment/quota proof remains in the separate full gate below.
+test-virtualmin-lab-containers:
+	@echo "🧪 [Virtualmin lab] Container-only suites, faults, browser and maintenance Portal; no native qualification"
+	@failed=""; \
+	for leg in test-virtualmin-lab test-virtualmin-faults test-virtualmin-e2e test-virtualmin-maintenance-portal; do \
+		$(MAKE) --no-print-directory $$leg || failed="$$failed $$leg"; \
+	done; \
+	if [ -n "$$failed" ]; then echo "🔥 [Virtualmin container lab] Failed legs:$$failed"; exit 1; fi; \
+	echo "✅ [Virtualmin container lab] Every container leg passed; native acceptance remains separate"
 
 # The nightly run: every leg runs even when an earlier one fails, and the failed legs are named at the end.
 test-virtualmin-lab-full:

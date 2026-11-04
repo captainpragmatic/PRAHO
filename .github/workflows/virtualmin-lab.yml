@@ -1,16 +1,18 @@
 # ===============================================================================
 # VIRTUALMIN LAB — PRAHO AGAINST REAL VIRTUALMIN (Docker, systemd, two nodes + MinIO)
 # ===============================================================================
-# Three runs, one lab (deploy/virtualmin-lab, see its README):
+# Container coverage and separate native acceptance (deploy/virtualmin-lab, see its README):
 #
 #   pull request   virtualmin-lab-pr.yml: the round trip, the contract suite, the workflow suite and the lab checks
 #                  (make test-virtualmin-lab) on the PINNED version, when the change can reach the lab. It is a
 #                  workflow of its own so that its required check never shares a name with a job this workflow
 #                  skips on a schedule or a dispatch.
-#   release        release-candidate.yml runs no lab: its verifier requires the latest nightly full run on master
-#                  to have passed. A workflow_call (suite: full, `ref`) still runs it for a given commit.
-#   nightly full   03:30 UTC, skipped when nothing changed in 24h: the same, plus the from-scratch node deploy,
-#                  fault injection and the browser smoke tests (make test-virtualmin-lab-full), PINNED version.
+#   release        requires native-inclusive full acceptance on that exact master SHA, including an actual
+#                  fresh Ubuntu capability check; routine containers never supply that evidence.
+#   containers     03:30 UTC, skipped when nothing changed in 24h: suites, fault injection, browsers and
+#                  maintenance Portal on PINNED containers. No native kernel/deployment claim.
+#   manual full    explicit suite=full only, after the approved isolated native runner and private authority
+#                  are configured. No billable daily bootstrap or automatic credential/runner registration.
 #   nightly drift  05:30 UTC, always (Virtualmin changes without our commits): the lab image built from the
 #                  LATEST packages, then the contract suite, recording nothing, on amd64 and arm64.
 #
@@ -23,13 +25,12 @@
 name: Virtualmin Lab
 
 on:
-  # A caller's event is what this workflow sees, so a release candidate dispatched with suite `full` runs
-  # nightly-full exactly as a manual dispatch does, checked out at `ref`.
+  # Reusable callers get container coverage; native acceptance requires this explicit manual dispatch.
   workflow_call:
     inputs:
       suite:
         type: string
-        default: full
+        default: containers
       ref:
         type: string
         default: ''
@@ -41,8 +42,8 @@ on:
       suite:
         description: Which run to start
         type: choice
-        options: [full, drift, components]
-        default: full
+        options: [containers, full, drift, components]
+        default: containers
 
 permissions:
   contents: read
@@ -57,7 +58,7 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Nightly full run only: skip when master saw no commit or pull request activity in 24h.
+  # Routine container run only: skip when master saw no activity in 24h.
   # ---------------------------------------------------------------------------
   check-activity:
     if: github.event_name == 'schedule' && github.event.schedule == '30 3 * * *'
@@ -91,14 +92,14 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
-  # Nightly: everything, on the pinned Virtualmin.
+  # Routine container coverage, on the pinned Virtualmin. Never native proof.
   # ---------------------------------------------------------------------------
-  nightly-full:
+  nightly-containers:
     needs: check-activity
     if: >-
       always() && (
         (needs.check-activity.result == 'success' && needs.check-activity.outputs.run == 'true') ||
-        (github.event_name == 'workflow_dispatch' && inputs.suite == 'full')
+        (github.event_name == 'workflow_dispatch' && inputs.suite == 'containers')
       )
     runs-on: ubuntu-24.04  # Its browser tests need Playwright, which does not support Ubuntu 26.04.
     timeout-minutes: 240
@@ -115,11 +116,8 @@ jobs:
       - name: Start the lab
         run: make virtualmin-lab-up
 
-      - name: Full lab run (suites, node deploy, faults, browser tests)
-        run: make test-virtualmin-lab-full
-
-      - name: Maintenance Portal acceptance (real HTTP, owned fixture databases and captured mail)
-        run: make test-virtualmin-maintenance-portal
+      - name: Container-only suites, faults, browsers and maintenance Portal
+        run: make test-virtualmin-lab-containers
 
       - name: Lab diagnostics
         if: failure()
@@ -135,7 +133,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: virtualmin-lab-evidence
+          name: virtualmin-container-lab-evidence
           path: |
             output/playwright/virtualmin-lab/
             output/playwright/maintenance-lab/
@@ -150,6 +148,92 @@ jobs:
         run: |
           make virtualmin-lab-down
           deploy/virtualmin-lab/lab.sh node-down || true
+
+  # Fail unconfigured full dispatches on hosted CI, before queueing a private runner.
+  # This readiness declaration admits work only; it is never capability evidence.
+  native-admission:
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require approved prepared native runner configuration
+        env:
+          NATIVE_ACCEPTANCE_RUNNER_READY: ${{ vars.NATIVE_ACCEPTANCE_RUNNER_READY }}
+        run: |
+          if [ "$NATIVE_ACCEPTANCE_RUNNER_READY" != 'true' ]; then
+            echo '::error::Configure the approved isolated native-acceptance runner/environment and private authority first. Container success cannot qualify native acceptance.'
+            exit 1
+          fi
+
+  native-full:
+    needs: native-admission
+    if: github.event_name == 'workflow_dispatch' && inputs.suite == 'full'
+    runs-on: [self-hosted, linux, native-acceptance]
+    environment: native-acceptance
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require existing private native authority and isolated database
+        run: |
+          set -euo pipefail
+          : "${NATIVE_VM_MANIFEST:?Prepare the private fresh-intent authority outside the checkout}"
+          : "${NATIVE_DNS_ZONE:?Configure the approved disposable DNS zone}"
+          : "${NATIVE_S3_MANIFEST:?Prepare the exact owned native storage fixture}"
+          : "${DB_NAME:?Configure the isolated native PostgreSQL database}"
+          test -r "$NATIVE_VM_MANIFEST"
+          test -r "$NATIVE_S3_MANIFEST"
+          case "$DB_NAME" in praho_native_*) ;; *) echo '::error::An isolated praho_native_ database is required'; exit 1;; esac
+
+      - uses: ./.github/actions/virtualmin-lab-setup
+        with:
+          browser: 'true'
+
+      - name: Verify fresh Ubuntu native hosting capability
+        run: make test-virtualmin-native-fresh-deployment
+
+      - name: Start the container lab on the isolated acceptance runner
+        run: make virtualmin-lab-up
+
+      - name: Native-inclusive full Virtualmin lab
+        run: make test-virtualmin-lab-full
+
+      - name: Maintenance Portal acceptance
+        run: make test-virtualmin-maintenance-portal
+
+      - name: Lab diagnostics
+        if: failure()
+        run: |
+          docker ps -a
+          for node in vmlab-a vmlab-b vmlab-minio vmlab-component-source; do
+            echo "::group::docker logs ${node}"
+            docker logs --tail 200 "${node}" || true
+            echo "::endgroup::"
+          done
+
+      - name: Upload container evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtualmin-native-full-container-evidence
+          path: |
+            output/playwright/virtualmin-lab/
+            output/playwright/maintenance-lab/
+            output/virtualmin-lab/faults/
+            output/virtualmin-lab/components/
+            logs/virtualmin_e2e_server.log
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop the owned container lab
+        if: always()
+        run: make virtualmin-lab-down
+
+      # Native resources, their original private keys and uncertain outcomes are retained
+      # for the existing exact-resource reconciliation/teardown commands. Never upload them.
 
   # ---------------------------------------------------------------------------
   # Explicit runner diagnostics only; this job never qualifies the full lab.
@@ -242,7 +326,7 @@ jobs:
   # One issue, opened on the first failure and commented on by every later one; a person closes it.
   # ---------------------------------------------------------------------------
   notify-scheduled-failure:
-    needs: [nightly-full, nightly-drift]
+    needs: [nightly-containers, nightly-drift]
     if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
     runs-on: ubuntu-latest
     permissions:
@@ -263,5 +347,5 @@ jobs:
             gh issue create --label virtualmin-lab-failure --title "Virtualmin lab run failing" \
               --body "A scheduled Virtualmin lab run failed: $RUN_URL
 
-          Read the failing job, not the run: the full run (pinned Virtualmin) and the drift run (latest Virtualmin, amd64 and arm64) fail for different reasons. A drift failure means a program PRAHO calls now answers differently. Close this issue once both are green."
+          Read the failing job: the container run (pinned Virtualmin) and drift run (latest Virtualmin, amd64 and arm64) have different scopes. Neither proves native acceptance. Close this issue once both scheduled scopes are green."
           fi
