@@ -163,6 +163,8 @@ def test_split_tls_bridge_preserves_scheme_www_and_survives_source_domain_deleti
                 domain=DOMAIN,
                 virtualmin_username=owner,
                 template_name="Default Settings",
+                quota_managed=False,
+                effective_disk_quota_mb=None,
                 disk_quota_mb=1024,
                 bandwidth_quota_mb=10240,
                 get_recovery_seed=lambda: "bridge-contract-recovery-seed",
