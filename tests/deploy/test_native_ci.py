@@ -52,22 +52,38 @@ def test_required_integration_check_waits_for_parallel_native_and_general_suites
     }
     assert native.isdisjoint(general), "Serial native qualification needlessly consumes the merge queue deadline"
     assert len(native) == len(general) == 1
+    (native_job,) = native
     gate = jobs["integration-test"]
-    assert set(gate["needs"]) == native | general
+    assert set(gate["needs"]) == native | general | {"native-changes"}
     assert gate["if"] == "always()", "Failure and skip results must reach the required gate"
-    assert all(not jobs[name].get("needs") for name in native | general)
+    assert all(not jobs[name].get("needs") for name in general)
+    # The native jobs may skip only by their selection, which fails open (scripts/ci_native_needed.py).
+    assert jobs[native_job]["needs"] == "native-changes"
+    assert jobs[native_job]["if"] == "!cancelled() && needs.native-changes.outputs.native != 'false'"
+    assert "if" not in jobs["native-changes"] and not jobs["native-changes"].get("needs")
+    # The infrastructure check is not profile-specific: exactly one matrix entry runs it.
+    profile_bound = {"matrix.profile == 'combined-prod'"}
     for name in native | general:
         job = jobs[name]
-        assert "if" not in job and "continue-on-error" not in job
+        assert "continue-on-error" not in job
         for step in job["steps"]:
             assert "continue-on-error" not in step
-            assert step.get("if") in (None, "always()"), "Upstream work must not silently skip"
+            allowed = {None, "always()"} | (profile_bound if name == native_job else set())
+            assert step.get("if") in allowed, "Upstream work must not silently skip"
 
 
 def test_native_ci_qualifies_each_topology_in_parallel_with_no_missing_profile() -> None:
     native = yaml.safe_load((ROOT / ".github/workflows/integration.yml").read_text())["jobs"]["native-deploy"]
     strategy = native.get("strategy", {})
-    assert strategy.get("matrix", {}).get("profile") == ["split-prod", "combined-staging", "combined-prod"]
+    # The split cases run as shards; tests/deploy/test_native_profiles.py proves the matrix covers every case once.
+    assert strategy.get("matrix", {}).get("profile") == [
+        "split-prod-1",
+        "split-prod-2",
+        "split-prod-3",
+        "split-prod-4",
+        "combined-staging",
+        "combined-prod",
+    ]
     assert strategy.get("fail-fast") is False
     assert native.get("env", {}).get("PRAHO_NATIVE_ACCEPTANCE_PROFILE") == "${{ matrix.profile }}"
 
@@ -91,18 +107,29 @@ def test_general_integration_installs_the_pinned_transport_collection_before_tes
     assert len(install) == 1 and install[0] < tests, "A fresh runner has ansible-core but no transport collection"
 
 
+@pytest.mark.parametrize("selected", ["true", "false", ""])
 @pytest.mark.parametrize("general", ["success", "failure", "cancelled", "skipped"])
 @pytest.mark.parametrize("native", ["success", "failure", "cancelled", "skipped"])
-def test_required_integration_gate_only_passes_when_both_real_jobs_succeed(general: str, native: str) -> None:
+def test_required_integration_gate_only_passes_when_both_real_jobs_succeed(
+    general: str, native: str, selected: str
+) -> None:
     gate = yaml.safe_load((ROOT / ".github/workflows/integration.yml").read_text())["jobs"]["integration-test"]
-    results = {"integration-suite": general, "native-deploy": native}
+    # An empty answer is a selection that failed or never ran: it can never excuse a skip.
+    results = {
+        "integration-suite": general,
+        "native-deploy": native,
+        "native-changes": "success" if selected else "failure",
+    }
+    outputs = {("native-changes", "native"): selected}
     environment = dict(os.environ)
     for name, expression in gate["env"].items():
-        binding = re.fullmatch(r"\$\{\{\s*needs\.([\w-]+)\.result\s*\}\}", expression)
-        assert binding is not None, "The gate must consume actual upstream job results"
-        environment[name] = results[binding[1]]
+        result = re.fullmatch(r"\$\{\{\s*needs\.([\w-]+)\.result\s*\}\}", expression)
+        output = re.fullmatch(r"\$\{\{\s*needs\.([\w-]+)\.outputs\.([\w-]+)\s*\}\}", expression)
+        assert result or output, "The gate must consume actual upstream job results"
+        environment[name] = results[result[1]] if result else outputs[(output[1], output[2])]
     script = "\n".join(step["run"] for step in gate["steps"] if "run" in step)
     completed = subprocess.run(  # noqa: S603 -- Execute the repository-owned gate, not caller-provided shell text.
         ["/bin/bash", "-euc", script], env=environment, capture_output=True, check=False
     )
-    assert (completed.returncode == 0) is (general == native == "success")
+    deliberately_skipped = native == "skipped" and selected == "false"
+    assert (completed.returncode == 0) is (general == "success" and (native == "success" or deliberately_skipped))
