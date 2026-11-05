@@ -7,12 +7,12 @@
 #                  (make test-virtualmin-lab) on the PINNED version, when the change can reach the lab. It is a
 #                  workflow of its own so that its required check never shares a name with a job this workflow
 #                  skips on a schedule or a dispatch.
-#   release        requires native-inclusive full acceptance on that exact master SHA, including an actual
-#                  fresh Ubuntu capability check; routine containers never supply that evidence.
+#   release        release-candidate.yml runs no lab: its verifier requires the latest full lab on master to have
+#                  passed, the container job or an optional native run. No self-hosted runner is required.
 #   containers     03:30 UTC, skipped when nothing changed in 24h: suites, fault injection, browsers and
 #                  maintenance Portal on PINNED containers. No native kernel/deployment claim.
-#   manual full    explicit suite=full only, after the approved isolated native runner and private authority
-#                  are configured. No billable daily bootstrap or automatic credential/runner registration.
+#   manual full    optional: explicit suite=full only, after an isolated native runner and private authority
+#                  are configured. Not required for a release. No automatic credential/runner registration.
 #   nightly drift  05:30 UTC, always (Virtualmin changes without our commits): the lab image built from the
 #                  LATEST packages, then the contract suite, recording nothing, on amd64 and arm64.
 #

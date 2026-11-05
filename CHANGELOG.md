@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **A release no longer needs a self-hosted native runner.** The release candidate again requires the latest full Virtualmin lab on master to have passed: the container job, or an optional native `full` dispatch when one has run. Native acceptance stays available as a manual run but does not gate a release; kernel, filesystem and cloud-image behaviour is proven on staging by a test node deploy after the promote.
+
 - **One button component for the look-alike buttons.** It gained icon-only, loading, `formaction`, input-group, Alpine and `hx_disabled_elt` options and ghost, link, outline, soft and inverse variants (all checked for WCAG contrast), and about forty hand-styled buttons across both services moved onto it (ADR-0035, amended).
 
 - **The release candidate runs no Virtualmin lab of its own.** The merge queue already runs the lab suites on the exact commit that lands, and the nightly full lab runs node deploy, fault injection and the browser tests on master every night master changed. The release candidate now requires the latest nightly full lab on master to have passed, and runs only the whole platform suite on PostgreSQL on the candidate, which takes about twenty minutes instead of about seventy (ADR-0036).

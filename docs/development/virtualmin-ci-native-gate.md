@@ -55,14 +55,14 @@ evidence belongs to the native gate. Native notification/commercial acceptance
 retains its separate documented controls. This full job does not claim those
 additional scenarios merely because its foundation capability check passed.
 
-Release-candidate verification requires the native-inclusive job, successful real
-capability step and successful workflow on the exact candidate SHA from `master`.
-The native job checks out that immutable event SHA. Container-only, missing or
-skipped capability, canceled native attempts and historical pre-native full jobs
-cannot qualify it. Genuine drift/quiet/container runs may be passed over to find
-actual matching native proof; they cannot turn an older pre-native success into
-native evidence. Previously approved staging rollback keeps its existing
-successful-release-candidate requirements and is not requalified retroactively.
+Native acceptance is optional and does not gate a release. No self-hosted runner
+exists, so release-candidate verification requires the latest full Virtualmin lab
+on `master` to have passed: the container job (`nightly-containers`, nightly or a
+`containers` dispatch) or, when one has run, a native `full` dispatch. A failed or
+cancelled latest full lab refuses; drift runs, quiet nights and `full` dispatches
+refused at admission are passed over. Kernel, filesystem and cloud-image behaviour
+(quotas, image defaults) is proven on staging by deploying a test node after the
+promote, until a disposable-VM native check runs on hosted runners.
 
 Always preserve failed or uncertain native state and private logs for the existing
 exact-resource reconciliation and teardown procedures. Container cleanup runs
