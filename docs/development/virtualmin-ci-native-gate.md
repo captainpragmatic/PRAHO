@@ -70,9 +70,12 @@ was qualified under and is not requalified retroactively.
 Always preserve failed or uncertain native state and private logs for the existing
 exact-resource reconciliation and teardown procedures. Container cleanup runs
 after failure; it does not delete a native VM, overwrite its identity or upload
-private recovery material. Routine CI can be green while this native gate remains
-unqualified. The hosting changes must remain unmerged until their required native
-acceptance is actually complete.
+private recovery material. Routine CI can be green while native acceptance remains
+unqualified. Hosting code may merge with its new acceptance and notification flags
+disabled after the required CI and merge-queue checks pass. Before enabling those
+features or closing their acceptance issues, complete the documented native quota,
+notification and commercial scenarios on staging. Container results do not satisfy
+that feature-activation requirement.
 
 ## Docker kernel prerequisites
 
