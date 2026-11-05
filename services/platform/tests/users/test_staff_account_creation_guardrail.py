@@ -34,6 +34,7 @@ EXPECTED_CREATION_SITES = frozenset(
         "apps/common/management/commands/generate_sample_data.py:_create_customer_permutations:manager_user",
         "apps/common/management/commands/setup_test_users.py:_create_test_admin:_create_test_admin",
         "apps/provisioning/management/commands/_virtualmin_lab.py:ensure_lab_staff:user",
+        "apps/infrastructure/native_acceptance_fixture.py:create_commercial_staff:staff",
         "apps/infrastructure/native_workflow.py:native_fixture_actor:actor",
         "scripts/setup_test_data.py:create_test_data:superuser",
         "scripts/setup_test_data.py:create_test_data:e2e_admin",
@@ -48,7 +49,7 @@ EXPECTED_IS_STAFF_MUTATIONS = frozenset(
     }
 )
 
-NEWEST_KNOWN_CREATION_SITE = "apps/infrastructure/native_workflow.py:native_fixture_actor:actor"
+NEWEST_KNOWN_CREATION_SITE = "apps/infrastructure/native_acceptance_fixture.py:create_commercial_staff:staff"
 
 
 @dataclass(frozen=True)
@@ -209,9 +210,16 @@ class BareIsStaffCreationGuardrailTests(SimpleTestCase):
         identifiers = {site.identifier for site in sites}
 
         # Structural-Helper Integrity: exact count plus newest-site canary.
-        self.assertEqual(len(sites), 8)
+        self.assertEqual(len(sites), 9)
         self.assertEqual(identifiers, EXPECTED_CREATION_SITES)
         self.assertIn(NEWEST_KNOWN_CREATION_SITE, identifiers)
+
+        # Native setup deliberately creates a nonsuperuser UI canary. Its actual
+        # password, scoped grants and revoked-authority controls are exercised in
+        # test_native_acceptance_fixture; keep this scanner's classification exact.
+        native_staff = next(site for site in sites if site.identifier == NEWEST_KNOWN_CREATION_SITE)
+        self.assertTrue(native_staff.has_staff_role)
+        self.assertFalse(native_staff.is_superuser)
 
         unsafe_sites = [
             f"{site.identifier}:{site.line_number}" for site in sites if not (site.has_staff_role or site.is_superuser)

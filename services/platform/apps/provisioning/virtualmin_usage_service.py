@@ -242,6 +242,7 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
     if not isinstance(records, list) or len(records) > MAX_RECORDS:
         raise ValueError("Usage records are missing")
     published = 0
+    changed_disk: set[UUID] = set()
     attempt = token or uuid4()
     # Business writers take the account lock first. Keep that order even for
     # source-node intervals belonging to accounts now hosted elsewhere.
@@ -344,7 +345,13 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
                 **({"email_accounts_used": mailboxes} if mailboxes is not None else {}),
             )
             published += 1
-    publish_segments(server_id, installation, records, observed, attempt, captured)
+            changed_disk.add(account.pk)
+    changed_bandwidth = publish_segments(server_id, installation, records, observed, attempt, captured)
+    from .hosting_warning_observation import observe_warning_accounts  # noqa: PLC0415 -- After accepted observations.
+
+    warnings = observe_warning_accounts(
+        set(captured), poll=attempt, observed=observed, changed_disk=changed_disk, changed_bandwidth=changed_bandwidth
+    )
     if (
         token is not None
         and not NodeUsageSyncState.objects.filter(
@@ -353,6 +360,10 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
     ):
         transaction.set_rollback(True)
         return 0
+    if warnings:
+        from .hosting_warning_delivery import enqueue_warning_sweep  # noqa: PLC0415 -- Only after publication commits.
+
+        transaction.on_commit(enqueue_warning_sweep, robust=True)
     return published
 
 
@@ -363,7 +374,7 @@ def publish_segments(  # noqa: C901, PLR0913  # Independent source and ownership
     observed: datetime,
     attempt: UUID,
     captured: dict[UUID, AccountCapture],
-) -> None:
+) -> set[UUID]:
     """Only canonical node/owner intersections can contribute to a monthly total."""
     start, end = month(observed)
     key = start.isoformat()
@@ -418,6 +429,7 @@ def publish_segments(  # noqa: C901, PLR0913  # Independent source and ownership
                 changed.add(account.pk)
     for account_id in changed:
         publish_bandwidth(account_id, observed, attempt)
+    return changed
 
 
 def publish_bandwidth(account_id: UUID, observed: datetime, attempt: UUID) -> None:

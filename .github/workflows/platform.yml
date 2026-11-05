@@ -164,8 +164,7 @@ jobs:
   # first ran after merge, in the nightly, so a PR could break one and still merge green.
   platform-postgres:
     runs-on: ubuntu-latest
-    # The scanner-derived gate now includes over 1,100 tests plus real schema setup.
-    # Keep a finite budget with room for the full serial gate on hosted runners.
+    # Include cold schema setup and database teardown in the serial suite's budget.
     timeout-minutes: 45
 
     env:

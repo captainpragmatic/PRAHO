@@ -13,6 +13,7 @@ import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Protocol
 from uuid import UUID, uuid4
@@ -20,6 +21,7 @@ from uuid import UUID, uuid4
 MAX_STATE_BYTES = 16384
 MAX_QUANTITY = (1 << 63) - 1
 COMMAND_ARGUMENT_COUNT = 2
+OVERLAY_PROTOCOL_VERSION = 2
 
 
 class QuotaBackend(Protocol):
@@ -76,6 +78,51 @@ def _write(path: Path, state: dict[str, object]) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def _validate_policy(policy: object) -> None:
+    if not isinstance(policy, dict) or set(policy) != {
+        "schema",
+        "base_revision",
+        "overlay_revision",
+        "extra_mib",
+        "expires_at",
+        "expiry_reduction",
+        "monotonic_reduction",
+    }:
+        raise ValueError("The quota overlay has unsupported terms")
+    if type(policy["schema"]) is not int or policy["schema"] != OVERLAY_PROTOCOL_VERSION:
+        raise ValueError("The quota overlay protocol is unsupported")
+    for key in ("base_revision", "overlay_revision", "extra_mib"):
+        value = policy[key]
+        if type(value) is not int or not (0 if key == "extra_mib" else 1) <= value <= MAX_QUANTITY:
+            raise ValueError("The quota overlay has invalid versions or amount")
+    if not isinstance(policy["expires_at"], str):
+        raise ValueError("The quota overlay requires an exact UTC expiry")
+    expiry = datetime.fromisoformat(policy["expires_at"])
+    if expiry.utcoffset() != timedelta(0) or expiry.isoformat() != policy["expires_at"]:
+        raise ValueError("The quota overlay requires an exact UTC expiry")
+    if type(policy["expiry_reduction"]) is not bool or (policy["expiry_reduction"] and policy["extra_mib"] != 0):
+        raise ValueError("An expiry reduction cannot include extra resources")
+    if type(policy["monotonic_reduction"]) is not bool or (
+        policy["monotonic_reduction"] and not policy["expiry_reduction"]
+    ):
+        raise ValueError("A monotonic reduction requires explicit preauthorized expiry")
+
+
+def _application_protocol(request: dict[str, object], state: dict[str, object] | None) -> int:
+    """After taking the native lane, reject expired terms and legacy writers."""
+    policy = request.get("policy")
+    protocol = OVERLAY_PROTOCOL_VERSION if isinstance(policy, dict) else 1
+    if state is not None and state.get("protocol", 1) > protocol:
+        raise ValueError("The native quota protocol cannot return to base-only writers")
+    if isinstance(policy, dict):
+        expired = datetime.fromisoformat(policy["expires_at"]) <= datetime.now(UTC)
+        if policy["extra_mib"] and expired:
+            raise ValueError("The temporary quota overlay expired before native application")
+        if policy["expiry_reduction"] and not expired:
+            raise ValueError("The temporary quota overlay has not expired")
+    return protocol
+
+
 class QuotaCoordinator:
     def __init__(self, root: Path, backend: QuotaBackend, *, lock_root: Path | None = None) -> None:
         self.root, self.backend = root, backend
@@ -109,8 +156,10 @@ class QuotaCoordinator:
             os.close(descriptor)
 
     def _scope(self, request: dict[str, object]) -> tuple[Path, str, str, int, str]:
-        if set(request) != {"identity", "token", "generation", "disk_limit_kib", "bandwidth_limit_bytes"}:
+        if set(request) - {"policy"} != {"identity", "token", "generation", "disk_limit_kib", "bandwidth_limit_bytes"}:
             raise ValueError("The quota application has unsupported terms")
+        if "policy" in request:
+            _validate_policy(request["policy"])
         identity = request["identity"]
         if not isinstance(identity, dict):
             raise ValueError("An exact native quota identity is required")
@@ -154,6 +203,7 @@ class QuotaCoordinator:
                 return {"outcome": "fenced", "token": token, "generation": generation}
             if _read(cancelled) is not None:
                 raise ValueError("The quota application token was permanently cancelled")
+            protocol = _application_protocol(request, state)
             if state is not None:
                 previous = state.get("generation")
                 if type(previous) is not int or generation < previous:
@@ -165,12 +215,22 @@ class QuotaCoordinator:
                         return {**self.backend.probe(request), "token": token, "generation": generation}
                 if state.get("phase") not in {"completed", "fenced"}:
                     raise ValueError("The previous quota application is uncertain; fence it before retrying")
-            _write(path, {"generation": generation, "token": token, "digest": digest, "phase": "running"})
+            _write(
+                path,
+                {"generation": generation, "token": token, "digest": digest, "phase": "running", "protocol": protocol},
+            )
             self.backend.apply(request, lock_fd=descriptor)
             result = {**self.backend.probe(request), "token": token, "generation": generation}
             _write(
                 path,
-                {"generation": generation, "token": token, "digest": digest, "phase": "completed", "receipt": result},
+                {
+                    "generation": generation,
+                    "token": token,
+                    "digest": digest,
+                    "phase": "completed",
+                    "receipt": result,
+                    "protocol": protocol,
+                },
             )
             return result
 

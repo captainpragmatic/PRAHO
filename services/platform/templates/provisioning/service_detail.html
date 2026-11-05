@@ -80,6 +80,8 @@
                     {% if can_override_resources %}
                       {% url 'provisioning:service_resource_override' service.pk as override_url %}
                       {% trans "Resource-only exception" as override_label %}{% button override_label variant="secondary" href=override_url %}
+                      {% url 'provisioning:service_hosting_raise' service.pk as relief_url %}
+                      {% trans "Temporary disk relief" as relief_label %}{% button relief_label variant="secondary" href=relief_url %}
                     {% endif %}
                 {% endif %}
                 {% url 'provisioning:services' as services_url %}
@@ -284,6 +286,10 @@
                 </div>
 
             </div>
+
+            {% if staff_hosting_history %}
+              {% include "provisioning/partials/hosting_warning_history.html" with history=staff_hosting_history only %}
+            {% endif %}
 
             <!-- Status Timeline -->
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">

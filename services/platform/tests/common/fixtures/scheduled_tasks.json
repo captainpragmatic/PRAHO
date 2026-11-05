@@ -450,6 +450,15 @@
     "cluster": "praho-cluster"
   },
   {
+    "name": "hosting-warning-deliveries",
+    "func": "apps.provisioning.hosting_warning_delivery.sweep_hosting_warnings",
+    "schedule_type": "I",
+    "minutes": 5,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
     "name": "infra_bulk_validate_nodes",
     "func": "apps.infrastructure.tasks.bulk_validate_nodes_task",
     "schedule_type": "D",

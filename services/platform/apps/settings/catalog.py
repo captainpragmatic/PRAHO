@@ -2798,6 +2798,18 @@ CATALOG: tuple[SettingDef, ...] = (
         input_kind="toggle",
     ),
     SettingDef(
+        key="provisioning.quota_warnings_enabled",
+        data_type="boolean",
+        default=False,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Platform hosting allowance warnings"),
+        help_text=_(
+            "Enable the durable Platform warning pipeline before explicitly handing over native customer notifications."
+        ),
+        input_kind="toggle",
+    ),
+    SettingDef(
         key="provisioning.enforce_verified_web_nodes",
         data_type="boolean",
         default=False,
@@ -3214,6 +3226,19 @@ CATALOG: tuple[SettingDef, ...] = (
         unit="MiB",
         input_kind="number",
         validation={"min": 0},
+    ),
+    SettingDef(
+        key="provisioning.hosting_raises_enabled",
+        data_type="boolean",
+        default=False,
+        group="virtualmin",
+        section=_("Quotas"),
+        label=_("Allow new temporary disk raises"),
+        input_kind="toggle",
+        critical=True,
+        help_text=_(
+            "Enable after current workers and protocol 2 native helpers are qualified. Existing expiry and recovery remain active when disabled."
+        ),
     ),
     SettingDef(
         key="virtualmin.max_retries",

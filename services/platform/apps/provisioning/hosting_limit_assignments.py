@@ -265,6 +265,9 @@ def request_service_plan_change(  # noqa: PLR0913 -- Explicit revision and idemp
     target = (
         _terms_snapshot(locked, accepted_terms) if accepted_terms is not None else _snapshot(locked, plan, _defaults())
     )
+    from .hosting_raise_service import compose_assignment_raise  # noqa: PLC0415 -- Service-only composed authority.
+
+    overlay = compose_assignment_raise(locked, target.disk_allowance_mib)
     application = HostingLimitApplication.objects.using(using).create(
         service=locked,
         revision=limits.revision + 1,
@@ -276,6 +279,7 @@ def request_service_plan_change(  # noqa: PLR0913 -- Explicit revision and idemp
         policy_version=POLICY_VERSION,
         reason=reason,
         authority=recorded_authority,
+        **overlay.application_fields(),
     )
     token = _ASSIGNMENT_WRITE.set(True)
     try:
@@ -317,6 +321,11 @@ def reassign_hosting_limit_owner(service_id: int, customer_id: int, *, using: st
         return
     limits.revision += 1
     limits.save(using=using, update_fields=["revision", "updated_at"])
+    from .hosting_raise_service import compose_assignment_raise  # noqa: PLC0415
+    from .service_models import Service  # noqa: PLC0415
+
+    service = Service.objects.using(using).get(pk=service_id)
+    overlay = compose_assignment_raise(service, limits.disk_allowance_mib)
     HostingLimitApplication.objects.using(using).create(
         service_id=service_id,
         revision=limits.revision,
@@ -328,4 +337,5 @@ def reassign_hosting_limit_owner(service_id: int, customer_id: int, *, using: st
         policy_version=limits.policy_version,
         reason="Hosting ownership changed",
         authority={"kind": "ownership_transfer", "customer_id": str(customer_id)},
+        **overlay.application_fields(),
     )

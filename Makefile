@@ -74,6 +74,7 @@ help:
 	@echo "  make virtualmin-probe   - Opt-in incremental-backup contract probe (writes docs/domain evidence)"
 	@echo "  make test-e2e-portal   - Portal customer E2E tests (:8701)"
 	@echo "  make test-portal-checkout-browser - Opt-in Chromium checkout boundary acceptance (Platform/Stripe doubled)"
+	@echo "  make test-portal-hosting-warnings-browser - English/Romanian warning, relief and preference browser checks"
 	@echo "  make test-hosting-plan-checkout-full - Real Portal/Platform payment journey (isolated PostgreSQL, synthetic provider)"
 	@echo "  make test-e2e-csp      - Verify the strict-CSP browser violation oracle (needs make dev-e2e-csp-bg)"
 	@echo "  make test-e2e-orm      - ORM E2E subset (requires the healthy owned stack)"
@@ -382,6 +383,11 @@ CHECKOUT_BROWSER_ARGS ?=
 test-portal-checkout-browser: build-css
 	@$(PYTHON_PORTAL) -m pytest -o addopts= -m browser --no-cov -v tests/browser/test_plan_change_checkout.py $(CHECKOUT_BROWSER_ARGS)
 
+.PHONY: test-portal-hosting-warnings-browser
+HOSTING_WARNING_BROWSER_ARGS ?=
+test-portal-hosting-warnings-browser: build-css
+	@$(PYTHON_PORTAL) -m pytest -o addopts= -m browser --no-cov -v tests/browser/test_hosting_warning_surfaces.py $(HOSTING_WARNING_BROWSER_ARGS)
+
 # Real Portal password/session/HMAC + Platform/finance/webhook, synthetic provider only.
 # This target can create/drop only hosting_browser/test_hosting_browser on loopback PostgreSQL.
 .PHONY: test-hosting-plan-checkout-full
@@ -556,11 +562,14 @@ build-crowdsec-patched:
 test-crowdsec:
 	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_crowdsec*.py -m 'not docker' -q
 
-test-crowdsec-docker:
+.PHONY: prepare-crowdsec-test-artifacts
+prepare-crowdsec-test-artifacts:
 	@if [ -z "$${CROWDSEC_BOUNCER_BINARY:-}" ] && [ "$${CROWDSEC_BOUNCER_REJECTED_PACKAGE:-0}" != 1 ] && \
 		{ [ ! -f build/crowdsec-patched/crowdsec-firewall-bouncer-amd64 ] || [ ! -f build/crowdsec-patched/crowdsec-firewall-bouncer-arm64 ]; }; then \
 		$(MAKE) build-crowdsec-patched; \
 	fi
+
+test-crowdsec-docker: prepare-crowdsec-test-artifacts
 	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_crowdsec*_docker.py -m docker -q
 
 test-ssh:
@@ -603,7 +612,7 @@ test-native-infra:
 	@terraform -chdir=deploy/terraform test
 	@$(PYTHON_SHARED) scripts/check_native_destroy_protection.py
 
-test-integration:
+test-integration: prepare-crowdsec-test-artifacts
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🧪 Running counter store tests on the configured database..."
@@ -1495,12 +1504,111 @@ NATIVE_VM_MANIFEST ?=
 NATIVE_DNS_ZONE ?=
 export NATIVE_VM_MANIFEST NATIVE_DNS_ZONE NATIVE_S3_MANIFEST NATIVE_MAIL_MANIFEST
 
+# These are paths and scalar arguments, including literal dollar signs. Keep
+# GNU Make from interpreting imported values as recursive Make expressions.
+NATIVE_PEER_MANIFEST ?=
+PRAHO_NATIVE_SMTP_MANIFEST ?=
+NATIVE_UI_AUTHORITY ?=
+NATIVE_SMTP_EMAIL_LOG_ID ?=
+NATIVE_BOUNDARY_MINUTES ?= 75
+NATIVE_ACCEPTANCE_LIFETIME_SECONDS ?= 10800
+override NATIVE_VM_MANIFEST := $(value NATIVE_VM_MANIFEST)
+override NATIVE_PEER_MANIFEST := $(value NATIVE_PEER_MANIFEST)
+override PRAHO_NATIVE_SMTP_MANIFEST := $(value PRAHO_NATIVE_SMTP_MANIFEST)
+override NATIVE_UI_AUTHORITY := $(value NATIVE_UI_AUTHORITY)
+override NATIVE_SMTP_EMAIL_LOG_ID := $(value NATIVE_SMTP_EMAIL_LOG_ID)
+override NATIVE_BOUNDARY_MINUTES := $(value NATIVE_BOUNDARY_MINUTES)
+override NATIVE_ACCEPTANCE_LIFETIME_SECONDS := $(value NATIVE_ACCEPTANCE_LIFETIME_SECONDS)
+export NATIVE_PEER_MANIFEST PRAHO_NATIVE_SMTP_MANIFEST NATIVE_UI_AUTHORITY NATIVE_SMTP_EMAIL_LOG_ID
+export NATIVE_BOUNDARY_MINUTES NATIVE_ACCEPTANCE_LIFETIME_SECONDS
+
 # The Platform runner changes cwd. Export the absolute manifest as data before
 # entering it; shell expansion cannot execute metacharacters inside its value.
 define NATIVE_WORKFLOW_ENV
 case "$$NATIVE_VM_MANIFEST" in /*) ;; *) NATIVE_VM_MANIFEST="$$PWD/$$NATIVE_VM_MANIFEST" ;; esac; \
 export NATIVE_VM_MANIFEST PRAHO_NATIVE_LAB=1;
 endef
+
+# Resolve optional paths before PYTHON_PLATFORM_MANAGE changes directory. No
+# eval or unquoted argument expansion is used for manifest names or log IDs.
+define NATIVE_ACCEPTANCE_ENV
+$(NATIVE_WORKFLOW_ENV) \
+case "$$NATIVE_PEER_MANIFEST" in ''|/*) ;; *) NATIVE_PEER_MANIFEST="$$PWD/$$NATIVE_PEER_MANIFEST" ;; esac; \
+case "$$PRAHO_NATIVE_SMTP_MANIFEST" in ''|/*) ;; *) PRAHO_NATIVE_SMTP_MANIFEST="$$PWD/$$PRAHO_NATIVE_SMTP_MANIFEST" ;; esac; \
+case "$$NATIVE_UI_AUTHORITY" in ''|/*) ;; *) NATIVE_UI_AUTHORITY="$$PWD/$$NATIVE_UI_AUTHORITY" ;; esac; \
+export NATIVE_PEER_MANIFEST PRAHO_NATIVE_SMTP_MANIFEST NATIVE_UI_AUTHORITY;
+endef
+
+define NATIVE_ACCEPTANCE_RUN
+$(NATIVE_ACCEPTANCE_ENV) \
+$(if $(filter peer-destroy,$(1)),export PRAHO_NATIVE_CLEANUP_ONLY=1;,unset PRAHO_NATIVE_CLEANUP_ONLY;) \
+set --; if [ -n "$$NATIVE_PEER_MANIFEST" ]; then set -- --peer-manifest "$$NATIVE_PEER_MANIFEST"; fi; \
+$(PYTHON_PLATFORM_MANAGE) hosting_native_acceptance $(1) --manifest "$$NATIVE_VM_MANIFEST" "$$@" \
+    --boundary-minutes "$$NATIVE_BOUNDARY_MINUTES" --settings=config.settings.native
+endef
+
+.PHONY: native-peer-manifest native-smtp-manifest native-ui-authority native-commercial-staff-setup native-commercial-setup native-peer-intent native-peer-create native-peer-export native-commercial-verify native-peer-destroy test-virtualmin-peer-quotas native-smtp-serve native-smtp-verify native-portal-serve native-virtualmin-schedules native-billing-schedules native-worker
+native-peer-manifest:
+	@test -n "$$NATIVE_PEER_MANIFEST" || { echo 'Set NATIVE_PEER_MANIFEST to the private approved child manifest path.' >&2; exit 2; }
+
+native-smtp-manifest:
+	@test -n "$$PRAHO_NATIVE_SMTP_MANIFEST" || { echo 'Set PRAHO_NATIVE_SMTP_MANIFEST to the private owned SMTP capture path.' >&2; exit 2; }
+
+native-ui-authority:
+	@test -n "$$NATIVE_UI_AUTHORITY" || { echo 'Set NATIVE_UI_AUTHORITY to the private two-service authority path.' >&2; exit 2; }
+
+native-commercial-setup: native-vm-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,setup)
+
+native-commercial-staff-setup: native-vm-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,staff-setup)
+
+native-peer-intent: native-vm-manifest native-peer-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,peer-intent)
+
+native-peer-create: native-vm-manifest native-peer-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,create-peer)
+
+native-peer-export: native-vm-manifest native-peer-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,export-peer)
+
+native-commercial-verify: native-vm-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,verify)
+
+native-peer-destroy: native-vm-manifest native-peer-manifest
+	@$(call NATIVE_ACCEPTANCE_RUN,peer-destroy)
+
+test-virtualmin-peer-quotas: native-vm-manifest native-peer-manifest
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_SHARED) tests/virtualmin_lab/native/provider_vm.py verify --manifest "$$NATIVE_PEER_MANIFEST"
+
+native-smtp-serve: native-vm-manifest native-smtp-manifest
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_SHARED) tests/virtualmin_lab/native/smtp_capture.py serve --manifest "$$NATIVE_VM_MANIFEST" \
+	    --smtp-manifest "$$PRAHO_NATIVE_SMTP_MANIFEST" --lifetime-seconds "$$NATIVE_ACCEPTANCE_LIFETIME_SECONDS"
+
+native-smtp-verify: native-vm-manifest native-smtp-manifest
+	@test -n "$$NATIVE_SMTP_EMAIL_LOG_ID" || { echo 'Set NATIVE_SMTP_EMAIL_LOG_ID to one recorded native EmailLog UUID.' >&2; exit 2; }
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_SHARED) tests/virtualmin_lab/native/smtp_capture.py verify --manifest "$$NATIVE_VM_MANIFEST" \
+	    --smtp-manifest "$$PRAHO_NATIVE_SMTP_MANIFEST" --email-log-id "$$NATIVE_SMTP_EMAIL_LOG_ID"
+
+native-portal-serve: native-vm-manifest native-ui-authority
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_SHARED) tests/virtualmin_lab/native/portal_runner.py serve --manifest "$$NATIVE_VM_MANIFEST" \
+	    --ui-authority "$$NATIVE_UI_AUTHORITY" --lifetime-seconds "$$NATIVE_ACCEPTANCE_LIFETIME_SECONDS"
+
+native-virtualmin-schedules: native-vm-manifest
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_PLATFORM_MANAGE) setup_scheduled_tasks --virtualmin-only --settings=config.settings.native
+
+native-billing-schedules: native-vm-manifest
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_PLATFORM_MANAGE) setup_scheduled_tasks --billing-only --settings=config.settings.native
+
+native-worker: native-vm-manifest
+	@$(NATIVE_ACCEPTANCE_ENV) unset PRAHO_NATIVE_CLEANUP_ONLY; \
+	$(PYTHON_PLATFORM_MANAGE) qcluster --settings=config.settings.native
 
 .PHONY: native-vm-manifest native-dns-zone native-vm-create native-vm-migrate native-vm-prepare native-vm-register native-vm-destroy native-vm-fresh-intent native-vm-fresh-deploy native-vm-fresh-destroy test-virtualmin-quotas test-virtualmin-native-workflow test-virtualmin-native-fresh-deployment
 native-vm-manifest:

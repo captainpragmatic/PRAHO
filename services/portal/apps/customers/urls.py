@@ -6,10 +6,12 @@ Team management, tax profile, and address routes.
 from django.urls import path
 
 from . import views
+from .notification_preferences import notification_preferences_view
 
 app_name = "customers"
 
 urlpatterns = [
+    path("notifications/", notification_preferences_view, name="notification_preferences"),
     path("team/", views.company_team_view, name="team"),
     path("team/invite/", views.company_team_invite_view, name="team_invite"),
     path("team/<int:target_user_id>/role/", views.company_team_role_view, name="team_role"),

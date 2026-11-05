@@ -8,8 +8,6 @@ from django.test import TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 
 from apps.audit.services import GDPRDeletionService
-from apps.billing.models import Payment
-from apps.billing.payment_convergence import PaymentSuccessService
 from apps.billing.plan_change_financial import (
     commercial_source_refusal,
     plan_change_native_refusal,
@@ -24,52 +22,8 @@ from apps.provisioning.hosting_parent_limits import held_parent_cap_repair_issue
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
 from apps.users.models import CustomerMembership
 from tests.billing import test_plan_change_lifecycle as lifecycle_tests
-from tests.billing.test_plan_change_intervals import _PlanChangeCoverageFixture
-from tests.helpers.plan_change_checkout import VerifiedPlanChangeCheckoutFixture
+from tests.helpers.plan_change_financial import StripeCoverageFixture
 from tests.provisioning.test_hosting_safety_observation import HostingSafetyObservationFixture
-
-
-class StripeCoverageFixture(VerifiedPlanChangeCheckoutFixture):
-    def cycle(self, **kwargs):
-        cycle, invoice, line = _PlanChangeCoverageFixture.cycle(self, paid=False, **kwargs)
-        Payment.objects.create(
-            customer=self.customer,
-            invoice=invoice,
-            currency=self.currency,
-            amount_cents=invoice.total_cents,
-            payment_method="stripe",
-            gateway_txn_id="pi_original_paid_coverage",
-            meta={"stripe_customer_id": "cus_original_coverage"},
-        )
-        paid = PaymentSuccessService.converge_gateway_success(
-            "pi_original_paid_coverage",
-            {"amount_received": invoice.total_cents, "currency": "ron", "customer_id": "cus_original_coverage"},
-        )
-        self.assertTrue(paid.is_ok(), paid)
-        invoice.refresh_from_db()
-        self.assertEqual(invoice.status, "paid")
-        return cycle, invoice, line
-
-    def dispute(self, intent_id, *, amount):
-        with patch("apps.notifications.services.NotificationService.send_admin_alert", return_value=True):
-            accepted, message, event = self.deliver_signed_payload(
-                {
-                    "id": "evt_disputed_financial_coverage",
-                    "type": "charge.dispute.created",
-                    "data": {
-                        "object": {
-                            "id": "dp_visible_financial_fact",
-                            "payment_intent": intent_id,
-                            "amount": amount,
-                            "currency": "ron",
-                            "reason": "fraudulent",
-                        }
-                    },
-                },
-            )
-        self.assertTrue(accepted, message)
-        self.assertEqual(event.status, "processed")
-        self.assertEqual(Payment.objects.get(gateway_txn_id=intent_id).status, "disputed")
 
 
 class PlanChangeNativeFinancialGateTests(StripeCoverageFixture, TransactionTestCase):

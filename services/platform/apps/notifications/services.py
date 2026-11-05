@@ -44,6 +44,7 @@ from apps.notifications.models import (
     EmailAttachment,
     EmailCampaign,
     EmailLog,
+    EmailPreference,
     EmailSuppression,
     EmailTemplate,
     PendingDeliveryEvent,
@@ -704,6 +705,12 @@ class EmailService:
 
             if not maintenance_dispatch_allowed(str(email_log.id), email_log.claim_token):
                 raise RuntimeError("Maintenance delivery is no longer permitted")
+            from apps.provisioning.hosting_warning_delivery import (  # noqa: PLC0415 -- Same final gate as async delivery.
+                warning_dispatch_allowed,
+            )
+
+            if not warning_dispatch_allowed(str(email_log.id), email_log.claim_token):
+                raise RuntimeError("Hosting warning delivery is no longer permitted")
             from apps.billing.plan_change_delivery import (  # noqa: PLC0415  # Source-specific final policy.
                 plan_change_dispatch_allowed,
             )
@@ -875,6 +882,7 @@ class EmailService:
         attachments: list[AttachmentInput] | None = None,
         async_send: bool = True,
         require_async: bool = False,
+        essential: bool = False,
         **kwargs: Any,
     ) -> EmailResult:
         """
@@ -974,6 +982,7 @@ class EmailService:
                 priority=priority,
                 async_send=async_send,
                 require_async=require_async,
+                essential=essential,
                 tags={"template": template_key, "locale": locale, "category": template.category},
             )
 
@@ -1441,12 +1450,14 @@ class EmailPreferenceService:
     @staticmethod
     def get_preferences(customer: Customer) -> dict[str, bool]:
         """Get email preferences for a customer."""
+        preference = EmailPreference.objects.filter(customer=customer).first() or EmailPreference(customer=customer)
         return {
             "marketing": getattr(customer, "marketing_consent", True),
             "transactional": True,  # Always receive transactional emails
             "billing": True,  # Always receive billing emails
             "security": True,  # Always receive security emails
             "newsletters": getattr(customer, "marketing_consent", False),
+            "quota_warnings": preference.quota_warnings,
         }
 
     @staticmethod
@@ -1460,8 +1471,14 @@ class EmailPreferenceService:
         """
         from apps.customers.models import Customer as CustomerModel  # noqa: PLC0415
 
+        if "quota_warnings" in preferences and type(preferences["quota_warnings"]) is not bool:
+            raise ValueError("The quota warning preference must be an explicit boolean")
         with transaction.atomic():
             locked = CustomerModel.objects.select_for_update(of=("self",)).get(id=customer.id)
+            if "quota_warnings" in preferences:
+                preference, _created = EmailPreference.objects.select_for_update().get_or_create(customer=locked)
+                preference.quota_warnings = preferences["quota_warnings"]
+                preference.save(update_fields=["quota_warnings", "updated_at"])
 
             # "marketing" is the canonical key; "newsletters" is accepted as an alias.
             # If both are present, "marketing" wins so an explicit opt-out cannot be
@@ -1480,6 +1497,9 @@ class EmailPreferenceService:
     @staticmethod
     def can_send_category(customer: Customer, category: str) -> bool:
         """Check if we can send emails of a specific category to a customer."""
+        if category == "quota_warnings":
+            preference = EmailPreference.objects.filter(customer=customer).first() or EmailPreference(customer=customer)
+            return preference.can_receive("quota_warnings")
         # Transactional emails always allowed
         if category in ["billing", "provisioning", "security", "system", "compliance"]:
             return True
@@ -1530,6 +1550,30 @@ class EmailPreferenceService:
                     return False
 
                 email = token_obj.email
+
+                # Warning links change their explicit optional category. They
+                # never withdraw unrelated marketing or global delivery choices.
+                if category == "quota_warnings" or (
+                    category is None and token_obj.template_key == "hosting_usage_warning"
+                ):
+                    from apps.notifications.models import EmailPreference  # noqa: PLC0415
+
+                    customers = list(
+                        Customer.objects.select_for_update(of=("self",))
+                        .filter(
+                            primary_email__iexact=email,
+                            anonymized_at__isnull=True,
+                            deleted_at__isnull=True,
+                        )
+                        .order_by("pk")
+                    )
+                    for warning_customer in customers:
+                        preference, _created = EmailPreference.objects.select_for_update(of=("self",)).get_or_create(
+                            customer=warning_customer
+                        )
+                        preference.quota_warnings = False
+                        preference.save(update_fields=["quota_warnings", "updated_at"])
+                    return True
 
                 try:
                     customer = Customer.objects.select_for_update(of=("self",)).get(primary_email=email)

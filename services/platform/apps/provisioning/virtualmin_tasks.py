@@ -2177,7 +2177,29 @@ def delete_virtualmin_account_async(account_id: str) -> str:
 
 def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
     """Set up all Virtualmin scheduled tasks."""
-    tasks_created = {}
+    from .hosting_warning_delivery import setup_warning_pipeline  # noqa: PLC0415 -- One explicit scheduler setup.
+
+    tasks_created = setup_warning_pipeline()
+    _, created = ScheduleModel.objects.update_or_create(
+        name="hosting-safety-observations",
+        defaults={
+            "func": "apps.provisioning.hosting_safety_observation.dispatch_hosting_safety_observations",
+            "schedule_type": "I",
+            "minutes": 1,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["hosting_safety"] = "created" if created else "updated"
+    _, created = ScheduleModel.objects.update_or_create(
+        name="hosting-limits-dispatch",
+        defaults={
+            "func": "apps.provisioning.hosting_limit_tasks.dispatch_hosting_limits",
+            "schedule_type": "I",
+            "minutes": 5,
+            "cluster": "praho-cluster",
+        },
+    )
+    tasks_created["hosting_limits"] = "created" if created else "updated"
     _, created = ScheduleModel.objects.update_or_create(
         name="hosting-safety-observations",
         defaults={

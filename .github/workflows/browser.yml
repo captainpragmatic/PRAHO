@@ -83,6 +83,9 @@ jobs:
     - name: Portal checkout browser boundary acceptance
       run: make test-portal-checkout-browser
 
+    - name: Portal hosting warnings and relief browser acceptance
+      run: make test-portal-hosting-warnings-browser
+
     - name: Stop the browser-test stack
       if: always()
       run: make stop-e2e
@@ -95,6 +98,7 @@ jobs:
         path: |
           output/playwright/runs/
           output/playwright/hosting-plan-checkout-boundary/
+          output/playwright/hosting-warning-boundary/
           logs/
         if-no-files-found: warn
         retention-days: 14

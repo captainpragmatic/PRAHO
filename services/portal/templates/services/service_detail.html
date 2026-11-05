@@ -160,6 +160,8 @@
 
   <!-- Main Content -->
   {% include "services/partials/hosting_limits.html" with limits=service.hosting_limits %}
+  {% include "services/partials/hosting_raise.html" with relief=service.hosting_raise %}
+  {% include "services/partials/hosting_warnings.html" with warnings=service.hosting_warnings limits=service.hosting_limits %}
   <div class="space-y-8" x-data="tabGroup">
       <!-- Navigation Tabs -->
       <div class="bg-slate-800 rounded-lg border border-slate-700">

@@ -18,7 +18,7 @@ from .hosting_limit_execution import _account_busy, canonical_safety_used_bytes
 from .hosting_limit_native import quantity, validate_identity, verify_quota_probe
 from .hosting_limit_transport import probe_registered_account_quota
 from .hosting_node_execution import invalidate_observed_quota_identity
-from .hosting_safety_scope import SAFETY_BUDGET, SAFETY_PROBE_MAX_AGE, current_safety_scope
+from .hosting_safety_scope import SAFETY_BUDGET, SAFETY_PROBE_MAX_AGE, SAFETY_SCHEMA, current_safety_scope
 from .service_models import Service
 from .virtualmin_models import (
     SAFETY_OBSERVATION_OPERATION,
@@ -119,7 +119,7 @@ def request_safety_refresh(service_id: int, customer_id: int, actor_id: int) -> 
             claimed_at=now,
             execution_deadline=now + SAFETY_BUDGET,
             correlation_id="safety-" + str(token),
-            parameters={"schema": 1, "scope": scope, "requested_by": actor_id, "task_budget_seconds": 240},
+            parameters={"schema": SAFETY_SCHEMA, "scope": scope, "requested_by": actor_id, "task_budget_seconds": 240},
         )
         transaction.on_commit(lambda: _enqueue(job.pk, token))
         return job
@@ -237,12 +237,15 @@ def _publish(job_id: UUID, token: UUID, probe: dict[str, Any]) -> str:
             "canonical_bytes": canonical_safety_used_bytes(account, probe, owner_id=service.customer_id),
         }
         job.result = {
-            "schema": 1,
+            "schema": SAFETY_SCHEMA,
             "scope": scope,
             "identity": identity,
             "observed_at": verified.observed_at.isoformat(),
             "components": parts,
             "used_bytes": max(parts.values()),
+            "available_bytes": verified.available_bytes,
+            "capacity_baseline_kib": verified.capacity_baseline_kib,
+            "quota_protocol": probe.get("quota_protocol", 1),
         }
         job.status, job.completed_at = "completed", now
         job.save(update_fields=["result", "status", "completed_at", "updated_at"])

@@ -16,18 +16,14 @@ from .service_models import Service
 from .virtualmin_models import VirtualminAccount, VirtualminServer
 from .virtualmin_security import connection_identity
 
-SAFETY_SCHEMA = 1
+SAFETY_SCHEMA = 2
 SAFETY_TTL = timedelta(minutes=5)
 SAFETY_PROBE_MAX_AGE = timedelta(seconds=60)
 SAFETY_BUDGET = timedelta(minutes=4)
 
 
 def current_safety_scope(service_id: int) -> dict[str, Any] | None:
-    """PR3 must replace the explicit zero-overlay identity before enabling raises.
-
-    Overlay revision must then remain monotonic across expiry; old zero-overlay
-    jobs and results cannot be interpreted as current after that revision changes.
-    """
+    """Bind actual persistent overlay identity, including expiry and revoked state."""
     try:
         return _current_safety_scope(service_id)
     except (VirtualminAccount.DoesNotExist, VirtualminServer.DoesNotExist, ValidationError):
@@ -65,6 +61,9 @@ def _current_safety_scope(service_id: int) -> dict[str, Any] | None:  # noqa: PL
         native_identity = current_quota_identity(server)
     except (ValidationError, VirtualminServer.DoesNotExist):
         return None
+    from .hosting_raise_service import current_raise_terms  # noqa: PLC0415 -- Persistent revision survives expiry.
+
+    overlay = current_raise_terms(service.pk, service.customer_id)
     return {
         "schema": SAFETY_SCHEMA,
         "service_id": service.pk,
@@ -82,6 +81,7 @@ def _current_safety_scope(service_id: int) -> dict[str, Any] | None:  # noqa: PL
         "assigned_plan_id": limits.assigned_plan_id,
         "service_plan_id": service.service_plan_id,
         "operational_revision": limits.operational_revision,
-        "overlay_revision": 0,
-        "overlay_expires_at": None,
+        "overlay_revision": overlay.revision,
+        "overlay_extra_mib": overlay.extra_mib,
+        "overlay_expires_at": overlay.expires_at.isoformat() if overlay.expires_at else None,
     }

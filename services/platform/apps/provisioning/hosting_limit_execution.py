@@ -30,7 +30,7 @@ from .hosting_limit_native import (
     verify_quota_probe,
     verify_quota_receipt,
 )
-from .hosting_limit_policy import BYTES_PER_MIB, effective_disk_limit
+from .hosting_limit_policy import BYTES_PER_MIB, OVERLAY_QUOTA_PROTOCOL, effective_disk_limit
 from .service_models import Service
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from .virtualmin_security import connection_identity
@@ -193,7 +193,7 @@ def _account_busy(
     return jobs.exclude(pk__in=ignored).exists()
 
 
-def _parent_refusal(account: VirtualminAccount, parent: dict[str, Any]) -> str | None:
+def _parent_refusal(account: VirtualminAccount, parent: dict[str, Any]) -> str | None:  # noqa: PLR0911 -- Independent current-claim, target, lease and immutable-review refusals.
     """An archive writer may repair quota as an explicitly bound child of its own lane."""
     if parent.get("job_id"):
         job = VirtualminProvisioningJob.objects.filter(pk=parent["job_id"], account_id=account.pk).first()
@@ -224,6 +224,16 @@ def _parent_refusal(account: VirtualminAccount, parent: dict[str, Any]) -> str |
         frozen = migration.pre_migration_snapshot.get("hosting_limits")
         if not isinstance(frozen, dict) or parent.get("approved_application_id") != frozen.get("application_id"):
             return "The migration quota application has no immutable reviewed ceiling."
+        from .hosting_limit_review import (  # noqa: PLC0415 -- Reviewed derivative depends on the native execution model.
+            reviewed_application_matches,
+        )
+
+        frozen_id = parent.get("frozen_application_id")
+        application = (
+            HostingLimitApplication.objects.filter(pk=frozen_id).first() if isinstance(frozen_id, str) else None
+        )
+        if application is None or not reviewed_application_matches(migration, application):
+            return "The migration quota application exceeds or differs from its immutable reviewed ceiling."
     return None
 
 
@@ -233,12 +243,14 @@ def freeze_migration_limits(account: VirtualminAccount) -> dict[str, Any]:
 
     application = current_application(account.service_id)
     return {
+        "schema": 2,
         "application_id": str(application.pk),
         "base_revision": application.revision,
-        "overlay_revision": 0,
-        "overlay_expires_at": None,
+        "overlay_revision": application.overlay_revision,
+        "overlay_extra_mib": application.overlay_extra_mib,
+        "overlay_expires_at": application.overlay_expires_at.isoformat() if application.overlay_expires_at else None,
         "owner_id": str(application.authority.get("customer_id")),
-        "disk_cap_mib": effective_disk_limit(application.disk_allowance_mib),
+        "disk_cap_mib": effective_disk_limit(application.disk_allowance_mib, extra_mib=application.overlay_extra_mib),
         "bandwidth_mib": application.bandwidth_allowance_mib,
     }
 
@@ -248,11 +260,26 @@ def _frozen_parent_application(application: HostingLimitApplication, parent: dic
         from .hosting_parent_limits import held_parent_application_matches  # noqa: PLC0415
 
         return held_parent_application_matches(application, parent)
+    if not parent.get("migration_id") or parent.get("frozen_application_id") != str(application.pk):
+        return False
+    from .hosting_limit_review import reviewed_application_matches  # noqa: PLC0415
+    from .virtualmin_migration_models import VirtualminMigration  # noqa: PLC0415
+
+    migration = VirtualminMigration.objects.filter(pk=parent["migration_id"]).first()
     return bool(
-        parent.get("migration_id")
-        and parent.get("frozen_application_id") == str(application.pk)
-        and parent.get("approved_application_id") == str(application.pk)
+        migration is not None
+        and parent.get("approved_application_id")
+        == migration.pre_migration_snapshot.get("hosting_limits", {}).get("application_id")
+        and reviewed_application_matches(migration, application)
     )
+
+
+def _operational_cleanup(application: HostingLimitApplication, service: Service) -> bool:
+    from .hosting_raise_expiry import (  # noqa: PLC0415 -- DB-only cycle boundary.
+        operational_expiry_authorized,
+    )
+
+    return operational_expiry_authorized(application, service)
 
 
 def quota_operation_refusal(server_id: UUID) -> str | None:
@@ -304,16 +331,12 @@ def _lock_context(execution: HostingLimitExecution) -> tuple[VirtualminAccount, 
 
 
 def _commercial_refusal(application: HostingLimitApplication, parent: dict[str, Any]) -> str | None:
-    if application.authority.get("kind") not in {"paid_plan_change", "zero_due_plan_change", "scheduled_plan_change"}:
-        return None
-    from apps.billing.plan_change_financial import (  # noqa: PLC0415 -- Optional source-specific authority.
-        plan_change_native_refusal,
-    )
+    from .hosting_limit_commercial import quota_dispatch_refusal  # noqa: PLC0415 -- DB-only composed base provenance.
 
-    return plan_change_native_refusal(application, parent=parent)
+    return quota_dispatch_refusal(application, parent)
 
 
-def _authority_refusal(  # noqa: C901, PLR0911 -- Independent owner, revision, native-lane, provider and adopted-policy refusals.
+def _authority_refusal(  # noqa: C901, PLR0911, PLR0912 -- Independent owner, base/overlay, native-lane, provider and adopted-policy refusals.
     execution: HostingLimitExecution, account: VirtualminAccount, server: VirtualminServer, service: Service
 ) -> str | None:
     job = VirtualminProvisioningJob.objects.get(pk=execution.job_id)
@@ -333,8 +356,20 @@ def _authority_refusal(  # noqa: C901, PLR0911 -- Independent owner, revision, n
     if parent and str(account.server_id) not in {parent.get("account_server_id"), parent.get("native_server_id")}:
         return "The parent quota operation no longer owns this account's source/target binding."
     limits = ServiceHostingLimits.objects.get(service_id=service.pk)
-    if limits.revision != execution.service_revision and not _frozen_parent_application(_application(job), parent):
+    if (
+        limits.revision != execution.service_revision
+        and not _frozen_parent_application(_application(job), parent)
+        and not _operational_cleanup(_application(job), service)
+    ):
         return "A newer hosting allowance supersedes this native application."
+    if _application(job).authority.get("kind") == "temporary_raise_expiry" and not _operational_cleanup(
+        _application(job), service
+    ):
+        return "The expiry cleanup no longer owns its recorded operational base."
+    from .hosting_raise_service import application_raise_refusal  # noqa: PLC0415 -- Exact base/overlay composition.
+
+    if refusal := application_raise_refusal(_application(job), service):
+        return refusal
     if service.status not in {"active", "suspended", "provisioning", "pending"} or account.status == "terminated":
         return "The hosting service no longer permits a quota application."
     if refusal := _parent_refusal(account, parent):
@@ -363,7 +398,7 @@ def _authority_refusal(  # noqa: C901, PLR0911 -- Independent owner, revision, n
     return _commercial_refusal(_application(job), parent) if execution.phase == "prepared" else None
 
 
-def _parent_requalification_transfer(
+def _parent_requalification_transfer(  # noqa: PLR0911 -- Closed original review, never-issued journal and native identity guards.
     application: HostingLimitApplication,
     account: VirtualminAccount,
     server: VirtualminServer,
@@ -374,8 +409,9 @@ def _parent_requalification_transfer(
 
     The caller holds Account→sortedServers→Service. A prepared request is never
     authorized to mutate through the SSH gate; only an issued, complete request
-    can dispatch. The old attention record remains immutable history, and its
-    capacity will move only in the transaction creating the fresh attempt.
+    can dispatch. A smaller reviewed overlay may replace a still-probing child;
+    the old complete request never existed. The same transaction retires that
+    attempt and carries its full capacity into the successor.
     """
     if not parent or _parent_refusal(account, parent):
         return None
@@ -383,13 +419,24 @@ def _parent_requalification_transfer(
         policy = _node_policy(server)
     except ValidationError:
         return None
+    ownership = {"job__hosting_limit_application_id": application.pk}
+    if parent.get("migration_id") and parent.get("approved_application_id"):
+        ownership = {
+            "job__parameters__quota_parent__migration_id": parent["migration_id"],
+            "job__parameters__quota_parent__approved_application_id": parent["approved_application_id"],
+        }
+    elif parent.get("job_id") and parent.get("approved_application_id"):
+        ownership = {
+            "job__parameters__quota_parent__job_id": parent["job_id"],
+            "job__parameters__quota_parent__approved_application_id": parent["approved_application_id"],
+        }
     candidates = list(
         HostingLimitExecution.objects.select_for_update(of=("self",))
         .filter(
             job__account_id=account.pk,
             job__server_id=server.pk,
-            job__hosting_limit_application_id=application.pk,
             phase__in=ACTIVE_PHASES,
+            **ownership,
         )
         .order_by("pk")[:2]
     )
@@ -397,34 +444,74 @@ def _parent_requalification_transfer(
         return None
     old = candidates[0]
     old_parent = old.job.parameters.get("quota_parent", {})
+    original = old.job.hosting_limit_application
+    if original is None:
+        return None
+    derived = original.pk != application.pk
+    if derived:
+        from .hosting_limit_review import (  # noqa: PLC0415
+            reviewed_application_history_matches,
+            reviewed_job_application_matches,
+        )
+        from .virtualmin_migration_models import VirtualminMigration  # noqa: PLC0415
+
+        if parent.get("migration_id"):
+            migration = VirtualminMigration.objects.filter(pk=parent["migration_id"]).first()
+            reviewed = migration is not None and reviewed_application_history_matches(migration, original)
+        else:
+            job_id = parent.get("job_id")
+            parent_job = (
+                VirtualminProvisioningJob.objects.filter(pk=job_id).first() if isinstance(job_id, str) else None
+            )
+            reviewed = parent_job is not None and reviewed_job_application_matches(
+                parent_job, original, historical=True
+            )
+        if (
+            not reviewed
+            or application.overlay_revision <= original.overlay_revision
+            or application.overlay_extra_mib > original.overlay_extra_mib
+            or original.overlay_expires_at is None
+            or application.overlay_expires_at is None
+            or application.overlay_expires_at > original.overlay_expires_at
+        ):
+            return None
     from .hosting_limit_provider_recovery import (  # noqa: PLC0415 -- Database-only original provider binding.
         provider_binding,
     )
 
+    owned_phase = (old.phase, old.job.status) == ("attention", "attention") or (
+        derived and (old.phase, old.job.status) == ("prepared", "running")
+    )
     if (
-        old.phase != "attention"
+        not owned_phase
         or old.issued_at is not None
         or old.request
         or old.receipt
-        or old.job.status != "attention"
         or old.job.execution_token is None
         or not old.reserved_bytes
         or old.reservation_released_at is not None
         or old.account_epoch != account.quota_generation
         or old.service_revision != application.revision
         or old.owner_id != service.customer_id
-        or old.overlay_revision != 0
-        or old.job.parameters.get("overlay_revision") != 0
+        or old.overlay_revision != original.overlay_revision
+        or old.job.parameters.get("overlay_revision") != original.overlay_revision
+        or old.job.parameters.get("overlay_extra_mib", 0) != original.overlay_extra_mib
+        or old.job.parameters.get("overlay_expires_at")
+        != (original.overlay_expires_at.isoformat() if original.overlay_expires_at else None)
         or not isinstance(old_parent, dict)
-        or {key: value for key, value in old_parent.items() if key != "token"}
-        != {key: value for key, value in parent.items() if key != "token"}
+        or {key: value for key, value in old_parent.items() if key not in {"token", "frozen_application_id"}}
+        != {key: value for key, value in parent.items() if key not in {"token", "frozen_application_id"}}
         or not (old_parent.get("migration_id") or old_parent.get("job_id"))
-        or old.node_policy_revision >= policy.revision
+        or old.node_policy_revision > policy.revision
         or old.connection_identity != connection_identity(server)
         or old.job.parameters.get("quota_provider") != provider_binding(server)
         or set(old.identity) != {"installation", "filesystem_uuid", "boot_id"}
         or any(old.identity.get(key) != policy.quota_evidence.get(key) for key in ("installation", "filesystem_uuid"))
-        or old.identity["boot_id"] == policy.quota_evidence.get("boot_id")
+        or (not derived and old.identity["boot_id"] == policy.quota_evidence.get("boot_id"))
+        or (
+            old.identity["boot_id"] != policy.quota_evidence.get("boot_id")
+            and old.node_policy_revision >= policy.revision
+        )
     ):
         return None
     return old
@@ -456,7 +543,13 @@ def admit_application(  # noqa: C901, PLR0911, PLR0912 -- Explicit stale, duplic
         service = Service.objects.select_for_update(of=("self",), no_key=True).get(pk=account.service_id)
         limits = ServiceHostingLimits.objects.get(service_id=service.pk)
         if application.service_id != service.pk or (
-            limits.revision != application.revision and not _frozen_parent_application(application, parent or {})
+            limits.revision != application.revision
+            and not _frozen_parent_application(application, parent or {})
+            and not _operational_cleanup(application, service)
+        ):
+            return None
+        if application.authority.get("kind") == "temporary_raise_expiry" and not _operational_cleanup(
+            application, service
         ):
             return None
         if str(application.authority.get("customer_id")) != str(service.customer_id):
@@ -469,7 +562,11 @@ def admit_application(  # noqa: C901, PLR0911, PLR0912 -- Explicit stale, duplic
             job__server_id=server.pk,
             phase__in=(*ACTIVE_PHASES, "completed"),
         )
-        if limits.verified_at is None or limits.applied_revision != application.revision:
+        if (
+            limits.verified_at is None
+            or limits.applied_revision != application.revision
+            or limits.applied_overlay_revision != application.overlay_revision
+        ):
             candidates = candidates.exclude(phase="completed")
         if parent:
             candidates = candidates.filter(job__parameters__quota_parent=parent)
@@ -537,7 +634,11 @@ def admit_application(  # noqa: C901, PLR0911, PLR0912 -- Explicit stale, duplic
             retry_count=retry_count,
             parameters={
                 "revision": application.revision,
-                "overlay_revision": 0,
+                "overlay_revision": application.overlay_revision,
+                "overlay_extra_mib": application.overlay_extra_mib,
+                "overlay_expires_at": application.overlay_expires_at.isoformat()
+                if application.overlay_expires_at
+                else None,
                 "quota_parent": parent or {},
                 "quota_provider": provider_binding(server),
                 **({"quota_reservation_from": str(transfer.pk)} if transfer is not None else {}),
@@ -548,6 +649,7 @@ def admit_application(  # noqa: C901, PLR0911, PLR0912 -- Explicit stale, duplic
         execution = HostingLimitExecution.objects.create(
             job=job,
             service_revision=application.revision,
+            overlay_revision=application.overlay_revision,
             owner_id=service.customer_id,
             account_epoch=account.quota_generation,
             node_policy_revision=policy.revision,
@@ -713,6 +815,51 @@ def canonical_safety_used_bytes(account: VirtualminAccount, probe: dict[str, Any
     raise ValidationError(_("Fresh canonical disk evidence for this exact owner and native scope is required."))
 
 
+def _refuse_prepared(execution: HostingLimitExecution, refusal: str) -> None:
+    if execution.reserved_bytes and _parent_still_active(execution):
+        raise ValidationError(refusal)
+    _release(execution, phase="superseded", status="cancelled", message=refusal)
+
+
+def _verify_cleanup_reduction(
+    execution: HostingLimitExecution, application: HostingLimitApplication, service: Service, probe: dict[str, Any]
+) -> None:
+    if not _operational_cleanup(application, service):
+        return
+    from .hosting_limit_review import (  # noqa: PLC0415 -- Issued immutable parent boundary.
+        issued_reviewed_parent,
+    )
+    from .hosting_raise_expiry import cleanup_probe_refusal  # noqa: PLC0415
+
+    if not issued_reviewed_parent(application, execution.job.parameters.get("quota_parent", {})) and (
+        refusal := cleanup_probe_refusal(application, probe)
+    ):
+        raise ValidationError(refusal)
+
+
+def _application_policy(
+    execution: HostingLimitExecution, application: HostingLimitApplication, service: Service
+) -> dict[str, Any]:
+    from .hosting_limit_review import (  # noqa: PLC0415 -- Native issued review boundary.
+        issued_reviewed_parent,
+    )
+    from .hosting_raise_service import is_preauthorized_raise_expiry  # noqa: PLC0415
+
+    if application.overlay_expires_at is None:
+        raise ValidationError(_("The temporary resource application has no exact expiry."))
+    expiry_reduction = is_preauthorized_raise_expiry(application, service)
+    return {
+        "schema": OVERLAY_QUOTA_PROTOCOL,
+        "base_revision": application.revision,
+        "overlay_revision": application.overlay_revision,
+        "extra_mib": application.overlay_extra_mib,
+        "expires_at": application.overlay_expires_at.isoformat(),
+        "expiry_reduction": expiry_reduction,
+        "monotonic_reduction": expiry_reduction
+        and not issued_reviewed_parent(application, execution.job.parameters.get("quota_parent", {})),
+    }
+
+
 def _prepare_dispatch(execution_id: UUID, probe: dict[str, Any]) -> dict[str, Any] | None:
     hint = HostingLimitExecution.objects.get(pk=execution_id)
     # Commit a verified same-node reboot observation before the dispatch's
@@ -734,10 +881,10 @@ def _prepare_dispatch(execution_id: UUID, probe: dict[str, Any]) -> dict[str, An
         if execution.phase != "prepared":
             return None
         if refusal := _authority_refusal(execution, account, server, service):
-            _release(execution, phase="superseded", status="cancelled", message=refusal)
+            _refuse_prepared(execution, refusal)
             return None
         application = _application(execution.job)
-        cap = effective_disk_limit(application.disk_allowance_mib)
+        cap = effective_disk_limit(application.disk_allowance_mib, extra_mib=application.overlay_extra_mib)
         if cap is None:
             raise ValidationError(_("The assigned disk allowance is unknown."))
         identity = validate_identity(probe.get("identity"))
@@ -747,8 +894,17 @@ def _prepare_dispatch(execution_id: UUID, probe: dict[str, Any]) -> dict[str, An
         ):
             raise ValidationError(_("The native owner or adopted node identity differs from the prepared application."))
         observed = verify_quota_probe(probe, identity=identity, now=timezone.now())
+        _verify_cleanup_reduction(execution, application, service, probe)
+        if application.overlay_revision and probe.get("quota_protocol") != OVERLAY_QUOTA_PROTOCOL:
+            raise ValidationError(_("Prepare the current quota helper protocol before applying temporary resources."))
         current = observed.capacity_baseline_kib
-        if cap and _safety_used(account, probe, owner_id=execution.owner_id) > cap * BYTES_PER_MIB:
+        from .hosting_raise_service import is_preauthorized_raise_expiry  # noqa: PLC0415
+
+        if (
+            cap
+            and not is_preauthorized_raise_expiry(application, service)
+            and _safety_used(account, probe, owner_id=execution.owner_id) > cap * BYTES_PER_MIB
+        ):
             raise ValidationError(_("Current usage exceeds the requested cap; limits remain pending for review."))
         if cap == 0 and current is not None:
             raise ValidationError(_("An unbounded increase needs an explicit node capacity review."))
@@ -780,6 +936,8 @@ def _prepare_dispatch(execution_id: UUID, probe: dict[str, Any]) -> dict[str, An
             "disk_limit_kib": cap * 1024,
             "bandwidth_limit_bytes": quantity(application.bandwidth_allowance_mib) * BYTES_PER_MIB,
         }
+        if application.overlay_revision:
+            request["policy"] = _application_policy(execution, application, service)
         execution.identity, execution.request, execution.reserved_bytes = identity, request, delta
         ServiceHostingLimits.objects.filter(service_id=service.pk).update(verified_at=None)
         execution.phase, execution.issued_at = "issued", timezone.now()
@@ -795,6 +953,8 @@ def _complete(execution_id: UUID, receipt: dict[str, Any], *, publish_completed:
         if execution.phase != "issued" and not (publish_completed and execution.phase == "completed"):
             return False
         application = _application(execution.job)
+        if application.overlay_revision and receipt.get("quota_protocol") != OVERLAY_QUOTA_PROTOCOL:
+            raise ValidationError(_("The native helper did not verify the temporary resource protocol."))
         verify_quota_receipt(
             receipt,
             identity=execution.identity,
@@ -835,6 +995,7 @@ def _complete(execution_id: UUID, receipt: dict[str, Any], *, publish_completed:
         ):
             return True
         limits.applied_revision = limits.operational_revision = execution.service_revision
+        limits.applied_overlay_revision = execution.overlay_revision
         limits.applied_disk_allowance_mib = limits.operational_disk_allowance_mib = application.disk_allowance_mib
         limits.applied_bandwidth_allowance_mib = limits.operational_bandwidth_allowance_mib = (
             application.bandwidth_allowance_mib
@@ -843,6 +1004,7 @@ def _complete(execution_id: UUID, receipt: dict[str, Any], *, publish_completed:
         limits.save(
             update_fields=[
                 "applied_revision",
+                "applied_overlay_revision",
                 "operational_revision",
                 "applied_disk_allowance_mib",
                 "operational_disk_allowance_mib",
@@ -956,38 +1118,32 @@ def ensure_managed_limits(  # noqa: C901, PLR0911, PLR0912 -- Preserve independe
     # Keep the prior receipt as history, but never display it as current proof.
     if parent:
         ServiceHostingLimits.objects.filter(service_id=account.service_id).update(verified_at=None)
-    if parent_job is not None:
-        from .hosting_parent_limits import frozen_parent_application  # noqa: PLC0415
+    if migration is not None:
+        frozen = migration.pre_migration_snapshot.get("hosting_limits")
+        if not isinstance(frozen, dict) or frozen.get("disk_cap_mib") is None or frozen.get("bandwidth_mib") is None:
+            return Err("The reviewed migration cap is unknown.")
+        from .hosting_limit_review import (  # noqa: PLC0415 -- Shared bounded immutable parent review.
+            reviewed_parent_application,
+        )
+
+        try:
+            application = reviewed_parent_application(migration)
+        except (ValidationError, HostingLimitApplication.DoesNotExist, ValueError, KeyError, TypeError) as error:
+            return Err(str(error))
+        parent["approved_application_id"] = frozen["application_id"]
+        parent["frozen_application_id"] = str(application.pk)
+    elif parent_job is not None:
+        from .hosting_limit_review import reviewed_job_application  # noqa: PLC0415
 
         try:
             recorded = VirtualminProvisioningJob.objects.get(pk=parent_job.pk)
-            application = frozen_parent_application(recorded)
+            application = reviewed_job_application(recorded)
+            parent["approved_application_id"] = str(recorded.hosting_limit_application_id)
+            parent["frozen_application_id"] = str(application.pk)
         except (ValidationError, HostingLimitApplication.DoesNotExist, VirtualminAccount.DoesNotExist) as error:
             return Err(str(error))
     else:
         application = current_application(account.service_id)
-    if migration is not None:
-        frozen = migration.pre_migration_snapshot.get("hosting_limits")
-        if (
-            not isinstance(frozen, dict)
-            or set(frozen)
-            != {
-                "application_id",
-                "base_revision",
-                "overlay_revision",
-                "overlay_expires_at",
-                "owner_id",
-                "disk_cap_mib",
-                "bandwidth_mib",
-            }
-            or frozen.get("overlay_revision") != 0
-        ):
-            return Err("This migration has no supported immutable hosting-limit review.")
-        parent["approved_application_id"] = frozen["application_id"]
-        if frozen["disk_cap_mib"] is None or frozen["bandwidth_mib"] is None:
-            return Err("The reviewed migration cap is unknown.")
-        application = HostingLimitApplication.objects.get(pk=frozen["application_id"])
-        parent["frozen_application_id"] = str(application.pk)
     outcome = apply_hosting_limits(application.pk, parent=parent, native_server_id=target.pk)
     if staged_server is not None:
         account.server = staged_server
@@ -1024,9 +1180,12 @@ def reserve_managed_creation(  # noqa: PLR0911 -- Explicit pre-dispatch refusal 
         "native_server_id": str(target.pk),
     }
     try:
-        from .hosting_parent_limits import frozen_parent_application  # noqa: PLC0415
+        from .hosting_limit_review import reviewed_job_application  # noqa: PLC0415
 
-        application = frozen_parent_application(VirtualminProvisioningJob.objects.get(pk=job.pk))
+        recorded = VirtualminProvisioningJob.objects.get(pk=job.pk)
+        application = reviewed_job_application(recorded)
+        parent["approved_application_id"] = str(recorded.hosting_limit_application_id)
+        parent["frozen_application_id"] = str(application.pk)
         execution = admit_application(application.pk, parent=parent, native_server_id=target.pk)
         if execution is None:
             return Err("The managed creation no longer owns its quota capacity admission.")
@@ -1037,7 +1196,7 @@ def reserve_managed_creation(  # noqa: PLR0911 -- Explicit pre-dispatch refusal 
                 return Err("The creation's quota capacity claim is no longer prepared.")
             if refusal := _authority_refusal(current, locked, server, service):
                 return Err(refusal)
-            cap = effective_disk_limit(application.disk_allowance_mib)
+            cap = effective_disk_limit(application.disk_allowance_mib, extra_mib=application.overlay_extra_mib)
             if cap is None:
                 return Err("The managed creation allowance is unknown.")
             total = (
@@ -1065,7 +1224,7 @@ def reserve_managed_creation(  # noqa: PLR0911 -- Explicit pre-dispatch refusal 
     return Ok(True)
 
 
-def reserve_managed_migration(migration: Any) -> Result[bool, str]:  # noqa: PLR0911 -- Every missing proof refuses before native mutation.
+def reserve_managed_migration(migration: Any) -> Result[bool, str]:  # noqa: C901, PLR0911 -- Every missing proof refuses before native mutation.
     """The held destination reserves its complete reviewed cap before creating/restoring data."""
     from apps.settings.services import SettingsService  # noqa: PLC0415
 
@@ -1079,8 +1238,17 @@ def reserve_managed_migration(migration: Any) -> Result[bool, str]:  # noqa: PLR
             return Err("A managed account requires a qualified quota destination before migration restore.")
         return Ok(False)
     frozen = migration.pre_migration_snapshot.get("hosting_limits")
-    if not isinstance(frozen, dict) or frozen.get("overlay_revision") != 0 or frozen.get("disk_cap_mib") is None:
+    if not isinstance(frozen, dict) or frozen.get("disk_cap_mib") is None:
         return Err("The migration has no reviewed finite/explicit-unlimited composed cap.")
+    from .hosting_limit_review import reviewed_parent_application  # noqa: PLC0415
+
+    try:
+        application = reviewed_parent_application(migration)
+        composed_cap = effective_disk_limit(application.disk_allowance_mib, extra_mib=application.overlay_extra_mib)
+    except (ValidationError, HostingLimitApplication.DoesNotExist, ValueError, KeyError, TypeError) as error:
+        return Err(str(error))
+    if composed_cap is None:
+        return Err("The migration's current reviewed composed cap is unknown.")
     health = VirtualminGateway(VirtualminConfig(server=target)).test_connection()
     if health.is_err() or health.unwrap().get("healthy") is not True:
         return Err("The migration destination has no fresh affirmative capacity evidence.")
@@ -1094,9 +1262,9 @@ def reserve_managed_migration(migration: Any) -> Result[bool, str]:  # noqa: PLR
         "account_server_id": str(migration.source_server_id),
         "native_server_id": str(target.pk),
         "approved_application_id": frozen["application_id"],
-        "frozen_application_id": frozen["application_id"],
+        "frozen_application_id": str(application.pk),
     }
-    execution = admit_application(frozen["application_id"], parent=parent, native_server_id=target.pk)
+    execution = admit_application(application.pk, parent=parent, native_server_id=target.pk)
     if execution is None:
         return Err("The migration no longer owns its reviewed destination capacity.")
     with transaction.atomic():
@@ -1106,7 +1274,7 @@ def reserve_managed_migration(migration: Any) -> Result[bool, str]:  # noqa: PLR
             return Err("The migration's quota capacity claim needs native recovery.")
         if refusal := _authority_refusal(current, account, server, service):
             return Err(refusal)
-        cap = quantity(frozen["disk_cap_mib"]) * BYTES_PER_MIB
+        cap = composed_cap * BYTES_PER_MIB
         if current.reserved_bytes < cap:
             others = (
                 HostingLimitExecution.objects.filter(

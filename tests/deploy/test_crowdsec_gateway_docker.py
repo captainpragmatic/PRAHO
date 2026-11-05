@@ -15,6 +15,7 @@ from pathlib import Path
 
 import paramiko
 import pytest
+from fixture_images import fixture_image
 from test_ssh_hardening_docker import ROOT, docker
 
 from apps.common.crowdsec_transport import CrowdSecRPCError, Endpoint, remote_rpc
@@ -237,7 +238,7 @@ def install_hub(container: str, directory: Path) -> None:
 
 @pytest.fixture(scope="module")
 def native_gateway(tmp_path_factory: pytest.TempPathFactory) -> Iterator[NativeGateway]:
-    image = "praho-ssh-test:26.04"
+    image = fixture_image("praho-ssh-test:26.04")
     docker(
         "build",
         "--build-arg",

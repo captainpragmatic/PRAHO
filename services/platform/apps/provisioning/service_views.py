@@ -31,6 +31,7 @@ from apps.users.models import User
 
 from .hosting_limit_override_service import can_override_hosting_resources
 from .hosting_limit_selectors import allowance_gib, hosting_limits_summary, operational_allowances
+from .hosting_warning_staff import staff_hosting_history
 from .service_models import Service, ServicePlan, ServicePlanPrice
 from .virtualmin_usage_service import prime_service_usage
 
@@ -166,6 +167,8 @@ def service_detail(request: HttpRequest, pk: int) -> HttpResponse:
         "failed_line": failed_line,
         "cancelled_with_order": cancelled_with_order,
     }
+    if user.is_staff_user:
+        context["staff_hosting_history"] = staff_hosting_history(service)
 
     return render(request, "provisioning/service_detail.html", context)
 

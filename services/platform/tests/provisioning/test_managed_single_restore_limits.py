@@ -185,7 +185,8 @@ class ManagedSingleRestoreFixture:
             patch.object(VirtualminGateway, "call", autospec=True, side_effect=self.gateway_call),
             patch.object(pair, "run_pair_step", side_effect=self.node_restore),
             patch(
-                "apps.provisioning.hosting_limit_transport.probe_account_quota", return_value=self.fresh_receipt(1024)
+                "apps.provisioning.hosting_limit_transport.probe_account_quota",
+                side_effect=lambda execution: self.fresh_receipt(1024),
             ),
             patch("apps.provisioning.hosting_limit_transport.run_quota_operation", side_effect=apply),
         ):

@@ -9,6 +9,7 @@ AllowanceSource = Literal["plan", "stored_default", "unlimited", "legacy_unknown
 MIB_PER_GIB = 1024
 BYTES_PER_MIB = 1024 * 1024
 POLICY_VERSION = 1
+OVERLAY_QUOTA_PROTOCOL = 2
 
 
 @dataclass(frozen=True)

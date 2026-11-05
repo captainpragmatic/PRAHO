@@ -1,0 +1,19 @@
+{% load i18n formatting localisation_tags %}
+{% if relief %}
+<section class="my-4 rounded-lg border border-slate-600 bg-slate-800 p-4 text-slate-200" data-hosting-raise="{{ relief.state }}" aria-labelledby="hosting-relief-title">
+  <h3 id="hosting-relief-title" class="font-semibold">
+    {% if relief.state == 'requested' %}{% trans "Temporary disk relief requested" %}
+    {% elif relief.state == 'verified' %}{% trans "Temporary disk relief verified" %}
+    {% elif relief.state == 'expired_attention' %}{% trans "Temporary disk relief has expired" %}
+    {% elif relief.state == 'expired' %}{% trans "Temporary disk relief removed" %}
+    {% else %}{% trans "Temporary capacity status requires review" %}{% endif %}
+  </h3>
+  {% if relief.state == 'requested' %}<p class="mt-2">{% trans "Extra capacity is pending verification." %}</p>{% endif %}
+  {% if relief.state == 'requested' or relief.state == 'verified' %}
+    <p class="mt-2">{% trans "Temporary extra capacity" %}: {{ relief.extra_mib|divide:1024|compact_number }} GiB</p>
+  {% endif %}
+  {% if relief.expires_at %}<p class="mt-2">{% trans "Expires" %}: <time datetime="{{ relief.expires_at }}">{% localised_date relief.expires_at "datetime" %}</time></p>{% endif %}
+  {% if relief.state == 'expired_attention' %}<p class="mt-2 text-amber-300">{% trans "Current capacity needs review. Contact support if you need help." %}</p>{% endif %}
+  <p class="mt-2 text-sm text-slate-300">{% trans "Usage warnings continue to use your purchased allowance." %}</p>
+</section>
+{% endif %}

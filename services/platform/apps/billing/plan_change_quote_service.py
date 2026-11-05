@@ -56,9 +56,12 @@ class PlanChangeSafetyUnavailable(ValidationError):  # noqa: N818 -- Typed API r
         )
 
 
-def _require_downgrade_fit(service: Service, target: PlanTarget) -> None:
+def _require_downgrade_fit(service: Service, target: PlanTarget, *, effective_at: datetime) -> None:
     try:
-        from .plan_change_safety import current_safety_used_bytes  # noqa: PLC0415 -- Root-owned read-only capability.
+        from .plan_change_safety import (  # noqa: PLC0415 -- Read-only current observation and bounded R.
+            current_safety_used_bytes,
+            downgrade_allowance_mib,
+        )
     except ModuleNotFoundError as error:
         if error.name != "apps.billing.plan_change_safety":
             raise
@@ -66,7 +69,7 @@ def _require_downgrade_fit(service: Service, target: PlanTarget) -> None:
     used = current_safety_used_bytes(service)
     if type(used) is not int or used < 0:
         raise PlanChangeSafetyUnavailable()
-    allowance = target.limits.disk_allowance_mib
+    allowance = downgrade_allowance_mib(service, target.limits.disk_allowance_mib, effective_at=effective_at)
     if allowance and used > allowance * BYTES_PER_MIB:
         raise ValidationError(
             _("Current usage exceeds the proposed assigned disk allowance."), code="usage_exceeds_target"
@@ -245,10 +248,15 @@ def plan_change_options(
         options = []
         for target in eligible_plan_targets(subscription):
             recurring = _tax_quote(customer, [target.period_price_cents])
+            effective_at = (
+                _time(at)
+                if target.direction == "upgrade"
+                else first_uncommitted_renewal(subscription, coverage, at=_time(at))
+            )
             refusal_code = None
             if target.direction == "downgrade":
                 try:
-                    _require_downgrade_fit(service, target)
+                    _require_downgrade_fit(service, target, effective_at=effective_at)
                 except ValidationError as error:
                     refusal_code = getattr(error, "code", "usage_exceeds_target")
             options.append(
@@ -260,11 +268,7 @@ def plan_change_options(
                     "currency": subscription.currency.code,
                     "next_recurring_total_cents": recurring["total_cents"],
                     "allowances": target.limits.as_snapshot(),
-                    "effective_at": (
-                        _time(at)
-                        if target.direction == "upgrade"
-                        else first_uncommitted_renewal(subscription, coverage, at=_time(at))
-                    ).isoformat(),
+                    "effective_at": effective_at.isoformat(),
                     "expected_limit_revision": ServiceHostingLimits.objects.get(service=service).revision,
                     "available": refusal_code is None,
                     "refusal_code": refusal_code,
@@ -321,9 +325,10 @@ def _build_quote(  # noqa: PLR0913 -- Locked scope plus explicit submission/revi
         raise PlanChangeConflict(_("The assigned resource revision changed. Reload the available plans."))
     _lock_catalog(subscription, target_product_id)
     target = _target(subscription, target_product_id)
-    if target.direction == "downgrade":
-        _require_downgrade_fit(service, target)
     coverage = load_plan_coverage(subscription, at=at)
+    effective_at = at if target.direction == "upgrade" else first_uncommitted_renewal(subscription, coverage, at=at)
+    if target.direction == "downgrade":
+        _require_downgrade_fit(service, target, effective_at=effective_at)
     current = next(part for part in coverage.intervals if part.start <= at < part.end)
     parts = (
         quote_supplements(
@@ -356,7 +361,7 @@ def _build_quote(  # noqa: PLR0913 -- Locked scope plus explicit submission/revi
         quoted_at=at,
         expires_at=min(at + QUOTE_TTL, authority),
         authority_expires_at=authority,
-        effective_at=at if target.direction == "upgrade" else first_uncommitted_renewal(subscription, coverage, at=at),
+        effective_at=effective_at,
         current_period_start=current.start,
         current_period_end=current.end,
         old_period_price_cents=coverage.current_period_price_cents,
@@ -452,7 +457,7 @@ def _validate_quoted_terms(
         raise PlanChangeConflict(_("The committed period coverage changed. Request a fresh quote."))
     target = validate_frozen_catalog(change, subscription)
     if change.direction == "downgrade":
-        _require_downgrade_fit(service, target)
+        _require_downgrade_fit(service, target, effective_at=change.effective_at)
         if first_uncommitted_renewal(subscription, coverage, at=at) != change.effective_at:
             raise PlanChangeConflict(_("Another renewal was committed. Request its current downgrade date."))
     return target

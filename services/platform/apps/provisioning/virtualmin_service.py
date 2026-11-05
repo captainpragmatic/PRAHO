@@ -621,11 +621,14 @@ class VirtualminProvisioningService:
         )
         if job.hosting_limit_application_id is not None:
             from .hosting_limit_policy import effective_disk_limit  # noqa: PLC0415
-            from .hosting_parent_limits import frozen_parent_application  # noqa: PLC0415
+            from .hosting_limit_review import reviewed_job_application  # noqa: PLC0415
 
-            frozen = frozen_parent_application(job)
+            frozen = reviewed_job_application(job)
             params.update(
-                quota_parameters(effective_disk_limit(frozen.disk_allowance_mib), frozen.bandwidth_allowance_mib)
+                quota_parameters(
+                    effective_disk_limit(frozen.disk_allowance_mib, extra_mib=frozen.overlay_extra_mib),
+                    frozen.bandwidth_allowance_mib,
+                )
             )
         return params
 

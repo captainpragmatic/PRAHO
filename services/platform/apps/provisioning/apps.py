@@ -15,5 +15,6 @@ class ProvisioningConfig(AppConfig):
         import apps.provisioning.account_hostname_signals  # Circular: app registry
         import apps.provisioning.hosting_limit_signals  # Circular: app registry
         import apps.provisioning.hosting_node_policy_signals  # Circular: app registry
+        import apps.provisioning.hosting_warning_signals  # Circular: app registry
         import apps.provisioning.signals  # Circular: app registry
         import apps.provisioning.virtualmin_signals  # noqa: F401  # Circular: app registry
