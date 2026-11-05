@@ -31582,6 +31582,11 @@ msgstr "Verificat"
 msgid "Effective inbound firewall policy is incomplete or admits unreviewed traffic."
 msgstr "Politica efectivă a firewall-ului pentru traficul de intrare este incompletă sau permite trafic neverificat."
 
+#: apps/provisioning/virtualmin_security_policy.py
+#, python-format
+msgid "Effective inbound firewall policy is incomplete or admits unreviewed traffic (%(detail)s)."
+msgstr "Politica efectivă a firewall-ului pentru traficul de intrare este incompletă sau permite trafic neverificat (%(detail)s)."
+
 #: apps/provisioning/virtualmin_security_policy.py:215
 #, python-format
 msgid "Network preparation required: %(detail)s. Remove or restrict this public publication/direct route, or prepare an independently verified ingress policy; preserve unrelated outbound/private routing. Inspect again before hardening. Import and migration-source acknowledgment remain available."
