@@ -7,7 +7,16 @@ from unittest import TestCase
 
 from django.core.exceptions import ValidationError
 
-from apps.provisioning.virtualmin_security_policy import SSH_CONFIG_DIGESTS, verify_evidence, verify_filter
+from apps.provisioning.virtualmin_security_policy import (
+    CROWDSEC_PROFILE,
+    SSH_CONFIG_DIGESTS,
+    _fail,
+    _verify_listeners,
+    verify_evidence,
+    verify_filter,
+)
+
+GENERIC_POLICY_FAILURE = "Effective inbound firewall policy is incomplete or admits unreviewed traffic."
 
 OPERATOR_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINdamAGCsQq31Uv+08lkBzoO4XLz2qYjJa8CGmj3B1Ea"
 OPERATOR_FINGERPRINT = "SHA256:bbXpuKG6zhzdmnxq256TlqzFBzRl2f6OOg722cYNbU8"
@@ -341,6 +350,62 @@ class NodePolicyProofTests(TestCase):
                 verify_evidence(
                     evidence, "praho-api", ADMIN_NETWORKS, expected_operator_fingerprints=[OPERATOR_FINGERPRINT]
                 )
+
+    def verify(self, evidence):
+        verify_evidence(evidence, "praho-api", ADMIN_NETWORKS, expected_operator_fingerprints=[OPERATOR_FINGERPRINT])
+
+    def rejection(self, evidence):
+        with self.assertRaises(ValidationError) as caught:
+            self.verify(evidence)
+        return caught.exception.messages[0]
+
+    def test_chrony_command_port_is_permitted_only_on_loopback(self):
+        # Ubuntu 26.04 ships chrony, which listens on loopback UDP 323; these are -001's own lines.
+        live = [
+            "udp UNCONN 0      0                  [::1]:323      [::]:*",
+            "udp UNCONN 0      0              127.0.0.1:323   0.0.0.0:*",
+        ]
+        evidence = node_policy_evidence()
+        evidence["listeners"] += live
+        self.verify(evidence)
+        crowdsec = [*node_policy_evidence()["listeners"], "tcp LISTEN 0 4096 127.0.0.1:8080 0.0.0.0:*", *live]
+        _verify_listeners(crowdsec, CROWDSEC_PROFILE)
+        for line in (
+            "udp UNCONN 0 0 0.0.0.0:323 0.0.0.0:*",
+            "udp UNCONN 0 0 [::]:323 [::]:*",
+            "udp UNCONN 0 0 *:323 *:*",
+            "udp UNCONN 0 0 192.0.2.1:323 0.0.0.0:*",
+            "tcp LISTEN 0 128 127.0.0.1:323 0.0.0.0:*",
+            "udp UNCONN 0 0 127.0.0.1:324 0.0.0.0:*",
+        ):
+            evidence = node_policy_evidence()
+            evidence["listeners"].append(line)
+            with self.subTest(line=line):
+                self.assertEqual(
+                    self.rejection(evidence), f"{GENERIC_POLICY_FAILURE[:-1]} (unreviewed listener: {line})."
+                )
+
+    def test_evidence_checks_name_what_they_rejected(self):
+        services = node_policy_evidence()
+        services["services"].append("usermin install ok installed 2.0")
+        principals = node_policy_evidence()
+        principals["principals"][0] = {"name": "root", "access": "allow=0.0.0.0/0;deny=;modules=acl"}
+        firewall = node_policy_evidence()
+        firewall["firewall"].remove("PRAHO_NFT_INPUT_INSPECTED")
+        for evidence, named in (
+            (services, "usermin install ok installed 2.0"),
+            (principals, "root"),
+            (firewall, "PRAHO_NFT_INPUT_INSPECTED"),
+        ):
+            with self.subTest(named=named):
+                message = self.rejection(evidence)
+                self.assertTrue(message.startswith(GENERIC_POLICY_FAILURE[:-1] + " ("), message)
+                self.assertIn(named, message)
+
+    def test_a_failure_without_detail_keeps_the_reviewed_message(self):
+        with self.assertRaises(ValidationError) as caught:
+            _fail()
+        self.assertEqual(caught.exception.messages, [GENERIC_POLICY_FAILURE])
 
     def test_missing_ssh_attestation_prevents_web_verification(self):
         evidence = node_policy_evidence()

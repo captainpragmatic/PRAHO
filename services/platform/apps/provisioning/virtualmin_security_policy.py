@@ -26,6 +26,8 @@ from .virtualmin_validators import WEB_ONLY_VIRTUALMIN_FEATURES
 
 MIN_SOCKET_FIELDS = 6
 LOOPBACK_TCP_PORTS = frozenset({"25", "3306", "53", "11000"})
+# DNS stub resolver, and chronyd's command port (Ubuntu 25.10+ ships chrony instead of systemd-timesyncd).
+LOOPBACK_UDP_PORTS = frozenset({"53", "323"})
 SSH_BASELINE = {
     "port": ["9876"],
     "permitrootlogin": ["without-password"],
@@ -63,7 +65,13 @@ SSH_CONFIG_DIGESTS = {
 }
 
 
-def _fail() -> NoReturn:
+def _fail(detail: str = "") -> NoReturn:
+    """Refuse verification; evidence-level checks name what they rejected, parser internals stay generic."""
+    if detail:
+        raise ValidationError(
+            _("Effective inbound firewall policy is incomplete or admits unreviewed traffic (%(detail)s)."),
+            params={"detail": detail},
+        )
     raise ValidationError(_("Effective inbound firewall policy is incomplete or admits unreviewed traffic."))
 
 
@@ -591,34 +599,29 @@ def _verify_principals(principals: list[dict[str, str]], username: str, cidrs: l
         actual = set(attributes.get("allow", "").split())
         wanted = set(cidrs) if principal["name"] == username else {"127.0.0.1/32"}
         if actual != wanted or attributes.get("deny") != "":
-            _fail()
-    if not {username, "root"} <= found:
-        _fail()
+            _fail(f"Webmin principal {principal['name']} access: {principal['access']}")
+    if missing := {username, "root"} - found:
+        _fail("missing Webmin principals: " + ", ".join(sorted(missing)))
 
 
 def _verify_services(services: list[str]) -> None:
     required = {"Native feature webmin: No", "Native default webmin: No", "Customer Webmin domains: 0"}
     required.update("Native feature " + feature + ": Yes" for feature in WEB_ONLY_VIRTUALMIN_FEATURES)
-    if not required <= set(services):
-        _fail()
+    if missing := required - set(services):
+        _fail("missing service facts: " + ", ".join(sorted(missing)))
     allowed_defaults = {"Native default " + feature + ": Yes" for feature in WEB_ONLY_VIRTUALMIN_FEATURES}
-    if any(
-        line.startswith("Native default ") and line.endswith(": Yes") and line not in allowed_defaults
-        for line in services
-    ):
-        _fail()
-    if any(
-        " install ok installed " in line and line.split()[0].startswith(("fail2ban", "usermin", "proftpd"))
-        for line in services
-    ):
-        _fail()
+    for line in services:
+        if line.startswith("Native default ") and line.endswith(": Yes") and line not in allowed_defaults:
+            _fail(f"unreviewed service default: {line}")
+        if " install ok installed " in line and line.split()[0].startswith(("fail2ban", "usermin", "proftpd")):
+            _fail(f"unreviewed package: {line}")
 
 
 def _verify_listeners(listeners: list[str], policy_version: str = BASE_PROFILE) -> None:
     for line in listeners:
         fields = line.split()
         if len(fields) < MIN_SOCKET_FIELDS or fields[0] not in {"tcp", "udp"}:
-            _fail()
+            _fail(f"unparsed listener: {line}")
         address, port = fields[4].rsplit(":", 1)
         address = address.strip("[]").split("%", 1)[0]
         # This compares listener evidence; it does not open or bind a socket.
@@ -627,28 +630,29 @@ def _verify_listeners(listeners: list[str], policy_version: str = BASE_PROFILE) 
             continue
         if fields[0] == "tcp" and (port in {"80", "443", "9876", "10000"} or (loopback and port in LOOPBACK_TCP_PORTS)):
             continue
-        if fields[0] == "udp" and ((loopback and port == "53") or port in {"68", "546"}):
+        if fields[0] == "udp" and ((loopback and port in LOOPBACK_UDP_PORTS) or port in {"68", "546"}):
             continue
-        _fail()
+        _fail(f"unreviewed listener: {line}")
     listening_ports = {line.split()[4].rsplit(":", 1)[1] for line in listeners if line.startswith("tcp ")}
-    if not {"80", "9876", "10000"} <= listening_ports:
-        _fail()
+    if missing := {"80", "9876", "10000"} - listening_ports:
+        _fail("missing TCP listeners: " + ", ".join(sorted(missing)))
     if policy_version == CROWDSEC_PROFILE and "8080" not in listening_ports:
-        _fail()
+        _fail("missing TCP listener: 8080 (CrowdSec)")
 
 
 def _verify_firewall(firewall: list[str], cidrs: list[str], policy_version: str = BASE_PROFILE) -> None:
-    if not {"Status: active", "PRAHO_NFT_INPUT_INSPECTED"} <= set(firewall):
-        _fail()
+    if missing := {"Status: active", "PRAHO_NFT_INPUT_INSPECTED"} - set(firewall):
+        _fail("missing firewall facts: " + ", ".join(sorted(missing)))
     allowed_input = {"NFT input chain: ip:filter:INPUT", "NFT input chain: ip6:filter:INPUT"}
     if policy_version == CROWDSEC_PROFILE:
         allowed_input |= {"NFT input chain: ip:praho_crowdsec4:input", "NFT input chain: ip6:praho_crowdsec6:input"}
-    if any(line.startswith("NFT input chain: ") and line not in allowed_input for line in firewall):
-        _fail()
+    for line in firewall:
+        if line.startswith("NFT input chain: ") and line not in allowed_input:
+            _fail(f"unreviewed input hook: {line}")
     for family, ipv6 in (("IPV4", False), ("IPV6", True)):
         start, end = f"PRAHO_{family}_FILTER_BEGIN", f"PRAHO_{family}_FILTER_END"
         if firewall.count(start) != 1 or firewall.count(end) != 1 or firewall.index(start) >= firewall.index(end):
-            _fail()
+            _fail(f"{family} filter section is missing or malformed")
         verify_filter("\n".join(firewall[firewall.index(start) + 1 : firewall.index(end)]), cidrs, ipv6=ipv6)
 
 
