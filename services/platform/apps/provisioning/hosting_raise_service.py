@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,7 +13,7 @@ from uuid import UUID
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import F, Q, Sum
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from apps.users.models import User
 
 _RAISE_WRITE = ContextVar("hosting_raise_write", default=False)
+logger = logging.getLogger(__name__)
 
 
 def raise_write_allowed() -> bool:
@@ -304,37 +306,62 @@ def expire_hosting_raise(service_id: int) -> HostingLimitApplication | None:
     with transaction.atomic():
         service = Service.objects.select_for_update(of=("self",), no_key=True).get(pk=service_id)
         row = ServiceHostingRaise.objects.filter(
-            service=service, status__in=("active", "revoked"), expires_at__lte=timezone.now()
+            service=service, status__in=("active", "revoked", "expired"), expires_at__lte=timezone.now()
         ).first()
         if row is None:
             return None
-        revoked = row.status == "revoked"
-        row.revision += 1
-        # fsm-bypass: CharField raise; Service lock records preauthorized expiry before guarded save.
-        row.status = "expired"
-        _save_raise(row)
-        limits = ServiceHostingLimits.objects.get(service=service)
-        limits.verified_at = None
-        limits.save(update_fields=["verified_at", "updated_at"])
         from .hosting_raise_expiry import (  # noqa: PLC0415 -- Pin historical operational base.
             create_expiry_cleanup,
+            expiry_removal_recorded,
             has_expiry_consent,
         )
 
-        if revoked and not has_expiry_consent(service, row):
-            # A deadline is a fact; another owner does not inherit the original
-            # customer's native mutation authority. Retain unverified state.
+        limits = ServiceHostingLimits.objects.get(service=service)
+        already_expired = row.status == "expired"
+        if already_expired and expiry_removal_recorded(row, limits):
             return None
+        revoked = row.status == "revoked"
+        if not already_expired:
+            row.revision += 1
+            # fsm-bypass: CharField raise; Service lock records preauthorized expiry before guarded save.
+            row.status = "expired"
+            _save_raise(row)
+            limits.verified_at = None
+            limits.save(update_fields=["verified_at", "updated_at"])
+        if (revoked or already_expired) and not has_expiry_consent(service, row):
+            # A deadline is a fact; another owner does not inherit the original
+            # customer's native mutation authority, including on later sweeps.
+            return None
+        # Assignment may already have recorded the elapsed deadline. Recover its
+        # missing immutable cleanup here, never in the financial transaction.
         return create_expiry_cleanup(service, limits, row)
 
 
 def expire_hosting_raises() -> int:
     due = list(
-        ServiceHostingRaise.objects.filter(status__in=("active", "revoked"), expires_at__lte=timezone.now())
-        .order_by("expires_at")
+        ServiceHostingRaise.objects.filter(status__in=("active", "revoked", "expired"), expires_at__lte=timezone.now())
+        # A later native attempt may clear current verification, but it cannot
+        # erase published R0 history or make completed expiry pending again.
+        .exclude(Q(status="expired") & Q(service__hosting_limits__applied_overlay_revision=F("revision")))
+        .order_by("updated_at", "expires_at", "service_id")
         .values_list("service_id", flat=True)[:100]
     )
-    return sum(expire_hosting_raise(service_id) is not None for service_id in due)
+    if due:
+        # Rotate this bounded batch even on a source-scope refusal. This single
+        # autocommit timestamp write releases row locks before any Service lock;
+        # it changes no accepted revision, consent or native capacity claim.
+        token = _RAISE_WRITE.set(True)
+        try:
+            ServiceHostingRaise.objects.filter(service_id__in=due).update(updated_at=timezone.now())
+        finally:
+            _RAISE_WRITE.reset(token)
+    expired = 0
+    for service_id in due:
+        try:
+            expired += expire_hosting_raise(service_id) is not None
+        except ValidationError as error:
+            logger.warning("Temporary hosting raise expiry deferred for service %s: %s", service_id, error)
+    return expired
 
 
 @dataclass(frozen=True)
