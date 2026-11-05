@@ -101,8 +101,8 @@ def test_the_committed_ruleset_is_read() -> None:
 
 
 SHA = "a" * 40
+CONTAINER_JOB = "nightly-containers"
 NATIVE_JOB = "native-full"
-NATIVE_STEP = "Verify fresh Ubuntu native hosting capability"
 REQUIRED = required_contexts(
     json.loads((Path(__file__).resolve().parents[2] / ".github/rulesets/master.json").read_text())
 )
@@ -117,13 +117,13 @@ def nightly(  # noqa: PLR0913  # One fixture field per fact a run can carry
     drift: str = "skipped",
     jobs: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """A completed lab run: ``full`` is its native-full job, ``activity`` its check-activity job,
+    """A completed lab run: ``full`` is its full container lab job, ``activity`` its check-activity job,
     ``drift`` its nightly-drift job (it runs only on the drift schedule), ``conclusion`` the run's own."""
     if jobs is None:
         jobs = [
             {"name": "check-activity", "conclusion": activity},
-            {"name": "nightly-containers", "conclusion": "skipped"},
-            {"name": NATIVE_JOB, "conclusion": full, "steps": [{"name": NATIVE_STEP, "conclusion": "success"}]},
+            {"name": CONTAINER_JOB, "conclusion": full},
+            {"name": NATIVE_JOB, "conclusion": "skipped"},
             # Drift is a matrix job: GitHub names each leg after its runner.
             {"name": "nightly-drift (ubuntu-latest)", "conclusion": drift},
             {"name": "nightly-drift (ubuntu-24.04-arm)", "conclusion": drift},
@@ -131,82 +131,108 @@ def nightly(  # noqa: PLR0913  # One fixture field per fact a run can carry
     return {
         "id": run_id,
         "head_branch": branch,
-        "head_sha": SHA,
-        "event": "workflow_dispatch",
+        "head_sha": "b" * 40,  # The nightly lab runs on master's tip, not on the candidate.
+        "event": "schedule",
         "conclusion": conclusion,
         "jobs": jobs,
     }
 
 
-def test_container_success_cannot_fall_back_to_a_pre_native_full_run() -> None:
-    container = nightly(
-        912,
-        "skipped",
-        jobs=[
-            {"name": "check-activity", "conclusion": "success"},
-            {"name": "nightly-containers", "conclusion": "success"},
-            {"name": NATIVE_JOB, "conclusion": "skipped"},
-        ],
-    )
-    legacy = nightly(911, "success", jobs=[{"name": "nightly-full", "conclusion": "success"}])
-    with pytest.raises(VerificationError, match="full Virtualmin lab"):
-        verify(SHA, "owner/repo", FakeGitHub(all_green(), [container, legacy]))
+def native(run_id: int, outcome: str, conclusion: str | None = None) -> dict[str, Any]:
+    """A manual suite=full dispatch: optional native acceptance on a configured runner."""
+    jobs = [
+        {"name": "native-admission", "conclusion": "success"},
+        {"name": CONTAINER_JOB, "conclusion": "skipped"},
+        {"name": NATIVE_JOB, "conclusion": outcome},
+    ]
+    return {**nightly(run_id, "skipped", jobs=jobs), "event": "workflow_dispatch", "conclusion": conclusion or outcome}
 
 
-@pytest.mark.parametrize("outcome", [None, "skipped", "failure", "cancelled"])
-def test_a_native_job_without_successful_capability_step_is_not_proof(outcome: str | None) -> None:
-    steps = [] if outcome is None else [{"name": NATIVE_STEP, "conclusion": outcome}]
-    full = nightly(913, "success", jobs=[{"name": NATIVE_JOB, "conclusion": "success", "steps": steps}])
-    with pytest.raises(VerificationError, match="full Virtualmin lab"):
-        verify(SHA, "owner/repo", FakeGitHub(all_green(), [full]))
+def test_the_container_lab_qualifies_a_release_without_a_native_runner() -> None:
+    # No self-hosted runner exists: the full container lab on master is the release evidence.
+    assert "run 912" in verify(SHA, "owner/repo", FakeGitHub(all_green(), [nightly(912, "success")]))
 
 
-@pytest.mark.parametrize("field,value", [("head_sha", "b" * 40), ("event", "pull_request"), ("event", "schedule")])
-def test_native_proof_requires_the_exact_candidate_and_explicit_dispatch(field: str, value: str) -> None:
-    full = {**nightly(914, "success"), field: value}
-    with pytest.raises(VerificationError, match="full Virtualmin lab"):
-        verify(SHA, "owner/repo", FakeGitHub(all_green(), [full]))
+def test_the_container_lab_need_not_have_run_on_the_candidate_itself() -> None:
+    # The queue ran the lab suites on the candidate; the nightly full lab covers master.
+    run = {**nightly(913, "success"), "head_sha": "c" * 40, "event": "workflow_dispatch"}
+    assert "run 913" in verify(SHA, "owner/repo", FakeGitHub(all_green(), [run]))
 
 
-def test_a_newer_canceled_native_attempt_cannot_reuse_older_success() -> None:
-    newer = nightly(916, "cancelled", activity="skipped", conclusion="cancelled")
-    with pytest.raises(VerificationError, match="full Virtualmin lab"):
-        verify(SHA, "owner/repo", FakeGitHub(all_green(), [newer, nightly(915, "success")]))
+def test_an_optional_native_run_counts_when_it_passed_and_blocks_when_it_failed() -> None:
+    assert "run 915" in verify(SHA, "owner/repo", FakeGitHub(all_green(), [native(915, "success")]))
+    for outcome in ("failure", "cancelled"):
+        with pytest.raises(VerificationError, match="full Virtualmin lab"):
+            verify(SHA, "owner/repo", FakeGitHub(all_green(), [native(916, outcome), nightly(914, "success")]))
 
 
-def test_admission_configuration_success_is_not_native_capability_evidence() -> None:
-    admitted = nightly(
+def test_a_full_dispatch_refused_for_want_of_a_runner_is_passed_over() -> None:
+    # native-admission fails when no runner is configured: nothing about the code was tested.
+    refused = nightly(
         918,
         "skipped",
         activity="skipped",
+        conclusion="failure",
         jobs=[
-            {"name": "native-admission", "conclusion": "success"},
+            {"name": "native-admission", "conclusion": "failure"},
+            {"name": CONTAINER_JOB, "conclusion": "skipped"},
+            {"name": NATIVE_JOB, "conclusion": "skipped"},
+        ],
+    )
+    assert "run 917" in verify(SHA, "owner/repo", FakeGitHub(all_green(), [refused, nightly(917, "success")]))
+
+
+def test_the_full_lab_under_its_earlier_job_name_still_counts() -> None:
+    # Before the container job was renamed, "nightly-full" ran the same full container lab.
+    legacy = nightly(
+        921,
+        "skipped",
+        jobs=[{"name": "check-activity", "conclusion": "success"}, {"name": "nightly-full", "conclusion": "success"}],
+    )
+    assert "run 921" in verify(SHA, "owner/repo", FakeGitHub(all_green(), [legacy]))
+    failed = {**legacy, "id": 922, "jobs": [{"name": "nightly-full", "conclusion": "failure"}], "conclusion": "failure"}
+    with pytest.raises(VerificationError, match="full Virtualmin lab"):
+        verify(SHA, "owner/repo", FakeGitHub(all_green(), [failed, nightly(920, "success")]))
+
+
+def test_a_run_whose_lab_job_this_gate_does_not_know_is_not_a_quiet_night() -> None:
+    # A renamed container job must be taught to the gate, never mistaken for a night without changes.
+    # A real scheduled run also lists native-full as skipped: that must not make it look quiet.
+    renamed = nightly(
+        924,
+        "skipped",
+        jobs=[
+            {"name": "check-activity", "conclusion": "success"},
+            {"name": "nightly-everything", "conclusion": "success"},
             {"name": NATIVE_JOB, "conclusion": "skipped"},
         ],
     )
     with pytest.raises(VerificationError, match="full Virtualmin lab"):
-        verify(SHA, "owner/repo", FakeGitHub(all_green(), [admitted, nightly(917, "success")]))
+        verify(SHA, "owner/repo", FakeGitHub(all_green(), [renamed, nightly(923, "success")]))
 
 
-def test_native_success_cannot_hide_canceled_run_or_duplicate_capability_evidence() -> None:
-    canceled = nightly(920, "success", conclusion="cancelled")
-    duplicate = nightly(
-        921,
-        "success",
-        jobs=[
-            {
-                "name": NATIVE_JOB,
-                "conclusion": "success",
-                "steps": [
-                    {"name": NATIVE_STEP, "conclusion": "success"},
-                    {"name": NATIVE_STEP, "conclusion": "success"},
-                ],
-            }
-        ],
-    )
-    for failed in (canceled, duplicate):
-        with pytest.raises(VerificationError, match="full Virtualmin lab"):
-            verify(SHA, "owner/repo", FakeGitHub(all_green(), [failed, nightly(919, "success")]))
+def test_a_components_diagnostic_dispatch_is_passed_over() -> None:
+    # suite=components runs only a diagnostic: it says nothing about the full lab, whatever its outcome.
+    for outcome in ("success", "failure"):
+        diagnostic = nightly(
+            926,
+            "skipped",
+            activity="skipped",
+            conclusion=outcome,
+            jobs=[
+                {"name": "check-activity", "conclusion": "skipped"},
+                {"name": CONTAINER_JOB, "conclusion": "skipped"},
+                {"name": NATIVE_JOB, "conclusion": "skipped"},
+                {"name": "components-diagnostic", "conclusion": outcome},
+            ],
+        )
+        assert "run 925" in verify(SHA, "owner/repo", FakeGitHub(all_green(), [diagnostic, nightly(925, "success")]))
+
+
+def test_a_passed_lab_job_in_a_cancelled_run_does_not_qualify() -> None:
+    cancelled = nightly(920, "success", conclusion="cancelled")
+    with pytest.raises(VerificationError, match="full Virtualmin lab"):
+        verify(SHA, "owner/repo", FakeGitHub(all_green(), [cancelled, nightly(919, "success")]))
 
 
 class FakeGitHub:
