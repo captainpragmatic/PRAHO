@@ -123,11 +123,13 @@ def os_quota_notification_inventory() -> tuple[bool, str]:
     if defaults is None:
         return True, digest  # The exact stock cron exits without a defaults file.
     assignments = {}
-    for line in defaults.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
+    for line in defaults.split("\n"):
+        if not line.strip(" \t") or line.lstrip(" \t").startswith("#"):
             continue
         match = re.fullmatch(
-            r"\s*(run_warnquota|RPCRQUOTADOPTS)=(?:\"([^\"$`\\]*)\"|'([^']*)'|([A-Za-z0-9_./:=-]*))\s*(?:#.*)?", line
+            r"[ \t]*(run_warnquota|RPCRQUOTADOPTS)=(?:\"([^\"$`\\]*)\"|'([^']*)'|([A-Za-z0-9_./:=-]*))"
+            r"(?:[ \t]+#.*|[ \t]*)",
+            line,
         )
         if match is None or match[1] in assignments:
             return False, digest
