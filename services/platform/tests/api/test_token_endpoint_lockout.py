@@ -19,6 +19,9 @@ four-hour lock across all of them.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase, override_settings
@@ -89,7 +92,12 @@ class PublicTokenEndpointLockoutTests(TestCase):
         # Six, not more: the per-account budget is 5/minute and the endpoint's older
         # client-keyed budget is 10/minute. Staying under the latter keeps this test
         # about the per-account limit rather than about whichever fires first.
-        statuses = [self._attempt() for _ in range(6)]
+        # These requests must share one fixed window; crossing a real minute
+        # correctly replenishes the budget. Replace only the limiter's clock
+        # dependency so authentication, cache expiry and other clocks stay real.
+        clock = SimpleNamespace(time=lambda: 1_800_000_001.0)
+        with patch("apps.common.performance.rate_limiting.time", clock):
+            statuses = [self._attempt() for _ in range(6)]
 
         self.assertIn(429, statuses, "no per-account limit replaced the lockout")
 
