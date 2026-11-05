@@ -111,6 +111,40 @@ class HostingMailCompletenessTests(SimpleTestCase):
         self.assertNotEqual(first[1], second[1])
         self.assertNotEqual(first[1], self._os_policy("run_warnquota=false\n", cron="unknown\n")[1])
 
+    def test_shell_word_hash_and_non_lf_separators_cannot_hide_enabled_warnings(self):
+        # These are assignments and a shell builtin only: execute the actual
+        # interpreter grammar without sourcing any host configuration.
+        for disabled in ("false", "'false'", '"false"', "false\r", "false\v", "false\f", "false\u2028"):
+            defaults = f"run_warnquota={disabled}#disabled; run_warnquota=true\n"
+            with self.subTest(disabled=disabled):
+                result = subprocess.run(
+                    ["/bin/sh"],
+                    input=defaults + 'printf "%s" "$run_warnquota"\n',
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    env={"PATH": "/usr/bin:/bin"},
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, "true")
+                self.assertFalse(self._os_policy(defaults)[0])
+
+    def test_only_horizontal_shell_whitespace_is_accepted_outside_quoted_values(self):
+        for whitespace in ("\r", "\v", "\f", "\u0085", "\u00a0", "\u2028", "\u2029"):
+            for defaults in (f"{whitespace}run_warnquota=false\n", f"run_warnquota=false{whitespace}\n"):
+                with self.subTest(defaults=defaults):
+                    self.assertFalse(self._os_policy(defaults)[0])
+
+    def test_space_tab_comments_and_quoted_hash_values_remain_supported(self):
+        for defaults in (
+            "\t run_warnquota=false\t # approved disabled route\n",
+            "run_warnquota='false' \t# approved disabled route\n",
+            'run_warnquota="false"\t\nRPCRQUOTADOPTS="literal#value"\n',
+            " \t# comment without assignments\nrun_warnquota=\n",
+        ):
+            with self.subTest(defaults=defaults):
+                self.assertTrue(self._os_policy(defaults)[0])
+
     def test_protected_source_read_preserves_exact_newline_bytes_for_stock_fingerprints(self):
         with TemporaryDirectory() as directory:
             source = Path(directory).resolve() / "cron"
