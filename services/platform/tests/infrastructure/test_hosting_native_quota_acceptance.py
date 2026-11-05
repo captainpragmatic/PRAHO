@@ -34,18 +34,25 @@ class DatabaseBoundary:
         self.probe_calls = 0
         self.pid_reads = 0
         self.changed_pid = False
+        self.changed_pid_after_commit = False
+        self.failed_qualification_after_commit = False
         self.used_bytes = module.LIMIT_KIB * 1024
         self.native = ModuleType("praho_quota_native")
-        self.native._database_writer_qualified = Mock()
+        self.native._database_writer_qualified = Mock(side_effect=self.qualify_writer)
         self.native._set_kernel_quota = Mock()
         self.native._run = self.read_native
 
     def read_native(self, arguments):
         if arguments[0] == "/usr/bin/systemctl":
             self.pid_reads += 1
-            return "999" if self.changed_pid and self.pid_reads > 1 else "777"
+            changed = (self.changed_pid and self.pid_reads > 1) or (self.changed_pid_after_commit and self.markers)
+            return "999" if changed else "777"
         assert arguments[0] == "/usr/bin/findmnt"
         return json.dumps({"filesystems": [{"source": "/dev/owned-fixture-only"}]})
+
+    def qualify_writer(self):
+        if self.failed_qualification_after_commit and self.markers:
+            raise AssertionError("Post-denial writer qualification refused")
 
     def domain(self, name):
         assert name in {"victim", "neighbor"}
@@ -164,6 +171,26 @@ class NativeQuotaDatabaseProofTests(SimpleTestCase):
         boundary = DatabaseBoundary(self.acceptance, commit_error=True)
         with self.assertRaisesRegex(AssertionError, "Post-denial neighbor transaction refused"):
             boundary.exercise()
+
+    def test_post_denial_commit_must_preserve_database_pid(self):
+        boundary = DatabaseBoundary(self.acceptance)
+        boundary.changed_pid_after_commit = True
+        with self.assertRaisesRegex(AssertionError, "post-denial neighbor commit restarted MariaDB"):
+            boundary.exercise()
+        self.assertEqual(len(boundary.transactions), 1)
+        self.assertIn(int(boundary.marker_reads[0]), boundary.markers)
+        self.assertEqual(boundary.count_reads[-1], boundary.count_reads[0] + 1)
+        self.assertEqual(boundary.pid_reads, 3)
+
+    def test_post_denial_commit_must_preserve_writer_qualification(self):
+        boundary = DatabaseBoundary(self.acceptance)
+        boundary.failed_qualification_after_commit = True
+        with self.assertRaisesRegex(AssertionError, "Post-denial writer qualification refused"):
+            boundary.exercise()
+        self.assertEqual(len(boundary.transactions), 1)
+        self.assertIn(int(boundary.marker_reads[0]), boundary.markers)
+        self.assertEqual(boundary.count_reads[-1], boundary.count_reads[0] + 1)
+        self.assertEqual(boundary.native._database_writer_qualified.call_count, 2)
 
     def test_acknowledged_but_unpersisted_post_denial_marker_is_refused(self):
         boundary = DatabaseBoundary(self.acceptance, commit_persists=False)
