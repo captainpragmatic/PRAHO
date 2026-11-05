@@ -1,0 +1,12 @@
+---
+- name: Set up initial data (categories, settings, tasks, templates, superuser)
+  no_log: true
+  command: >
+    /usr/local/lib/praho/native_exec.sh {{ project_root }}/.platform-deploy.env -- {{ project_root }}/.venv-linux/bin/python manage.py setup_initial_data
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+
+# ---------------------------------------------------------------------------
+# 8. Caddy reverse proxy
+# ---------------------------------------------------------------------------

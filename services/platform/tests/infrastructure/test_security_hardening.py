@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+from functools import partial
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -113,24 +114,27 @@ class AnsiblePlaybookBoundaryTests(SimpleTestCase):
         service._ssh_manager.get_private_key_file.return_value = Ok(Path("nonexistent-praho-key"))
         deployment = enrolled_node()
 
-        tmpdir = Path(tempfile.gettempdir())
-        before = set(tmpdir.glob("praho_ansible_vars_*"))
-        with (
-            # Mock the SSH seams or run_playbook errs on the readiness wait BEFORE
-            # ever reaching _write_vars_file — the leak assertion would pass
-            # vacuously (and eat the full 180s socket timeout) (#367).
-            patch.object(AnsibleService, "_wait_for_ssh", return_value=Ok(True)),
-            patch.object(AnsibleService, "_scan_host_key", return_value=None),
-            patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
-            patch.object(service, "_build_vars", return_value={"praho_api_password": "secret-value"}),
-            patch("apps.infrastructure.ansible_service.json.dump", side_effect=OSError("disk full")),
-        ):
-            result = service.run_playbook(deployment, "virtualmin.yml", extra_vars={"praho_api_password": "secret-value"})
+        # Other parallel workers may legitimately own files with the same prefix.
+        # Inspect only this test's directory, before its automatic cleanup runs.
+        with tempfile.TemporaryDirectory() as directory:
+            tmpdir = Path(directory)
+            with (
+                # Mock the SSH seams or run_playbook errs on the readiness wait BEFORE
+                # ever reaching _write_vars_file — the leak assertion would pass
+                # vacuously (and eat the full 180s socket timeout) (#367).
+                patch.object(AnsibleService, "_wait_for_ssh", return_value=Ok(True)),
+                patch.object(AnsibleService, "_scan_host_key", return_value=None),
+                patch.object(service, "_generate_inventory", return_value=Path("nonexistent-praho-inventory")),
+                patch.object(service, "_build_vars", return_value={"praho_api_password": "secret-value"}),
+                patch("apps.infrastructure.ansible_service.json.dump", side_effect=OSError("disk full")),
+                patch("apps.infrastructure.ansible_service.tempfile.mkstemp", wraps=partial(tempfile.mkstemp, dir=tmpdir)),
+            ):
+                result = service.run_playbook(deployment, "virtualmin.yml", extra_vars={"praho_api_password": "secret-value"})
 
-        self.assertTrue(result.is_err(), "a vars-file write failure must surface as an Err")
-        self.assertIn("disk full", result.unwrap_err(), "the Err must come from the vars-file write, not an SSH wait")
-        leaked = set(tmpdir.glob("praho_ansible_vars_*")) - before
-        self.assertEqual(leaked, set(), f"partial-secret vars file(s) leaked in tempdir: {leaked}")
+            self.assertTrue(result.is_err(), "a vars-file write failure must surface as an Err")
+            self.assertIn("disk full", result.unwrap_err(), "the Err must come from the vars-file write, not an SSH wait")
+            leaked = set(tmpdir.iterdir())
+            self.assertEqual(leaked, set(), f"partial-secret vars file(s) leaked in tempdir: {leaked}")
 
     @patch.dict(
         "os.environ",

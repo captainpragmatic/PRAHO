@@ -33,3 +33,7 @@ server_image = "ubuntu-26.04"
 # Restrict SSH access to specific IPs (REQUIRED — terraform plan will fail without this)
 # 0.0.0.0/0 and ::/0 are explicitly blocked. Use your office/VPN CIDR(s).
 firewall_ssh_sources = ["1.2.3.4/32", "5.6.7.8/32"]  # Replace with your actual IPs
+# Native topology defaults: production split; new dev/staging combined.
+# Existing two-server staging MUST set native_topology = "split" before adoption.
+# Save and review adoption plans. Both server resources have prevent_destroy enabled.
+native_topology = "split"

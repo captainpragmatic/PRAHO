@@ -111,7 +111,10 @@ def test_every_required_check_runs_on_every_pull_request(context: str) -> None:
     if context in SELECTIVE_JOBS:
         assert job["if"] == SELECTIVE_JOBS[context], f"{workflow}:{context} must skip only on an explicit 'false'"
     else:
-        assert "if" not in job, f"{workflow}:{context} can be skipped, and a skipped job reports success"
+        # always() forces a dependency gate to run even when an upstream job fails or skips.
+        assert job.get("if") in (None, "always()"), (
+            f"{workflow}:{context} can be skipped, and a skipped job reports success"
+        )
     if context not in STEP_CONDITIONS_ALLOWED:
         for step in job.get("steps", []):
             condition = step.get("if")
@@ -136,7 +139,9 @@ def test_every_required_workflow_runs_in_the_merge_queue(workflow: str) -> None:
 
 def test_crowdsec_native_qualification_runs_once_before_the_aggregate() -> None:
     workflow = load_workflow(WORKFLOWS / "integration.yml")
-    job = workflow["jobs"]["integration-test"]
+    job = workflow["jobs"]["integration-suite"]
+    gate = workflow["jobs"]["integration-test"]
+    assert "integration-suite" in gate["needs"] and gate["if"] == "always()"
     steps = job["steps"]
     (native,) = [step for step in steps if step.get("run") == "make test-crowdsec-docker"]
     (aggregate,) = [step for step in steps if step.get("run") == "make test-integration"]

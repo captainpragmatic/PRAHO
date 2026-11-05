@@ -1,0 +1,62 @@
+---
+- name: Template praho-platform systemd unit
+  when: native_platform
+  template:
+    src: praho-platform.service.j2
+    dest: /etc/systemd/system/praho-platform.service
+    mode: "0644"
+  notify:
+    - systemd daemon-reload
+    - restart praho-platform
+
+- name: Template praho-portal systemd unit
+  when: native_portal
+  template:
+    src: praho-portal.service.j2
+    dest: /etc/systemd/system/praho-portal.service
+    mode: "0644"
+  notify:
+    - systemd daemon-reload
+    - restart praho-portal
+
+- name: Template praho-qcluster systemd unit
+  when: native_platform
+  template:
+    src: praho-qcluster.service.j2
+    dest: /etc/systemd/system/praho-qcluster.service
+    mode: "0644"
+  notify:
+    - systemd daemon-reload
+    - restart praho-qcluster
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
+
+- name: Enable and start PRAHO services
+  systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: yes
+  loop:
+    "{{ (['praho-platform'] if native_platform else []) + (['praho-portal'] if native_portal else []) +
+        (['praho-qcluster'] if native_platform and not native_coordinated else []) }}"
+
+- name: Enable and start Caddy
+  systemd:
+    name: caddy
+    state: started
+    enabled: yes
+
+# ---------------------------------------------------------------------------
+# 10. Backup and utility scripts
+# ---------------------------------------------------------------------------
+
+
+- name: Template health check script
+  template:
+    src: health-check.sh.j2
+    dest: "{{ project_root }}/scripts/health-check.sh"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"

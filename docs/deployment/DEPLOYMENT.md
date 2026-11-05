@@ -8,6 +8,9 @@ post-migration setup installs the one-minute maintenance schedule, and `setup_sc
 New calendars suggest 15 minutes of latest-start deferral for explicit operator review. Saved zero values
 and existing deadlines are preserved. Existing notification template edits survive default seeding.
 
+Native host topology and coordinated recovery are documented in [NATIVE_TOPOLOGY.md](NATIVE_TOPOLOGY.md).
+Production defaults to split hosts; existing two-server staging must explicitly retain split topology.
+
 This guide covers all deployment scenarios for PRAHO, from native single-server setups to multi-server distributed deployments.
 
 ## Table of Contents
@@ -466,11 +469,9 @@ make deploy-prod
 
 That's it. The Makefile validates the file exists, passes it to Ansible, and Ansible copies it to `/opt/praho/.env` on the server.
 
-**Manual Ansible command** (if you prefer not to use Make):
+**Controller command** (if you prefer not to use Make):
 ```bash
-cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml \
-  playbooks/native-single-server.yml \
-  -e praho_env=staging -e env_file_path=$(pwd)/../../.env.staging -v
+.venv-linux/bin/python deploy/scripts/native_env.py run --env staging --env-file .env.staging
 ```
 
 #### Staging vs Production Django Settings
@@ -688,7 +689,7 @@ sudo systemctl restart praho-platform
 
 #### Redeployment
 
-To redeploy (e.g., after code changes), run the same Make command again. The playbook is idempotent — it will rsync code, run migrations, collect static files, and restart services.
+To redeploy, run the same Make command again. The controller pins one release SHA, coordinates maintenance and backups, runs migrations, collects static files, and verifies both services before reopening traffic.
 
 ```bash
 make deploy-staging   # or: make deploy-prod
@@ -705,7 +706,7 @@ make deploy-staging
 
 #### Tuning (Ansible Extra Variables)
 
-Override defaults with `-e` flags:
+Set native role defaults in `deploy/ansible/group_vars/all.yml` before invoking the controller. Run production and staging changes through the coordinated Make targets.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -715,16 +716,12 @@ Override defaults with `-e` flags:
 | `gunicorn_threads_portal` | 4 | Portal threads per worker (`gthread` only; `sync` always has one) |
 | `platform_memory_max` | 1G | systemd memory limit (platform) |
 | `portal_memory_max` | 512M | systemd memory limit (portal) |
-| `deploy_method` | git | `git` (always for prod), or `DEPLOY_METHOD=rsync` in a dev/staging env file |
+| `deploy_method` | git | `git` for production; dev/staging may select `DEPLOY_METHOD=rsync`, transporting a clean checkout of the pinned release |
 | `platform_allowed_ips` | `[]` | IP whitelist for Platform access |
 
-Example: deploy production with 4 Gunicorn workers:
+Example: after setting `gunicorn_workers_platform: 4` and `gunicorn_workers_portal: 3` in group vars:
 ```bash
-ansible-playbook -i inventory/native-single-server.yml \
-  playbooks/native-single-server.yml \
-  -e praho_env=prod \
-  -e gunicorn_workers_platform=4 \
-  -e gunicorn_workers_portal=3
+make deploy-prod VERSION=vX.Y.Z
 ```
 
 #### Portal server settings
@@ -1012,9 +1009,7 @@ make backup
 
 # Native deployment, from your machine: back up, then download that dump to ~/praho-backups
 make ansible-backup ENV=prod FETCH=true    # reads .env.prod, like make deploy-prod
-# or, directly, with that file's PRAHO_SERVER_IP and SSH settings exported
-cd deploy/ansible && ansible-playbook -i inventory/native-single-server.yml playbooks/backup.yml \
-  -e fetch_backup=true    # -e backup_fetch_dir=PATH to choose another directory
+# The controller targets only praho_platform and verifies its independent SSH trust.
 ```
 
 Docker backups are stored in `./backups/` as `praho_backup_YYYYMMDD_HHMMSS_<pid>.sql.gz`; native ones

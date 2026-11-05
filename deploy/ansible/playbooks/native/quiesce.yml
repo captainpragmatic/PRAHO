@@ -1,0 +1,73 @@
+---
+- name: Stop Platform web writers after Portal and workers have drained
+  systemd:
+    name: praho-platform.service
+    state: stopped
+    enabled: false
+  when: "'praho-platform.service' in ansible_facts.services"
+- name: Create the root-owned recovery helper directory
+  file:
+    path: /usr/local/lib/praho
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: native_platform_state
+- name: Transfer controller recovery checks without application configuration
+  copy:
+    src: "{{ playbook_dir }}/../../scripts/{{ item }}"
+    dest: "/usr/local/lib/praho/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [native_env.py, native_backup_pair.py, native_migration_guard.py]
+  when: native_platform_state
+- name: Run and validate the pre-deploy recovery pair with the installed environment
+  shell: |
+    set -eu
+    set -a
+    . {{ project_root }}/.env
+    set +a
+    export DJANGO_SETTINGS_MODULE={{ django_settings_module }}
+    {{ project_root }}/scripts/backup.sh
+  args:
+    executable: /bin/bash
+  become_user: "{{ project_user }}"
+  register: native_backup
+  no_log: true
+  when: native_platform_state
+- name: Validate the fresh exact recovery pair and record source release provenance
+  command:
+    argv:
+      - "{{ project_root }}/.venv-linux/bin/python"
+      - /usr/local/lib/praho/native_backup_pair.py
+      - "{{ native_backup.stdout | regex_findall('Backup created: (\\S+)') | last }}"
+      - "{{ native_backup.stdout | regex_findall('Media archived: (\\S+)') | last }}"
+      - "{{ native_prior_release.stdout }}"
+  become_user: "{{ project_user }}"
+  no_log: true
+  when: native_platform_state
+- name: Prove a fresh database and media pair was produced
+  assert:
+    that:
+      - "'Backup created: ' in native_backup.stdout"
+      - "'Media archived: ' in native_backup.stdout"
+      - "'Backup completed successfully' in native_backup.stdout"
+    fail_msg: "A validated fresh recovery pair is required; all holds remain active."
+  no_log: true
+  when: native_platform_state
+- name: Check rollback migration compatibility before checkout
+  shell: |
+    set -eu
+    set -a
+    . {{ project_root }}/.env
+    set +a
+    export DJANGO_SETTINGS_MODULE={{ django_settings_module }}
+    export PYTHONPATH={{ project_root }}/src/services/platform
+    export PRAHO_NATIVE_SOURCE_ROOT={{ project_root }}/src
+    {{ project_root }}/.venv-linux/bin/python /usr/local/lib/praho/native_migration_guard.py --repository {{ praho_git_repo | quote }} {{ deploy_git_version }}
+  args:
+    executable: /bin/bash
+  no_log: true
+  become_user: "{{ project_user }}"
+  when: native_platform_state

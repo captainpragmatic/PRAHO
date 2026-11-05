@@ -1,0 +1,17 @@
+---
+- name: Reject inline comments in the .env file
+  include_tasks: env_preflight.yml
+
+- name: Read .env file locally for role variables
+  tags: [always]
+  set_fact:
+    native_configuration: "{{ lookup('native_env', native_role_env_file | default(env_file_path)) }}"
+  no_log: true
+
+- name: Parse .env vars for role use
+  tags: [always]
+  set_fact:
+    deployed_env: "{{ native_configuration['env'] }}"
+  no_log: true
+
+# Existing hosts must move their session store while stopped before changing identities.

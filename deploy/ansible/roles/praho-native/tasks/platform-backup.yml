@@ -1,0 +1,9 @@
+---
+- name: Record applied Platform backup configuration
+  no_log: true
+  command:
+    argv: "{{ ['/usr/local/lib/praho/native_exec.sh', project_root + '/.platform-deploy.env', '--', project_root + '/.venv-linux/bin/python', 'manage.py', 'upload_platform_backup', '--register-runner', 'native', '--schedule-timezone', deployed_env.TIME_ZONE | default('Europe/Bucharest')] + ([] if backup_enabled else ['--runner-disabled']) }}"
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+  changed_when: false
