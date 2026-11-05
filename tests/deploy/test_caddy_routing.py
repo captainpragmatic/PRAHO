@@ -345,14 +345,14 @@ def test_native_template_renders_the_deployed_hsts_policy(deployed: str | None, 
     assert values and set(values) == {expected}
 
 
-def _docker(*args: str, source: str | None = None) -> subprocess.CompletedProcess[str]:
+def _docker(*args: str, source: str | None = None, timeout: float = 60) -> subprocess.CompletedProcess[str]:
     return subprocess.run(  # noqa: S603
         ["docker", *args],  # noqa: S607
         input=source,
         text=True,
         capture_output=True,
         check=False,
-        timeout=60,
+        timeout=timeout,
     )
 
 
@@ -360,6 +360,36 @@ def _docker_ok(*args: str, source: str | None = None) -> str:
     result = _docker(*args, source=source)
     assert result.returncode == 0, result.stdout + result.stderr
     return result.stdout.strip()
+
+
+def _publication_port(output: str) -> str:
+    try:
+        address, raw_port = output.strip().splitlines()[0].rsplit(":", 1)
+        ipaddress.ip_address(address[1:-1] if address.startswith("[") and address.endswith("]") else address)
+        port = int(raw_port)
+        if not 1 <= port <= 65535:
+            raise ValueError("port range")
+        return str(port)
+    except (ValueError, IndexError) as error:
+        raise AssertionError(f"Malformed 80/tcp publication: {output!r}") from error
+
+
+def _published_port(edge: str) -> str:
+    """Wait for the owned container's publication, with a six-second command budget."""
+    deadline = time.monotonic() + 6
+    failure = "No publication observed"
+    while (remaining := deadline - time.monotonic()) > 0:
+        try:
+            result = _docker("port", edge, "80/tcp", timeout=min(1, remaining))
+        except subprocess.TimeoutExpired as error:
+            failure = str(error)
+        else:
+            if result.returncode == 0:
+                return _publication_port(result.stdout)
+            failure = result.stdout + result.stderr
+        if (remaining := deadline - time.monotonic()) > 0:
+            time.sleep(min(0.1, remaining))
+    raise AssertionError(f"80/tcp publication not ready for {edge}: {failure}")
 
 
 @pytest.fixture(scope="module")
@@ -613,7 +643,7 @@ def _running_edge(
                 time.sleep(0.2)
             else:
                 raise AssertionError(_docker("logs", edge).stderr)
-        port = _docker_ok("port", edge, "80/tcp").splitlines()[0].rsplit(":", 1)[1]
+        port = _published_port(edge)
         yield edge, peer, f"host.docker.internal:{port}"
     finally:
         _docker("rm", "-f", "-v", peer, edge)
