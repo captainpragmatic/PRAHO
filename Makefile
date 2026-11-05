@@ -1275,7 +1275,7 @@ test-i18n-guards:
 	@PRAHO_SKIP_DOTENV=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(PWD)/services/platform $(PYTHON_SHARED) -m pytest -o addopts= --no-cov -p no:cacheprovider tests/integration/test_platform_error_localisation.py tests/integration/test_translation_catalog_markup.py -q
 
 test-i18n:
-	@PRAHO_SKIP_DOTENV=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(PWD)/services/platform $(PYTHON_SHARED) -m pytest -o addopts= --no-cov -p no:cacheprovider tests/integration/test_translation_catalog_check.py tests/integration/test_translate_po.py tests/integration/test_platform_error_localisation.py tests/integration/test_translation_catalog_markup.py $(I18N_TEST_ARGS) -q
+	@PRAHO_SKIP_DOTENV=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=$(PWD)/services/platform $(PYTHON_SHARED) -m pytest -o addopts= --no-cov -p no:cacheprovider tests/integration/test_translation_catalog_check.py tests/integration/test_translate_po.py tests/integration/test_platform_error_localisation.py tests/integration/test_translation_catalog_markup.py tests/integration/test_notification_gettext_extraction.py $(I18N_TEST_ARGS) -q
 
 translate-stats:
 	@echo "📊 Translation coverage stats (both services)..."

@@ -129,11 +129,13 @@ def _message(delivery: GiftCardDelivery, purchase: GiftCardPurchase) -> EmailMes
         if purchase.is_gift and card.personal_message:
             body += f"\n{card.personal_message}\n"
         if not purchase.is_gift:
-            body += f"\n{_('Funding receipt')}: {purchase.receipt_number}\n"
+            funding_receipt = _("Funding receipt")
+            body += f"\n{funding_receipt}: {purchase.receipt_number}\n"
         subject = _("Your gift card")
     else:
         subject = _("Gift-card purchase receipt")
-        body = f"{_('Funding receipt')}: {purchase.receipt_number}\n{value}\n"
+        funding_receipt = _("Funding receipt")
+        body = f"{funding_receipt}: {purchase.receipt_number}\n{value}\n"
         body += _("Your recipient receives the gift card in a separate email.")
     return EmailMessage(
         subject=str(subject),
