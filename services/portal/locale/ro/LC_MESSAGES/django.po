@@ -8853,3 +8853,8 @@ msgstr "Verificați utilizarea sau contactați asistența"
 #| msgid "Contact Support"
 msgid "Contact support"
 msgstr "Contactați asistența"
+
+#: apps/billing/views.py:495
+#, python-format
+msgid "Successfully synced %(count)s invoices."
+msgstr "S-au sincronizat cu succes %(count)s facturi."
