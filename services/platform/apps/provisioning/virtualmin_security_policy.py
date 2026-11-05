@@ -65,9 +65,17 @@ SSH_CONFIG_DIGESTS = {
 }
 
 
+MAX_FAILURE_DETAIL = 300
+
+
 def _fail(detail: str = "") -> NoReturn:
-    """Refuse verification; evidence-level checks name what they rejected, parser internals stay generic."""
+    """Refuse verification; evidence-level checks name what they rejected, parser internals stay generic.
+
+    Details quote node-supplied text with repr() and are bounded: the node may be compromised.
+    """
     if detail:
+        if len(detail) > MAX_FAILURE_DETAIL:
+            detail = detail[:MAX_FAILURE_DETAIL] + "…"
         raise ValidationError(
             _("Effective inbound firewall policy is incomplete or admits unreviewed traffic (%(detail)s)."),
             params={"detail": detail},
@@ -223,7 +231,15 @@ def verify_filter(saved: str, cidrs: list[str], *, ipv6: bool) -> None:
             else:
                 _fail()
     if required != grants:
-        _fail()
+        missing = ", ".join(f"{port} from {source}" for port, source in sorted(required - grants))
+        extra = ", ".join(f"{port} from {source}" for port, source in sorted(grants - required))
+        _fail(
+            "; ".join(
+                part
+                for part in (missing and f"missing admin grants: {missing}", extra and f"unreviewed grants: {extra}")
+                if part
+            )
+        )
 
 
 def _network_fail(detail: str) -> NoReturn:
@@ -595,11 +611,14 @@ def _verify_principals(principals: list[dict[str, str]], username: str, cidrs: l
         if principal["name"].startswith("group:"):
             continue
         found.add(principal["name"])
-        attributes = dict(part.split("=", 1) for part in principal["access"].split(";"))
+        try:
+            attributes = dict(part.split("=", 1) for part in principal["access"].split(";"))
+        except ValueError:
+            _fail(f"unparsed Webmin principal {principal['name']!r}: {principal['access']!r}")
         actual = set(attributes.get("allow", "").split())
         wanted = set(cidrs) if principal["name"] == username else {"127.0.0.1/32"}
         if actual != wanted or attributes.get("deny") != "":
-            _fail(f"Webmin principal {principal['name']} access: {principal['access']}")
+            _fail(f"Webmin principal {principal['name']} access: {principal['access']!r}")
     if missing := {username, "root"} - found:
         _fail("missing Webmin principals: " + ", ".join(sorted(missing)))
 
@@ -612,27 +631,30 @@ def _verify_services(services: list[str]) -> None:
     allowed_defaults = {"Native default " + feature + ": Yes" for feature in WEB_ONLY_VIRTUALMIN_FEATURES}
     for line in services:
         if line.startswith("Native default ") and line.endswith(": Yes") and line not in allowed_defaults:
-            _fail(f"unreviewed service default: {line}")
+            _fail(f"unreviewed service default: {line!r}")
         if " install ok installed " in line and line.split()[0].startswith(("fail2ban", "usermin", "proftpd")):
-            _fail(f"unreviewed package: {line}")
+            _fail(f"unreviewed package: {line!r}")
 
 
 def _verify_listeners(listeners: list[str], policy_version: str = BASE_PROFILE) -> None:
     for line in listeners:
         fields = line.split()
-        if len(fields) < MIN_SOCKET_FIELDS or fields[0] not in {"tcp", "udp"}:
-            _fail(f"unparsed listener: {line}")
+        if len(fields) < MIN_SOCKET_FIELDS or fields[0] not in {"tcp", "udp"} or ":" not in fields[4]:
+            _fail(f"unparsed listener: {line!r}")
         address, port = fields[4].rsplit(":", 1)
         address = address.strip("[]").split("%", 1)[0]
         # This compares listener evidence; it does not open or bind a socket.
-        loopback = address not in {"*", "0.0.0.0", "::"} and ipaddress.ip_address(address).is_loopback  # nosec B104 - reject wildcard evidence before checking loopback.
+        try:
+            loopback = address not in {"*", "0.0.0.0", "::"} and ipaddress.ip_address(address).is_loopback  # nosec B104 - reject wildcard evidence before checking loopback.
+        except ValueError:
+            _fail(f"unparsed listener: {line!r}")
         if policy_version == CROWDSEC_PROFILE and fields[0] == "tcp" and address == "127.0.0.1" and port == "8080":
             continue
         if fields[0] == "tcp" and (port in {"80", "443", "9876", "10000"} or (loopback and port in LOOPBACK_TCP_PORTS)):
             continue
         if fields[0] == "udp" and ((loopback and port in LOOPBACK_UDP_PORTS) or port in {"68", "546"}):
             continue
-        _fail(f"unreviewed listener: {line}")
+        _fail(f"unreviewed listener: {line!r}")
     listening_ports = {line.split()[4].rsplit(":", 1)[1] for line in listeners if line.startswith("tcp ")}
     if missing := {"80", "9876", "10000"} - listening_ports:
         _fail("missing TCP listeners: " + ", ".join(sorted(missing)))
@@ -648,7 +670,7 @@ def _verify_firewall(firewall: list[str], cidrs: list[str], policy_version: str 
         allowed_input |= {"NFT input chain: ip:praho_crowdsec4:input", "NFT input chain: ip6:praho_crowdsec6:input"}
     for line in firewall:
         if line.startswith("NFT input chain: ") and line not in allowed_input:
-            _fail(f"unreviewed input hook: {line}")
+            _fail(f"unreviewed input hook: {line!r}")
     for family, ipv6 in (("IPV4", False), ("IPV6", True)):
         start, end = f"PRAHO_{family}_FILTER_BEGIN", f"PRAHO_{family}_FILTER_END"
         if firewall.count(start) != 1 or firewall.count(end) != 1 or firewall.index(start) >= firewall.index(end):
@@ -814,8 +836,11 @@ def verify_evidence(  # noqa: PLR0913 -- independent operator, configuration and
     verify_network_ingress(
         cast("list[str]", evidence["firewall"]), policy_version=policy_version, protected_cidrs=protected
     )
-    if username == "root" or evidence["versions"] != {"webmin": "2.670", "virtualmin": "8.3.0"}:
-        _fail()
+    if username == "root":
+        _fail("the API identity is root")
+    if (versions := evidence["versions"]) != {"webmin": "2.670", "virtualmin": "8.3.0"}:
+        found = cast("dict[str, str]", versions)
+        _fail(f"unreviewed versions: webmin {found.get('webmin')!r}, virtualmin {found.get('virtualmin')!r}")
     _verify_principals(cast("list[dict[str, str]]", evidence["principals"]), username, cidrs)
     _verify_services(services)
     _verify_listeners(cast("list[str]", evidence["listeners"]), policy_version)

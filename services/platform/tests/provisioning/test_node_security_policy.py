@@ -382,7 +382,7 @@ class NodePolicyProofTests(TestCase):
             evidence["listeners"].append(line)
             with self.subTest(line=line):
                 self.assertEqual(
-                    self.rejection(evidence), f"{GENERIC_POLICY_FAILURE[:-1]} (unreviewed listener: {line})."
+                    self.rejection(evidence), f"{GENERIC_POLICY_FAILURE[:-1]} (unreviewed listener: {line!r})."
                 )
 
     def test_evidence_checks_name_what_they_rejected(self):
@@ -390,17 +390,47 @@ class NodePolicyProofTests(TestCase):
         services["services"].append("usermin install ok installed 2.0")
         principals = node_policy_evidence()
         principals["principals"][0] = {"name": "root", "access": "allow=0.0.0.0/0;deny=;modules=acl"}
+        versions = node_policy_evidence()
+        versions["versions"] = {"webmin": "2.680", "virtualmin": "8.3.0"}
+        grants = node_policy_evidence()
+        grants["firewall"] = [
+            line for line in grants["firewall"] if not ("--dport 10000" in line and "192.0.2.1" in line)
+        ]
         firewall = node_policy_evidence()
         firewall["firewall"].remove("PRAHO_NFT_INPUT_INSPECTED")
         for evidence, named in (
             (services, "usermin install ok installed 2.0"),
-            (principals, "root"),
+            (principals, "Webmin principal root access: 'allow=0.0.0.0/0;deny=;modules=acl'"),
             (firewall, "PRAHO_NFT_INPUT_INSPECTED"),
+            (versions, "unreviewed versions: webmin '2.680', virtualmin '8.3.0'"),
+            (grants, "missing admin grants: 10000 from 192.0.2.1/32"),
         ):
             with self.subTest(named=named):
                 message = self.rejection(evidence)
                 self.assertTrue(message.startswith(GENERIC_POLICY_FAILURE[:-1] + " ("), message)
                 self.assertIn(named, message)
+
+    def test_malformed_node_rows_are_refused_with_a_name_not_a_crash(self):
+        listener = node_policy_evidence()
+        listener["listeners"].append("udp UNCONN 0 0 somehost 0.0.0.0:*")
+        principal = node_policy_evidence()
+        principal["principals"][0] = {"name": "root", "access": "allow=127.0.0.1/32;deny=;"}
+        hostname = node_policy_evidence()
+        hostname["listeners"].append("udp UNCONN 0 0 somehost:53 0.0.0.0:*")
+        for evidence, named in (
+            (listener, "unparsed listener"),
+            (principal, "unparsed Webmin principal 'root'"),
+            (hostname, "unparsed listener"),
+        ):
+            with self.subTest(named=named):
+                self.assertIn(named, self.rejection(evidence))
+
+    def test_node_supplied_detail_is_quoted_and_bounded(self):
+        evidence = node_policy_evidence()
+        evidence["listeners"].append("udp UNCONN 0 0 0.0.0.0:9999 0.0.0.0:* " + "x" * 2000)
+        message = self.rejection(evidence)
+        self.assertLess(len(message), 500)
+        self.assertIn("unreviewed listener: 'udp UNCONN 0 0 0.0.0.0:9999", message)
 
     def test_a_failure_without_detail_keeps_the_reviewed_message(self):
         with self.assertRaises(ValidationError) as caught:
