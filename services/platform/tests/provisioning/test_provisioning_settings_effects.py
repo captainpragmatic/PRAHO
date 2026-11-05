@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Generator, Iterable, Iterator
-from concurrent.futures import Future, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import replace
 from decimal import Decimal
 from io import StringIO
 from threading import Event, Lock
-from typing import ClassVar
 from unittest.mock import Mock, patch
 from uuid import UUID
 
@@ -71,7 +70,8 @@ def healthy_check(account: VirtualminAccount) -> tuple[VirtualminAccount, bool, 
 
 
 class ConcurrencyProbe:
-    def __init__(self) -> None:
+    def __init__(self, expected_workers: int) -> None:
+        self.expected_workers = expected_workers
         self.lock = Lock()
         self.overlap = Event()
         self.active = 0
@@ -82,15 +82,19 @@ class ConcurrencyProbe:
         with self.lock:
             self.active += 1
             self.peak = max(self.peak, self.active)
-            first = not self.visited
+            rendezvous = len(self.visited) < self.expected_workers
             self.visited.append(account.domain)
-            if self.active > 1:
+            if self.active == self.expected_workers:
                 self.overlap.set()
-        if first:
-            self.overlap.wait(0.2)
-        with self.lock:
-            self.active -= 1
-        return healthy_check(account)
+        try:
+            # Keep the initial workers active until all have actually entered;
+            # pool capacity does not promise another thread will start within 200 ms.
+            if rendezvous and not self.overlap.wait(10):
+                raise AssertionError("Expected health workers did not reach the bounded rendezvous")
+            return healthy_check(account)
+        finally:
+            with self.lock:
+                self.active -= 1
 
 
 @override_settings(CACHES=LOCMEM, DISABLE_AUDIT_SIGNALS=True)
@@ -137,29 +141,44 @@ class ProvisioningSettingsEffectTests(TestCase):
     def test_max_concurrent_health_checks_limits_active_workers_and_handles_empty_batches(self) -> None:
         accounts = [VirtualminAccount(domain=f"worker{number}.example.test") for number in range(3)]
         self.set_setting("provisioning.max_concurrent_health_checks", 1)
-        probe = ConcurrencyProbe()
-        with patch.object(views, "_perform_single_health_check", side_effect=probe.check):
+        probe = ConcurrencyProbe(1)
+        with (
+            patch.object(views, "_perform_single_health_check", side_effect=probe.check),
+            patch.object(views, "ThreadPoolExecutor", wraps=ThreadPoolExecutor) as executor,
+        ):
             result = views._execute_bulk_health_check(accounts)
+        executor.assert_called_once_with(max_workers=1)
         self.assertEqual(probe.peak, 1)
         self.assertCountEqual(probe.visited, [account.domain for account in accounts])
         self.assertEqual((result.successful_count, result.failed_count, result.errors), (3, 0, []))
         self.set_setting("provisioning.max_concurrent_health_checks", 2)
-        probe = ConcurrencyProbe()
-        with patch.object(views, "_perform_single_health_check", side_effect=probe.check):
+        probe = ConcurrencyProbe(2)
+        with (
+            patch.object(views, "_perform_single_health_check", side_effect=probe.check),
+            patch.object(views, "ThreadPoolExecutor", wraps=ThreadPoolExecutor) as executor,
+        ):
             result = views._execute_bulk_health_check(accounts)
+        executor.assert_called_once_with(max_workers=2)
         self.assertEqual(probe.peak, 2)
         self.assertEqual((result.successful_count, result.failed_count), (3, 0))
-        empty = views._execute_bulk_health_check([])
+        with patch.object(views, "ThreadPoolExecutor", wraps=ThreadPoolExecutor) as executor:
+            empty = views._execute_bulk_health_check([])
+        executor.assert_not_called()
         self.assertEqual(
             (empty.total_processed, empty.successful_count, empty.failed_count, empty.errors), (0, 0, 0, [])
         )
         self.assertTrue(SettingsService.update_setting("provisioning.max_concurrent_health_checks", 0).is_err())
         # Legacy rows written outside the validated service must not construct a zero-worker pool.
         SystemSetting.objects.filter(key="provisioning.max_concurrent_health_checks").update(value=0)
-        probe = ConcurrencyProbe()
-        with patch.object(views, "_perform_single_health_check", side_effect=probe.check):
+        # The enforced legacy fallback is 10, capped to these three accounts.
+        probe = ConcurrencyProbe(3)
+        with (
+            patch.object(views, "_perform_single_health_check", side_effect=probe.check),
+            patch.object(views, "ThreadPoolExecutor", wraps=ThreadPoolExecutor) as executor,
+        ):
             legacy = views._execute_bulk_health_check(accounts)
-        self.assertEqual(probe.peak, 2)
+        executor.assert_called_once_with(max_workers=3)
+        self.assertEqual(probe.peak, 3)
         self.assertEqual((legacy.successful_count, legacy.failed_count, legacy.errors), (3, 0, []))
 
     def test_max_error_display_truncates_rollback_errors_at_call_time(self) -> None:
@@ -250,7 +269,8 @@ class ProvisioningSettingsEffectTests(TestCase):
 
 @override_settings(CACHES=LOCMEM, DISABLE_AUDIT_SIGNALS=True)
 class ProvisioningSettingsQueryTests(SimpleTestCase):
-    databases: ClassVar[set[str]] = {"default"}
+    # Django configures this on the class; django-stubs declares an instance attribute.
+    databases: set[str] = {"default"}  # noqa: RUF012 -- Required Django class database allowlist.
 
     def setUp(self) -> None:
         cache.clear()
