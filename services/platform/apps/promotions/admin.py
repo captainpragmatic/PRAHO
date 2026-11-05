@@ -117,7 +117,8 @@ class PromotionCampaignAdmin(admin.ModelAdmin):
 
     def budget_display(self, obj: Any) -> str:
         if obj.budget_cents is not None:
-            return f"{obj.budget_cents / 100:.2f} {obj.budget_currency_id or _('Unresolved currency')}"
+            currency = obj.budget_currency_id or _("Unresolved currency")
+            return f"{obj.budget_cents / 100:.2f} {currency}"
         return "-"
 
     budget_display.short_description = _("Budget")

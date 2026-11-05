@@ -896,7 +896,8 @@ class EmailSuppression(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"Suppressed: {self.email_hash[:8]}... ({self.get_reason_display() or _('Marketing opt-out')})"
+        reason = self.get_reason_display() or _("Marketing opt-out")
+        return f"Suppressed: {self.email_hash[:8]}... ({reason})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         _update_fields, written = written_fields(kwargs, ("email_encrypted",))
