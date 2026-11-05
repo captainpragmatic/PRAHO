@@ -8462,3 +8462,8 @@ msgstr "Limite în așteptare"
 #| msgid "Not specified"
 msgid "Not yet verified"
 msgstr "Încă neverificate"
+
+#: apps/billing/views.py:495
+#, python-format
+msgid "Successfully synced %(count)s invoices."
+msgstr "S-au sincronizat cu succes %(count)s facturi."

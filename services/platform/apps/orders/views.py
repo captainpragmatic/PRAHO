@@ -26,6 +26,7 @@ from django.forms import ModelForm, modelform_factory
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from django.utils.text import format_lazy
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_POST
 
@@ -773,7 +774,11 @@ def order_create(request: HttpRequest) -> HttpResponse:
 
                     logger.info(f"✅ [Orders] Created order: {order.order_number} for customer {customer.company_name}")
                     messages.success(
-                        request, _(f"✅ Order '{order.order_number}' created successfully. You can now add products.")
+                        request,
+                        format_lazy(
+                            _("✅ Order '{order_number}' created successfully. You can now add products."),
+                            order_number=str(order.order_number),
+                        ),
                     )
                     return redirect("orders:order_detail", pk=order.id)
 
@@ -1057,7 +1062,10 @@ def order_create_with_item(request: HttpRequest) -> HttpResponse:
 
             messages.success(
                 request,
-                _(f"✅ Order '{order.order_number}' created successfully. You can now add products."),
+                format_lazy(
+                    _("✅ Order '{order_number}' created successfully. You can now add products."),
+                    order_number=str(order.order_number),
+                ),
             )
             return redirect("orders:order_detail", pk=order.id)
 

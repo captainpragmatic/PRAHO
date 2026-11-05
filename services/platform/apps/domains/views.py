@@ -18,6 +18,7 @@ from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
+from django.utils.text import format_lazy
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.http import require_http_methods
 
@@ -391,7 +392,10 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
                     )
 
                     if result.is_ok():
-                        messages.success(request, _(f"✅ Domain {domain_name} registered successfully!"))
+                        messages.success(
+                            request,
+                            format_lazy(_("✅ Domain {domain} registered successfully!"), domain=str(domain_name)),
+                        )
                         domain = result.unwrap()
                         return redirect("domains:detail", domain_id=domain.id)
                     elif str(result.unwrap_err()) == str(REGISTRATION_PENDING_MESSAGE):
@@ -399,7 +403,9 @@ def domain_register(  # Complexity: multi-step workflow  # noqa: PLR0912  # Comp
                         # request and the reconciliation worker will activate it.
                         messages.info(request, f"⏳ {result.unwrap_err()}")
                     else:
-                        messages.error(request, _(f"❌ Registration failed: {result.unwrap_err()}"))
+                        messages.error(
+                            request, format_lazy(_("❌ Registration failed: {error}"), error=str(result.unwrap_err()))
+                        )
 
             except Customer.DoesNotExist:
                 messages.error(request, _("Invalid customer selected"))
@@ -489,7 +495,9 @@ def domain_renew(request: HttpRequest, domain_id: str) -> HttpResponse:
                 messages.success(request, f"✅ {renewal_result.unwrap()}")
                 return redirect("domains:detail", domain_id=domain_id)
             else:
-                messages.error(request, _(f"❌ Renewal failed: {renewal_result.unwrap_err()}"))
+                messages.error(
+                    request, format_lazy(_("❌ Renewal failed: {error}"), error=str(renewal_result.unwrap_err()))
+                )
 
     from .currency_terms import domain_renewal_quote  # noqa: PLC0415
 
@@ -669,7 +677,7 @@ def registrar_create(request: HttpRequest) -> HttpResponse:
 def registrar_sync_all(request: HttpRequest) -> HttpResponse:
     """🔄 Staff action - Sync all registrars (stats/health)."""
     count = RegistrarService.sync_all_registrars()
-    messages.success(request, _(f"✅ Synced {count} registrar(s)"))
+    messages.success(request, format_lazy(_("✅ Synced {count} registrar(s)"), count=str(count)))
     # Support HTMX redirects if applicable
     response = redirect("domains:registrar_list")
     try:
