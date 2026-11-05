@@ -346,6 +346,9 @@ a failed/destroyed FSM transition. Do not represent this retained intent as a
 completed teardown. Any issued or uncertain create still requires actual provider
 inventory and the existing public reconciliation/teardown lane.
 
-Only actual completed evidence satisfies this gate. Keep feature rollout and PR
-merge gates pending while provider/DNS/payment authority, physical execution,
-mail proof or an unresolved native outcome is missing.
+Only actual completed evidence satisfies this feature-activation gate. Following
+merged #866, disabled hosting code may merge after required CI and merge-queue
+checks pass. Keep feature rollout and final issue acceptance pending while
+provider/DNS/payment authority, physical execution, mail proof or an unresolved
+native outcome is missing. Run these scenarios on staging after promotion and
+before enabling new acceptance or customer notifications.
