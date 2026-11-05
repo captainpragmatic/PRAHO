@@ -843,12 +843,18 @@ class NodeDeployment(models.Model):
         row meanwhile) raises instead of overwriting the newer status.
         """
         if not self.is_valid_transition(new_status):
-            raise ValidationError(_(f"Cannot transition from '{self.status}' to '{new_status}'"))
+            raise ValidationError(
+                _("Cannot transition from '%(status)s' to '%(target)s'"),
+                params={"status": self.status, "target": new_status},
+            )
         values: dict[str, Any] = {"status": new_status, "updated_at": timezone.now()}
         if message:
             values["status_message"] = message
         if type(self).objects.filter(pk=self.pk, status=self.status).update(**values) != 1:
-            raise ValidationError(_(f"Cannot transition from '{self.status}': the deployment changed concurrently"))
+            raise ValidationError(
+                _("Cannot transition from '%(status)s': the deployment changed concurrently"),
+                params={"status": self.status},
+            )
         for name, value in values.items():
             setattr(self, name, value)
 

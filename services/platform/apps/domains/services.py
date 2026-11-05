@@ -24,6 +24,7 @@ from uuid import UUID
 from django.db import transaction
 from django.db.models import Min, Q, QuerySet
 from django.utils import timezone
+from django.utils.text import format_lazy
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransition, TransitionNotAllowed
 
@@ -499,7 +500,7 @@ class DomainLifecycleService:
         tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)
         tld = TLDService.get_tld_pricing(tld_extension)
         if not tld:
-            return Err(cast(str, _(f"TLD '.{tld_extension}' is not supported")))
+            return Err(cast(str, format_lazy(_("TLD '.{tld}' is not supported"), tld=str(tld_extension))))
 
         registrar = RegistrarService.select_best_registrar_for_tld(tld)
         if not registrar:
@@ -1503,7 +1504,7 @@ class DomainOrderService:
         tld_extension = DomainValidationService.extract_tld_from_domain(domain_name)
         tld = TLDService.get_tld_pricing(tld_extension)
         if not tld:
-            return False, cast(str, _(f"TLD '.{tld_extension}' is not supported"))
+            return False, cast(str, format_lazy(_("TLD '.{tld}' is not supported"), tld=str(tld_extension)))
 
         registrar = registrar or (
             RegistrarService.select_best_registrar_for_tld(tld) if action in ORDERABLE_DOMAIN_ACTIONS else None

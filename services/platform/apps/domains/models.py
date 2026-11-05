@@ -9,6 +9,7 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
 from django.db.models.query import QuerySet
 from django.utils import timezone
+from django.utils.text import format_lazy
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
@@ -663,7 +664,7 @@ class Domain(ConcurrentTransitionMixin, models.Model):
                 domain_tld = longest_matching_tld_suffix(self.name, configured_tlds)
                 if not domain_tld:
                     domain_tld = self.name.rsplit(".", maxsplit=1)[-1].lower()
-                    raise ValidationError(_(f"TLD '.{domain_tld}' is not supported"))
+                    raise ValidationError(format_lazy(_("TLD '.{tld}' is not supported"), tld=str(domain_tld)))
                 self.tld = configured_tlds[domain_tld]
 
     # Signal-related attributes for change tracking (native value types — see

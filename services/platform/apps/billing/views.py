@@ -39,6 +39,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
+from django.utils.text import format_lazy
 from django.utils.translation import gettext_lazy as _
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods, require_POST
@@ -2754,7 +2755,7 @@ def efactura_submit(request: HttpRequest, pk: int) -> HttpResponse:
         else:
             messages.info(request, _("This e-Factura submission is already in progress."))
     else:
-        messages.error(request, _(f"e-Factura submission failed: {result.error_message}"))
+        messages.error(request, format_lazy(_("e-Factura submission failed: {error}"), error=str(result.error_message)))
 
     return redirect("billing:efactura_dashboard")
 
@@ -2783,7 +2784,7 @@ def efactura_retry(request: HttpRequest, pk: str) -> HttpResponse:
         else:
             messages.info(request, _("This e-Factura submission is already in progress."))
     else:
-        messages.error(request, _(f"Retry failed: {result.error_message}"))
+        messages.error(request, format_lazy(_("Retry failed: {error}"), error=str(result.error_message)))
 
     return redirect("billing:efactura_document_detail", pk=pk)
 

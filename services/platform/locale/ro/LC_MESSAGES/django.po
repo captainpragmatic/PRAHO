@@ -28624,10 +28624,6 @@ msgstr "Resetați"
 #~ msgstr "❌ Reînnorirea a eșuat: {message}"
 
 #, python-brace-format
-#~ msgid "✅ Synced {count} registrar(s)"
-#~ msgstr "✅ Sincronizat {count} registrator(e)"
-
-#, python-brace-format
 #~ msgid "Cannot transition from '{self.status}' to '{new_status}'"
 #~ msgstr "Nu se poate face tranziția de la '{self.status}' la '{new_status}'"
 
@@ -34959,3 +34955,53 @@ msgstr "Punctul de acces furnizat pentru notificările native nu mai este actual
 #: apps/provisioning/hosting_notification_completion.py:145
 msgid "Native notification inspection lost its accepted scope or claim"
 msgstr "Verificarea notificărilor native a pierdut contextul acceptat sau dreptul de execuție."
+
+#: apps/infrastructure/models.py:847
+#, python-format
+msgid "Cannot transition from '%(status)s' to '%(target)s'"
+msgstr "Nu se poate face tranziția de la '%(status)s' la '%(target)s'"
+
+#: apps/infrastructure/models.py:855
+#, python-format
+msgid "Cannot transition from '%(status)s': the deployment changed concurrently"
+msgstr "Nu se poate face tranziția de la '%(status)s': implementarea s-a modificat între timp"
+
+#: apps/domains/models.py:667 apps/domains/services.py:503 apps/domains/services.py:1507
+#, python-brace-format
+msgid "TLD '.{tld}' is not supported"
+msgstr "TLD-ul '.{tld}' nu este acceptat"
+
+#: apps/billing/views.py:2758
+#, python-brace-format
+msgid "e-Factura submission failed: {error}"
+msgstr "Trimiterea către e-Factura a eșuat: {error}"
+
+#: apps/billing/views.py:2787
+#, python-brace-format
+msgid "Retry failed: {error}"
+msgstr "Reîncercarea a eșuat: {error}"
+
+#: apps/domains/views.py:395
+#, python-brace-format
+msgid "✅ Domain {domain} registered successfully!"
+msgstr "✅ Domeniul {domain} a fost înregistrat cu succes!"
+
+#: apps/domains/views.py:403
+#, python-brace-format
+msgid "❌ Registration failed: {error}"
+msgstr "❌ Înregistrarea a eșuat: {error}"
+
+#: apps/domains/views.py:493
+#, python-brace-format
+msgid "❌ Renewal failed: {error}"
+msgstr "❌ Reînnoirea a eșuat: {error}"
+
+#: apps/domains/views.py:673
+#, python-brace-format
+msgid "✅ Synced {count} registrar(s)"
+msgstr "✅ S-au sincronizat {count} registratori"
+
+#: apps/orders/views.py:779 apps/orders/views.py:1066
+#, python-brace-format
+msgid "✅ Order '{order_number}' created successfully. You can now add products."
+msgstr "✅ Comanda '{order_number}' a fost creată cu succes. Acum puteți adăuga produse."
