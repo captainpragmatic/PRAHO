@@ -33,7 +33,12 @@ elif name == "backup.sh":
     safety.with_suffix(".media.tar.gz").write_bytes(b"completed media archive")
     if os.environ.get("MISSING_SAFETY_MEDIA"): safety.with_suffix(".media.tar.gz").unlink()
     if os.environ.get("BACKUP_FAIL"): sys.exit(1)
+    print("[time] Backup created: " + str(safety))
+    print("[time] Backup completed successfully")
+elif name == "runuser":
+    sys.exit(subprocess.run(args[3:], check=False).returncode)
 elif name == "systemctl":
+    if args == ["is-active", "--quiet", "praho-qcluster"] and os.environ.get("WORKER_HELD"): sys.exit(3)
     if args[:3] == ["start", "--wait", "praho-backup.service"]:
         context = dict(os.environ, BACKUP_SERVICE_CONTEXT="1")
         sys.exit(subprocess.run([os.environ["BACKUP_SCRIPT"]], env=context, check=False).returncode)
@@ -83,6 +88,47 @@ def calls(env: dict[str, str]) -> list[list[str]]:
     return [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
 
 
+def test_split_restore_requires_explicit_held_recovery(tmp_path: Path) -> None:
+    root, env, dump = scenario(tmp_path)
+    result = _run(_render("restore-platform-native.sh.j2", root, native_topology="split"), env, str(dump), stdin="yes\n")
+    assert result.returncode != 0
+    assert "--leave-stopped" in result.stderr
+    assert not any(call[0] in {"sudo", "systemctl", "backup.sh"} for call in calls(env))
+
+
+@pytest.mark.parametrize("backup_fails", [False, True])
+def test_split_restore_keeps_remote_portal_and_persistent_worker_holds(tmp_path: Path, backup_fails: bool) -> None:
+    root, env, dump = scenario(tmp_path)
+    gates = tmp_path / "gates"
+    gates.mkdir()
+    env["WORKER_HELD"] = "1"
+    for name in ("hold-platform", "hold-workers"):
+        (gates / name).touch()
+    (root / ".env").write_text("DJANGO_SETTINGS_MODULE=config.settings.prod\n")
+    helper = tmp_path / "native_exec.sh"
+    helper.write_text((Path(__file__).resolve().parents[2] / "deploy/scripts/native_exec.sh").read_text())
+    helper.chmod(0o755)
+    (tmp_path / "bin/runuser").write_text(STUB.format(python=sys.executable))
+    (tmp_path / "bin/runuser").chmod(0o755)
+    if backup_fails:
+        env["BACKUP_FAIL"] = "1"
+    script = _render("restore-platform-native.sh.j2", root, native_topology="split")
+    script = script.replace("/etc/praho-native", str(gates)).replace("/usr/local/lib/praho/native_exec.sh", str(helper))
+    result = _run(script, env, "--leave-stopped", str(dump), stdin="yes\n")
+    recorded = calls(env)
+    assert not any("praho-portal" in call for call in recorded)
+    assert not any(call[:2] == ["systemctl", "start"] for call in recorded)
+    assert (gates / "hold-platform").exists() and (gates / "hold-workers").exists()
+    if backup_fails:
+        assert result.returncode != 0 and "Pre-restore safety backup failed" in result.stderr
+        assert not any(call[:3] == ["sudo", "-u", "postgres"] for call in recorded)
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Restore completed successfully; coordinated maintenance remains active" in result.stdout
+        assert ["systemctl", "stop", "praho-qcluster", "praho-platform"] in recorded
+        assert any(call[0] == "pg_restore" and "--exit-on-error" in call for call in recorded)
+
+
 @pytest.mark.parametrize("failure", ["BAD_TOC", "EMPTY_TOC", "BAD_DATA", "BACKUP_FAIL", "STOP_FAIL", "EMPTY_FILE", "BAD_MEDIA", "BAD_MEDIA_GZIP"])
 def test_preflight_and_stop_failures_never_replace_the_database(tmp_path: Path, failure: str) -> None:
     root, env, dump = scenario(tmp_path)
@@ -128,6 +174,8 @@ def test_selected_dump_survives_retention_and_strict_restore_precedes_health(tmp
     assert not dump.exists()
     recorded = calls(env)
     restore = next(i for i, call in enumerate(recorded) if call[0] == "pg_restore" and "--exit-on-error" in call)
+    createdb = next(call for call in recorded if call[:4] == ["sudo", "-u", "postgres", "createdb"])
+    assert "--template=template0" in createdb and "--lc-collate=en_US.UTF-8" in createdb
     start = next(i for i, call in enumerate(recorded) if call[:2] == ["systemctl", "start"] and "praho-platform" in call)
     assert restore < start
     staged = Path(recorded[restore][-1])

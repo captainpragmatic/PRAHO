@@ -8,11 +8,30 @@ DB_NAME={{ deployed_env.DB_NAME | default('praho') | quote }}
 DB_USER={{ deployed_env.DB_USER | default('praho') | quote }}
 DB_HOST={{ deployed_env.DB_HOST | default('localhost') | quote }}
 DB_PORT={{ deployed_env.DB_PORT | default('5432') | quote }}
-SERVICES=(praho-platform praho-portal praho-qcluster)
+MEDIA_ROOT={{ deployed_env.MEDIA_ROOT | default(project_root + '/media') | quote }}
+MEDIA_NAME=$(basename "$MEDIA_ROOT")
+SERVICES=(praho-platform {% if native_topology | default('combined') != 'split' %}praho-portal {% endif %}praho-qcluster)
+STOP_SERVICES=(praho-qcluster {% if native_topology | default('combined') != 'split' %}praho-portal {% endif %}praho-platform)
+LEAVE_STOPPED=false
+if [ "${1:-}" = --leave-stopped ]; then LEAVE_STOPPED=true; shift; fi
+{% if native_topology | default('combined') == 'split' %}
+if ! $LEAVE_STOPPED; then
+    echo 'ERROR: Split native recovery requires --leave-stopped with both origins held; resume through the coordinated launcher.' >&2
+    exit 1
+fi
+{% endif %}
+if $LEAVE_STOPPED; then
+    if [ ! -f /etc/praho-native/hold-platform ] || [ ! -f /etc/praho-native/hold-workers ] ||
+       systemctl is-active --quiet praho-qcluster; then
+        echo 'ERROR: Establish both ingress holds and drain workers before held recovery.' >&2; exit 1
+    fi
+elif [ -f /etc/praho-native/hold-workers ] || [ -f /etc/praho-native/hold-platform ]; then
+    echo 'ERROR: Native maintenance is active; use --leave-stopped and resume through the coordinated launcher.' >&2; exit 1
+fi
 case "$DB_HOST:$DB_PORT" in localhost:5432|127.0.0.1:5432) ;;
     *) echo 'ERROR: Native recovery supports the local bundled PostgreSQL on port 5432 only' >&2; exit 1 ;;
 esac
-if [ $# -ne 1 ]; then echo "Usage: $0 [--latest | backup.dump]" >&2; exit 1; fi
+if [ $# -ne 1 ]; then echo "Usage: $0 [--leave-stopped] [--latest | backup.dump]" >&2; exit 1; fi
 if [ "$1" = --latest ]; then
     BACKUP_FILE=$(ls -t "$BACKUP_DIR"/praho_backup_*.dump 2>/dev/null | head -1) || true
 else
@@ -45,8 +64,8 @@ HAS_MEDIA=false
 if [ -f "$MEDIA_FILE" ]; then
     cp -- "$MEDIA_FILE" "$STAGE/media.tar.gz"
     if ! gzip -t "$STAGE/media.tar.gz" || ! tar -tzf "$STAGE/media.tar.gz" > "$STAGE/members" ||
-       ! grep -Fxq -e media -e media/ "$STAGE/members" ||
-       ! awk -F/ '{if ($1 != "media") exit 1; for(i=1;i<=NF;i++) if($i == "..") exit 1}' "$STAGE/members"; then
+       ! grep -Fxq -e "$MEDIA_NAME" -e "$MEDIA_NAME/" "$STAGE/members" ||
+       ! awk -v root="$MEDIA_NAME" -F/ '{if ($1 != root) exit 1; for(i=1;i<=NF;i++) if($i == "..") exit 1}' "$STAGE/members"; then
         echo 'ERROR: Invalid media archive; nothing was restored' >&2; exit 1
     fi
     HAS_MEDIA=true
@@ -55,8 +74,14 @@ else
 fi
 read -r -p 'This overwrites the current database. Continue? (yes/no): ' CONFIRM
 if [ "$CONFIRM" != yes ]; then echo 'Restore cancelled'; exit 0; fi
-# The service supplies the backup owner and its complete deployed environment. A root
-# invocation of backup.sh fails its ownership guard; never bypass that guard.
+# The held mode explicitly runs the backup as its owner without opening the
+# scheduled worker gate. Credentials are loaded on the target, never into argv.
+if $LEAVE_STOPPED; then
+    if ! SAFETY_OUTPUT=$(runuser -u {{ project_user | quote }} -- /usr/local/lib/praho/native_exec.sh "{{ project_root }}/.env" -- "{{ project_root }}/scripts/backup.sh"); then
+        echo 'ERROR: Pre-restore safety backup failed; nothing was restored.' >&2; exit 1
+    fi
+else
+# The service supplies the backup owner and its complete deployed environment.
 journalctl --sync
 SAFETY_CURSOR=$(journalctl -n 0 --show-cursor --no-pager --output=cat | sed -n 's/^-- cursor: //p')
 if [ -z "$SAFETY_CURSOR" ] || [[ "$SAFETY_CURSOR" == *$'\n'* ]]; then
@@ -69,6 +94,7 @@ fi
 # journal cursor works with the backup timer disabled and excludes old successes.
 journalctl --sync
 SAFETY_OUTPUT=$(journalctl -u praho-backup.service "--after-cursor=$SAFETY_CURSOR" --no-pager --output=cat)
+fi
 SAFETY_DUMP=$(sed -n 's/^.* Backup created: //p' <<< "$SAFETY_OUTPUT")
 # Lock contention exits zero without creating a pair. Require evidence from this
 # fresh log window before stopping writers or replacing their database.
@@ -82,16 +108,16 @@ if ! grep -Fq 'Backup completed successfully' <<< "$SAFETY_OUTPUT" ||
     echo 'ERROR: Cannot verify completed safety backup pair; nothing was restored' >&2; exit 1
 fi
 # A failed stop can leave only some services stopped. Never mutate the database in that case.
-if ! systemctl stop praho-qcluster praho-portal praho-platform; then
+if ! systemctl stop "${STOP_SERVICES[@]}"; then
     echo 'ERROR: Could not stop all writers; database unchanged. Some services may already be stopped.' >&2; exit 1
 fi
 WRITERS_STOPPED=true
 sudo -u postgres dropdb --if-exists "$DB_NAME"
-sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
+sudo -u postgres createdb --template=template0 --encoding=UTF8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8 -O "$DB_USER" "$DB_NAME"
 pg_restore -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" \
     --exit-on-error --no-owner --no-privileges "$STAGE/database.dump"
 if $HAS_MEDIA; then
-    sudo -u {{ project_user | quote }} tar --no-same-owner --no-same-permissions -C "{{ project_root }}" -xzf - < "$STAGE/media.tar.gz"
+    sudo -u {{ project_user | quote }} tar --no-same-owner --no-same-permissions -C "$(dirname "$MEDIA_ROOT")" -xzf - < "$STAGE/media.tar.gz"
 fi
 # After a restore, files written since the backup have no row, and the orphaned-media sweep would
 # delete them a day later: pause it for seven days. A backup taken before the sweeper existed has no
@@ -104,8 +130,13 @@ if [ -z "$PAUSED_UNTIL" ]; then
     exit 1
 fi
 echo "Orphaned-media sweep paused until $PAUSED_UNTIL"
+if $LEAVE_STOPPED; then
+    COMPLETE=true
+    echo 'Restore completed successfully; coordinated maintenance remains active. Resume through the native launcher.'
+    exit 0
+fi
 hold_offline() {
-    systemctl stop praho-qcluster praho-portal praho-platform ||
+    systemctl stop "${STOP_SERVICES[@]}" ||
         echo 'ERROR: Could not hold every application offline; operator intervention required' >&2
 }
 if ! systemctl start "${SERVICES[@]}"; then hold_offline; exit 1; fi

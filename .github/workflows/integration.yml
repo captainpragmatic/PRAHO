@@ -150,7 +150,7 @@ jobs:
   # ---------------------------------------------------------------------------
   # Integration Tests — requires PostgreSQL
   # ---------------------------------------------------------------------------
-  integration-test:
+  integration-suite:
     runs-on: ubuntu-24.04  # Playwright 1.58 does not support Ubuntu 26.04.
 
     # Override workflow-level settings: integration tests need PostgreSQL + DatabaseCache
@@ -186,6 +186,10 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y gettext
+
+    - name: Install the pinned native transport collection
+      # ansible-core does not bundle synchronize. Keep the regression independent of runner images.
+      run: uv tool run --from ansible-core==2.20.6 ansible-galaxy collection install ansible.posix:2.2.0
 
     # A PR compares against its base branch, not against its own previous push: every file the PR changes
     # is checked, however many pushes it took.
@@ -285,3 +289,53 @@ jobs:
     - name: Stop CI PostgreSQL
       if: always()
       run: make ci-postgres-stop
+
+  # Native qualification owns its databases and SSH hosts, so it can run alongside
+  # the general suite instead of consuming the merge queue's deadline serially.
+  native-deploy:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [split-prod, combined-staging, combined-prod]
+    env:
+      PRAHO_NATIVE_ACCEPTANCE_PROFILE: ${{ matrix.profile }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Install the frozen qualification dependencies
+      run: |
+        uv python install
+        uv sync --all-groups --frozen
+
+    - name: Native split and combined deployment acceptance
+      run: make test-native-deploy
+
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.13.5
+
+    - name: Native infrastructure topology and adoption safety
+      run: make test-native-infra
+
+  # Preserve the required check name and reject failed, cancelled or skipped suites.
+  integration-test:
+    needs: [integration-suite, native-deploy]
+    if: always()
+    runs-on: ubuntu-24.04
+    env:
+      GENERAL_RESULT: ${{ needs.integration-suite.result }}
+      NATIVE_RESULT: ${{ needs.native-deploy.result }}
+    steps:
+    - name: Require both integration suites to pass
+      run: |
+        printf 'General suite: %s; native qualification: %s\n' "$GENERAL_RESULT" "$NATIVE_RESULT"
+        test "$GENERAL_RESULT" = success
+        test "$NATIVE_RESULT" = success

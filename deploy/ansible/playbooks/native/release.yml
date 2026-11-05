@@ -1,0 +1,21 @@
+---
+- name: Verify the operation owner before releasing Platform holds
+  include_tasks: lock-owner.yml
+- name: Reopen provider callbacks after Portal authentication is verified
+  file:
+    path: /etc/praho-native/hold-platform
+    state: absent
+- name: Release durable worker hold
+  file:
+    path: /etc/praho-native/hold-workers
+    state: absent
+- name: Restore workers
+  systemd:
+    name: praho-qcluster.service
+    state: started
+    enabled: true
+- name: Restore configured backup scheduling
+  systemd:
+    name: praho-backup.timer
+    state: "{{ 'started' if backup_enabled else 'stopped' }}"
+    enabled: "{{ backup_enabled }}"

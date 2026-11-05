@@ -1,0 +1,35 @@
+---
+- name: Prepare private recovery checks on the Portal host
+  file:
+    path: /usr/local/lib/praho
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+- name: Transfer Portal migration compatibility checks
+  copy:
+    src: "{{ playbook_dir }}/../../scripts/{{ item }}"
+    dest: "/usr/local/lib/praho/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [native_env.py, native_migration_guard.py]
+- name: Fetch the rollback commit as the source owner before reading Portal state
+  command:
+    argv: [git, -C, "{{ project_root }}/src", fetch, --no-tags, --, "{{ praho_git_repo }}", "{{ deploy_git_version }}"]
+  become_user: "{{ project_user }}"
+  changed_when: false
+- name: Check Portal rollback migrations using its installed private environment
+  shell: |
+    set -eu
+    set -a
+    . {{ project_root }}/.portal.env
+    set +a
+    export PYTHONPATH={{ project_root }}/src/services/portal
+    export PRAHO_NATIVE_SOURCE_ROOT={{ project_root }}/src
+    export PORTAL_LOG_DIR=''
+    {{ project_root }}/.venv-linux/bin/python /usr/local/lib/praho/native_migration_guard.py --service portal --no-fetch {{ deploy_git_version }}
+  args:
+    executable: /bin/bash
+  become_user: "{{ portal_user | default('praho-portal') }}"
+  no_log: true

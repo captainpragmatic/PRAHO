@@ -3,6 +3,7 @@
 
 [Unit]
 Description=PRAHO Q-Cluster (Django-Q2 background worker)
+ConditionPathExists=!/etc/praho-native/hold-workers
 After=postgresql.service praho-platform.service
 Wants=praho-platform.service
 
@@ -21,6 +22,8 @@ EnvironmentFile={{ project_root }}/.env
 ExecStart={{ project_root }}/.venv-linux/bin/python manage.py qcluster
 Restart=on-failure
 RestartSec=10
+KillMode=mixed
+TimeoutStopSec=900
 
 # Resource limits
 MemoryMax={{ qcluster_memory_max }}
@@ -30,7 +33,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths={{ project_root }}/logs {{ project_root }}/media /var/log/praho
+ReadWritePaths={{ project_root }}/logs {{ deployed_env.MEDIA_ROOT | default(project_root + '/media') }} /var/log/praho
 
 [Install]
 WantedBy=multi-user.target

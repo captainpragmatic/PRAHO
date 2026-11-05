@@ -99,6 +99,40 @@ jobs:
           fi
 
   # ---------------------------------------------------------------------------
+  # Native qualification uses the workflow revision. An older staging checkout
+  # need not contain its Make targets; all three deployment topologies run here.
+  # ---------------------------------------------------------------------------
+  nightly-native-deploy:
+    needs: check-activity
+    if: needs.check-activity.outputs.branches != '[]'
+    runs-on: ubuntu-24.04
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.workflow_sha }}
+        fetch-depth: 0
+
+    - uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: "uv.lock"
+
+    - name: Install the frozen qualification dependencies
+      run: |
+        uv python install
+        uv sync --all-groups --frozen
+
+    - name: Native deployment acceptance
+      run: make test-native-deploy
+
+    - uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: 1.13.5
+
+    - name: Native infrastructure adoption safety
+      run: make test-native-infra
+
+  # ---------------------------------------------------------------------------
   # Full nightly suite (only if activity detected)
   # ---------------------------------------------------------------------------
   nightly:
@@ -140,6 +174,10 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y gettext
+
+    - name: Install the pinned native transport collection
+      # A staging checkout may predate new Make targets or controller dependencies.
+      run: uv tool run --from ansible-core==2.20.6 ansible-galaxy collection install ansible.posix:2.2.0
 
     - name: Full lint (every make lint phase)
       run: make lint
@@ -219,7 +257,7 @@ jobs:
         DJANGO_SETTINGS_MODULE: config.settings.dev
       run: |
         cd services/portal
-        PYTHONPATH= PYTHONNOUSERSITE=1 "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest -v
+        PYTHONPATH='' PYTHONNOUSERSITE=1 "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest -v
 
     - name: Install the browser the page-monitor self-tests drive
       run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
@@ -398,7 +436,7 @@ jobs:
   # Dispatched runs are attended, so they never notify.
   # ---------------------------------------------------------------------------
   notify-scheduled-failure:
-    needs: [check-activity, nightly, nightly-e2e]
+    needs: [check-activity, nightly, nightly-e2e, nightly-native-deploy]
     if: always() && github.event_name == 'schedule' && contains(needs.*.result, 'failure')
     runs-on: ubuntu-latest
     permissions:

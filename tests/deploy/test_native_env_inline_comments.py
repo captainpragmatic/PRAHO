@@ -30,6 +30,8 @@ from typing import Any
 import pytest
 import yaml
 
+from tests.native_role_helpers import native_tasks
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ROLE = PROJECT_ROOT / "deploy/ansible/roles/praho-native"
 CHECKER = ROLE / "files/check_env_inline_comments.py"
@@ -153,7 +155,7 @@ class TestTheDeployRunsTheCheckFirst:
 
     @pytest.mark.integration
     def test_the_role_checks_before_its_first_read(self) -> None:
-        tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+        tasks = native_tasks(ROLE / "tasks/main.yml")
         names = _names(tasks)
         assert tasks[names.index(PREFLIGHT)]["include_tasks"] == "env_preflight.yml"
         assert names.index(PREFLIGHT) < names.index("Read .env file locally for role variables")

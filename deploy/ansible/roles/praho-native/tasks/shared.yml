@@ -1,0 +1,140 @@
+---
+- name: Create source directory
+  file:
+    path: "{{ project_root }}/src"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+
+- name: Create static, media, and log directories
+  file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0755"
+  loop:
+    "{{ ([deployed_env.STATIC_ROOT | default(project_root + '/static'), deployed_env.MEDIA_ROOT | default(project_root + '/media')] if native_platform else []) +
+        ([project_root + '/portal-static'] if native_portal else []) + [project_root + '/logs', '/var/log/praho'] }}"
+
+- name: Install logrotate
+  apt:
+    name: logrotate
+    state: present
+
+- name: Install the native rsync receiver
+  apt:
+    name: rsync
+    state: present
+  when: deploy_method == 'rsync'
+
+- name: Deploy code via rsync
+  ansible.posix.synchronize:
+    src: "{{ native_source_directory | default(playbook_dir + '/../../../') }}"
+    dest: "{{ project_root }}/src/"
+    delete: yes
+    verify_host: true
+    use_ssh_args: true
+    rsync_opts:
+      # Controller/lab state and saved plans can contain credentials; never ship them as code.
+      - "--exclude=.terraform"
+      - "--exclude=.state"
+      - "--exclude=*.tfstate"
+      - "--exclude=*.tfstate.*"
+      - "--exclude=*.tfplan"
+      - "--exclude=*.tfvars"
+      - "--exclude=*.tfvars.json"
+      - "--exclude=.venv"
+      - "--exclude=.venv-darwin"
+      - "--exclude=.venv-linux"
+      - "--exclude=__pycache__"
+      - "--exclude=node_modules"
+      - "--exclude=*.pyc"
+      - "--exclude=.env"
+      - "--exclude=.env.*"
+      - "--exclude=.envrc"
+      - "--exclude=db.sqlite3"
+      # Database dumps: the checkout's backups/ (deploy/scripts/backup.sh) and any stray one.
+      - "--exclude=/backups/"
+      - "--exclude=praho_backup_*"
+      - "--exclude=.mypy_cache"
+      - "--exclude=.pytest_cache"
+      - "--exclude=htmlcov"
+      - "--exclude=.ruff_cache"
+      - "--exclude=.vscode"
+      - "--exclude=.idea"
+  when: deploy_method == 'rsync'
+  notify:
+    - restart praho-platform
+    - restart praho-portal
+    - restart praho-qcluster
+
+- name: Deploy code via git
+  git:
+    repo: "{{ praho_git_repo }}"
+    dest: "{{ project_root }}/src"
+    version: "{{ deploy_git_version }}"
+    force: yes
+  become_user: "{{ project_user }}"
+  when: deploy_method == 'git'
+  notify:
+    - restart praho-platform
+    - restart praho-portal
+    - restart praho-qcluster
+
+- name: Set source ownership
+  file:
+    path: "{{ project_root }}/src"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    recurse: yes
+
+- name: Get deployed git SHA
+  command: git rev-parse HEAD
+  args:
+    chdir: "{{ project_root }}/src"
+  register: deployed_sha
+  changed_when: false
+  when: deploy_method == 'git' or native_coordinated | bool
+  become_user: "{{ project_user }}"
+
+- name: Verify immutable deployed revision
+  assert:
+    that: deployed_sha.stdout == deploy_git_version
+    fail_msg: "Host checkout differs from the controller's pinned release SHA"
+  when: native_coordinated | bool
+
+# ---------------------------------------------------------------------------
+# 5. Virtual environment + dependencies
+# ---------------------------------------------------------------------------
+
+- name: Create virtualenv with uv
+  command: >
+    /usr/local/bin/uv venv
+    --python {{ native_python.stdout | trim }}
+    {{ project_root }}/.venv-linux
+  args:
+    creates: "{{ project_root }}/.venv-linux/bin/python"
+  become_user: "{{ project_user }}"
+
+- name: Install dependencies with uv
+  command: >
+    /usr/local/bin/uv sync
+    {{ '--group platform' if native_platform else '' }}
+    {{ '--group portal' if native_portal else '' }}
+    --group prod
+    --no-dev
+    --frozen
+  args:
+    chdir: "{{ project_root }}/src"
+  become_user: "{{ project_user }}"
+  environment:
+    UV_PROJECT_ENVIRONMENT: "{{ project_root }}/.venv-linux"
+    UV_CACHE_DIR: "{{ native_uv_cache_directory | default(project_root + '/.cache/uv') }}"
+    UV_CONCURRENT_INSTALLS: '1'
+    UV_CONCURRENT_BUILDS: '1'
+
+# ---------------------------------------------------------------------------
+# 6. Environment file (.env as single source of truth)
+# ---------------------------------------------------------------------------

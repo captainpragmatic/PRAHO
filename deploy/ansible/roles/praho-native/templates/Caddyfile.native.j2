@@ -8,10 +8,10 @@
 # 1. Portal — public-facing customer service
 # ---------------------------------------------------------------------------
 {# Edge HSTS, per environment. A non-empty HSTS_POLICY in the deployed .env wins, with surrounding quotes
-   stripped (a ";"-bearing value must be quoted for `source .env`). Unset or empty falls back by
-   praho_env: one hour on staging, so an existing staging .env without the key still gets it. #}
+stripped (a ";"-bearing value must be quoted for `source .env`). Unset or empty falls back by
+praho_env: one hour on staging, so an existing staging .env without the key still gets it. #}
 {% set hsts_policy = (deployed_env.HSTS_POLICY | default('', true) | trim | trim('"') | trim("'"))
-   or ('max-age=3600' if (praho_env | default('prod')) == 'staging' else 'max-age=31536000; includeSubDomains') %}
+or ('max-age=3600' if (praho_env | default('prod')) == 'staging' else 'max-age=31536000; includeSubDomains') %}
 {
     log {
         format filter {
@@ -35,13 +35,8 @@
     }
 }
 
-{{ deployed_env.PORTAL_DOMAIN }} {
-    tls {{ deployed_env.ACME_EMAIL | default('admin@example.com') }}
-
-    # Security headers
-    # HSTS_POLICY sets this per environment (staging: max-age=3600). It is set twice on purpose:
-    # the deferred block below replaces the header Django sends, and this immediate line covers
-    # responses Caddy generates itself (a 502 when the upstream is down), which skip deferred headers.
+(native_security) {
+    # The immediate HSTS covers edge errors; deletion makes the block deferred over upstream headers.
     header Strict-Transport-Security "{{ hsts_policy }}"
     header {
         X-Frame-Options "DENY"
@@ -51,67 +46,122 @@
         Strict-Transport-Security "{{ hsts_policy }}"
         -Server
     }
-
     encode gzip zstd
+}
 
-{% if (praho_env | default('prod')) == 'staging' %}
-    # All staging routes require an approved connection IP. Forwarded headers cannot bypass this.
+(native_platform_hold) {
+    @platform_hold_{args[0]} file {
+        root /etc/praho-native
+        try_files hold-platform
+    }
+    handle @platform_hold_{args[0]} {
+        header Retry-After "600"
+        @json_{args[0]} path /api /api/*
+        header @json_{args[0]} Content-Type application/json
+        respond @json_{args[0]} `{"error":"maintenance","detail":"The platform is temporarily unavailable for scheduled maintenance.","retry_after":600}` 503
+        respond "Scheduled maintenance" 503
+    }
+}
+
+{% if native_portal | default(true) %}
+{{ deployed_env.PORTAL_DOMAIN }} {
+    {% if native_tls_certificate | default('') %}
+    tls {{ native_tls_certificate }} {{ native_tls_key }}
+    {% else %}
+    tls {{ deployed_env.ACME_EMAIL | default('admin@example.com') }}
+    {% endif %}
+
+    import native_security
+
     route {
-        @staging_denied not remote_ip {{ platform_allowed_ips | default(['127.0.0.1/32', '::1/128'], true) | join(' ') }}
+        @portal_health path /status /status/*
+        handle @portal_health {
+            @health_denied not remote_ip {{ (deployed_env.PRAHO_MONITORING_CIDRS | default('')).split() | join(' ') }} 127.0.0.1/32 ::1/128
+            respond @health_denied "Access denied" 403
+            reverse_proxy 127.0.0.1:{{ portal_port }} {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+                header_up X-Forwarded-Host {host}
+                header_up -Forwarded
+                header_up -X-Cluster-Client-IP
+                header_up -CF-Connecting-IP
+                header_up -CF-Connecting-IPv6
+                header_up -CF-Pseudo-IPv4
+                header_up -CF-Ray
+                header_up -True-Client-IP
+            }
+        }
+        @callback path /order/payment/webhook /order/payment/webhook/*
+        handle @callback {
+            @callback_denied not remote_ip {{ (deployed_env.PRAHO_PLATFORM_WEBHOOK_SOURCE_CIDRS | default('')).split() | join(' ') }} 127.0.0.1/32 ::1/128
+            respond @callback_denied "Access denied" 403
+            @callback_hold file {
+                root /etc/praho-native
+                try_files hold-callbacks
+            }
+            header Retry-After "600"
+            respond @callback_hold "Scheduled maintenance" 503
+            request_body {
+                max_size 5MB
+            }
+            reverse_proxy 127.0.0.1:{{ portal_port }} {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+                header_up X-Forwarded-Host {host}
+                header_up -Forwarded
+                header_up -X-Cluster-Client-IP
+                header_up -CF-Connecting-IP
+                header_up -CF-Connecting-IPv6
+                header_up -CF-Pseudo-IPv4
+                header_up -CF-Ray
+                header_up -True-Client-IP
+            }
+        }
+        {% if (praho_env | default('prod')) == 'staging' %}
+        # Staging customer pages remain restricted; monitoring and peer callbacks have their own gates.
+        @staging_denied not remote_ip {{ platform_allowed_ips | default(['127.0.0.1/32', '::1/128'], true) | join(' ') }} 127.0.0.1/32 ::1/128
         respond @staging_denied "Access denied" 403
-{% endif %}
-    # Portal static files
-    handle_path /static/* {
-        root * {{ project_root }}/portal-static
-        file_server
-        header Cache-Control "public, max-age=31536000, immutable"
-    }
-
-    # Portal health check
-    handle /status/ {
-        reverse_proxy localhost:{{ portal_port }} {
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-            header_up X-Forwarded-Host {host}
-            header_up -Forwarded
-            header_up -X-Cluster-Client-IP
-            header_up -CF-Connecting-IP
-            header_up -CF-Connecting-IPv6
-            header_up -CF-Pseudo-IPv4
-            header_up -CF-Ray
-            header_up -True-Client-IP
+        {% endif %}
+        @portal_hold file {
+            root /etc/praho-native
+            try_files hold-portal
         }
-    }
-
-    # All other traffic → Portal
-    handle {
-        request_body {
-            max_size 5MB
+        header @portal_hold Retry-After "600"
+        respond @portal_hold "Scheduled maintenance" 503
+        handle_path /static/* {
+            root * {{ project_root }}/portal-static
+            file_server
+            header Cache-Control "public, max-age=31536000, immutable"
         }
-        reverse_proxy localhost:{{ portal_port }} {
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
-            header_up X-Forwarded-Host {host}
-            header_up -Forwarded
-            header_up -X-Cluster-Client-IP
-            header_up -CF-Connecting-IP
-            header_up -CF-Connecting-IPv6
-            header_up -CF-Pseudo-IPv4
-            header_up -CF-Ray
-            header_up -True-Client-IP
-            # Read the whole request before passing it on (the buffer is above the 5MB cap, so any
-            # accepted body is complete), and up to 10MiB of the response before sending it: a slow
-            # client then holds Caddy, not a portal thread.
-            request_buffers 6MB
-            response_buffers 10MiB
-        }
-    }
 
-{% if (praho_env | default('prod')) == 'staging' %}
+        # All other traffic → Portal
+        handle {
+            request_body {
+                max_size 5MB
+            }
+            reverse_proxy localhost:{{ portal_port }} {
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-For {remote_host}
+                header_up X-Forwarded-Proto {scheme}
+                header_up X-Forwarded-Host {host}
+                header_up -Forwarded
+                header_up -X-Cluster-Client-IP
+                header_up -CF-Connecting-IP
+                header_up -CF-Connecting-IPv6
+                header_up -CF-Pseudo-IPv4
+                header_up -CF-Ray
+                header_up -True-Client-IP
+                # Read the whole request before passing it on (the buffer is above the 5MB cap, so any
+                # accepted body is complete), and up to 10MiB of the response before sending it: a slow
+                # client then holds Caddy, not a portal thread.
+                request_buffers 6MB
+                response_buffers 10MiB
+            }
+        }
+
     }
-{% endif %}
     log {
         format filter {
             wrap json
@@ -131,102 +181,122 @@
 # ---------------------------------------------------------------------------
 # 2. Platform — staff/admin service (IP-restricted by default)
 # ---------------------------------------------------------------------------
-{{ deployed_env.PLATFORM_DOMAIN }} {
+{% elif native_legacy_portal_origin | default(false) %}
+# Preserve the old origin through DNS expiry. It cannot run customer writers.
+{{ deployed_env.PORTAL_DOMAIN }} {
+    {% if native_tls_certificate | default('') %}
+    tls {{ native_tls_certificate }} {{ native_tls_key }}
+    {% else %}
     tls {{ deployed_env.ACME_EMAIL | default('admin@example.com') }}
-
-    # HSTS_POLICY sets this per environment (staging: max-age=3600). It is set twice on purpose:
-    # the deferred block below replaces the header Django sends, and this immediate line covers
-    # responses Caddy generates itself (a 502 when the upstream is down), which skip deferred headers.
-    header Strict-Transport-Security "{{ hsts_policy }}"
+    {% endif %}
+    import native_security
     header {
-        X-Frame-Options "DENY"
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        Strict-Transport-Security "{{ hsts_policy }}"
-        Permissions-Policy "camera=(), microphone=(), geolocation=()"
-        -Server
+        Retry-After "600"
+        Cache-Control "no-store"
     }
-
-    encode gzip zstd
-
-{% if (praho_env | default('prod')) == 'staging' %}
-    route {
-        @staging_denied not remote_ip {{ platform_allowed_ips | default(['127.0.0.1/32', '::1/128'], true) | join(' ') }}
-        respond @staging_denied "Access denied" 403
+    respond "Scheduled maintenance" 503
+}
 {% endif %}
-    # Public handles cap request bodies at Django's DATA_UPLOAD_MAX_MEMORY_SIZE (10 MiB). None takes a
-    # multipart upload; the tickets API's attachments arrive base64 inside a JSON body, which Django
-    # caps at the same size. So the cap refuses nothing Django would take, and an oversized body stops
-    # here instead of streaming into a worker.
-    handle /api/users/health/* {
-        request_body {
-            max_size 10MiB
-        }
-        reverse_proxy localhost:{{ platform_port }}
-    }
+{% if native_platform | default(true) %}
+{{ deployed_env.PLATFORM_DOMAIN }} {
+    {% if native_tls_certificate | default('') %}
+    tls {{ native_tls_certificate }} {{ native_tls_key }}
+    {% else %}
+    tls {{ deployed_env.ACME_EMAIL | default('admin@example.com') }}
+    {% endif %}
 
-    handle /integrations/webhooks/* {
-        request_body {
-            max_size 10MiB
-        }
-        reverse_proxy localhost:{{ platform_port }}
-    }
+    import native_security
 
-    # Email provider bounce feeds and the recipient unsubscribe page are public too.
-    handle /notifications/webhooks/* {
-        request_body {
-            max_size 10MiB
+    route {
+        # Public handles cap request bodies at Django's DATA_UPLOAD_MAX_MEMORY_SIZE (10 MiB). None takes a
+        # multipart upload; the tickets API's attachments arrive base64 inside a JSON body, which Django
+        # caps at the same size. So the cap refuses nothing Django would take, and an oversized body stops
+        # here instead of streaming into a worker.
+        @platform_health path /api/users/health /api/users/health/*
+        handle @platform_health {
+            @health_denied not remote_ip {{ (deployed_env.PRAHO_MONITORING_CIDRS | default('')).split() | join(' ') }} 127.0.0.1/32 ::1/128
+            respond @health_denied "Access denied" 403
+            request_body {
+                max_size 10MiB
+            }
+            reverse_proxy 127.0.0.1:{{ platform_port }}
         }
-        reverse_proxy localhost:{{ platform_port }}
-    }
-
-    handle /notifications/unsubscribe/* {
-        request_body {
-            max_size 10MiB
-        }
-        reverse_proxy localhost:{{ platform_port }}
-    }
-
-    # Django enforces API authentication, including its explicit public exceptions.
-    handle /api/* {
-        request_body {
-            max_size 10MiB
-        }
-        reverse_proxy localhost:{{ platform_port }}
-    }
-
-    # An omitted or empty list keeps the loopback restriction.
-    @staff remote_ip {{ platform_allowed_ips | default(['127.0.0.1/32', '::1/128'], true) | join(' ') }}
-    handle @staff {
-        # The largest staff reply Django can accept: tickets.max_attachments_per_reply (at most 5)
-        # files of tickets.max_file_size_bytes (at most 10 MiB), plus 2 MiB of multipart headroom.
-        # Caddy cannot read settings, so this sits at their upper bounds; Django enforces the values
-        # in effect. Media has no route here: every stored file is read through a Django view that
-        # checks who is asking and records it (ADR-0057).
-        request_body {
-            max_size 62MiB
-        }
-
-        handle_path /static/* {
-            root * {{ project_root }}/static
-            file_server
-            header Cache-Control "public, max-age=31536000, immutable"
-        }
-
-        handle {
-            reverse_proxy localhost:{{ platform_port }} {
-                header_up X-Real-IP {remote_host}
-                header_up X-Forwarded-For {remote_host}
-                header_up X-Forwarded-Proto {scheme}
+        @api path /api /api/*
+        handle @api {
+            route {
+                @api_denied not remote_ip {{ (deployed_env.PRAHO_PORTAL_API_SOURCE_CIDRS | default('')).split() | join(' ') }} {{ platform_allowed_ips | default(['127.0.0.1/32', '::1/128'], true) | join(' ') }} 127.0.0.1/32 ::1/128
+                respond @api_denied "Access denied" 403
+                # This signed read-only endpoint is the deployment authentication probe.
+                @probe path /api/localisation/
+                handle @probe {
+                    request_body {
+                        max_size 10MiB
+                    }
+                    reverse_proxy 127.0.0.1:{{ platform_port }}
+                }
+                handle {
+                    import native_platform_hold api
+                    request_body {
+                        max_size 10MiB
+                    }
+                    reverse_proxy 127.0.0.1:{{ platform_port }}
+                }
             }
         }
-    }
+        import native_platform_hold public
 
-    respond "Access denied" 403
+        handle /integrations/webhooks/* {
+            request_body {
+                max_size 10MiB
+            }
+            reverse_proxy localhost:{{ platform_port }}
+        }
 
-{% if (praho_env | default('prod')) == 'staging' %}
+        # Email provider bounce feeds and the recipient unsubscribe page are public too.
+        handle /notifications/webhooks/* {
+            request_body {
+                max_size 10MiB
+            }
+            reverse_proxy localhost:{{ platform_port }}
+        }
+
+        handle /notifications/unsubscribe/* {
+            request_body {
+                max_size 10MiB
+            }
+            reverse_proxy localhost:{{ platform_port }}
+        }
+
+        # An omitted or empty list keeps the loopback restriction.
+        @staff remote_ip {{ platform_allowed_ips | default(['127.0.0.1/32', '::1/128'], true) | join(' ') }}
+        handle @staff {
+            # The largest staff reply Django can accept: tickets.max_attachments_per_reply (at most 5)
+            # files of tickets.max_file_size_bytes (at most 10 MiB), plus 2 MiB of multipart headroom.
+            # Caddy cannot read settings, so this sits at their upper bounds; Django enforces the values
+            # in effect. Media has no route here: every stored file is read through a Django view that
+            # checks who is asking and records it (ADR-0057).
+            request_body {
+                max_size 62MiB
+            }
+
+            handle_path /static/* {
+                root * {{ deployed_env.STATIC_ROOT | default(project_root + '/static') }}
+                file_server
+                header Cache-Control "public, max-age=31536000, immutable"
+            }
+
+            handle {
+                reverse_proxy localhost:{{ platform_port }} {
+                    header_up X-Real-IP {remote_host}
+                    header_up X-Forwarded-For {remote_host}
+                    header_up X-Forwarded-Proto {scheme}
+                }
+            }
+        }
+
+        respond "Access denied" 403
+
     }
-{% endif %}
 
     log {
         format filter {
@@ -244,9 +314,44 @@
     }
 }
 
-# ---------------------------------------------------------------------------
-# 3. Bare IP — redirect to portal domain
-# ---------------------------------------------------------------------------
+{% endif %}
+
+# Bare IPv4 HTTP requests retain the native Portal redirect.
 http://{{ ansible_default_ipv4.address | default('0.0.0.0') }} {
     redir https://{{ deployed_env.PORTAL_DOMAIN }}{uri} permanent
 }
+
+{% if native_portal | default(true) and deployed_env.PRAHO_ADDRESS_IPV4_DOMAIN | default('') %}
+{% for address_domain in [deployed_env.PRAHO_ADDRESS_IPV4_DOMAIN, deployed_env.PRAHO_ADDRESS_IPV6_DOMAIN] %}
+{{ address_domain }} {
+    {% if native_tls_certificate | default('') %}
+    tls {{ native_tls_certificate }} {{ native_tls_key }}
+    {% else %}
+    tls {{ deployed_env.ACME_EMAIL | default('admin@example.com') }}
+    {% endif %}
+    import native_security
+    route {
+        header {
+            Content-Type "text/plain; charset=utf-8"
+            Cache-Control "no-store"
+            Access-Control-Allow-Origin "https://{{ deployed_env.PORTAL_DOMAIN }}"
+            -Set-Cookie
+        }
+        @forwarded header Forwarded *
+        @xff header X-Forwarded-For *
+        @xreal header X-Real-IP *
+        @proto header X-Forwarded-Proto *
+        respond @forwarded "Forwarding headers are not accepted" 400
+        respond @xff "Forwarding headers are not accepted" 400
+        respond @xreal "Forwarding headers are not accepted" 400
+        respond @proto "Forwarding headers are not accepted" 400
+        @address {
+            method GET
+            path /
+        }
+        respond @address "{remote_host}" 200
+        respond "Not found" 404
+    }
+}
+{% endfor %}
+{% endif %}

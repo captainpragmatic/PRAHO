@@ -15,6 +15,10 @@
   gather_facts: yes
 
   pre_tasks:
+    - name: Require the validated native controller launcher
+      assert:
+        that: native_coordinated | default(false) | bool
+        fail_msg: "Use make deploy-prod/deploy-staging/deploy-dev-native so topology, SSH trust and release SHA are validated together."
     - name: Validate praho_env
       assert:
         that:

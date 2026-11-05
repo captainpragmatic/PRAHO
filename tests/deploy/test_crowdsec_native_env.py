@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from deploy.scripts.native_env import read_env
+from deploy.scripts.native_env import read_env, runtime_environments
+from tests.native_role_helpers import native_tasks
 
 ROOT = Path(__file__).resolve().parents[2]
 ROLE = ROOT / "deploy/ansible/roles/praho-native"
@@ -30,7 +31,7 @@ PLATFORM_FLAGS = {
 
 def _render_native_env(tmp_path: Path, configured: dict[str, str]):
     marker = secrets.token_hex(20)
-    role_tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+    role_tasks = native_tasks(ROLE / "tasks/main.yml")
     named = {task["name"]: task for task in role_tasks}
     tasks = [named["Set Django environment variables from .env file"], named["Set Portal Django environment"]]
     assert all(task["no_log"] is True for task in tasks)
@@ -59,6 +60,7 @@ def _render_native_env(tmp_path: Path, configured: dict[str, str]):
         "PORTAL_DJANGO_SECRET_KEY": "portal-key-" + marker,
         "PORTAL_DOMAIN": "portal.example.test",
         "PLATFORM_DOMAIN": "staff.example.test",
+        "PLATFORM_API_BASE_URL": "https://staff.example.test/api",
         **configured,
     }
     playbook = tmp_path / "play.yml"
@@ -75,6 +77,7 @@ def _render_native_env(tmp_path: Path, configured: dict[str, str]):
                         "platform_port": 8700,
                         "portal_state_directory": str(tmp_path / "state"),
                         "django_settings_module": "config.settings.prod",
+                        "native_topology": "split",
                     },
                     "tasks": tasks,
                 }
@@ -103,6 +106,45 @@ def _render_native_env(tmp_path: Path, configured: dict[str, str]):
     )
     assert marker not in result.stdout + result.stderr
     return result
+
+
+def test_controller_preserves_portal_protection_settings_before_transfer() -> None:
+    key = secrets.token_hex(20)
+    platform, portal = runtime_environments(
+        {
+            "DJANGO_SECRET_KEY": "platform-only-key",
+            "PORTAL_DJANGO_SECRET_KEY": "portal-only-key",
+            "PLATFORM_DOMAIN": "staff.example.test",
+            "PORTAL_DOMAIN": "portal.example.test",
+            **PLATFORM_FLAGS,
+            "CROWDSEC_AUTH_EVENTS_ENABLED": "true",
+            "CROWDSEC_AUTH_PSEUDONYM_KEY": key,
+            "CROWDSEC_AUTH_LOG_PATH": LOG_PATH,
+        },
+        "prod",
+        "split",
+    )
+    assert portal["CROWDSEC_AUTH_EVENTS_ENABLED"] == "true"
+    assert portal["CROWDSEC_AUTH_PSEUDONYM_KEY"] == key
+    assert portal["CROWDSEC_AUTH_LOG_PATH"] == LOG_PATH
+    assert not (set(PLATFORM_FLAGS) & set(portal))
+    assert {name: platform[name] for name in PLATFORM_FLAGS} == PLATFORM_FLAGS
+
+
+def test_controller_refuses_unqualified_enabled_auth_log_path_before_transfer() -> None:
+    with pytest.raises(ValueError, match="qualified Portal authentication log path"):
+        runtime_environments(
+            {
+                "DJANGO_SECRET_KEY": "platform-only-key",
+                "PORTAL_DJANGO_SECRET_KEY": "portal-only-key",
+                "PLATFORM_DOMAIN": "staff.example.test",
+                "PORTAL_DOMAIN": "portal.example.test",
+                "CROWDSEC_AUTH_EVENTS_ENABLED": "true",
+                "CROWDSEC_AUTH_LOG_PATH": "/private/unacquired/auth.jsonl",
+            },
+            "prod",
+            "split",
+        )
 
 
 @pytest.mark.parametrize("enabled", [True, False])

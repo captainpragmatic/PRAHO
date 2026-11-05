@@ -1,0 +1,54 @@
+---
+- name: Wait for platform to be healthy
+  when: native_platform
+  uri:
+    url: "http://localhost:{{ platform_port }}/api/users/health/"
+    status_code: 200
+    follow_redirects: none
+  register: platform_health
+  until: platform_health.status == 200
+  retries: 30
+  delay: 5
+
+- name: Wait for portal to respond
+  when: native_portal
+  uri:
+    url: "http://localhost:{{ portal_port }}/billing/"
+    status_code:
+      - 200
+      - 302
+    follow_redirects: none
+  register: portal_health
+  until: portal_health.status in [200, 302]
+  retries: 15
+  delay: 5
+
+- name: Display deployment info
+  when: not native_coordinated
+  debug:
+    msg: |
+      ================================================
+      PRAHO Native Deployment Complete!
+      ================================================
+      Portal:    https://{{ deployed_env.PORTAL_DOMAIN }}
+      Platform:  https://{{ deployed_env.PLATFORM_DOMAIN }}
+      Local:     http://localhost:{{ platform_port }} / http://localhost:{{ portal_port }}
+      Q-Cluster: service enabled (verify actual queued work separately)
+      Database:  PostgreSQL 16 (localhost:{{ deployed_env.DB_PORT | default('5432') }})
+      Method:    {{ deploy_method }}
+      Version:   {{ deploy_git_version + ' (' + deployed_sha.stdout + ')' if deploy_method == 'git' else 'rsync (local)' }}
+      Env file:  {{ env_file_path }}
+      ================================================
+      Useful commands:
+        systemctl status praho-platform praho-portal praho-qcluster
+        journalctl -u praho-platform -f
+        {{ project_root }}/scripts/health-check.sh
+        systemctl start praho-backup.service
+      ================================================
+
+# ---------------------------------------------------------------------------
+# 12. Log rotation: policies, old backups and the hourly timer (after every writer has restarted)
+# ---------------------------------------------------------------------------
+
+# Restart anything the deploy notified now: a process still running the old in-process rotation
+# could be writing to a backup that the next task compresses and unlinks.

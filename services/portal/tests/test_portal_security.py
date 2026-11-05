@@ -52,6 +52,31 @@ class WebhookAuthenticationTests(TestCase):
         self.assertEqual(self.url, "/order/payment/webhook/")
         self.assertIs(resolve(self.url).func, payment_success_webhook)
 
+    @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET, PORTAL_EXTRA_PUBLIC_URLS=())
+    def test_signed_empty_callback_reaches_validation_without_a_browser_session(self) -> None:
+        body, timestamp = b"{}", str(int(time.time()))
+        response = self.client.post(self.url, data=body, content_type="application/json", secure=True,
+                                    HTTP_X_PLATFORM_TIMESTAMP=timestamp,
+                                    HTTP_X_PLATFORM_SIGNATURE=_build_valid_sig(body, timestamp))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"error": "order_id required"})
+        self.assertNotIn("Location", response)
+
+    @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET, PORTAL_EXTRA_PUBLIC_URLS=())
+    def test_unsigned_callback_reaches_hmac_rejection_without_login_redirect(self) -> None:
+        response = self.client.post(self.url, data=b"{}", content_type="application/json", secure=True)
+        self.assertEqual(response.status_code, 401)
+        self.assertIn("error", response.json())
+        self.assertNotIn("Location", response)
+
+    @override_settings(PORTAL_EXTRA_PUBLIC_URLS=())
+    def test_callback_exception_keeps_adjacent_order_routes_private(self) -> None:
+        for path in ("/order/cart/", self.url + "descendant", "/order/payment/webhook-other/"):
+            with self.subTest(path=path):
+                response = self.client.get(path, secure=True)
+                self.assertEqual(response.status_code, 302)
+                self.assertTrue(response["Location"].startswith("/login/?next="))
+
     @override_settings(PLATFORM_TO_PORTAL_WEBHOOK_SECRET=_TEST_WEBHOOK_SECRET)
     def test_webhook_rejected_without_signature(self) -> None:
         """POST without X-Platform-Signature header must return 401."""

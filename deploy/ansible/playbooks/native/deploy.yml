@@ -1,0 +1,12 @@
+---
+- name: Establish verified SSH handoff
+  include_role:
+    name: ssh-hardening
+- name: Prepare shared host dependencies
+  include_role:
+    name: common
+- name: Deploy owned native responsibilities
+  include_role:
+    name: praho-native
+- name: Apply all owned service handlers while workers remain held
+  meta: flush_handlers
