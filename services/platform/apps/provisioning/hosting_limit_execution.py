@@ -993,7 +993,10 @@ def ensure_managed_limits(  # noqa: C901, PLR0911, PLR0912 -- Preserve independe
         account.server = staged_server
     if outcome != "completed":
         return Err("Current managed quotas could not be verified; preserve the native hold (" + outcome + ").")
-    return Ok(True)
+    mail = verify_lifecycle_notification_policy(
+        account, native_server=target, parent_job=parent_job, migration=migration
+    )
+    return Err(mail.unwrap_err()) if mail.is_err() else Ok(True)
 
 
 def reserve_managed_creation(  # noqa: PLR0911 -- Explicit pre-dispatch refusal contracts retain the native account lane.
