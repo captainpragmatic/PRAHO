@@ -171,6 +171,11 @@ def operational_expiry_authorized(application: HostingLimitApplication, service:
     )
 
 
+def expiry_removal_recorded(row: ServiceHostingRaise, limits: ServiceHostingLimits) -> bool:
+    """Published R0 history survives later probe invalidation; it is not current verification."""
+    return limits.applied_overlay_revision == row.revision
+
+
 def pending_expiry_cleanup(service_id: int) -> HostingLimitApplication | None:
     service = Service.objects.get(pk=service_id)
     row = ServiceHostingRaise.objects.filter(service=service, status="expired").first()
@@ -179,7 +184,7 @@ def pending_expiry_cleanup(service_id: int) -> HostingLimitApplication | None:
     limits = ServiceHostingLimits.objects.get(service=service)
     if limits.operational_revision is None:
         return None
-    if limits.applied_overlay_revision == row.revision and limits.verified_at is not None:
+    if expiry_removal_recorded(row, limits):
         return None
     candidate = HostingLimitApplication.objects.filter(
         service=service,

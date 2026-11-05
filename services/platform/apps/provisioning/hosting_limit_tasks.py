@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Exists, F, OuterRef, Q
 from django.utils import timezone
@@ -115,7 +116,13 @@ def dispatch_hosting_limits() -> dict[str, int]:
             )
     queued = 0
     for _limits_id, service_id in pending:
-        application = current_application(service_id)
+        try:
+            application = current_application(service_id)
+        except ValidationError as error:
+            # Per-service authority refusal retains that pending obligation; it
+            # must not stop unrelated expiry, recovery or native scheduling.
+            logger.warning("Quota scheduling deferred for service %s: %s", service_id, error)
+            continue
         enqueue_application(application.pk)
         queued += 1
     return {"queued": queued, "recovered": recovered}
