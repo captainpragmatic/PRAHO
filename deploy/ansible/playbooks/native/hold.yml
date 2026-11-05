@@ -1,0 +1,95 @@
+---
+- name: Read installed services before defining cutover ownership
+  service_facts:
+- name: Retain a maintenance origin for a former local Portal
+  set_fact:
+    native_legacy_portal_origin: "{{ inventory_hostname in groups.praho_platform and inventory_hostname not in groups.praho_portal and 'praho-portal.service' in ansible_facts.services }}"
+- name: Journal pending maintenance before the first host mutation
+  copy:
+    content: "{{ deploy_git_version }}\n"
+    dest: "{{ native_journal_directory }}/held-{{ inventory_hostname }}"
+    mode: '0600'
+  delegate_to: localhost
+  become: false
+- name: Create root-owned gate directory
+  file:
+    path: /etc/praho-native
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+- name: Prepare durable worker and backup gate drop-ins before creating the holds
+  file:
+    path: "/etc/systemd/system/{{ item }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop: [praho-qcluster.service, praho-backup.service]
+  when: inventory_hostname in groups.praho_platform
+- name: Bind existing units to the durable worker hold across reboot
+  copy:
+    dest: "/etc/systemd/system/{{ item }}.d/native-gate.conf"
+    content: |
+      [Unit]
+      ConditionPathExists=!/etc/praho-native/hold-workers
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [praho-qcluster.service, praho-backup.service]
+  when: inventory_hostname in groups.praho_platform
+- name: Give the cluster controller time to drain its child workers
+  copy:
+    dest: /etc/systemd/system/praho-qcluster.service.d/native-drain.conf
+    content: |
+      [Service]
+      KillMode=mixed
+      TimeoutStopSec=900
+    owner: root
+    group: root
+    mode: '0644'
+  when: inventory_hostname in groups.praho_platform
+- name: Activate the durable conditions on existing units
+  systemd:
+    daemon_reload: true
+  when: inventory_hostname in groups.praho_platform
+- name: Persist each owned ingress gate
+  copy:
+    content: "Coordinated deployment in progress. Resume with the native launcher.\n"
+    dest: "/etc/praho-native/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: "{{ (['hold-workers', 'hold-platform'] if inventory_hostname in groups.praho_platform else []) + (['hold-callbacks', 'hold-portal'] if inventory_hostname in groups.praho_portal or native_legacy_portal_origin else []) }}"
+- name: Inspect installed Caddy configuration
+  stat:
+    path: /etc/caddy/Caddyfile
+  register: native_caddy
+- name: Load only the owned configuration for a new origin
+  set_fact:
+    deployed_env: "{{ lookup('native_env', native_platform_env_file if inventory_hostname in groups.praho_platform else native_portal_env_file)['env'] }}"
+  no_log: true
+  when: not native_caddy.stat.exists
+- name: Prepare a maintenance-only edge before stopping existing business writers
+  include_role:
+    name: praho-native
+    tasks_from: edge
+  when: not native_caddy.stat.exists
+- name: Apply the maintenance edge before verifying it
+  meta: flush_handlers
+- name: Require maintenance-aware edge on an existing origin
+  command: /usr/bin/grep -q /etc/praho-native /etc/caddy/Caddyfile
+  changed_when: false
+  when: native_caddy.stat.exists
+  # Upgrade the edge first with make deploy-caddy; a deploy must not stop writers behind an old edge.
+- name: Verify existing ingress returns maintenance over trusted HTTPS
+  command:
+    argv: [curl, --silent, --show-error, --noproxy, '*', --output, /dev/null, --write-out, '%{http_code}', --connect-timeout, '5', --max-time, '10', --resolve, "{{ item }}:443:127.0.0.1", "https://{{ item }}/"]
+  loop: "{{ ([lookup('native_env', native_platform_env_file)['env'].PLATFORM_DOMAIN] if inventory_hostname in groups.praho_platform else []) + ([lookup('native_env', native_portal_env_file)['env'].PORTAL_DOMAIN] if inventory_hostname in groups.praho_portal else []) }}"
+  no_log: true
+  changed_when: false
+  register: native_hold_check
+  failed_when: native_hold_check.rc != 0 or native_hold_check.stdout != '503'
+  until: native_hold_check.rc == 0 and native_hold_check.stdout == '503'
+  retries: 12
+  delay: 5

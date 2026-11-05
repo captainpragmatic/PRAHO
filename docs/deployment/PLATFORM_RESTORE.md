@@ -61,6 +61,22 @@ independent recovery path for the keys/configuration have also been tested.
 
 ## Native restore
 
+For coordinated native deployments, first hold both origins and drain workers using the native
+deployment/recovery procedure. Confirm the Portal hold separately on its host. On Platform, use:
+
+```bash
+/opt/praho/scripts/restore-platform.sh --leave-stopped /opt/praho/backups/praho_backup_TIMESTAMP_PID.dump
+```
+
+This explicit recovery mode requires Platform's durable ingress/worker holds and an inactive
+qcluster. It runs a fresh safety backup as `praho` using the private installed environment while
+backup scheduling stays held. It restores Platform's local database/media and leaves services
+stopped and all gates intact. Verify the recovery point and migration set, then resume through
+the coordinated launcher so both hosts and authenticated callbacks are checked before reopening.
+Split hosts require this mode. An ordinary restore refuses to clear an active maintenance hold.
+
+For a legacy combined installation without coordinated holds, the existing interface remains:
+
 Run as root on the confirmed target, using the Ansible-rendered script:
 
 ```bash

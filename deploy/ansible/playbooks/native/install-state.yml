@@ -1,0 +1,38 @@
+---
+- name: Prepare root-owned read-only state inspection helpers
+  file:
+    path: /usr/local/lib/praho
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+- name: Transfer state inspection code without application credentials
+  copy:
+    src: "{{ playbook_dir }}/../../scripts/{{ item }}"
+    dest: "/usr/local/lib/praho/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop: [native_env.py, native_install_state.py]
+- name: Inspect actual application data before selecting bootstrap or recovery
+  command:
+    argv:
+      - /usr/bin/python3
+      - /usr/local/lib/praho/native_install_state.py
+      - --service
+      - "{{ item }}"
+      - --root
+      - "{{ project_root }}"
+      - --state
+      - "{{ portal_state_directory | default('/var/lib/praho-portal') }}"
+      - --media
+      - "{{ lookup('native_env', native_platform_env_file)['env'].MEDIA_ROOT | default(project_root + '/media') if inventory_hostname in groups.praho_platform else project_root + '/media' }}"
+      - --database
+      - "{{ lookup('native_env', native_platform_env_file)['env'].DB_NAME | default('praho') if inventory_hostname in groups.praho_platform else 'praho' }}"
+  register: native_install_state
+  changed_when: false
+  loop: "{{ (['platform'] if inventory_hostname in groups.praho_platform else []) + (['portal'] if inventory_hostname in groups.praho_portal else []) }}"
+- name: Record whether business data needs backup and migration protection
+  set_fact:
+    native_platform_state: "{{ (native_install_state.results | selectattr('item', 'equalto', 'platform') | map(attribute='stdout') | first | default('{\"protected\":false}') | from_json).protected }}"
+    native_portal_state: "{{ (native_install_state.results | selectattr('item', 'equalto', 'portal') | map(attribute='stdout') | first | default('{\"protected\":false}') | from_json).protected }}"

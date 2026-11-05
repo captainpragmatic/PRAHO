@@ -1,0 +1,30 @@
+---
+- name: Verify service release SHA
+  command: "git -C {{ project_root }}/src rev-parse HEAD"
+  become_user: "{{ project_user }}"
+  register: native_verified_sha
+  changed_when: false
+- name: Require the same pinned SHA on every host
+  assert:
+    that: native_verified_sha.stdout == deploy_git_version
+- name: Verify isolated service ownership
+  command: "systemctl show --property=User --value {{ item.service }}"
+  register: native_service_owner
+  failed_when: native_service_owner.stdout != item.user
+  changed_when: false
+  loop: "{{ ([{'service': 'praho-platform', 'user': project_user}] if inventory_hostname in groups.praho_platform else []) + ([{'service': 'praho-portal', 'user': 'praho-portal'}] if inventory_hostname in groups.praho_portal else []) }}"
+- name: Verify Portal to Platform over HTTPS with good and bad HMAC signatures
+  command: "/usr/local/lib/praho/native_exec.sh {{ project_root }}/.portal.env --https-api-probe {{ '--loopback' if native_topology == 'combined' else '' }} -- {{ project_root }}/.venv-linux/bin/python /usr/local/lib/praho/native_probe.py api"
+  become_user: praho-portal
+  no_log: true
+  changed_when: false
+  when: inventory_hostname in groups.praho_portal
+- name: Verify each owned certificate and local health through Caddy
+  command:
+    argv: [curl, --silent, --show-error, --fail, --noproxy, '*', --resolve, "{{ item.split('/')[0] }}:443:127.0.0.1", "https://{{ item }}"]
+  loop: "{{ ([deployed_env.PLATFORM_DOMAIN + '/api/users/health/'] if inventory_hostname in groups.praho_platform else []) + ([deployed_env.PORTAL_DOMAIN + '/status/'] if inventory_hostname in groups.praho_portal else []) }}"
+  retries: 15
+  delay: 4
+  register: native_https_health
+  until: native_https_health.rc == 0
+  changed_when: false

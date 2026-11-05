@@ -1,0 +1,12 @@
+---
+- name: Prepare Python runtime and database locale
+  include_tasks: runtime.yml
+
+- name: Install controller-owned native execution and verification helpers
+  copy:
+    src: "{{ role_path }}/../../../scripts/{{ item }}"
+    dest: "/usr/local/lib/praho/{{ item }}"
+    owner: root
+    group: root
+    mode: '0755'
+  loop: [native_exec.sh, native_probe.py]

@@ -180,9 +180,9 @@ class PortalStartupTests(TestCase):
         self.assertNotIn("gunicorn", self.trace.read_text())
 
     def test_native_health_gate_uses_limited_route(self) -> None:
-        import yaml  # noqa: PLC0415
+        from tests.native_role_helpers import native_tasks  # noqa: PLC0415
 
-        tasks = yaml.safe_load((ROOT / "deploy/ansible/roles/praho-native/tasks/main.yml").read_text())
+        tasks = native_tasks(ROOT / "deploy/ansible/roles/praho-native/tasks/main.yml")
         health = next(task for task in tasks if task.get("register") == "portal_health")
         self.assertTrue(health["uri"]["url"].endswith("/billing/"))
         self.assertEqual(health["uri"]["status_code"], [200, 302])

@@ -7,6 +7,7 @@
     daemon_reload: yes
 
 - name: restart postgresql
+  when: native_platform
   service:
     name: postgresql
     state: restarted
@@ -17,16 +18,19 @@
     state: restarted
 
 - name: restart praho-platform
+  when: native_platform
   systemd:
     name: praho-platform
     state: restarted
 
 - name: restart praho-portal
+  when: native_portal
   systemd:
     name: praho-portal
     state: restarted
 
 - name: restart praho-qcluster
+  when: native_platform and not native_coordinated
   systemd:
     name: praho-qcluster
     state: restarted

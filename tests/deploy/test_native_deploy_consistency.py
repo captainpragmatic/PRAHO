@@ -26,7 +26,10 @@ from typing import Any
 
 import pytest
 import yaml
+from jinja2 import Environment, StrictUndefined
 from packaging.requirements import Requirement
+
+from tests.native_role_helpers import native_tasks
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 ANSIBLE = PROJECT_ROOT / "deploy/ansible"
@@ -41,12 +44,14 @@ EXTERNAL_SHORT_NAME = re.compile(r"^\s*-?\s*(synchronize|ufw|timezone|postgresql
 QUALIFIED_MODULE = re.compile(r"^\s*-?\s*([a-z_]+\.[a-z_]+)\.[a-z_]+:", re.MULTILINE)
 
 
-def test_native_dependency_resolution_contains_the_portals_runtime_packages(tmp_path: Path) -> None:
-    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+@pytest.mark.parametrize("platform", [False, True])
+def test_native_dependency_resolution_contains_the_portals_runtime_packages(tmp_path: Path, platform: bool) -> None:
+    tasks = native_tasks(NATIVE_TASKS)
     sync = next(task["command"] for task in tasks if task.get("name") == "Install dependencies with uv")
     import shlex  # noqa: PLC0415 -- Parse the actual deployment command, without running a shell.
 
-    arguments = shlex.split(sync)[2:]
+    rendered = Environment(undefined=StrictUndefined).from_string(sync).render(native_platform=platform, native_portal=True)  # noqa: S701 -- shell arguments
+    arguments = shlex.split(rendered)[2:]
     exported = subprocess.run(  # noqa: S603 -- uv exports the frozen lockfile, no environment mutation.
         [shutil.which("uv") or "uv", "export", "--format", "requirements-txt", "--no-hashes",
          "--no-header", "--no-annotate", *arguments],
@@ -58,6 +63,7 @@ def test_native_dependency_resolution_contains_the_portals_runtime_packages(tmp_
     configuration = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text())
     required = {Requirement(spec).name for spec in configuration["dependency-groups"]["portal"]}
     assert required <= resolved, f"Native deployment omits Portal packages: {sorted(required - resolved)}"
+    assert ("ansible-core" in resolved) is platform
 
 
 def _flat_tasks(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -335,7 +341,7 @@ class TestDumpsStayOutOfTheCheckout:
 
     @pytest.mark.integration
     def test_the_native_rsync_leaves_dumps_behind(self) -> None:
-        (task,) = [t for t in yaml.safe_load(NATIVE_TASKS.read_text()) if t.get("name") == "Deploy code via rsync"]
+        (task,) = [t for t in native_tasks(NATIVE_TASKS) if t.get("name") == "Deploy code via rsync"]
         module = next(value for key, value in task.items() if key.endswith("synchronize"))
         # Anchored: only the checkout's own backups/ (deploy/scripts/backup.sh), never a source directory.
         assert {"--exclude=/backups/", "--exclude=praho_backup_*"} <= set(module["rsync_opts"])
@@ -396,7 +402,7 @@ class TestUbuntuVersion:
 
 
 def test_rsync_excludes_controller_state_but_preserves_existing_runtime_state(tmp_path: Path) -> None:
-    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    tasks = native_tasks(NATIVE_TASKS)
     sync = next(task["ansible.posix.synchronize"] for task in tasks if "ansible.posix.synchronize" in task)
     source, target = tmp_path / "source", tmp_path / "target"
     source.mkdir()
@@ -424,7 +430,7 @@ def test_rsync_excludes_controller_state_but_preserves_existing_runtime_state(tm
 def test_platform_passthrough_carries_the_anaf_switch() -> None:
     # The services read the whole .env through EnvironmentFile, but the deploy-time manage.py commands
     # see only this list, so without it they run with ANAF_TRANSPORT_ENABLED at its default of true.
-    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    tasks = native_tasks(NATIVE_TASKS)
     task = next(task for task in tasks if task.get("name") == "Set Django environment variables from .env file")
     assert "ANAF_TRANSPORT_ENABLED" in task["vars"]["praho_passthrough"]
 
@@ -432,7 +438,7 @@ def test_platform_passthrough_carries_the_anaf_switch() -> None:
 def test_platform_passthrough_carries_the_audit_session_digest_secret() -> None:
     # Deploy-time manage.py commands see only this list and write audit rows too, so without it
     # their session digests would be keyed differently from the running services'.
-    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    tasks = native_tasks(NATIVE_TASKS)
     task = next(task for task in tasks if task.get("name") == "Set Django environment variables from .env file")
     assert "AUDIT_SESSION_DIGEST_SECRET" in task["vars"]["praho_passthrough"]
 
@@ -441,7 +447,7 @@ def test_secrets_are_rebound_once_every_process_runs_the_new_release() -> None:
     """Migrations run while the previous release still serves; one of its processes can write a secret under the
     previous binding meanwhile. rebind_secrets (idempotent) runs after the restart that moves every writer onto
     the new release (#751 follow-up, M19)."""
-    tasks = yaml.safe_load(NATIVE_TASKS.read_text())
+    tasks = native_tasks(NATIVE_TASKS)
     names = [task.get("name", "") for task in tasks]
     migrate = names.index("Run database migrations")
     restart = next(i for i, task in enumerate(tasks) if task.get("meta") == "flush_handlers")
@@ -449,7 +455,10 @@ def test_secrets_are_rebound_once_every_process_runs_the_new_release() -> None:
     assert len(rebind) == 1
     assert migrate < restart < rebind[0]
     task = tasks[rebind[0]]
-    assert task["environment"] == "{{ django_env }}"
+    assert "/usr/local/lib/praho/native_exec.sh {{ project_root }}/.platform-deploy.env --" in task["command"]
+    install = next(t for t in tasks if t.get("name") == "Install private Platform management environment")
+    assert install["copy"]["content"] == "{{ django_env | native_systemd_env }}"
+    assert install["copy"]["mode"] == "0600" and install["no_log"] and install["diff"] is False
     assert task.get("no_log") is True
 
 

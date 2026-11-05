@@ -579,10 +579,29 @@ deploy-caddy:
 	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env "$(ENV)" --caddy-only
 
 test-deploy:
-	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/ tests/integration/test_deploy_scripts.py tests/integration/test_media_root.py tests/integration/test_restore_safety.py -m 'not docker' -q
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= $(if $(FILE),$(FILE),tests/deploy/ tests/integration/test_deploy_scripts.py tests/integration/test_media_root.py tests/integration/test_restore_safety.py) --ignore=tests/deploy/test_native_acceptance.py -m 'not docker' -q
 
 test-deploy-docker:
-	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= tests/deploy/test_caddy_routing.py -m docker -q
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) -m pytest -o addopts= $(if $(FILE),$(FILE),tests/deploy/test_caddy_routing.py tests/deploy/test_native_edge_policy.py) -m docker -q
+
+.PHONY: test-native-infra test-native-deploy rollback-native check-native-adoption-plan
+check-native-adoption-plan:
+	@test -n "$(PLAN)" || { echo "PLAN=<saved plan> and TOPOLOGY=split|combined are required"; exit 1; }
+	@$(PYTHON_SHARED) deploy/scripts/check_native_adoption_plan.py --plan "$(PLAN)" --existing-topology "$(TOPOLOGY)"
+test-native-deploy:
+	@PYTHONPATH=$(PWD)/services/platform DJANGO_SETTINGS_MODULE=config.settings.test $(PYTHON_SHARED) scripts/run_native_acceptance.py
+
+rollback-native:
+	@case "$(ENV)" in staging|prod|dev) ;; *) echo "Usage: make rollback-native ENV=staging|prod|dev VERSION=<revision>"; exit 1 ;; esac
+	@test -n "$(VERSION)" || { echo "VERSION is required for coordinated native rollback"; exit 1; }
+	@$(PYTHON_SHARED) deploy/scripts/native_env.py run --env "$(ENV)" --version "$(VERSION)" --rollback
+
+test-native-infra:
+	@terraform -chdir=deploy/terraform fmt -check -recursive
+	@terraform -chdir=deploy/terraform init -backend=false -input=false
+	@terraform -chdir=deploy/terraform validate
+	@terraform -chdir=deploy/terraform test
+	@$(PYTHON_SHARED) scripts/check_native_destroy_protection.py
 
 test-integration:
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
@@ -597,7 +616,7 @@ test-integration:
 	# DID break here, silently. The Makefile auto-merged with no conflict, so git gave no warning and
 	# only running the suite on the merged tree found the target pointing at a deleted file.
 	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest \
-		tests/integration/ tests/deploy/ -v
+		tests/integration/ tests/deploy/ --ignore=tests/deploy/test_native_acceptance.py -v
 	@echo "✅ Integration tests completed!"
 
 test-cache:

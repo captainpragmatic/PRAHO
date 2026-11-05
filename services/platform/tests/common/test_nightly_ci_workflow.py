@@ -37,6 +37,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
     workflow: ClassVar[dict[str, Any]]
     nightly_job: ClassVar[dict[str, Any]]
     integration_job: ClassVar[dict[str, Any]]
+    integration_gate: ClassVar[dict[str, Any]]
 
     @classmethod
     def setUpClass(cls) -> None:
@@ -44,7 +45,8 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         cls.workflow = yaml.safe_load(_NIGHTLY_WORKFLOW.read_text(encoding="utf-8"))
         cls.nightly_job = cls.workflow["jobs"]["nightly"]
         integration_workflow = yaml.safe_load(_INTEGRATION_WORKFLOW.read_text(encoding="utf-8"))
-        cls.integration_job = integration_workflow["jobs"]["integration-test"]
+        cls.integration_job = integration_workflow["jobs"]["integration-suite"]
+        cls.integration_gate = integration_workflow["jobs"]["integration-test"]
 
     def test_concurrency_step_runs_on_postgresql_before_broad_suite(self) -> None:
         startup = next(
@@ -86,6 +88,8 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         self.assertNotIn("--parallel", command)
 
     def test_api_token_concurrency_runs_on_postgresql_for_pull_requests(self) -> None:
+        self.assertIn("integration-suite", self.integration_gate["needs"])
+        self.assertEqual(self.integration_gate["if"], "always()")
         startup = next(
             step for step in self.integration_job["steps"] if step.get("name") == "Start PostgreSQL (registry fallback)"
         )
@@ -355,7 +359,7 @@ class ScheduledFailureNotifierTests(SimpleTestCase):
     def test_a_failed_scheduled_run_opens_or_updates_the_tracking_issue(self) -> None:
         jobs = _nightly()["jobs"]
         notifier = jobs["notify-scheduled-failure"]
-        self.assertEqual(set(notifier["needs"]), {"check-activity", "nightly", "nightly-e2e"})
+        self.assertEqual(set(notifier["needs"]), {"check-activity", "nightly", "nightly-e2e", "nightly-native-deploy"})
         for clause in ("always()", "github.event_name == 'schedule'", "contains(needs.*.result, 'failure')"):
             self.assertIn(clause, notifier["if"])
         script = "\n".join(str(step.get("run", "")) for step in notifier["steps"])

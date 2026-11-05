@@ -1,0 +1,13 @@
+---
+- name: Release only this controller's operation lock after success or failure recovery
+  hosts: praho_platform
+  become: true
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Verify the operation owner
+      include_tasks: native/lock-owner.yml
+    - name: Release the operation lock without changing maintenance holds
+      file:
+        path: "{{ native_operation_lock_directory }}"
+        state: absent

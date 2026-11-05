@@ -107,7 +107,7 @@ class BackupSourcesTests(unittest.TestCase):
         )
 
     def test_the_native_backup_copies_only_the_dump_and_media(self) -> None:
-        self.assertIn('MEDIA_ROOT="{{ project_root }}/media"', NATIVE_BACKUP.read_text())
+        self.assertIn('MEDIA_ROOT="${MEDIA_ROOT:-{{ project_root }}/media}"', NATIVE_BACKUP.read_text())
         archives = _commands(NATIVE_BACKUP, r"^tar\b|\brsync\b|\bcp\b")
         self.assertEqual(
             archives,
@@ -154,4 +154,4 @@ class PortalStateLocationTests(unittest.TestCase):
         project_root = yaml.safe_load(ALL_VARS.read_text())["project_root"]
         self.assertEqual((state_dir, project_root), ("/var/lib/praho-portal", "/opt/praho"))
         self.assertFalse(PurePosixPath(state_dir).is_relative_to(project_root))
-        self.assertIn("SESSION_DB_PATH: \"{{ portal_state_directory + '/portal.sqlite3' }}\"", NATIVE_TASKS.read_text())
+        self.assertIn("SESSION_DB_PATH: \"{{ portal_state_directory + '/portal.sqlite3' }}\"", (NATIVE_TASKS.parent / "portal.yml").read_text())

@@ -35,16 +35,24 @@ echo "========================================"
 echo ""
 
 echo "Systemd Services:"
+{% if native_platform | default(true) %}
 check_service postgresql
 check_service praho-platform
-check_service praho-portal
 check_service praho-qcluster
+{% endif %}
+{% if native_portal | default(true) %}
+check_service praho-portal
+{% endif %}
 check_service caddy
 
 echo ""
 echo "HTTP Endpoints:"
+{% if native_platform | default(true) %}
 check_http "Platform" "http://localhost:{{ platform_port }}/api/users/health/"
+{% endif %}
+{% if native_portal | default(true) %}
 check_http "Portal" "http://localhost:{{ portal_port }}/status/"
+{% endif %}
 
 echo ""
 if [ $ERRORS -eq 0 ]; then
