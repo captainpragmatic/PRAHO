@@ -650,6 +650,7 @@ class Migration(migrations.Migration):
 
 
 def _deploy_while_refusing_a_competing_controller(lab: NativeLab) -> subprocess.CompletedProcess[str]:
+    lab.execute(lab.controller, "truncate", "-s", "0", "/fixture/deployment.log")
     with ThreadPoolExecutor(max_workers=1) as executor:
         pending = executor.submit(lab.deploy)
         lab.wait_for_phase("PLAY [Drain Platform workers and active backups before stopping web writers]")
