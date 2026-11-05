@@ -4,7 +4,7 @@
 
 from django.urls import path
 
-from . import views
+from . import upgrade_path_views, views
 
 app_name = "products"
 
@@ -15,6 +15,18 @@ urlpatterns = [
     path("create/", views.product_create, name="product_create"),
     path("<slug:slug>/", views.product_detail, name="product_detail"),
     path("<slug:slug>/edit/", views.product_edit, name="product_edit"),
+    path("<slug:slug>/upgrade-paths/", upgrade_path_views.upgrade_paths, name="upgrade_paths"),
+    path("<slug:slug>/upgrade-paths/create/", upgrade_path_views.upgrade_path_edit, name="upgrade_path_create"),
+    path(
+        "<slug:slug>/upgrade-paths/<uuid:relationship_id>/edit/",
+        upgrade_path_views.upgrade_path_edit,
+        name="upgrade_path_edit",
+    ),
+    path(
+        "<slug:slug>/upgrade-paths/<uuid:relationship_id>/remove/",
+        upgrade_path_views.upgrade_path_remove,
+        name="upgrade_path_remove",
+    ),
     # HTMX toggle endpoints
     path("<slug:slug>/toggle-active/", views.product_toggle_active, name="product_toggle_active"),
     path("<slug:slug>/toggle-public/", views.product_toggle_public, name="product_toggle_public"),

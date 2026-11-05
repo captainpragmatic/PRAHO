@@ -200,6 +200,9 @@ class HostingNodeDispatchRequalificationTests(HostingLimitWorkerFixture, Transac
         self.assertIsNone(NodeHostingPolicy.objects.get(pk=self.policy.pk).quota_verified_at)
 
     def _qualified_paused_migration(self):
+        composed_cap = effective_disk_limit(
+            self.application.disk_allowance_mib, extra_mib=self.application.overlay_extra_mib
+        )
         source = VirtualminServer.objects.create(hostname="old-source.example.test")
         token = uuid4()
         migration = VirtualminMigration.objects.create(
@@ -209,6 +212,7 @@ class HostingNodeDispatchRequalificationTests(HostingLimitWorkerFixture, Transac
             status="activating",
             contract="cutover",
             cutover_committed_at=timezone.now(),
+            restore_issued=True,
             lease_token=token,
             worker_lease_expires_at=timezone.now() + timedelta(minutes=5),
             pre_migration_snapshot={"hosting_limits": freeze_migration_limits(self.account)},
@@ -230,7 +234,7 @@ class HostingNodeDispatchRequalificationTests(HostingLimitWorkerFixture, Transac
         }
         child = admit_application(self.application.pk, parent=parent)
         self.assertIsNotNone(child)
-        child.reserved_bytes = 5632 * 1024**2
+        child.reserved_bytes = composed_cap * 1024**2
         child.save(update_fields=["reserved_bytes", "updated_at"])
         fresh = self.receipt()
         fresh["identity"] = {**self.native_identity, "boot_id": str(uuid4())}
@@ -289,7 +293,7 @@ class HostingNodeDispatchRequalificationTests(HostingLimitWorkerFixture, Transac
         self.assertIsNotNone(migration.cutover_committed_at)
         self.assertEqual(bridge.status, "failed")
         self.assertEqual(child.phase, "attention")
-        self.assertEqual(child.reserved_bytes, 5632 * 1024**2)
+        self.assertEqual(child.reserved_bytes, composed_cap * 1024**2)
         self.assertIsNone(child.reservation_released_at)
         self.assertIsNone(ServiceHostingLimits.objects.get(service=self.service).verified_at)
         return migration, bridge, child, fresh
@@ -324,7 +328,11 @@ class HostingNodeDispatchRequalificationTests(HostingLimitWorkerFixture, Transac
             assert start.wait(10)
             return reserve_managed_creation(account, job, available)
 
-        parent = {**child.job.parameters["quota_parent"], "token": str(migration.lease_token)}
+        parent = {
+            **child.job.parameters["quota_parent"],
+            "token": str(migration.lease_token),
+            "frozen_application_id": str(self.application.pk),
+        }
         if connection.vendor != "postgresql":
             # SQLite proves the same committed reservation outcome. The
             # independent lock wait below is specifically PostgreSQL evidence.

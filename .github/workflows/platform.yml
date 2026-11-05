@@ -164,7 +164,8 @@ jobs:
   # first ran after merge, in the nightly, so a PR could break one and still merge green.
   platform-postgres:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Include cold schema setup and database teardown in the serial suite's budget.
+    timeout-minutes: 45
 
     env:
       DJANGO_SETTINGS_MODULE: config.settings.ci

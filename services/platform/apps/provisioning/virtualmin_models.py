@@ -640,7 +640,62 @@ class VirtualminAccount(models.Model):
         return self.service.service_plan.name if self.service and self.service.service_plan else "Default"
 
 
-class VirtualminJobQuerySet(models.QuerySet["VirtualminProvisioningJob"]):
+SAFETY_OBSERVATION_OPERATION = "observe_hosting_limits"
+SAFETY_OBSERVATION_TERMS = frozenset(
+    {
+        "id",
+        "pk",
+        "operation",
+        "account",
+        "account_id",
+        "server",
+        "server_id",
+        "hosting_limit_application",
+        "hosting_limit_application_id",
+        "parameters",
+    }
+)
+SAFETY_OBSERVATION_PUBLICATION = SAFETY_OBSERVATION_TERMS | {"status", "result", "completed_at", "execution_token"}
+
+
+class SafetyObservationJobQuerySet(models.QuerySet["VirtualminProvisioningJob"]):
+    def update(self, **kwargs: Any) -> int:
+        if (
+            SAFETY_OBSERVATION_TERMS.intersection(kwargs)
+            and self.filter(operation=SAFETY_OBSERVATION_OPERATION).exists()
+        ):
+            raise ValidationError(_("Accepted safety observation scope cannot be overwritten."))
+        if kwargs.get("operation") == SAFETY_OBSERVATION_OPERATION and self.exists():
+            raise ValidationError(_("Safety observations require a new individually admitted job."))
+        if (
+            SAFETY_OBSERVATION_PUBLICATION.intersection(kwargs)
+            and self.filter(operation=SAFETY_OBSERVATION_OPERATION, status="completed").exists()
+        ):
+            raise ValidationError(_("Published safety observations cannot be overwritten."))
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs: Any, fields: Any, *args: Any, **kwargs: Any) -> int:
+        rows = list(objs)
+        if (
+            any(row.operation == SAFETY_OBSERVATION_OPERATION for row in rows)
+            or self.filter(pk__in=[row.pk for row in rows], operation=SAFETY_OBSERVATION_OPERATION).exists()
+        ):
+            raise ValidationError(_("Safety observation jobs must be transitioned individually."))
+        return super().bulk_update(rows, fields, *args, **kwargs)
+
+    def bulk_create(self, objs: Any, *args: Any, **kwargs: Any) -> list[VirtualminProvisioningJob]:
+        rows = list(objs)
+        if any(row.operation == SAFETY_OBSERVATION_OPERATION for row in rows):
+            raise ValidationError(_("Safety observations require individual admission and audit."))
+        if (
+            kwargs.get("update_conflicts")
+            and self.filter(pk__in=[row.pk for row in rows], operation=SAFETY_OBSERVATION_OPERATION).exists()
+        ):
+            raise ValidationError(_("Conflict updates cannot replace accepted safety observations."))
+        return super().bulk_create(rows, *args, **kwargs)
+
+
+class VirtualminJobQuerySet(SafetyObservationJobQuerySet):
     def update(self, **kwargs: Any) -> int:
         from .hosting_parent_limits import (  # noqa: PLC0415
             PARENT_OPERATIONS,
@@ -758,6 +813,7 @@ class VirtualminProvisioningJob(models.Model):
         ("delete_domain", _("Delete Domain")),
         ("modify_domain", _("Modify Domain")),
         ("apply_hosting_limits", _("Apply Hosting Limits")),
+        (SAFETY_OBSERVATION_OPERATION, _("Observe Hosting Safety")),
         ("suspend_domain", _("Suspend Domain")),
         ("unsuspend_domain", _("Unsuspend Domain")),
         ("create_user", _("Create User")),
@@ -843,7 +899,6 @@ class VirtualminProvisioningJob(models.Model):
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
     objects = VirtualminJobQuerySet.as_manager()
 
     class Meta:
@@ -933,6 +988,32 @@ class VirtualminProvisioningJob(models.Model):
 
     def _save_with_usage_transition(self, *args: Any, **kwargs: Any) -> None:
         fields = kwargs.get("update_fields")
+        prior = type(self).objects.filter(pk=self.pk)
+        if self.operation != SAFETY_OBSERVATION_OPERATION:
+            prior = prior.filter(operation=SAFETY_OBSERVATION_OPERATION)
+        original = prior.first()
+        if self.operation == SAFETY_OBSERVATION_OPERATION or original is not None:
+            if self._state.adding:
+                if original is not None:
+                    raise ValidationError(_("Accepted safety observation identity already exists."))
+                if self.status != "pending" or self.result or self.hosting_limit_application_id is not None:
+                    raise ValidationError(_("Admit safety observations as new pending read-only jobs."))
+                kwargs["force_insert"] = True
+            else:
+                if original is None:
+                    raise ValidationError(_("Safety observation cannot replace another native operation."))
+                written = SAFETY_OBSERVATION_PUBLICATION if fields is None else set(fields)
+                guarded = SAFETY_OBSERVATION_PUBLICATION if original.status == "completed" else SAFETY_OBSERVATION_TERMS
+                for field in guarded.intersection(written):
+                    attribute = {
+                        "account": "account_id",
+                        "server": "server_id",
+                        "hosting_limit_application": "hosting_limit_application_id",
+                    }.get(field, field)
+                    if getattr(original, attribute) != getattr(self, attribute):
+                        raise ValidationError(
+                            _("Accepted safety observation scope or publication cannot be overwritten.")
+                        )
         terminal = self.status in {"completed", "failed", "attention"} and self.completed_at is not None
         if terminal and (fields is None or {"status", "completed_at"}.intersection(fields)):
             with transaction.atomic():

@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-589 actions, in 9 categories.
+592 actions, in 9 categories.
 
 ## Account management
 
@@ -121,7 +121,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `coupon_reversal_failed_on_cancellation` | high | yes | no | promotions |
 | `coupon_reversal_failed_on_refund` | high | yes | no | promotions |
 | `coupon_updated` | low | no | no | promotions |
-| `create` | low | no | no | domains, promotions, provisioning, settings |
+| `create` | low | no | no | billing, domains, products, promotions, provisioning, settings |
 | `credit_ledger_created` | low | no | yes | billing |
 | `credit_ledger_deleted` | low | no | yes | billing |
 | `credit_ledger_updated` | low | no | yes | billing |
@@ -129,7 +129,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `credit_score_updated` | low | no | yes | customers |
 | `d390_export` | low | no | no | billing |
 | `daily_billing_completed` | low | no | no | billing |
-| `delete` | low | no | no | audit, common, settings |
+| `delete` | low | no | no | audit, common, products, settings |
 | `dns_fallback` | low | no | no | common |
 | `dns_zone_crosscheck_requested` | low | no | no | domains |
 | `dns_zone_import_confirmed` | low | no | no | domains |
@@ -200,6 +200,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `grandfathering_expired` | low | no | no | billing |
 | `hosting_dns_recheck_requested` | low | no | no | provisioning |
 | `hosting_dns_state_changed` | low | no | no | provisioning |
+| `hosting_plan_change_attention` | high | yes | no | billing |
 | `illegal_invoice_deletion` | low | no | no | billing |
 | `integration_connection_test` | low | no | no | settings |
 | `invitation_email_sent` | low | no | no | users |
@@ -441,7 +442,7 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `tld_registrar_assignment_created` | low | no | no | domains |
 | `tld_registrar_assignment_updated` | low | no | no | domains |
 | `tld_updated` | low | no | no | domains |
-| `update` | low | no | no | audit, domains, promotions, provisioning, settings |
+| `update` | low | no | no | audit, billing, domains, products, promotions, provisioning, settings |
 | `usage_aggregation_rated` | low | no | no | billing |
 | `usage_alert_created` | low | no | no | billing |
 | `usage_events_batch_processed` | low | no | no | billing |
@@ -583,6 +584,8 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
 | Action | Severity | Review | Sensitive | Written by |
 |---|---|---|---|---|
+| `plan_change_payment_binding_rejected` | high | yes | yes | billing |
+| `plan_change_submission_conflict` | medium | no | no | billing |
 | `security_bnr_outbound_blocked` | high | yes | yes | billing |
 | `security_scan_detected` | critical | yes | yes | provisioning |
 | `suspicious_activity_detected` | critical | no | no | users |

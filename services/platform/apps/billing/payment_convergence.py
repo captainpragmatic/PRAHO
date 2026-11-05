@@ -18,6 +18,7 @@ from apps.common.validators import record_refusal_evidence
 
 from .metering_models import BillingCycle, UsageAggregation
 from .payment_models import Payment, PaymentRetryAttempt, PaymentRetryPolicy
+from .plan_change_settlement import converge_plan_change_invoice
 from .recurring_billing import fixed_renewal_schedule
 from .subscription_models import Subscription
 from .validators import log_security_event
@@ -97,9 +98,7 @@ def converge_recurring_payment_failure(payment: Payment) -> int:
         .filter(id__in=BillingCycle.objects.filter(cycle_filter).values("subscription_id"))
         .order_by("id")
     )
-    cycles = lock_many_and_load(
-        BillingCycle.objects.filter(cycle_filter).order_by("subscription_id", "id")
-    )
+    cycles = lock_many_and_load(BillingCycle.objects.filter(cycle_filter).order_by("subscription_id", "id"))
     if not cycles:
         return 0
     for subscription in subscriptions:
@@ -129,8 +128,9 @@ class PaymentSuccessService:
             with transaction.atomic():
                 try:
                     payment = lock_one_and_load(
-                        Payment.objects.select_related("currency", "invoice", "proforma")
-                        .filter(gateway_txn_id=gateway_txn_id)
+                        Payment.objects.select_related("currency", "invoice", "proforma").filter(
+                            gateway_txn_id=gateway_txn_id
+                        )
                     )
                 except Payment.DoesNotExist:
                     recovery = PaymentSuccessService.recover_unlinked_recurring_attempt(
@@ -174,6 +174,11 @@ class PaymentSuccessService:
                     payment.meta = {**(payment.meta or {}), **meta_update}
                     payment.save(update_fields=["meta", "updated_at"])
 
+                plan_change_staged = PaymentSuccessService._stage_plan_change_settlement(payment)
+
+            if plan_change_staged:
+                return Ok(payment)
+
             # Gateway facts commit before document, promotion and gift-card locks.
             from apps.promotions.models import GiftCardPurchase  # noqa: PLC0415
 
@@ -191,6 +196,17 @@ class PaymentSuccessService:
             return Err(f"Payment-success convergence failed: {exc}")
 
     @staticmethod
+    def _stage_plan_change_settlement(payment: Payment) -> bool:
+        """Journal required plan recovery before the existing gateway-fact transaction commits."""
+        if (payment.meta or {}).get("source") != "hosting_plan_change":
+            return False
+        from .plan_change_payment_service import stage_plan_change_settlement  # noqa: PLC0415
+
+        # An outer webhook/replay transaction may own the locks and commit callback.
+        stage_plan_change_settlement(payment)
+        return True
+
+    @staticmethod
     def recover_unlinked_recurring_attempt(  # noqa: PLR0911  # Preserve distinct fail-closed rejection reasons
         gateway_txn_id: str,
         gateway_facts: Mapping[str, Any],
@@ -203,33 +219,12 @@ class PaymentSuccessService:
         fact is validated before the local attempt is bound.
         """
         metadata = gateway_facts.get("metadata")
-        if isinstance(metadata, Mapping) and metadata.get("source") == "gift_card_funding":
-            from apps.promotions.models import GiftCardPurchase  # noqa: PLC0415
+        if isinstance(metadata, Mapping) and metadata.get("source") == "hosting_plan_change":
+            from .plan_change_payment_service import recover_unlinked_plan_change_attempt  # noqa: PLC0415
 
-            try:
-                purchase = (
-                    GiftCardPurchase.objects.select_related("funding_payment")
-                    .filter(pk=str(metadata.get("purchase_id", "")), customer_id=str(metadata.get("customer_id", "")))
-                    .first()
-                )
-            except (ValueError, ValidationError):
-                purchase = None
-            if purchase is None:
-                return Err("Gift-card funding attempt was not found")
-            payment = lock_one_and_load(Payment.objects.select_related("currency").filter(pk=purchase.funding_payment_id))
-            if (
-                payment.gateway_txn_id
-                or payment.status != "pending"
-                or payment.payment_method != "stripe"
-                or payment.meta.get("purchase_id") != str(purchase.pk)
-            ):
-                return Err("Gift-card funding attempt is not available for recovery")
-            validation_error = PaymentSuccessService._validate_gateway_facts(payment, gateway_facts)
-            if validation_error:
-                return Err(validation_error)
-            payment.gateway_txn_id = gateway_txn_id
-            payment.save(update_fields=["gateway_txn_id", "updated_at"])
-            return Ok(payment)
+            return recover_unlinked_plan_change_attempt(gateway_txn_id, gateway_facts)
+        if isinstance(metadata, Mapping) and metadata.get("source") == "gift_card_funding":
+            return PaymentSuccessService._recover_unlinked_gift_funding_attempt(gateway_txn_id, gateway_facts, metadata)
         if not isinstance(metadata, Mapping) or metadata.get("source") != "recurring_billing":
             return Err(f"Payment not found for gateway transaction {gateway_txn_id}")
 
@@ -282,6 +277,40 @@ class PaymentSuccessService:
                 "critical_financial_operation": True,
             },
         )
+        return Ok(payment)
+
+    @staticmethod
+    def _recover_unlinked_gift_funding_attempt(
+        gateway_txn_id: str,
+        gateway_facts: Mapping[str, Any],
+        metadata: Mapping[str, Any],
+    ) -> Result[Payment, str]:
+        """Retain the exact gift owner, pending-payment lock and gateway-fact checks."""
+        from apps.promotions.models import GiftCardPurchase  # noqa: PLC0415
+
+        try:
+            purchase = (
+                GiftCardPurchase.objects.select_related("funding_payment")
+                .filter(pk=str(metadata.get("purchase_id", "")), customer_id=str(metadata.get("customer_id", "")))
+                .first()
+            )
+        except (ValueError, ValidationError):
+            purchase = None
+        if purchase is None:
+            return Err("Gift-card funding attempt was not found")
+        payment = lock_one_and_load(Payment.objects.select_related("currency").filter(pk=purchase.funding_payment_id))
+        if (
+            payment.gateway_txn_id
+            or payment.status != "pending"
+            or payment.payment_method != "stripe"
+            or payment.meta.get("purchase_id") != str(purchase.pk)
+        ):
+            return Err("Gift-card funding attempt is not available for recovery")
+        validation_error = PaymentSuccessService._validate_gateway_facts(payment, gateway_facts)
+        if validation_error:
+            return Err(validation_error)
+        payment.gateway_txn_id = gateway_txn_id
+        payment.save(update_fields=["gateway_txn_id", "updated_at"])
         return Ok(payment)
 
     @staticmethod
@@ -360,6 +389,8 @@ class PaymentSuccessService:
             )
 
         payment_meta = payment.meta or {}
+        if payment_meta.get("source") == "hosting_plan_change":
+            return PaymentSuccessService._validate_plan_change_gateway_facts(payment, gateway_facts)
         if payment_meta.get("source") != "recurring_billing":
             return None
 
@@ -397,6 +428,30 @@ class PaymentSuccessService:
                     f"Gateway document metadata mismatch for {key}: "
                     f"expected {expected_value!r}, received {received_metadata.get(key)!r}"
                 )
+        return None
+
+    @staticmethod
+    def _validate_plan_change_gateway_facts(payment: Payment, gateway_facts: Mapping[str, Any]) -> str | None:
+        """A browser checkout must identify its exact durable document/owner/attempt."""
+        received = gateway_facts.get("metadata")
+        if not isinstance(received, Mapping) or payment.proforma_id is None:
+            return "Plan-change gateway document or metadata is missing"
+        if gateway_facts.get("customer_id") is not None:
+            return "A standalone plan checkout cannot acquire a saved gateway customer's authority"
+        local = payment.meta or {}
+        expected = {
+            "platform": "PRAHO",
+            "source": "hosting_plan_change",
+            "proforma_id": str(payment.proforma_id),
+            "customer_id": str(payment.customer_id),
+            "payment_id": str(payment.pk),
+            "plan_change_id": local.get("plan_change_id"),
+            "attempt_id": local.get("plan_change_attempt_id"),
+            "quote_fingerprint": local.get("quote_fingerprint"),
+        }
+        for key, value in expected.items():
+            if not isinstance(value, str) or not value or received.get(key) != value:
+                return f"Plan-change gateway metadata mismatch for {key}"
         return None
 
     @staticmethod
@@ -443,13 +498,13 @@ class PaymentSuccessService:
         if invoice.status != "paid":
             return f"Invoice state mismatch: fully settled invoice {invoice.number} is '{invoice.status}'"
 
+        converge_plan_change_invoice(invoice)
+
         cycles = lock_many_and_load(
-            BillingCycle.objects.filter(invoice_id=invoice.id)
-            .order_by("subscription_id", "period_start", "id")
+            BillingCycle.objects.filter(invoice_id=invoice.id).order_by("subscription_id", "period_start", "id")
         )
         usage_cycles = lock_many_and_load(
-            BillingCycle.objects.filter(usage_invoice_id=invoice.id)
-            .order_by("subscription_id", "period_start", "id")
+            BillingCycle.objects.filter(usage_invoice_id=invoice.id).order_by("subscription_id", "period_start", "id")
         )
         if not cycles and not usage_cycles:
             return None
@@ -461,7 +516,8 @@ class PaymentSuccessService:
                 Subscription.objects.select_related("saved_payment_method", "payment_authorization__payment_method")
                 .defer("saved_payment_method__bank_details", "payment_authorization__payment_method__bank_details")
                 .filter(id__in=subscription_ids)
-                .order_by("id")
+                .order_by("id"),
+                no_key=True,
             )
         }
 
@@ -475,7 +531,9 @@ class PaymentSuccessService:
 
             services = {
                 service.id: service
-                for service in Service.objects.select_for_update(of=("self",)).filter(id__in=service_ids).order_by("id")
+                for service in Service.objects.select_for_update(of=("self",), no_key=True)
+                .filter(id__in=service_ids)
+                .order_by("id")
             }
 
         now = timezone.now()

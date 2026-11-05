@@ -248,6 +248,7 @@ class EmailTemplate(models.Model):
         ("domain", _("Domain Management")),
         ("security", _("Security Alerts")),
         ("maintenance", _("Maintenance Notifications")),
+        ("quota_warnings", _("Hosting Allowance Warnings")),
         ("marketing", _("Marketing & Promotions")),
         ("compliance", _("Legal & Compliance")),
         ("system", _("System Notifications")),
@@ -896,7 +897,8 @@ class EmailSuppression(models.Model):
         )
 
     def __str__(self) -> str:
-        return f"Suppressed: {self.email_hash[:8]}... ({self.get_reason_display() or _('Marketing opt-out')})"
+        reason = self.get_reason_display() or _("Marketing opt-out")
+        return f"Suppressed: {self.email_hash[:8]}... ({reason})"
 
     def save(self, *args: Any, **kwargs: Any) -> None:
         _update_fields, written = written_fields(kwargs, ("email_encrypted",))
@@ -1037,6 +1039,10 @@ class EmailPreference(models.Model):
         default=True,
         help_text=_("Receive service notifications (provisioning, changes)"),
     )
+    quota_warnings = models.BooleanField(
+        default=True,
+        help_text=_("Receive optional hosting allowance warnings; critical allowance notices remain enabled."),
+    )
     security = models.BooleanField(
         default=True,
         help_text=_("Receive security alerts (login attempts, 2FA)"),
@@ -1115,6 +1121,7 @@ class EmailPreference(models.Model):
             "transactional": True,  # Always allowed
             "billing": self.billing,
             "service": self.service,
+            "quota_warnings": self.quota_warnings,
             "security": True,  # Always allowed for security
             "marketing": self.marketing,
             "newsletter": self.newsletter,

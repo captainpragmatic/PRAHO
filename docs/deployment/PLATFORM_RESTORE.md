@@ -133,6 +133,10 @@ controlled re-enablement step after operator acceptance.
 
 ## Rehearsal evidence: 2026-10-28
 
+The hosting plan-change recovery procedure below is a separate, newly introduced
+obligation. The historical rehearsal in this section did not exercise its records,
+payments or native applications.
+
 A disposable Ubuntu 26.04 VM on the operator's Proxmox cluster restored the staging native backup
 `praho_backup_20261027_224844_201279.dump` with its media pair using application revision
 `ec3b40dc9ec89d5faa411e8d7b32ba3830559140` and PostgreSQL 16. The corrected native restore took
@@ -152,3 +156,66 @@ exercised. The disposable VM, disk, transport archives and ephemeral key were re
 This evidence validates the repaired script, not an unmodified release. The fixes and filename change
 must be reviewed and deployed before the live server gains this behavior. Operational host identities,
 cleanup inventory exceptions and exact execution evidence are retained in the private staging KB.
+
+## Hosting plan-change recovery
+
+Use when #840 records or processor attempts exist in the restored database, or a
+deployment must stop accepting changes while earlier agreements remain unresolved.
+See [ADR-0074](../ADRs/ADR-0074-paid-hosting-plan-changes.md) and
+[recurring operations](../domain/RECURRING_BILLING.md#paid-hosting-plan-changes).
+
+Keep new acceptance disabled with `billing.hosting_plan_changes_enabled=false`.
+An existing worker version must still understand `PlanChange`, its interval
+allocations, payment attempts, review events, notices and native outbox. Preserve
+all of them with Payments, proforma/invoice lineage, refund/storno evidence and
+the matching encryption keyring. Restoring an older backup can omit payments or
+provider submissions that happened afterward: inventory that gap before any new
+charge, rather than assuming the restored queue is complete.
+
+1. Inspect the exact service/customer/change/document/attempt identities and the
+   actual processor facts using authorized operator tools. A queued task or elapsed
+   lease is not proof of no submission. Never log client secrets, credential
+   material or full native evidence into a ticket.
+2. Recover through the existing `billing-plan-change-payments` schedule and normal
+   document convergence. Retrieve a known original PaymentIntent. An unknown create
+   can replay only its original payload/key inside the persisted safe replay window;
+   after that window it needs review, not a fresh intent. Cancellation/expiry needs
+   never-issued or exact provider-cancellation evidence. Late verified money after
+   application authority ends remains `paid_review`.
+3. Process pending `PlanChangeReviewEvent` rows through
+   `billing-plan-change-financial-review`. Disputed/refunded source evidence already
+   blocks new commercial native dispatch before the sweep finishes. Resolve actual
+   financial liabilities with the existing refund/storno process; do not manually
+   clear FSM state, guess a partial refund's interval allocation or assume a refund
+   reverses a later plan/resource assignment.
+4. Reconcile `applying_limits` / `limits_attention` through
+   `billing-plan-change-fulfilment` and the existing native job recovery lane. Current
+   canonical-node receipt proof is required for completion. A resource failure does
+   not refund an accepted payment or authorize charging again. A downgrade that
+   reaches its boundary retains the agreed lower billing terms while unsafe native
+   reduction waits. Its first due reconciliation emits one HIGH/review-required
+   staff event in `/audit/review/`; inspect that queue. Preserve
+   `staff_escalated_at` with the immutable event history. Reviewing the event is an
+   acknowledgement, not proof that native limits applied or authority to reprice.
+5. Before retrying create/restore/migration repair, distinguish unissued work from
+   the exact already-issued token-bound frozen parent. Only the latter may retain
+   its approved repair authority during later financial review. Never use a
+   generic authority flag, old readback or job status edit as an exception. Preserve
+   fencing/leases and current owner/node binding; an uncertain restore must not
+   reactivate its domain before verification.
+6. Preserve historical agreement currency and original covered document IDs. A valid
+   later currency transition or unrelated new renewal does not rewrite the old
+   agreement. Do not "repair" a current-currency mismatch by editing historical
+   quotes, invoice amounts or accepted limits. New target renewals continue to use
+   their own independently accepted terms.
+7. Reconcile the four billing schedules and verify phase notice/EmailLog linkage.
+   Retrying an existing notice must not create another phase obligation, including
+   after EmailLog retention. Final send still checks current ownership, recipient,
+   privacy, phase and current completion proof. An issued invoice's notice follows
+   actual document issuance even when commercial application is in review.
+
+Leave acceptance off until the specific financial and native uncertainty is
+resolved and the deployed version passes the rollout checks. Stopping new checkout
+must not stop already accepted scheduled boundaries or the consumers that recover
+received money. This procedure supplies no evidence that a native or paid browser
+rehearsal has occurred.

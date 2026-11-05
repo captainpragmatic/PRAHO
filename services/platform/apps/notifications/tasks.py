@@ -116,6 +116,18 @@ def _pre_send_refusal(email_log_id: str, token: UUID | None) -> dict[str, Any] |
 
     if not maintenance_dispatch_allowed(email_log_id, token):
         return {"success": False, "error": "Maintenance delivery is no longer permitted", "retry_scheduled": False}
+    from apps.provisioning.hosting_warning_delivery import (  # noqa: PLC0415 -- Final warning policy.
+        warning_dispatch_allowed,
+    )
+
+    if not warning_dispatch_allowed(email_log_id, token):
+        return {"success": False, "error": "Hosting warning delivery is no longer permitted", "retry_scheduled": False}
+    from apps.billing.plan_change_delivery import (  # noqa: PLC0415  # Source-specific final policy.
+        plan_change_dispatch_allowed,
+    )
+
+    if not plan_change_dispatch_allowed(email_log_id, token):
+        return {"success": False, "error": "Plan-change delivery is no longer permitted", "retry_scheduled": False}
     return None
 
 

@@ -163,10 +163,15 @@ class HostingLimitSurfaceTests(TestCase):
             ]
         )
         queryset = Service.objects.select_related("hosting_limits", "service_plan", "customer", "currency")
-        with self.assertNumQueries(2):
-            values = ServiceListSerializer(queryset, many=True).data
-        self.assertEqual(len(values), 5)
-        self.assertEqual({value["hosting_limits"]["assigned"]["disk_mib"] for value in values}, {10240})
+        for identifiers in ([self.service.pk], list(queryset.values_list("pk", flat=True))):
+            # Root/account reads, one overlay batch and two warning reads;
+            # no account IDs means the warning cursor query needs no SQL.
+            with self.assertNumQueries(5) as queries:
+                values = ServiceListSerializer(queryset.filter(pk__in=identifiers), many=True).data
+            self.assertEqual(len(values), len(identifiers))
+            self.assertEqual({value["hosting_limits"]["assigned"]["disk_mib"] for value in values}, {10240})
+            self.assertTrue(all("hosting_warnings" in value and "hosting_raise" in value for value in values))
+            self.assertEqual(sum("provisioning_service_hosting_raise" in row["sql"] for row in queries.captured_queries), 1)
 
     def test_explicit_override_requires_authority_ticket_ack_and_replays_once(self) -> None:
         target = ServicePlan.objects.create(
@@ -482,10 +487,13 @@ class VerifiedHostingLimitSurfaceTests(HMACTestMixin, VirtualminTaskTestBase):
         )
         queryset = Service.objects.select_related("hosting_limits", "service_plan", "customer", "currency")
         enabled()
-        # Root, accounts, two shared settings, nodes, credentials and executions.
-        with self.assertNumQueries(7):
-            values = ServiceListSerializer(queryset, many=True).data
-        self.assertEqual(len(values), 5)
-        verified = [value for value in values if value["hosting_limits"]["state"] == "verified"]
-        self.assertEqual(len(verified), 1)
-        self.assertEqual(verified[0]["hosting_limits"]["assigned"]["disk_mib"], 5120)
+        for identifiers in ([self.service.pk], list(queryset.values_list("pk", flat=True))):
+            # The eight proof/overlay reads plus three warning reads remain
+            # fixed for one or five rows. Raise output reuses the overlay batch.
+            with self.assertNumQueries(11) as queries:
+                values = ServiceListSerializer(queryset.filter(pk__in=identifiers), many=True).data
+            self.assertEqual(len(values), len(identifiers))
+            self.assertEqual(sum("provisioning_service_hosting_raise" in row["sql"] for row in queries.captured_queries), 1)
+            verified = [value for value in values if value["hosting_limits"]["state"] == "verified"]
+            self.assertEqual(len(verified), 1)
+            self.assertEqual(verified[0]["hosting_limits"]["assigned"]["disk_mib"], 5120)

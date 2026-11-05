@@ -2,25 +2,41 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from django.core.exceptions import ValidationError
+from django.utils import timezone
 
 if TYPE_CHECKING:
     from .service_models import Service
     from .virtualmin_models import VirtualminAccount
 
 
-def prime_current_verification(services: list[Service], accounts: dict[int, VirtualminAccount]) -> None:
+def prime_current_verification(
+    services: list[Service], accounts: dict[int, VirtualminAccount], *, at: datetime | None = None
+) -> None:
     """One execution/credential batch, with no per-service reads or remote calls."""
     from .hosting_limit_execution_models import HostingLimitExecution  # noqa: PLC0415
     from .hosting_limit_native import current_verified_binding  # noqa: PLC0415
     from .hosting_node_policy import POLICY_VERSION, verify_quota_evidence  # noqa: PLC0415
+    from .hosting_raise_models import ServiceHostingRaise  # noqa: PLC0415 -- One overlay batch; no per-service reads.
+    from .hosting_raise_service import raise_terms_for  # noqa: PLC0415 -- Pure counterpart for preloaded rows.
     from .virtualmin_security import connection_identities  # noqa: PLC0415
 
+    if not services:
+        return
+    now = at or timezone.now()
+    overlays = {
+        row.service_id: row
+        for row in ServiceHostingRaise.objects.filter(service_id__in=[service.pk for service in services])
+    }
     candidates = {}
     for service in services:
+        service.__dict__["_hosting_raise_row"] = overlays.get(service.pk)
         service.__dict__["_hosting_current_verified"] = False
+        service.__dict__["_hosting_operational_verified"] = False
+        service.__dict__["_hosting_current_overlay_terms"] = None
         account = accounts.get(service.pk)
         managed = bool(account is not None and getattr(account, "quota_managed", False))
         service.__dict__["_hosting_enforcement_state"] = (
@@ -31,7 +47,8 @@ def prime_current_verification(services: list[Service], accounts: dict[int, Virt
             limits is not None
             and limits.verified_at
             and limits.verified_receipt
-            and limits.applied_revision == limits.revision == limits.operational_revision
+            and limits.operational_revision is not None
+            and limits.applied_revision == limits.operational_revision
             and service.pk in accounts
             and managed
         ):
@@ -57,6 +74,9 @@ def prime_current_verification(services: list[Service], accounts: dict[int, Virt
                 "service_id": application.service_id,
                 "owner_id": execution.owner_id,
                 "service_revision": execution.service_revision,
+                "overlay_revision": execution.overlay_revision,
+                "overlay_extra_mib": application.overlay_extra_mib,
+                "overlay_expires_at": application.overlay_expires_at,
                 "server_id": execution.job.server_id,
                 "connection_identity": execution.connection_identity,
                 "identity": execution.identity,
@@ -67,6 +87,8 @@ def prime_current_verification(services: list[Service], accounts: dict[int, Virt
         )
     for pk, service in candidates.items():
         account, limits = accounts[pk], service.hosting_limits
+        if limits.operational_revision is None:
+            continue
         policy = getattr(account.server, "hosting_policy", None)
         identity = identities.get(account.server_id)
         if (
@@ -84,22 +106,29 @@ def prime_current_verification(services: list[Service], accounts: dict[int, Virt
         except (ValidationError, ValueError, TypeError):
             continue
         node_identity = {key: evidence[key] for key in ("installation", "filesystem_uuid", "boot_id")}
+        overlay = raise_terms_for(overlays.get(pk), service.customer_id, at=now)
+        service.__dict__["_hosting_current_overlay_terms"] = overlay
         verified = any(
-            record["receipt"] == limits.verified_receipt
+            limits.applied_overlay_revision == overlay.revision
+            and record["receipt"] == limits.verified_receipt
             and record["account_epoch"] == account.quota_generation
             and current_verified_binding(
                 record=record,
                 service_id=pk,
                 owner_id=service.customer_id,
-                revision=limits.revision,
+                revision=limits.operational_revision,
                 server_id=account.server_id,
                 connection_identity=identity,
                 node_identity=node_identity,
+                overlay_revision=overlay.revision,
+                overlay_extra_mib=overlay.extra_mib,
+                overlay_expires_at=overlay.expires_at,
             )
             and record["identity"].get("domain") == account.domain
             for record in records.get(pk, [])
         )
-        service.__dict__["_hosting_current_verified"] = verified
+        service.__dict__["_hosting_operational_verified"] = verified
+        service.__dict__["_hosting_current_verified"] = verified and limits.operational_revision == limits.revision
 
 
 def allowance_gib(mib: int | None) -> float | None:

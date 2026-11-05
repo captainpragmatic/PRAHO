@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% load i18n ui_components localisation_tags %}
+{% block title %}{% trans "Temporary disk relief" %}{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-3xl space-y-5 py-8">
+  <h1 class="text-2xl font-semibold text-white">{% trans "Temporary disk relief" %}</h1>
+  <p class="text-slate-300">{{ service.domain }}</p>
+  <p class="text-slate-300">{% trans "The customer's purchased allowance and billing stay unchanged. Capacity remains pending until verified. A raise expires within seven days of its first grant." %}</p>
+  {% if raise %}<p class="text-slate-300">{% trans "Recorded expiry" %}: {% localised_date raise.expires_at "datetime" %}</p>{% endif %}
+  <form method="post" class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-5">
+    {% csrf_token %}<input type="hidden" name="action" value="refresh-usage">
+    {% trans "Refresh usage check" as refresh_label %}{% button refresh_label type="submit" variant="secondary" %}
+  </form>
+  {% if can_request %}
+  <form method="post" class="space-y-4 rounded-lg border border-slate-700 bg-slate-800 p-5">
+    {% csrf_token %}{{ form.non_field_errors }}
+    {% for field in form %}
+      {% if field.is_hidden %}{{ field }}{{ field.errors }}{% else %}<div>{{ field.label_tag }}{{ field }}{% if field.help_text %}<p class="text-sm text-slate-400">{{ field.help_text }}</p>{% endif %}{{ field.errors }}</div>{% endif %}
+    {% endfor %}
+    {% trans "Request temporary relief" as grant_label %}{% button grant_label type="submit" variant="primary" %}
+  </form>
+  {% else %}
+  <p class="rounded-lg border border-slate-600 p-4 text-slate-300">{% trans "This raise has reached its original seven-day limit." %}</p>
+  {% endif %}
+  {% url 'provisioning:service_detail' service.pk as service_url %}{% trans "Back to service" as back_label %}{% button back_label href=service_url variant="secondary" %}
+</div>
+{% endblock %}

@@ -419,7 +419,9 @@ class BillingAnalyticsService:
                 from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
 
                 with transaction.atomic():
-                    locked = Customer.objects.select_for_update(of=("self",)).get(id=customer.id)
+                    # Metrics mutate metadata only. Keep the shared document
+                    # context's FK-compatible Customer lock through callbacks.
+                    locked = Customer.objects.select_for_update(of=("self",), no_key=True).get(id=customer.id)
                     locked.meta = locked.meta or {}
                     locked.meta["billing_metrics"] = metrics
                     locked.save(update_fields=["meta", "updated_at"])

@@ -1512,6 +1512,19 @@ class PlatformAPIClient:
             user_id=user_id,
         )
 
+    def hosting_warning_preferences(
+        self,
+        customer_id: int,
+        user_id: int,
+        *,
+        quota_warnings: bool | None = None,
+    ) -> dict[str, Any]:
+        """Read/change only the selected customer's optional quota preference."""
+        payload: dict[str, object] = {"customer_id": customer_id, "action": "get"}
+        if quota_warnings is not None:
+            payload.update({"action": "update", "quota_warnings": quota_warnings})
+        return self.post("customers/notification-preferences/", data=payload, user_id=user_id)
+
     def update_customer_tax_profile(self, customer_id: int, user_id: int, data: dict[str, Any]) -> dict[str, Any]:
         """🔒 Update customer tax profile (CUI, VAT, reverse charge) — HMAC BODY"""
         payload = {**data, "customer_id": customer_id}

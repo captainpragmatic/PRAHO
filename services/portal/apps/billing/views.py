@@ -492,7 +492,7 @@ def sync_invoices_action(request: HttpRequest) -> JsonResponse:
         # Force sync from platform
         synced_invoices = sync_service.sync_customer_invoices(int(customer_id), int(request.user.id))  # type: ignore[union-attr, arg-type]
 
-        messages.success(request, _(f"Successfully synced {len(synced_invoices)} invoices."))
+        messages.success(request, _("Successfully synced %(count)s invoices.") % {"count": len(synced_invoices)})
 
         return JsonResponse(
             {

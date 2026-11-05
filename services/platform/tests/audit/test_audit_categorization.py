@@ -5,16 +5,15 @@ Validates industry compliance requirements and threat detection capabilities.
 
 import pytest
 from django.contrib.contenttypes.models import ContentType
+from django.db import connection
 from django.test import TestCase
-from unittest.mock import Mock, patch
 
 from apps.audit.models import AuditEvent
 from apps.audit.services import (
-    AuditService,
-    AuditEventData,
     AuditContext,
-    AuthenticationAuditService,
-    TwoFactorAuditRequest
+    AuditEventData,
+    AuditService,
+    TwoFactorAuditRequest,
 )
 from apps.users.models import User
 
@@ -92,9 +91,6 @@ class TestAuditEventCategorizationModel(TestCase):
 
     def test_audit_event_indexes_exist(self):
         """Test that performance indexes are created correctly"""
-        from django.db import connection
-        from django.test import skipIfDBFeature
-
         # Skip this test for SQLite as it doesn't have the same index introspection
         if connection.vendor == 'sqlite':
             self.skipTest("Index introspection test skipped for SQLite")
@@ -518,7 +514,7 @@ class TestComplianceReporting(TestCase):
             ('efactura_submitted', 'compliance')
         ]
 
-        for action, category in compliance_events:
+        for action, _category in compliance_events:
             context = AuditContext(
                 user=self.user,
                 metadata={'compliance_type': 'gdpr' if 'gdpr' in action else 'romanian_law'}

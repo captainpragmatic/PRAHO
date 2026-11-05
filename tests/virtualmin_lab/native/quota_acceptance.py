@@ -189,6 +189,38 @@ print('uid-edquot')
     os.sync()
 
 
+def _has_os_edquot(diagnostic: str) -> bool:
+    return (
+        re.search(
+            r"\b(disk quota exceeded|errno(?:\s*[=:]\s*|\s+)122|(?:operating system|os) error(?: number)?\s+122)\b",
+            diagnostic,
+            re.I,
+        )
+        is not None
+    )
+
+
+def _verify_neighbor_commit(schema: str, *, database_pid: str) -> None:
+    from praho_quota_native import (  # noqa: PLC0415 -- Actual writer readback after commit.
+        _database_writer_qualified,
+        _run,
+    )
+
+    # The fixture schema was validated by database(); negative IDs do not advance AUTO_INCREMENT.
+    marker = -(uuid4().int % ((1 << 63) - 1) + 1)
+    before = int(sql(f"SELECT COUNT(*) FROM `{schema}`.quota_neighbor").stdout.strip())  # noqa: S608 -- Exact generated schema validated by caller.
+    sql(
+        f"START TRANSACTION; INSERT INTO `{schema}`.quota_neighbor (id) VALUES ({marker}); COMMIT;"  # noqa: S608 -- Exact generated schema and local bounded integer.
+    )
+    after = int(sql(f"SELECT COUNT(*) FROM `{schema}`.quota_neighbor").stdout.strip())  # noqa: S608 -- Exact generated schema validated by caller.
+    stored = sql(f"SELECT id FROM `{schema}`.quota_neighbor WHERE id={marker}").stdout.strip()  # noqa: S608 -- Exact generated schema and local bounded integer.
+    if after != before + 1 or stored != str(marker):
+        raise AssertionError("The neighboring tenant did not commit its independent post-denial marker")
+    _database_writer_qualified()
+    if _run(["/usr/bin/systemctl", "show", "mariadb", "--property=MainPID", "--value"]) != database_pid:
+        raise AssertionError("The post-denial neighbor commit restarted MariaDB")
+
+
 def database(domain: str, neighbor: str) -> None:
     from praho_quota_native import _database_writer_qualified, _run, _set_kernel_quota  # noqa: PLC0415
 
@@ -234,13 +266,11 @@ def database(domain: str, neighbor: str) -> None:
             future.result(timeout=30)
     current = probe(domain)
     logs = run(["/usr/bin/journalctl", "-u", "mariadb", "--since", began, "--no-pager", "--output=cat"]).stdout
-    if failure is None or not re.search(
-        r"(quota exceeded|error (?:number )?122|errno[=: ]+122)", failure.stderr + logs, re.I
-    ):
+    if failure is None or not _has_os_edquot(failure.stderr + "\n" + logs):
         raise AssertionError("The real MariaDB writer did not prove EDQUOT")
     if len(commits) < 3 or _run(["/usr/bin/systemctl", "show", "mariadb", "--property=MainPID", "--value"]) != pid:
         raise AssertionError("Quota exhaustion interrupted the neighboring tenant or restarted MariaDB")
-    sql(f"SELECT COUNT(*) FROM `{neighbor_name}`.quota_neighbor")  # noqa: S608 -- Strict generated schema above.
+    _verify_neighbor_commit(neighbor_name, database_pid=pid)
     if current["gid_used_bytes"] < (LIMIT_KIB - 2048) * 1024:
         raise AssertionError("Database failure was not at the tenant group cap")
     # Only this owned lab fixture gets temporary cleanup headroom. Customer code never uses this bypass.

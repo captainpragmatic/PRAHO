@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from fixture_images import fixture_image
 from test_ssh_hardening_docker import ROOT, docker
 
 pytestmark = pytest.mark.docker
@@ -119,7 +120,7 @@ def write_decisions(
 
 @pytest.fixture(scope="module")
 def bouncer_image() -> str:
-    base = "praho-ssh-test:26.04"
+    base = fixture_image("praho-ssh-test:26.04")
     docker(
         "build",
         "--build-arg",
@@ -130,7 +131,7 @@ def bouncer_image() -> str:
         str(ROOT / "tests/deploy/ssh/Dockerfile"),
         str(ROOT / "tests/deploy/ssh"),
     )
-    image = "praho-crowdsec-bouncer-test:26.04"
+    image = fixture_image("praho-crowdsec-bouncer-test:26.04")
     docker(
         "build",
         "-t",

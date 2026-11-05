@@ -31,6 +31,7 @@ MAX_OPERATOR_EMAILS = 25
 STATE = Path("/var/lib/praho/hosting")
 INSTALLATION = Path("/var/lib/praho/usage/installation")
 PERL_ADAPTER = Path("/usr/local/lib/praho/praho-notification-policy.pl")
+OS_QUOTA_CRON_SHA256 = "e34d72322f0a58df9d06a0bfd68709efc4801964a8c9b64a7bc0b6e19d9e0f35"
 REQUALIFICATION_UID_MIN = 2147000000
 REQUALIFICATION_UID_COUNT = 32
 REQUALIFICATION_LIMIT_KIB = 64
@@ -76,6 +77,11 @@ ACME_MASTER_BRANCH = """
 \t\t&send_notify_email($from, [{ %$d, 'emailto' => $gconfig{'webmin_email_to'} }],
 \t\t\t$d, $subject, $body);
 \t\t}"""
+ACME_GUARDED_OWNER_BRANCH = ACME_OWNER_BRANCH.replace(
+    "\tif (",
+    "\trequire '/usr/local/lib/praho/praho-notification-policy.pl';\n\tif (&praho_native_customer_notifications() && (",
+    1,
+).replace("&& !$ok) {", "&& !$ok)) {", 1)
 
 
 def notification_source_patches(status: str, ssl: str) -> tuple[str, str]:
@@ -86,12 +92,73 @@ def notification_source_patches(status: str, ssl: str) -> tuple[str, str]:
             status = status.replace(original, replacement)
         elif status.count(original) != 0 or status.count(replacement) != 1:
             raise ValueError("Unknown Virtualmin existing-monitor recipient source shape")
-    complete = ACME_OWNER_BRANCH + ACME_MASTER_BRANCH
-    if ssl.count(complete) == 1:
+    complete = ACME_GUARDED_OWNER_BRANCH + ACME_MASTER_BRANCH
+    if ssl.count(complete) == 1 and ssl.count(ACME_OWNER_BRANCH) == 0 and ssl.count(ACME_MASTER_BRANCH) == 1:
         return status, ssl
+    previous = ACME_OWNER_BRANCH + ACME_MASTER_BRANCH
+    if ssl.count(previous) == 1 and ssl.count(ACME_OWNER_BRANCH) == 1 and ssl.count(ACME_MASTER_BRANCH) == 1:
+        return status, ssl.replace(previous, complete)
     if ssl.count(ACME_OWNER_BRANCH) != 1 or "# PRAHO: customer notifications" in ssl:
         raise ValueError("Unknown Virtualmin ACME notification source shape")
     return status, ssl.replace(ACME_OWNER_BRANCH, complete)
+
+
+def os_quota_notification_inventory() -> tuple[bool, str]:
+    """Recognize the supported stock OS route without executing imported shell configuration."""
+    values: dict[str, str | None] = {}
+    for filename in ("/etc/cron.daily/quota", "/etc/default/quota"):
+        try:
+            values[filename] = _read(Path(filename))
+        except FileNotFoundError:
+            values[filename] = None
+        except (OSError, ValueError):
+            values[filename] = "unreadable"
+    digests = {
+        name: None if value is None else hashlib.sha256(value.encode()).hexdigest() for name, value in values.items()
+    }
+    digest = hashlib.sha256(json.dumps(digests, sort_keys=True).encode()).hexdigest()
+    cron, defaults = values.values()
+    if cron is not None and hashlib.sha256(cron.encode()).hexdigest() != OS_QUOTA_CRON_SHA256:
+        return False, digest
+    if defaults is None:
+        return True, digest  # The exact stock cron exits without a defaults file.
+    assignments = {}
+    for line in defaults.split("\n"):
+        if not line.strip(" \t") or line.lstrip(" \t").startswith("#"):
+            continue
+        match = re.fullmatch(
+            r"[ \t]*(run_warnquota|RPCRQUOTADOPTS)=(?:\"([^\"$`\\]*)\"|'([^']*)'|([A-Za-z0-9_./:=-]*))"
+            r"(?:[ \t]+#.*|[ \t]*)",
+            line,
+        )
+        if match is None or match[1] in assignments:
+            return False, digest
+        assignments[match[1]] = next(value for value in match.groups()[1:] if value is not None)
+    return "run_warnquota" in assignments and assignments["run_warnquota"] in {"", "false"}, digest
+
+
+def notification_guard_inventory() -> tuple[bool, str]:
+    """An old domain flag is safe only with the actual guarded source and persisted ownership."""
+    root = Path("/usr/share/webmin/virtual-server")
+    paths = (root / "feature-status.pl", root / "feature-ssl.pl", STATE / "notification-owner")
+    values: list[str | None] = []
+    for path in paths:
+        try:
+            values.append(_read(path, limit=1024 * 1024 if path != paths[-1] else LIMIT))
+        except FileNotFoundError:
+            values.append(None)
+        except (OSError, ValueError):
+            values.append("unreadable")
+    digest = hashlib.sha256(
+        json.dumps([None if value is None else hashlib.sha256(value.encode()).hexdigest() for value in values]).encode()
+    ).hexdigest()
+    status, ssl, owner = values
+    if status is None or ssl is None or owner != "platform\n":
+        return False, digest
+    try:
+        return notification_source_patches(status, ssl) == (status, ssl), digest
+    except ValueError:
+        return False, digest
 
 
 def _apply_notification_source_patches() -> None:
@@ -126,7 +193,7 @@ def _read(path: Path, *, limit: int = LIMIT) -> str:
     if path.resolve() != path:
         raise ValueError("Native policy evidence must not traverse symlinks")
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-    with os.fdopen(fd) as stream:
+    with os.fdopen(fd, newline="") as stream:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or info.st_mode & 0o022:
             raise ValueError("Native evidence must be root-owned and protected")
@@ -504,6 +571,10 @@ def inspect(identity: str) -> dict[str, object]:  # noqa: C901 -- Keep fresh ker
     if str(UUID(installation)) != installation:
         raise ValueError("Native installation identity is invalid")
     notifications = json.loads(_run(["/usr/bin/perl", str(PERL_ADAPTER), "inspect"]))
+    os_quota_safe, os_quota_digest = os_quota_notification_inventory()
+    notifications["evidence"]["emitters"]["os_quota_warnings"] = os_quota_safe
+    guarded, source_digest = notification_guard_inventory()
+    notifications["evidence"]["emitters"]["acme_owners"] = guarded
     notification_evidence = {
         "schema": 1,
         "policy_version": "hosting-node-v1",
@@ -514,7 +585,9 @@ def inspect(identity: str) -> dict[str, object]:  # noqa: C901 -- Keep fresh ker
     result: dict[str, object] = {
         "identity": identity,
         "notifications": notification_evidence,
-        "notification_inventory_digest": notifications["inventory_digest"],
+        "notification_inventory_digest": hashlib.sha256(
+            json.dumps([notifications["inventory_digest"], os_quota_digest, source_digest]).encode()
+        ).hexdigest(),
         "quota": {},
     }
     try:
@@ -593,7 +666,7 @@ def native_emitter_command(command: bytes) -> bool:
             argument.startswith(b"/usr/share/webmin/virtual-server/")
             and argument != b"/usr/share/webmin/virtual-server/lookup-domain-daemon.pl"
         )
-        or argument in {b"/usr/share/webmin/status/monitor.pl", b"/usr/sbin/virtualmin"}
+        or argument in {b"/usr/share/webmin/status/monitor.pl", b"/usr/sbin/virtualmin", b"/usr/sbin/warnquota"}
         for argument in command.split(b"\0")
     )
 
@@ -620,6 +693,8 @@ def _emitters_idle() -> None:
 
 
 def _notification_apply(request: dict[str, object], descriptor: int, *, replace: bool) -> None:
+    if not os_quota_notification_inventory()[0]:
+        raise ValueError("Review the OS quota warning route before handing customer notifications to Platform")
     operators = request.get("operator_emails", [])
     if (
         not isinstance(operators, list)

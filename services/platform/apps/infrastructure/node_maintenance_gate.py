@@ -110,6 +110,8 @@ def begin_account_job(
         for node in nodes:
             if refusal := maintenance_refusal(node.pk):
                 return refusal
+        if refusal := native_account_observation_refusal(locked.pk):
+            return refusal
         if (
             job.operation != "apply_hosting_limits"
             and VirtualminProvisioningJob.objects.filter(
@@ -117,6 +119,9 @@ def begin_account_job(
             )
             .exclude(pk=job.pk)
             .exclude(
+                # Missing JSON keys are SQL NULL: only an explicit matching child may bypass this hold.
+                parameters__quota_parent__job_id__isnull=False,
+                parameters__quota_parent__token__isnull=False,
                 parameters__quota_parent__job_id=str(job.pk),
                 parameters__quota_parent__token=str(job.execution_token or ""),
             )
@@ -127,6 +132,25 @@ def begin_account_job(
             if job._state.adding:
                 job.save()
             job.mark_started()
+    return None
+
+
+def native_account_observation_refusal(account_id: UUID) -> str | None:
+    """Native writers call under Account→Servers; queued reads hold no native lane.
+
+    This is deliberately separate from ownership and commercial busy predicates.
+    A running probe can hold the native account lock longer than a writer's lock
+    budget, so the writer waits at admission instead of creating an uncertain write.
+    """
+    from apps.provisioning.virtualmin_models import (  # noqa: PLC0415 -- Shared native admission.
+        SAFETY_OBSERVATION_OPERATION,
+        VirtualminProvisioningJob,
+    )
+
+    if VirtualminProvisioningJob.objects.filter(
+        account_id=account_id, operation=SAFETY_OBSERVATION_OPERATION, status="running"
+    ).exists():
+        return str(_("A native safety observation is running. Retry after it finishes."))
     return None
 
 

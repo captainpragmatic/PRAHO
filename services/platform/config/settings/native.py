@@ -74,5 +74,12 @@ NATIVE_VM_RUN = _native.manifest["run"]
 PRAHO_SSH_OPERATOR_PUBLIC_KEYS_FILE = str(_native.path.parent / (NATIVE_VM_RUN + ".operator.pub"))
 EMAIL_BACKEND = "django.core.mail.backends.filebased.EmailBackend"
 EMAIL_FILE_PATH = str(_native.path.parent / (NATIVE_VM_RUN + ".platform-mail"))
+if os.environ.get("PRAHO_NATIVE_SMTP_MANIFEST") and os.environ.get("PRAHO_NATIVE_CLEANUP_ONLY") != "1":
+    from apps.infrastructure.native_smtp import smtp_settings
+
+    try:
+        globals().update(smtp_settings(_native, Path(os.environ["PRAHO_NATIVE_SMTP_MANIFEST"])))
+    except (OSError, ValueError, TypeError) as error:
+        raise ImproperlyConfigured("A current private owned native SMTP capture is required for this opt-in") from error
 Q_CLUSTER = {**Q_CLUSTER, "name": "native-acceptance", "orm": "default", "sync": False}
 ALLOWED_HOSTS = ["127.0.0.1"]

@@ -466,9 +466,10 @@ class Service(ConcurrentTransitionMixin, models.Model):
     def from_db(cls, db: str | None, field_names: Collection[str], values: Collection[Any]) -> Service:
         instance = super().from_db(db, field_names, values)
         remember_ownership(instance, "service")
-        from .hosting_limit_assignments import remember_plan  # noqa: PLC0415 -- Model load boundary.
+        from .hosting_limit_assignments import remember_plan, remember_price  # noqa: PLC0415 -- Model load boundary.
 
         remember_plan(instance)
+        remember_price(instance)
         return instance
 
     def get_next_billing_date(self) -> Any | None:
@@ -529,6 +530,10 @@ class Service(ConcurrentTransitionMixin, models.Model):
                 from .hosting_limit_assignments import remember_plan  # noqa: PLC0415 -- Model load boundary.
 
                 remember_plan(self)
+            if fields is None or "price" in fields:
+                from .hosting_limit_assignments import remember_price  # noqa: PLC0415
+
+                remember_price(self)
         except Exception:
             self.__dict__.update(saved)
             raise

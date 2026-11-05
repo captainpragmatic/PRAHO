@@ -8462,3 +8462,399 @@ msgstr "Limite în așteptare"
 #| msgid "Not specified"
 msgid "Not yet verified"
 msgstr "Încă neverificate"
+
+#: apps/services/plan_changes.py:82
+#| msgid "Gift card purchase not found."
+msgid "Plan change not found."
+msgstr "Schimbarea de plan nu a fost găsită."
+
+#: apps/services/plan_changes.py:90
+#| msgid "This action could not be confirmed. Check the purchase status before trying again."
+msgid "This action could not be confirmed. Refresh the plan change before trying again, or contact support."
+msgstr "Această acțiune nu a putut fi confirmată. Actualizați schimbarea de plan înainte de a încerca din nou sau contactați asistența."
+
+#: apps/services/plan_changes.py:111
+msgid "This card payment needs staff review. Refresh its status or contact support."
+msgstr "Această plată cu cardul necesită verificarea personalului. Actualizați starea plății sau contactați asistența."
+
+#: apps/services/plan_changes.py:113
+msgid "Payment status is uncertain. Refresh its status before taking another action."
+msgstr "Starea plății este incertă. Actualizați-o înainte de a efectua o altă acțiune."
+
+#: apps/services/plan_changes.py:116
+#| msgid "Payment successful! Your services are being activated..."
+msgid "Payment received. Your new limits are being applied."
+msgstr "Plata a fost primită. Noile limite sunt în curs de aplicare."
+
+#: apps/services/plan_changes.py:118
+msgid "Your accepted terms are recorded. Your new limits are being applied."
+msgstr "Condițiile acceptate au fost înregistrate. Noile limite sunt în curs de aplicare."
+
+#: apps/services/plan_changes.py:122
+msgid "Payment received. Applying your limits needs attention; your data is retained."
+msgstr "Plata a fost primită. Aplicarea limitelor necesită verificare; datele dumneavoastră sunt păstrate."
+
+#: apps/services/plan_changes.py:124
+msgid "Your accepted terms are recorded. Applying your limits needs attention; your data is retained."
+msgstr "Condițiile acceptate au fost înregistrate. Aplicarea limitelor necesită verificare; datele dumneavoastră sunt păstrate."
+
+#: apps/services/plan_changes.py:128
+msgid "Payment received. Staff must review this change before the plan can be applied."
+msgstr "Plata a fost primită. Personalul trebuie să verifice această schimbare înainte de a aplica planul."
+
+#: apps/services/plan_changes.py:130
+msgid "Staff must review this change before the plan can be applied."
+msgstr "Personalul trebuie să verifice această schimbare înainte de a aplica planul."
+
+#: apps/services/plan_changes.py:133
+#| msgid "View consent changes"
+msgid "Review your plan change"
+msgstr "Verificați schimbarea planului"
+
+#: apps/services/plan_changes.py:134
+#| msgid "Awaiting Payment"
+msgid "Awaiting payment"
+msgstr "În așteptarea plății"
+
+#: apps/services/plan_changes.py:135
+#| msgid "Check payment status"
+msgid "Check payment status before trying again"
+msgstr "Verificați starea plății înainte de a încerca din nou"
+
+#: apps/services/plan_changes.py:136
+msgid "Downgrade scheduled for the agreed renewal boundary"
+msgstr "Trecerea la un plan inferior este programată la data de reînnoire convenită"
+
+#: apps/services/plan_changes.py:137
+#| msgid "Your account is protected"
+msgid "Your accepted plan is active"
+msgstr "Planul acceptat este activ"
+
+#: apps/services/plan_changes.py:138
+#| msgid "cancelled"
+msgid "Plan change cancelled"
+msgstr "Schimbarea planului a fost anulată"
+
+#: apps/services/plan_changes.py:139
+msgid "Plan change expired"
+msgstr "Schimbarea planului a expirat"
+
+#: apps/services/plan_changes.py:182
+msgid "Select an available plan and request a fresh quote."
+msgstr "Selectați un plan disponibil și solicitați o ofertă nouă."
+
+#: apps/services/plan_changes.py:248
+msgid "Refresh the quote before accepting this change."
+msgstr "Actualizați oferta înainte de a accepta această schimbare."
+
+#: templates/services/plan_change.html:4 templates/services/plan_change.html:8
+#| msgid "Change Plan"
+msgid "Change hosting plan"
+msgstr "Schimbați planul de găzduire"
+
+#: templates/services/plan_change.html:14
+msgid "A lower plan requires a fresh usage check. Refresh the check, then reload the available plans."
+msgstr "Un plan inferior necesită o verificare recentă a utilizării. Actualizați verificarea, apoi reîncărcați planurile disponibile."
+
+#: templates/services/plan_change.html:15
+#| msgid "Refresh status"
+msgid "Refresh usage check"
+msgstr "Actualizați verificarea utilizării"
+
+#: templates/services/plan_change.html:21
+#: templates/services/plan_change.html:42
+msgid "Next recurring total, including VAT"
+msgstr "Totalul următoarei reînnoiri, inclusiv TVA"
+
+#: templates/services/plan_change.html:22
+#: templates/services/plan_change.html:45
+msgid "Effective date"
+msgstr "Data intrării în vigoare"
+
+#: templates/services/plan_change.html:26
+#| msgid "Review cart"
+msgid "Review exact quote"
+msgstr "Verificați oferta exactă"
+
+#: templates/services/plan_change.html:29
+msgid "This plan currently needs a usage or eligibility review. Contact support."
+msgstr "Acest plan necesită în prezent o verificare a utilizării sau a eligibilității. Contactați asistența."
+
+#: templates/services/plan_change.html:33
+#| msgid "No hosting plans are currently available."
+msgid "No compatible plan changes are currently available."
+msgstr "Nu sunt disponibile în prezent schimbări compatibile de plan."
+
+#: templates/services/plan_change.html:39
+msgid "Change amount before VAT"
+msgstr "Valoarea schimbării, fără TVA"
+
+#: templates/services/plan_change.html:41
+#| msgid "Total Spent"
+msgid "Total due now"
+msgstr "Total de plată acum"
+
+#: templates/services/plan_change.html:42
+msgid "Renewal total needs review"
+msgstr "Totalul reînnoirii necesită verificare"
+
+#: templates/services/plan_change.html:43
+#| msgid "Hosting allowances"
+msgid "Proposed disk allowance"
+msgstr "Limită propusă pentru spațiul pe disc"
+
+#: templates/services/plan_change.html:44
+msgid "Proposed bandwidth allowance"
+msgstr "Limită propusă pentru trafic"
+
+#: templates/services/plan_change.html:46
+#| msgid "Quote Items"
+msgid "Quote expires"
+msgstr "Oferta expiră la"
+
+#: templates/services/plan_change.html:50
+#| msgid "Current password"
+msgid "Current paid period"
+msgstr "Perioada curentă achitată"
+
+#: templates/services/plan_change.html:50
+msgid "Already committed future period supplement"
+msgstr "Sumă suplimentară pentru o perioadă viitoare deja stabilită"
+
+#: templates/services/plan_change.html:52
+#| msgid "Before"
+msgid "before VAT"
+msgstr "fără TVA"
+
+#: templates/services/plan_change.html:55
+msgid "Your lower recurring terms start at the agreed renewal boundary. There is no immediate refund."
+msgstr "Condițiile recurente cu preț redus intră în vigoare la data de reînnoire convenită. Nu se acordă o rambursare imediată."
+
+#: templates/services/plan_change.html:59
+msgid "I accept this plan change without a payment."
+msgstr "Accept această schimbare de plan fără plată."
+
+#: templates/services/plan_change.html:60
+#| msgid "Quote Items"
+msgid "Accept quoted terms"
+msgstr "Acceptați condițiile ofertei"
+
+#: templates/services/plan_change.html:70
+#| msgid "The payment could not be confirmed. Refresh this document before trying again."
+msgid "Payment could not be confirmed. Refresh its status before trying again."
+msgstr "Plata nu a putut fi confirmată. Actualizați starea plății înainte de a încerca din nou."
+
+#: templates/services/plan_change.html:72
+#| msgid "Confirm payment"
+msgid "Confirm card payment"
+msgstr "Confirmați plata cu cardul"
+
+#: templates/services/plan_change.html:81
+msgid "Cancel this change"
+msgstr "Anulați această schimbare"
+
+#: templates/services/plan_change.html:85
+#| msgid "Request another reset link"
+msgid "Review another plan"
+msgstr "Verificați un alt plan"
+
+#: templates/services/plan_change.html:89
+msgid "Ask support about an exceptional change"
+msgstr "Cereți asistență pentru o schimbare care necesită o excepție"
+
+#: templates/services/service_detail.html:88
+#| msgid "View consent changes"
+msgid "Review plan change"
+msgstr "Verificați schimbarea planului"
+
+#: templates/services/service_detail.html:91
+#| msgid "Change Plan"
+msgid "Change plan"
+msgstr "Schimbați planul"
+
+#: apps/common/account_health.py:90
+#, python-format
+msgid "%(count)d service has a recorded warning that its hosting allowance was reached."
+msgid_plural "%(count)d services have recorded warnings that their hosting allowances were reached."
+msgstr[0] "Pentru %(count)d serviciu există o avertizare înregistrată privind atingerea limitei resurselor incluse în găzduire."
+msgstr[1] "Pentru %(count)d servicii există avertizări înregistrate privind atingerea limitei resurselor incluse în găzduire."
+msgstr[2] "Pentru %(count)d de servicii există avertizări înregistrate privind atingerea limitei resurselor incluse în găzduire."
+
+#: apps/common/account_health.py:96
+#, python-format
+msgid "%(count)d service has a recorded warning about high hosting usage."
+msgid_plural "%(count)d services have recorded warnings about high hosting usage."
+msgstr[0] "Pentru %(count)d serviciu există o avertizare înregistrată privind utilizarea ridicată a resurselor de găzduire."
+msgstr[1] "Pentru %(count)d servicii există avertizări înregistrate privind utilizarea ridicată a resurselor de găzduire."
+msgstr[2] "Pentru %(count)d de servicii există avertizări înregistrate privind utilizarea ridicată a resurselor de găzduire."
+
+#: apps/common/account_health.py:108
+#| msgid "Review cart"
+msgid "Review usage"
+msgstr "Verificați utilizarea"
+
+#: apps/customers/notification_preferences.py:19
+#: templates/customers/notification_preferences.html:23
+msgid "Receive optional hosting allowance warnings"
+msgstr "Primiți avertizări opționale privind resursele incluse în găzduire"
+
+#: apps/customers/notification_preferences.py:45
+#| msgid "GDPR consents and marketing preferences"
+msgid "Hosting warning preferences saved."
+msgstr "Preferințele pentru avertizările de găzduire au fost salvate."
+
+#: templates/customers/notification_preferences.html:3
+#: templates/customers/notification_preferences.html:6
+#: templates/users/company_profile.html:248
+#| msgid "GDPR consents and marketing preferences"
+msgid "Hosting warning preferences"
+msgstr "Preferințe pentru avertizările de găzduire"
+
+#: templates/customers/notification_preferences.html:10
+#, python-format
+msgid "Choose whether this customer receives optional 80%% and 95%% hosting allowance warnings."
+msgstr "Alegeți dacă acest client primește avertizări opționale la utilizarea a 80%% și 95%% din resursele incluse în găzduire."
+
+#: templates/customers/notification_preferences.html:11
+msgid "Critical allowance notices remain enabled. Delivery still requires current ownership, a valid recipient and no hard delivery block."
+msgstr "Notificările critice privind resursele incluse rămân activate. Livrarea necesită în continuare proprietarul curent, un destinatar valid și absența unui blocaj ferm de livrare."
+
+#: templates/customers/notification_preferences.html:13
+msgid "Your global email opt-out also blocks optional hosting warnings."
+msgstr "Dezabonarea globală de la e-mailuri blochează și avertizările opționale de găzduire."
+
+#: templates/customers/notification_preferences.html:16
+#| msgid "Could not update role. Please try again."
+msgid "The preference could not be saved. Please try again."
+msgstr "Preferința nu a putut fi salvată. Încercați din nou."
+
+#: templates/customers/notification_preferences.html:18
+#| msgid "Could not update role. Please try again."
+msgid "The preference could not be loaded. Please try again."
+msgstr "Preferința nu a putut fi încărcată. Încercați din nou."
+
+#: templates/customers/notification_preferences.html:27
+#| msgid "Save Preferences"
+msgid "Save preferences"
+msgstr "Salvați preferințele"
+
+#: templates/services/partials/hosting_raise.html:5
+#| msgid "Temporarily rate limited"
+msgid "Temporary disk relief requested"
+msgstr "Spațiu suplimentar temporar pe disc solicitat"
+
+#: templates/services/partials/hosting_raise.html:6
+#| msgid "Temporarily rate limited"
+msgid "Temporary disk relief verified"
+msgstr "Spațiu suplimentar temporar pe disc verificat"
+
+#: templates/services/partials/hosting_raise.html:7
+msgid "Temporary disk relief has expired"
+msgstr "Spațiul suplimentar temporar pe disc a expirat"
+
+#: templates/services/partials/hosting_raise.html:8
+#| msgid "Temporarily rate limited"
+msgid "Temporary disk relief removed"
+msgstr "Spațiul suplimentar temporar pe disc a fost eliminat"
+
+#: templates/services/partials/hosting_raise.html:9
+#| msgid "Historical credit requires review"
+msgid "Temporary capacity status requires review"
+msgstr "Starea capacității temporare necesită verificare"
+
+#: templates/services/partials/hosting_raise.html:11
+msgid "Extra capacity is pending verification."
+msgstr "Capacitatea suplimentară așteaptă verificarea."
+
+#: templates/services/partials/hosting_raise.html:13
+#| msgid "Temporarily rate limited"
+msgid "Temporary extra capacity"
+msgstr "Capacitate suplimentară temporară"
+
+#: templates/services/partials/hosting_raise.html:15
+#| msgid "Expired"
+msgid "Expires"
+msgstr "Expiră"
+
+#: templates/services/partials/hosting_raise.html:16
+#| msgid "This payment needs review. Contact support before attempting another charge."
+msgid "Current capacity needs review. Contact support if you need help."
+msgstr "Capacitatea curentă necesită verificare. Contactați asistența dacă aveți nevoie de ajutor."
+
+#: templates/services/partials/hosting_raise.html:17
+msgid "Usage warnings continue to use your purchased allowance."
+msgstr "Avertizările de utilizare se raportează în continuare la resursele achiziționate."
+
+#: templates/services/partials/hosting_warnings.html:5
+msgid "Last known warning"
+msgstr "Ultima avertizare cunoscută"
+
+#: templates/services/partials/hosting_warnings.html:8
+msgid "Disk allowance reached"
+msgstr "Limita spațiului pe disc inclus a fost atinsă"
+
+#: templates/services/partials/hosting_warnings.html:8
+msgid "Disk allowance almost used up"
+msgstr "Spațiul pe disc inclus este aproape epuizat"
+
+#: templates/services/partials/hosting_warnings.html:8
+#| msgid "Disk usage over time"
+msgid "Disk usage is high"
+msgstr "Utilizarea spațiului pe disc este ridicată"
+
+#: templates/services/partials/hosting_warnings.html:10
+#| msgid "Proposed bandwidth allowance"
+msgid "Monthly bandwidth allowance reached"
+msgstr "Limita traficului lunar inclus a fost atinsă"
+
+#: templates/services/partials/hosting_warnings.html:10
+#| msgid "Monthly bandwidth is incomplete."
+msgid "Monthly bandwidth allowance almost used up"
+msgstr "Traficul lunar inclus este aproape epuizat"
+
+#: templates/services/partials/hosting_warnings.html:10
+#| msgid "Monthly bandwidth is incomplete."
+msgid "Monthly bandwidth usage is high"
+msgstr "Utilizarea traficului lunar este ridicată"
+
+#: templates/services/partials/hosting_warnings.html:13
+#, python-format
+msgid "The last confirmed warning was at the %(threshold)s%% level for the allowance in effect at that time."
+msgstr "Ultima avertizare confirmată a fost la nivelul de %(threshold)s%% din resursele incluse în acel moment."
+
+#: templates/services/partials/hosting_warnings.html:13
+#, python-format
+msgid "At least %(threshold)s%% of the current allowance is in use."
+msgstr "Cel puțin %(threshold)s%% din resursele incluse în prezent sunt utilizate."
+
+#: templates/services/partials/hosting_warnings.html:15
+msgid "Reading time:"
+msgstr "Momentul citirii:"
+
+#: templates/services/partials/hosting_warnings.html:16
+msgid "A fresh reading has not yet confirmed the current condition."
+msgstr "O citire recentă nu a confirmat încă nivelul curent de utilizare."
+
+#: templates/services/partials/hosting_warnings.html:17
+msgid "This incomplete reading is a confirmed lower bound."
+msgstr "Această citire incompletă reprezintă o limită inferioară confirmată."
+
+#: templates/services/partials/hosting_warnings.html:18
+#| msgid "Native limits verified. Writes may fail when the enforced disk cap is reached."
+msgid "Writes may fail when the enforced cap is reached."
+msgstr "Operațiunile de scriere pot eșua când este atinsă limita aplicată."
+
+#: templates/services/partials/hosting_warnings.html:19
+#| msgid "Need help? Contact support at"
+msgid "Review usage or contact support"
+msgstr "Verificați utilizarea sau contactați asistența"
+
+#: templates/services/partials/hosting_warnings.html:23
+#| msgid "Contact Support"
+msgid "Contact support"
+msgstr "Contactați asistența"
+
+#: apps/billing/views.py:495
+#, python-format
+msgid "Successfully synced %(count)s invoices."
+msgstr "S-au sincronizat cu succes %(count)s facturi."

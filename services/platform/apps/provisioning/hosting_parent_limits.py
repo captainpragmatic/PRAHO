@@ -148,12 +148,14 @@ def frozen_parent_application(job: VirtualminProvisioningJob) -> HostingLimitApp
     application = HostingLimitApplication.objects.get(pk=job.hosting_limit_application_id)
     snapshot, binding = job.parameters.get(SNAPSHOT_KEY), job.parameters.get(BINDING_KEY)
     expected = {
+        "schema": 2,
         "application_id": str(application.pk),
         "base_revision": application.revision,
-        "overlay_revision": 0,
-        "overlay_expires_at": None,
+        "overlay_revision": application.overlay_revision,
+        "overlay_extra_mib": application.overlay_extra_mib,
+        "overlay_expires_at": application.overlay_expires_at.isoformat() if application.overlay_expires_at else None,
         "owner_id": str(application.authority.get("customer_id")),
-        "disk_cap_mib": effective_disk_limit(application.disk_allowance_mib),
+        "disk_cap_mib": effective_disk_limit(application.disk_allowance_mib, extra_mib=application.overlay_extra_mib),
         "bandwidth_mib": application.bandwidth_allowance_mib,
     }
     if (
@@ -179,7 +181,10 @@ def frozen_parent_application(job: VirtualminProvisioningJob) -> HostingLimitApp
 
 def mark_parent_limits_issued(job: VirtualminProvisioningJob) -> bool:  # noqa: PLR0911 -- Explicit scope, nonce, lease and installed-node refusals.
     """Commit exact resource dispatch authority immediately before native mutation."""
+    from .hosting_limit_commercial import parent_dispatch_refusal  # noqa: PLC0415
+    from .hosting_limit_review import reviewed_job_application  # noqa: PLC0415
     from .hosting_node_policy import current_quota_identity  # noqa: PLC0415
+    from .service_models import Service  # noqa: PLC0415
     from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer  # noqa: PLC0415
 
     if job.account_id is None:
@@ -194,8 +199,9 @@ def mark_parent_limits_issued(job: VirtualminProvisioningJob) -> bool:  # noqa: 
             .filter(pk__in=(account.server_id, job.server_id))
             .order_by("pk")
         )
+        Service.objects.select_for_update(of=("self",), no_key=True).get(pk=account.service_id)
         current = VirtualminProvisioningJob.objects.select_for_update(of=("self",)).get(pk=job.pk)
-        frozen_parent_application(current)
+        application = reviewed_job_application(current)
         if (
             current.status != "running"
             or current.started_at is None
@@ -205,6 +211,18 @@ def mark_parent_limits_issued(job: VirtualminProvisioningJob) -> bool:  # noqa: 
             return False
         if current.operation == "restore_domain" and (
             current.execution_deadline is None or current.execution_deadline <= timezone.now()
+        ):
+            return False
+        if parent_dispatch_refusal(
+            application,
+            {
+                "job_id": str(current.pk),
+                "token": str(current.execution_token or ""),
+                "account_server_id": str(account.server_id),
+                "native_server_id": str(current.server_id),
+                "approved_application_id": str(current.hosting_limit_application_id),
+                "frozen_application_id": str(application.pk),
+            },
         ):
             return False
         native = current_quota_identity(current.server)
@@ -256,7 +274,7 @@ def held_parent_application_matches(application: HostingLimitApplication, parent
         return False
     job = VirtualminProvisioningJob.objects.filter(
         pk=identifier,
-        hosting_limit_application=application,
+        hosting_limit_application__isnull=False,
         operation__in=PARENT_OPERATIONS,
         status="running",
     ).first()
@@ -264,11 +282,22 @@ def held_parent_application_matches(application: HostingLimitApplication, parent
         return False
     if str(job.server_id) != parent.get("native_server_id"):
         return False
+    if parent.get("approved_application_id") is not None or parent.get("frozen_application_id") is not None:
+        if parent.get("approved_application_id") != str(job.hosting_limit_application_id) or parent.get(
+            "frozen_application_id"
+        ) != str(application.pk):
+            return False
+    elif job.hosting_limit_application_id != application.pk:
+        return False
     if job.operation == "restore_domain" and (
         job.execution_deadline is None or job.execution_deadline <= timezone.now()
     ):
         return False
     try:
+        from .hosting_limit_review import reviewed_job_application_matches  # noqa: PLC0415
+
+        if not reviewed_job_application_matches(job, application):
+            return False
         frozen_parent_application(job)
         native = current_quota_identity(job.server)
         original = job.parameters[BINDING_KEY]["node_identity"]

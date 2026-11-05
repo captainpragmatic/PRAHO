@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from fixture_images import fixture_image
 from test_crowdsec_qualification_docker import assert_native_role_profile
 from test_ssh_hardening_docker import ROOT, docker, harden, ssh_target
 
@@ -136,7 +137,7 @@ def test_shared_role_install_convergence_acquisition_and_simulation_transitions(
     variables["crowdsec_policy_preview"] = False
     installed = apply()
     if installed.returncode != 0 and os.environ.get("CROWDSEC_DEBUG_INSTALL") == "1":
-        docker("commit", target, "praho-crowdsec-role-debug:failed-install")
+        docker("commit", target, fixture_image("praho-crowdsec-role-debug:failed-install"))
     assert installed.returncode == 0, installed.stdout[-15000:] + installed.stderr[-2000:]
     first = json.loads(docker("exec", target, "cat", "/etc/praho-crowdsec/config.json").stdout)
     assert first["simulation"] is True

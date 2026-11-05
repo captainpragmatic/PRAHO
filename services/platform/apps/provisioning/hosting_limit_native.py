@@ -10,7 +10,7 @@ from uuid import UUID
 
 from django.utils.dateparse import parse_datetime
 
-from .hosting_limit_policy import BYTES_PER_MIB
+from .hosting_limit_policy import BYTES_PER_MIB, OVERLAY_QUOTA_PROTOCOL
 
 MAX_QUANTITY = (1 << 63) - 1
 MAX_RECEIPT_AGE = timedelta(minutes=2)
@@ -70,6 +70,9 @@ def current_verified_binding(  # noqa: PLR0913 -- Batch selectors supply preload
     server_id: object,
     connection_identity: str,
     node_identity: Mapping[str, str],
+    overlay_revision: int = 0,
+    overlay_extra_mib: int = 0,
+    overlay_expires_at: datetime | None = None,
 ) -> bool:
     """Pure current-state predicate; historical verified receipts remain visible separately.
 
@@ -82,12 +85,16 @@ def current_verified_binding(  # noqa: PLR0913 -- Batch selectors supply preload
         and record.get("service_id") == service_id
         and record.get("owner_id") == owner_id
         and record.get("service_revision") == revision
+        and record.get("overlay_revision", 0) == overlay_revision
+        and record.get("overlay_extra_mib", 0) == overlay_extra_mib
+        and record.get("overlay_expires_at") == overlay_expires_at
         and record.get("server_id") == server_id
         and record.get("connection_identity") == connection_identity
         and set(node_identity) == {"installation", "filesystem_uuid", "boot_id"}
         and isinstance(identity, dict)
         and isinstance(receipt, dict)
         and receipt.get("bandwidth_actions_safe") is True
+        and (overlay_revision == 0 or receipt.get("quota_protocol") == OVERLAY_QUOTA_PROTOCOL)
         and all(identity.get(key) == value for key, value in node_identity.items())
         and receipt.get("identity") == identity
         and receipt.get("generation") == record.get("account_epoch")
@@ -132,7 +139,10 @@ def verify_quota_receipt(  # noqa: PLR0913 -- All expected authority is mandator
     Calling this on an arbitrary probe is NOT recovery: the caller must first obtain
     the native terminal receipt or fence the original token under the native lock.
     """
-    if not isinstance(receipt, dict) or set(receipt) - {"observation", "bandwidth_actions_safe"} != RECEIPT_FIELDS:
+    if (
+        not isinstance(receipt, dict)
+        or set(receipt) - {"observation", "bandwidth_actions_safe", "quota_protocol"} != RECEIPT_FIELDS
+    ):
         raise ValueError("The native quota receipt has an unsupported shape")
     probe = verify_quota_probe(
         {key: value for key, value in receipt.items() if key not in {"token", "generation"}},
@@ -181,8 +191,15 @@ def verify_quota_probe(
     Only the final token-bound receipt may certify the new exact matching caps.
     """
     fields = RECEIPT_FIELDS - {"token", "generation"}
-    if not isinstance(probe, dict) or set(probe) - {"observation", "bandwidth_actions_safe"} != fields:
+    if (
+        not isinstance(probe, dict)
+        or set(probe) - {"observation", "bandwidth_actions_safe", "quota_protocol"} != fields
+    ):
         raise ValueError("The native quota probe has an unsupported shape")
+    if "quota_protocol" in probe and (
+        type(probe["quota_protocol"]) is not int or probe["quota_protocol"] not in {1, 2}
+    ):
+        raise ValueError("The native quota protocol is unsupported")
     if "bandwidth_actions_safe" in probe and type(probe["bandwidth_actions_safe"]) is not bool:
         raise ValueError("Native bandwidth action safety must be explicit")
     if (

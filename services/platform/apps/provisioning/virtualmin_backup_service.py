@@ -700,6 +700,14 @@ class VirtualminBackupService:
         try:
             if refusal := restore_destination_refusal(account, target_server, force=config.force_restore):
                 return Err(refusal, retriability=Retriability.NOT_RETRIABLE)
+            from .hosting_notification_completion import verify_lifecycle_notification_policy  # noqa: PLC0415
+
+            mail = verify_lifecycle_notification_policy(
+                account, native_server=target_server, parent_job=quota_parent_job
+            )
+            if mail.is_err():
+                # No archive was issued: this is a definite precondition refusal.
+                return Err(mail.unwrap_err(), retriability=Retriability.NOT_RETRIABLE)
             self._update_restore_progress(restore_id, "initializing", 0)
             if config.differential_backup_id or config.managed_single:
                 from .virtualmin_pair_restore import restore_pair  # noqa: PLC0415  # Circular

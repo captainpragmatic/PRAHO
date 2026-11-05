@@ -111,6 +111,8 @@ def test_every_required_check_runs_on_every_pull_request(context: str) -> None:
     assert "strategy" not in job, f"{workflow}:{context}: a matrix renames the check, which then never reports"
     if context in SELECTIVE_JOBS:
         assert job["if"] == SELECTIVE_JOBS[context], f"{workflow}:{context} must skip only on an explicit 'false'"
+    elif context == "browser-e2e":
+        assert job["if"] == "always()", "The required browser result must report failed/cancelled upstream checks"
     else:
         # always() forces a dependency gate to run even when an upstream job fails or skips.
         assert job.get("if") in (None, "always()"), (
@@ -153,7 +155,7 @@ def test_crowdsec_native_qualification_runs_once_before_the_aggregate() -> None:
     # Derive the native files from the actual Make recipe so a stale CI exclusion cannot
     # silently miss new suites or suppress unrelated Docker coverage.
     makefile = (REPO / "Makefile").read_text(encoding="utf-8")
-    recipe = re.search(r"^test-crowdsec-docker:\n((?:\t[^\n]*\n)+)", makefile, re.MULTILINE)
+    recipe = re.search(r"^test-crowdsec-docker:[^\n]*\n((?:\t[^\n]*\n)+)", makefile, re.MULTILINE)
     assert recipe is not None
     (native_glob,) = re.findall(r"tests/deploy/[^\s]+_docker\.py", recipe.group(1))
     native_files = set(REPO.glob(native_glob))
@@ -529,3 +531,55 @@ def test_browser_jobs_always_stop_their_stack(job_id: str) -> None:
     stops = [step for step in steps if step.get("run") == "make stop-e2e"]
 
     assert len(stops) == 1 and stops[0]["if"] == "always()", job_id
+
+
+def test_full_hosting_checkout_is_a_required_browser_dependency() -> None:
+    jobs = load_workflow(WORKFLOWS / "browser.yml")["jobs"]
+    assert set(jobs) == {"browser-e2e", "browser-csp", "browser-hosting-checkout"}
+    full = jobs["browser-hosting-checkout"]  # Final-job canary: inventory must include the new gate.
+    assert full["env"]["DB_PORT"] == "5432"
+    makefile = (REPO / "Makefile").read_text()
+    assert "DB_PORT=$(HOSTING_BROWSER_DB_PORT)" in makefile
+    assert "DB_NAME=hosting_browser DB_HOST=127.0.0.1" in makefile
+    assert any(
+        step.get("run") == 'make test-hosting-plan-checkout-full HOSTING_BROWSER_DB_PORT="$DB_PORT"'
+        for step in full["steps"]
+    )
+    stops = [step for step in full["steps"] if step.get("run") == "make ci-postgres-stop"]
+    assert len(stops) == 1 and stops[0]["if"] == "always()"
+    assert any("make test-hosting-plan-checkout-full" in step.get("run", "") for step in full["steps"])
+    assert any("make ci-postgres-start CI_POSTGRES_IMAGE_TAG=16" in step.get("run", "") for step in full["steps"])
+    assert full.get("continue-on-error") is not True
+    assert all(step.get("continue-on-error") is not True for step in full["steps"])
+    required = jobs["browser-e2e"]
+    assert required["needs"] == ["browser-hosting-checkout"]
+    assert required["if"] == "always()"
+    guard = required["steps"][0]
+    assert guard["env"]["HOSTING_CHECKOUT_RESULT"] == "${{ needs.browser-hosting-checkout.result }}"
+    assert "if" not in guard
+
+
+def test_hosting_warning_browser_matrix_is_a_required_step() -> None:
+    steps = load_workflow(WORKFLOWS / "browser.yml")["jobs"]["browser-e2e"]["steps"]
+    matches = [step for step in steps if step.get("run") == "make test-portal-hosting-warnings-browser"]
+    assert len(matches) == 1
+    assert "if" not in matches[0] and not matches[0].get("continue-on-error")
+    makefile = (REPO / "Makefile").read_text()
+    assert "test-portal-hosting-warnings-browser: build-css" in makefile
+    assert "tests/browser/test_hosting_warning_surfaces.py $(HOSTING_WARNING_BROWSER_ARGS)" in makefile
+    uploads = [step for step in steps if str(step.get("uses", "")).startswith("actions/upload-artifact@")]
+    assert len(uploads) == 1
+    assert "output/playwright/hosting-warning-boundary/" in uploads[0]["with"]["path"]
+
+
+@pytest.mark.parametrize("upstream", ["success", "failure", "cancelled", "skipped"])
+def test_required_browser_guard_rejects_every_unsuccessful_full_checkout(upstream: str) -> None:
+    guard = load_workflow(WORKFLOWS / "browser.yml")["jobs"]["browser-e2e"]["steps"][0]
+    completed = subprocess.run(  # noqa: S603 -- Execute the actual fixed CI guard against synthetic job results.
+        ["/bin/bash", "-c", guard["run"]],
+        check=False,
+        env={**os.environ, "HOSTING_CHECKOUT_RESULT": upstream},
+        capture_output=True,
+        text=True,
+    )
+    assert (completed.returncode == 0) is (upstream == "success"), completed.stderr

@@ -12,6 +12,7 @@ from django.db.models import ProtectedError
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.billing.models import Currency
 from apps.customers.models import Customer
 from apps.domains.models import TLD, Domain, DomainCurrencyTransition, Registrar
 from apps.notifications.models import EmailLog
@@ -26,6 +27,7 @@ def _old_log(subject: str) -> EmailLog:
 
 class EmailLogCleanupTests(TestCase):
     def test_a_log_a_notice_points_at_is_kept_and_the_rest_are_deleted(self) -> None:
+        Currency.objects.get_or_create(code="RON", defaults={"symbol": "lei"})
         customer = Customer.objects.create(name="Domain owner", primary_email="owner@example.test")
         tld = TLD.objects.create(
             extension="com", registration_price_cents=6000, renewal_price_cents=5000, transfer_price_cents=4500

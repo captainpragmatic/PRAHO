@@ -61,6 +61,37 @@ class CreateRetryBinding:
         )
 
 
+def create_binding_snapshot(
+    account: VirtualminAccount,
+    job: VirtualminProvisioningJob,
+    *,
+    origin_server_id: UUID | None = None,
+) -> CreateRetryBinding:
+    """Freeze local create identity; this pure snapshot grants no ownership itself."""
+    return CreateRetryBinding(
+        account.pk,
+        account.service_id,
+        account.server_id if origin_server_id is None else origin_server_id,
+        job.server_id,
+        account.domain,
+        account.virtualmin_username,
+        password_fingerprint(account),
+        job.status,
+        job.claimed_at,
+        job.started_at,
+    )
+
+
+def create_origin_allowed(binding: CreateRetryBinding, job: VirtualminProvisioningJob) -> bool:
+    """Only the existing reprovision producer may stage a different native target."""
+    intent = job.parameters.get("creation_intent")
+    return binding.origin_server_id == binding.target_server_id or (
+        isinstance(intent, dict)
+        and intent.get("purpose") == "reprovision"
+        and job.parameters.get("reprovision_source_server_id") == str(binding.origin_server_id)
+    )
+
+
 def retry_binding(account: VirtualminAccount, job: VirtualminProvisioningJob) -> CreateRetryBinding | None:
     """Only the actual reprovision producer may authorize a staged target."""
     expected_claim = (job.status, job.claimed_at, job.started_at)
@@ -72,25 +103,8 @@ def retry_binding(account: VirtualminAccount, job: VirtualminProvisioningJob) ->
         "completed",
     ):
         return None
-    intent = job.parameters.get("creation_intent")
-    staged_without_origin = account.server_id != job.server_id and (
-        not isinstance(intent, dict)
-        or intent.get("purpose") != "reprovision"
-        or job.parameters.get("reprovision_source_server_id") != str(account.server_id)
-    )
-    binding = CreateRetryBinding(
-        account.pk,
-        account.service_id,
-        account.server_id,
-        job.server_id,
-        account.domain,
-        account.virtualmin_username,
-        password_fingerprint(account),
-        job.status,
-        job.claimed_at,
-        job.started_at,
-    )
-    if not staged_without_origin and binding.owns(account, job):
+    binding = create_binding_snapshot(account, job)
+    if create_origin_allowed(binding, job) and binding.owns(account, job):
         return binding
     park_changed_binding(binding, job.pk, native_outcome="not_observed")
     return None
@@ -102,7 +116,14 @@ def binding_current(binding: CreateRetryBinding, job_id: UUID) -> bool:
     return binding.owns(account, job)
 
 
-def park_changed_binding(binding: CreateRetryBinding, job_id: UUID, *, native_outcome: str) -> None:
+def park_changed_binding(
+    binding: CreateRetryBinding,
+    job_id: UUID,
+    *,
+    native_outcome: str,
+    reason: str = "Original create account binding changed; verify the recorded native target",
+    response_data: dict[str, Any] | None = None,
+) -> None:
     """Park only the original delivery; preserve a reaper or a newer claim."""
     with transaction.atomic():
         VirtualminAccount.objects.select_for_update().get(pk=binding.account_id)
@@ -113,9 +134,10 @@ def park_changed_binding(binding: CreateRetryBinding, job_id: UUID, *, native_ou
             and job.started_at == binding.started_at
         ):
             job.mark_attention(
-                "Original create account binding changed; verify the recorded native target",
+                reason,
                 {
                     **job.result,
+                    **(response_data or {}),
                     "creation_review": {
                         "domain": binding.domain,
                         "owner": binding.owner,
@@ -127,10 +149,17 @@ def park_changed_binding(binding: CreateRetryBinding, job_id: UUID, *, native_ou
 
 
 def settle_retry_created(
-    binding: CreateRetryBinding, job_id: UUID, data: dict[str, Any], *, native_outcome: str
+    binding: CreateRetryBinding,
+    job_id: UUID,
+    data: dict[str, Any],
+    *,
+    native_outcome: str,
+    publish_limits: bool,
 ) -> Result[dict[str, Any], str]:
     try:
-        return _settle_retry_created(binding, job_id, data, native_outcome=native_outcome)
+        return _settle_retry_created(
+            binding, job_id, data, native_outcome=native_outcome, publish_limits=publish_limits
+        )
     except Exception:
         logger.exception("Native creation settlement needs review for job %s", job_id)
         park_changed_binding(binding, job_id, native_outcome=native_outcome)
@@ -138,7 +167,12 @@ def settle_retry_created(
 
 
 def _settle_retry_created(
-    binding: CreateRetryBinding, job_id: UUID, data: dict[str, Any], *, native_outcome: str
+    binding: CreateRetryBinding,
+    job_id: UUID,
+    data: dict[str, Any],
+    *,
+    native_outcome: str,
+    publish_limits: bool,
 ) -> Result[dict[str, Any], str]:
     """Commit verified target/count once; preserve a real resource on stale settlement."""
     with transaction.atomic():
@@ -176,5 +210,11 @@ def _settle_retry_created(
             VirtualminServer.objects.filter(pk=binding.target_server_id).update(
                 current_domains=models.F("current_domains") + 1, updated_at=timezone.now()
             )
+        if publish_limits:
+            from .hosting_limit_execution import publish_managed_limits  # noqa: PLC0415 -- Claim-bound quota commit.
+
+            # Receipt publication still needs the running parent claim. Commit
+            # canonical ownership, quota publication and completion together.
+            publish_managed_limits(account)
         job.mark_completed(data)
     return Ok(data)

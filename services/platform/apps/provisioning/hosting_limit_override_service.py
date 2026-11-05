@@ -24,10 +24,13 @@ def can_override_hosting_resources(user: User) -> bool:
 
 
 def _financial_refusal(subscription: Subscription | None, *, using: str) -> str | None:
+    from apps.billing.plan_change_models import PlanChange  # noqa: PLC0415 -- Shared commercial boundary.
     from apps.billing.subscription_currency_models import SubscriptionCurrencyTransition  # noqa: PLC0415
 
     if subscription is None:
         return None
+    if subscription.plan_changes.using(using).filter(status__in=PlanChange.ACTIVE_STATES).exists():
+        return str(_("Resolve the active commercial plan change before granting a resource exception."))
     if subscription.changes.using(using).filter(status="pending").exists():
         return str(_("Resolve the pending subscription change before granting a resource exception."))
     pending_currency = Q(status__in=["pending", "notified"])

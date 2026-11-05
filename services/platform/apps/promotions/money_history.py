@@ -72,7 +72,7 @@ def campaign_history_is_complete(campaign: PromotionCampaign, totals: list[Curre
 def format_money_totals(subject: Coupon | PromotionCampaign, field: Literal["spent_cents", "reserved_cents"]) -> str:
     return (
         "; ".join(
-            f"{Decimal(row[field]) / 100:.2f} {row['currency_code'] or _('Unresolved currency')}"
+            "{:.2f} {}".format(Decimal(row[field]) / 100, row["currency_code"] or _("Unresolved currency"))
             for row in money_totals(subject)
             if row[field]
         )

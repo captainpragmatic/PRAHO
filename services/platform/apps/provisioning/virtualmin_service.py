@@ -45,6 +45,7 @@ from .virtualmin_create_node_identity import lock_create_retry_node
 from .virtualmin_create_retry_binding import (
     CreateRetryBinding,
     binding_current,
+    create_binding_snapshot,
     park_changed_binding,
     password_fingerprint,
     retry_binding,
@@ -620,21 +621,24 @@ class VirtualminProvisioningService:
         )
         if job.hosting_limit_application_id is not None:
             from .hosting_limit_policy import effective_disk_limit  # noqa: PLC0415
-            from .hosting_parent_limits import frozen_parent_application  # noqa: PLC0415
+            from .hosting_limit_review import reviewed_job_application  # noqa: PLC0415
 
-            frozen = frozen_parent_application(job)
+            frozen = reviewed_job_application(job)
             params.update(
-                quota_parameters(effective_disk_limit(frozen.disk_allowance_mib), frozen.bandwidth_allowance_mib)
+                quota_parameters(
+                    effective_disk_limit(frozen.disk_allowance_mib, extra_mib=frozen.overlay_extra_mib),
+                    frozen.bandwidth_allowance_mib,
+                )
             )
         return params
 
-    def _execute_domain_creation(  # noqa: PLR0911, PLR0912, PLR0915 -- Verified create, native quota and canonical ownership commit.
+    def _execute_domain_creation(  # noqa: PLR0911, PLR0915 -- Verified create, native quota and canonical ownership commit.
         self,
         account: VirtualminAccount,
         job: VirtualminProvisioningJob,
         *,
         before_create: Callable[[], Err[str] | None] | None = None,
-        settle_created: Callable[[dict[str, Any]], Result[dict[str, Any], str]] | None = None,
+        settle_created: Callable[[dict[str, Any], bool], Result[dict[str, Any], str]] | None = None,
     ) -> Result[dict[str, Any], str]:
         """Execute domain creation on Virtualmin server with validation and rollback"""
         try:
@@ -673,6 +677,11 @@ class VirtualminProvisioningService:
             )
             if refusal is not None:
                 return refusal
+            created_binding = create_binding_snapshot(
+                account,
+                job,
+                origin_server_id=VirtualminAccount.objects.values_list("server_id", flat=True).get(pk=account.pk),
+            )
             result = gateway.call(
                 "create-domain",
                 params,
@@ -688,17 +697,19 @@ class VirtualminProvisioningService:
 
                     quotas = ensure_managed_limits(account, parent_job=job, native_server=account.server)
                     if quotas.is_err():
-                        job.mark_attention(quotas.unwrap_err(), response.data)
+                        park_changed_binding(
+                            created_binding,
+                            job.pk,
+                            native_outcome="created",
+                            reason=quotas.unwrap_err(),
+                            response_data=response.data,
+                        )
                         return Err(quotas.unwrap_err(), retriability=Retriability.UNKNOWN)
                     if settle_created is not None:
                         # Retry settlement owns its fresh binding/claim checks.
                         # A post-acceptance bookkeeping failure must never delete
                         # the actual resource or replay the creation command.
-                        settled = settle_created(response.data)
-                        if settled.is_ok():
-                            account.refresh_from_db()
-                            publish_managed_limits(account)
-                        return settled
+                        return settle_created(response.data, quotas.unwrap())
                     # Track successful domain creation for potential rollback
                     rollback_operations.append(
                         {
@@ -1459,9 +1470,12 @@ class VirtualminProvisioningService:
                 VirtualminServer.objects.select_for_update(of=("self",)).get(pk=account.server_id)
                 from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Native admission
                     maintenance_refusal,
+                    native_account_observation_refusal,
                 )
 
-                if node_refusal := maintenance_refusal(account.server_id):
+                if node_refusal := maintenance_refusal(account.server_id) or native_account_observation_refusal(
+                    account.pk
+                ):
                     _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
                     return Err(node_refusal, retriability=Retriability.RETRIABLE)
                 admission_refusal: Result[bool, str] | None
@@ -1671,7 +1685,9 @@ class VirtualminProvisioningService:
             account,
             job,
             before_create=lambda: self._retry_dispatch_refusal(account, job, binding),
-            settle_created=lambda data: settle_retry_created(binding, job.pk, data, native_outcome="created"),
+            settle_created=lambda data, managed: settle_retry_created(
+                binding, job.pk, data, native_outcome="created", publish_limits=managed
+            ),
         )
         if creation_result.is_err():
             return Err(creation_result.unwrap_err())
@@ -1685,29 +1701,25 @@ class VirtualminProvisioningService:
     ) -> Result[dict[str, Any], str]:
         from .hosting_limit_execution import (  # noqa: PLC0415 -- Same native gate as fresh creation.
             ensure_managed_limits,
-            publish_managed_limits,
         )
 
         verified: Result[bool, str] = Ok(False)
         if create_retry_policy(account, job).allowed:
             verified = ensure_managed_limits(account, parent_job=job, native_server=job.server)
             if verified.is_err() and create_retry_policy(account, job).allowed:
-                job.mark_attention(verified.unwrap_err())
+                park_changed_binding(binding, job.pk, native_outcome="adopted", reason=verified.unwrap_err())
                 return Err(verified.unwrap_err(), retriability=Retriability.UNKNOWN)
         with transaction.atomic():
             target = lock_create_retry_node(account, job)
             if target.is_err():
                 return Err(target.unwrap_err())
-            settled = settle_retry_created(
+            return settle_retry_created(
                 binding,
                 job.pk,
                 {"recovered": "remote domain already present"},
                 native_outcome="adopted",
+                publish_limits=verified.is_ok() and verified.unwrap(),
             )
-            if settled.is_ok() and verified.is_ok() and verified.unwrap():
-                account.refresh_from_db()
-                publish_managed_limits(account)
-            return settled
 
     def _retry_dispatch_refusal(
         self, account: VirtualminAccount, job: VirtualminProvisioningJob, binding: CreateRetryBinding
@@ -2517,6 +2529,7 @@ class VirtualminBackupManagementService:
                 return Err("Account moved to another server since this request began; retry")
             from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server admission
                 maintenance_refusal,
+                native_account_observation_refusal,
             )
 
             node_id = locked.server_id if source_bound else self.server.pk
@@ -2524,6 +2537,8 @@ class VirtualminBackupManagementService:
             if refusal := self._backup_server_refusal(locked, target_server, operation, parameters):
                 return Err(refusal)
             if refusal := maintenance_refusal(node_id):
+                return Err(refusal)
+            if refusal := native_account_observation_refusal(locked.pk):
                 return Err(refusal)
             if account_has_active_operation(locked):
                 return Err(ACCOUNT_BUSY_REFUSAL)

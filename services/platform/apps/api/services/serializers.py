@@ -16,6 +16,8 @@ from apps.provisioning.hosting_limit_selectors import (
     operational_allowances,
     usage_percentage,
 )
+from apps.provisioning.hosting_raise_service import prime_hosting_raises, service_raise_public_state
+from apps.provisioning.hosting_warning_selectors import prime_hosting_warnings, service_warning_data
 from apps.provisioning.relationship_models import ServiceDomain
 from apps.provisioning.service_models import Service, ServicePlan, ServicePlanPrice
 
@@ -24,6 +26,18 @@ def service_monthly_price(service: Service) -> Decimal:
     """Display the saved service charge, without repricing it from today's catalog."""
     months = {"monthly": 1, "quarterly": 3, "semi_annual": 6, "annual": 12}[service.billing_cycle]
     return service.price / months
+
+
+def hosting_raise_data(service: Service) -> dict[str, object] | None:
+    state = service_raise_public_state(service)
+    if state is None:
+        return None
+    return {
+        "state": state.state,
+        "extra_mib": state.extra_mib,
+        "expires_at": state.expires_at.isoformat(),
+        "revision": state.revision,
+    }
 
 
 class ServiceDomainSerializer(serializers.ModelSerializer):
@@ -114,6 +128,8 @@ class ServiceUsageListSerializer(serializers.ListSerializer):
 
         records = list(data.all() if hasattr(data, "all") else data)
         prime_service_usage(records)
+        prime_hosting_raises(records)
+        prime_hosting_warnings(records)
         return super().to_representation(records)
 
 
@@ -129,6 +145,8 @@ class UsageRepresentationMixin(serializers.ModelSerializer):
             prime_service_usage([instance])
         result = super().to_representation(instance)
         result["hosting_limits"] = hosting_limits_summary(instance)
+        result["hosting_warnings"] = service_warning_data(instance)
+        result["hosting_raise"] = hosting_raise_data(instance)
         if observations_apply(instance):
             result.update(public_usage(instance))
         return result

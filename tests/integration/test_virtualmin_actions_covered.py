@@ -302,7 +302,7 @@ class TestScannerSeesTheRealCode:
             (site.path, site.function, site.program) for site in sites
         }
         assert {
-            ("provisioning/hosting_limit_transport.py", "probe_account_quota", "list-domains"),
+            ("provisioning/hosting_limit_transport.py", "probe_registered_account_quota", "list-domains"),
             ("infrastructure/native_workflow_scenarios.py", "_node_enabled", "list-domains"),
         } <= {(site.path, site.function, site.program) for site in sites}
         # Disabling account-name previews removed _home() and its direct list-domains call.
