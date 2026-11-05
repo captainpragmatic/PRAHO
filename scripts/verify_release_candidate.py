@@ -120,11 +120,13 @@ def verify(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> str:
     return f"The merge queue passed every required check on the candidate itself ({sha}), and {lab}"
 
 
-# The full lab: the container job (nightly, or a suite=containers dispatch), its name before the rename
-# ("nightly-full", the same full container lab), or an optional native run.
+# The full lab: the container job (nightly, or a suite=containers dispatch), its earlier version
+# "nightly-full" (the full lab before node deploy moved to native acceptance), or an optional native run.
 NIGHTLY_LAB_WORKFLOW = "virtualmin-lab.yml"
-FULL_LAB_JOBS = ("nightly-containers", "nightly-full", "native-full")
+CONTAINER_LAB_JOBS = ("nightly-containers", "nightly-full")
+FULL_LAB_JOBS = (*CONTAINER_LAB_JOBS, "native-full")
 NATIVE_ADMISSION_JOB = "native-admission"
+COMPONENTS_JOB = "components-diagnostic"
 
 
 NIGHTLY_ACTIVITY_JOB = "check-activity"
@@ -145,21 +147,23 @@ def _master_lab_runs(repo: str, gh: Callable[[str], Any]) -> Iterator[dict[str, 
 
 
 def _passed_over(jobs: dict[str, JSONObject], run: JSONObject) -> bool:
-    """A run without a full lab that says nothing about the code: drift, a quiet night, or a native
-    dispatch refused before it started because no runner is configured."""
+    """A run without a full lab that says nothing about the code: drift, a quiet night, a components
+    diagnostic, or a native dispatch refused before it started because no runner is configured."""
     # Drift is a matrix: its jobs are named "nightly-drift (<runner>)". It is informational, never a gate.
     drift = any(
         name.startswith(NIGHTLY_DRIFT_JOB) and job.get("conclusion") not in (None, "skipped")
         for name, job in jobs.items()
     )
-    # A quiet night skipped a full-lab job this gate knows; a job it does not know was renamed, not quiet.
+    # A quiet night skipped the container job this gate knows. Every scheduled run also lists native-full
+    # as skipped, so that never counts: a container job it does not know was renamed, not quiet.
     quiet = (
-        any(jobs.get(name, {}).get("conclusion") == "skipped" for name in FULL_LAB_JOBS)
+        any(jobs.get(name, {}).get("conclusion") == "skipped" for name in CONTAINER_LAB_JOBS)
         and jobs.get(NIGHTLY_ACTIVITY_JOB, {}).get("conclusion") == "success"
         and run.get("conclusion") == "success"
     )
     unadmitted = jobs.get(NATIVE_ADMISSION_JOB, {}).get("conclusion") == "failure"
-    return drift or quiet or unadmitted
+    diagnostic = jobs.get(COMPONENTS_JOB, {}).get("conclusion") not in (None, "skipped")
+    return drift or quiet or unadmitted or diagnostic
 
 
 def latest_full_lab(repo: str, gh: Callable[[str], Any] = _gh) -> str:

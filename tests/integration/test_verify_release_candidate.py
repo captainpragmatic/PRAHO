@@ -196,17 +196,37 @@ def test_the_full_lab_under_its_earlier_job_name_still_counts() -> None:
 
 
 def test_a_run_whose_lab_job_this_gate_does_not_know_is_not_a_quiet_night() -> None:
-    # A renamed job must be taught to the gate, never mistaken for a night without changes.
+    # A renamed container job must be taught to the gate, never mistaken for a night without changes.
+    # A real scheduled run also lists native-full as skipped: that must not make it look quiet.
     renamed = nightly(
         924,
         "skipped",
         jobs=[
             {"name": "check-activity", "conclusion": "success"},
             {"name": "nightly-everything", "conclusion": "success"},
+            {"name": NATIVE_JOB, "conclusion": "skipped"},
         ],
     )
     with pytest.raises(VerificationError, match="full Virtualmin lab"):
         verify(SHA, "owner/repo", FakeGitHub(all_green(), [renamed, nightly(923, "success")]))
+
+
+def test_a_components_diagnostic_dispatch_is_passed_over() -> None:
+    # suite=components runs only a diagnostic: it says nothing about the full lab, whatever its outcome.
+    for outcome in ("success", "failure"):
+        diagnostic = nightly(
+            926,
+            "skipped",
+            activity="skipped",
+            conclusion=outcome,
+            jobs=[
+                {"name": "check-activity", "conclusion": "skipped"},
+                {"name": CONTAINER_JOB, "conclusion": "skipped"},
+                {"name": NATIVE_JOB, "conclusion": "skipped"},
+                {"name": "components-diagnostic", "conclusion": outcome},
+            ],
+        )
+        assert "run 925" in verify(SHA, "owner/repo", FakeGitHub(all_green(), [diagnostic, nightly(925, "success")]))
 
 
 def test_a_passed_lab_job_in_a_cancelled_run_does_not_qualify() -> None:

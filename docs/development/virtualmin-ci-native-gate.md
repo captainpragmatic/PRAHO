@@ -61,8 +61,11 @@ on `master` to have passed: the container job (`nightly-containers`, nightly or 
 `containers` dispatch) or, when one has run, a native `full` dispatch. A failed or
 cancelled latest full lab refuses; drift runs, quiet nights and `full` dispatches
 refused at admission are passed over. Kernel, filesystem and cloud-image behaviour
-(quotas, image defaults) is proven on staging by deploying a test node after the
-promote, until a disposable-VM native check runs on hosted runners.
+(quotas, image defaults) and node deploy are proven on staging by deploying a test
+node after the promote, until a disposable-VM native check runs on hosted runners.
+The lab evidence is master's latest full lab, not a run on the candidate itself.
+A previously approved staging rollback keeps the release-candidate requirements it
+was qualified under and is not requalified retroactively.
 
 Always preserve failed or uncertain native state and private logs for the existing
 exact-resource reconciliation and teardown procedures. Container cleanup runs
