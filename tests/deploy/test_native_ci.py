@@ -61,15 +61,25 @@ def test_required_integration_check_waits_for_parallel_native_and_general_suites
     assert jobs[native_job]["needs"] == "native-changes"
     assert jobs[native_job]["if"] == "!cancelled() && needs.native-changes.outputs.native != 'false'"
     assert "if" not in jobs["native-changes"] and not jobs["native-changes"].get("needs")
-    # The infrastructure check is not profile-specific: exactly one matrix entry runs it.
-    profile_bound = {"matrix.profile == 'combined-prod'"}
+
+    # The infrastructure check is not profile-specific: exactly one matrix entry runs it. Only those two
+    # steps may carry that condition; the acceptance itself runs in every entry.
+    def infrastructure(step: dict) -> bool:
+        return step.get("run") == "make test-native-infra" or step.get("uses", "").startswith(
+            "hashicorp/setup-terraform@"
+        )
+
     for name in native | general:
         job = jobs[name]
         assert "continue-on-error" not in job
         for step in job["steps"]:
             assert "continue-on-error" not in step
-            allowed = {None, "always()"} | (profile_bound if name == native_job else set())
-            assert step.get("if") in allowed, "Upstream work must not silently skip"
+            if name == native_job and infrastructure(step):
+                assert step.get("if") == "matrix.profile == 'combined-prod'"
+            else:
+                assert step.get("if") in (None, "always()"), "Upstream work must not silently skip"
+    acceptance = [step for step in jobs[native_job]["steps"] if step.get("run") == "make test-native-deploy"]
+    assert len(acceptance) == 1 and "if" not in acceptance[0]
 
 
 def test_native_ci_qualifies_each_topology_in_parallel_with_no_missing_profile() -> None:
@@ -107,19 +117,17 @@ def test_general_integration_installs_the_pinned_transport_collection_before_tes
     assert len(install) == 1 and install[0] < tests, "A fresh runner has ansible-core but no transport collection"
 
 
+@pytest.mark.parametrize("selection", ["success", "failure", "cancelled", "skipped"])
 @pytest.mark.parametrize("selected", ["true", "false", ""])
 @pytest.mark.parametrize("general", ["success", "failure", "cancelled", "skipped"])
 @pytest.mark.parametrize("native", ["success", "failure", "cancelled", "skipped"])
 def test_required_integration_gate_only_passes_when_both_real_jobs_succeed(
-    general: str, native: str, selected: str
+    general: str, native: str, selected: str, selection: str
 ) -> None:
     gate = yaml.safe_load((ROOT / ".github/workflows/integration.yml").read_text())["jobs"]["integration-test"]
-    # An empty answer is a selection that failed or never ran: it can never excuse a skip.
-    results = {
-        "integration-suite": general,
-        "native-deploy": native,
-        "native-changes": "success" if selected else "failure",
-    }
+    # The selection's status and its answer vary independently: an answer of false from a selection that
+    # then failed, was cancelled or skipped can never excuse a native skip.
+    results = {"integration-suite": general, "native-deploy": native, "native-changes": selection}
     outputs = {("native-changes", "native"): selected}
     environment = dict(os.environ)
     for name, expression in gate["env"].items():
@@ -131,5 +139,5 @@ def test_required_integration_gate_only_passes_when_both_real_jobs_succeed(
     completed = subprocess.run(  # noqa: S603 -- Execute the repository-owned gate, not caller-provided shell text.
         ["/bin/bash", "-euc", script], env=environment, capture_output=True, check=False
     )
-    deliberately_skipped = native == "skipped" and selected == "false"
+    deliberately_skipped = native == "skipped" and selected == "false" and selection == "success"
     assert (completed.returncode == 0) is (general == "success" and (native == "success" or deliberately_skipped))
