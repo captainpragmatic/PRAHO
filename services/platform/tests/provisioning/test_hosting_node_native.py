@@ -72,16 +72,25 @@ class HostingNodeNativeTests(SimpleTestCase):
             },
             "inventory_digest": "a" * 64,
         }
+
+        def native_file(path, **kwargs):
+            if path == Path("/etc/machine-id"):
+                return "f3dc92d50ac14de0b663f7daab29960a"
+            raise FileNotFoundError(path)
+
         with (
             TemporaryDirectory() as directory,
             patch.object(self.native, "INSTALLATION", Path(directory) / "not-installed"),
-            patch.object(self.native, "_read", return_value="f3dc92d50ac14de0b663f7daab29960a"),
+            patch.object(self.native, "_read", side_effect=native_file),
             patch.object(self.native, "_run", return_value=json.dumps(notifications)) as transport,
             patch.dict("sys.modules", {"praho_quota_native": None}),
         ):
             result = self.native.inspect("a" * 64)
         self.assertEqual(result["quota"], {})
-        self.assertEqual(result["notifications"]["emitters"], {"domain_signup": False})
+        self.assertEqual(
+            result["notifications"]["emitters"],
+            {"domain_signup": False, "os_quota_warnings": True, "acme_owners": False},
+        )
         self.assertEqual(transport.call_count, 1)
         self.assertEqual(transport.call_args.args[0][-1], "inspect")
 

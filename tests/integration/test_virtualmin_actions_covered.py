@@ -317,7 +317,7 @@ class TestScannerSeesTheRealCode:
             and site.program == "delete-domain"
             for site in sites
         )
-        assert len([site for site in sites if site.program]) == 52, (
+        assert len([site for site in sites if site.program]) == 53, (
             "call sites changed: review them, then update this count"
         )
 

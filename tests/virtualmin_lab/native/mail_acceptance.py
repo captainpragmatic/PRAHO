@@ -16,6 +16,7 @@ import socketserver
 import ssl
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import urllib.request
@@ -133,7 +134,9 @@ print 'PRAHO_NATIVE_MAIL={}';""",
     )
 
 
-def create_domain(domain: str, owner: str, *, template: str | None = None, notify: bool = False) -> None:
+def create_domain(
+    domain: str, owner: str, *, template: str | None = None, notify: bool = False, web_only: bool = False
+) -> None:
     argv = [
         VMIN,
         "create-domain",
@@ -150,8 +153,6 @@ def create_domain(domain: str, owner: str, *, template: str | None = None, notif
         "--web",
         "--ssl",
         "--mysql",
-        "--mail",
-        "--dns",
         "--logrotate",
         "--quota",
         "0",
@@ -160,6 +161,8 @@ def create_domain(domain: str, owner: str, *, template: str | None = None, notif
         "--bandwidth",
         "0",
     ]
+    if not web_only:
+        argv += ["--mail", "--dns"]
     if template is not None:
         argv += ["--template", template]
     if not notify:
@@ -167,9 +170,85 @@ def create_domain(domain: str, owner: str, *, template: str | None = None, notif
     run(argv, timeout=180)
 
 
+def archive_before_handover(stem: str) -> dict[str, object]:
+    """A separate disposable web-only account; retained mailbox accounts are never deleted."""
+    domain, owner = stem + "archive.praho.test", stem + "archive"
+    create_domain(domain, owner, web_only=True)
+    metadata = perl(
+        """my $d=&get_domain_by('dom',$p->{'domain'});die 'Missing archive fixture' if !$d || $d->{'mail'};
+&lock_domain($d);$d=&get_domain($d->{'id'},undef,1);$d->{'letsencrypt_email'}=0;$d->{'letsencrypt_email_master'}=1;
+$d->{'letsencrypt_renew'}=1;&save_domain($d);&unlock_domain($d);
+print 'PRAHO_NATIVE_MAIL=',JSON::PP->new->encode({domain=>$d->{'dom'},owner=>$d->{'user'},home=>$d->{'home'},
+domain_id=>$d->{'id'},ssl_cert=>$d->{'ssl_cert'},ssl_key=>$d->{'ssl_key'}});""",
+        {"domain": domain},
+    )
+    marker = Path(str(metadata["home"])) / "public_html/pre-handover-archive.txt"
+    marker.write_text("Native archive ownership fixture " + domain)
+    user = pwd.getpwnam(owner)
+    os.chown(marker, user.pw_uid, user.pw_gid)
+    archive = ROOT / "pre-handover-native.tar.gz"
+    assert not archive.exists()
+    run([VMIN, "backup-domain", "--domain", domain, "--dest", str(archive), "--all-features"], timeout=180)
+    archive.chmod(0o600)
+    with tarfile.open(archive, "r:gz") as bundle:
+        members = [member for member in bundle if Path(member.name).name == domain + "_virtualmin"]
+        assert len(members) == 1 and members[0].isfile() and members[0].size <= 1024 * 1024
+        stream = bundle.extractfile(members[0])
+        assert stream is not None
+        fields = dict(line.split("=", 1) for line in stream.read().decode().splitlines() if "=" in line)
+        assert fields["dom"] == domain and fields["user"] == owner and fields["letsencrypt_email"] == "0"
+        assert fields.get("mail") != "1"
+    return {
+        **metadata,
+        "archive": str(archive),
+        "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+        "marker_sha256": hashlib.sha256(marker.read_bytes()).hexdigest(),
+    }
+
+
+def restore_after_handover(metadata: dict[str, object], sink: MailSink) -> dict[str, object]:
+    """Actual missing-domain recreation restores whole metadata, unlike an existing-domain merge."""
+    domain, owner = str(metadata["domain"]), str(metadata["owner"])
+    archive = Path(str(metadata["archive"]))
+    assert hashlib.sha256(archive.read_bytes()).hexdigest() == metadata["archive_sha256"]
+    run([VMIN, "delete-domain", "--domain", domain])
+    assert not Path(str(metadata["home"])).exists()
+    argv = [VMIN, "restore-domain", "--domain", domain, "--source", str(archive), "--only-features"]
+    for feature in ("virtualmin", "unix", "dir", "web", "ssl", "mysql", "logrotate"):
+        argv += ["--feature", feature]
+    run(argv, timeout=180)
+    restored = perl(
+        """my $d=&get_domain_by('dom',$p->{'domain'});die 'Archive owner/settings not restored' if !$d
+|| $d->{'user'} ne $p->{'owner'} || $d->{'mail'} || $d->{'letsencrypt_email'} ne '0';
+print 'PRAHO_NATIVE_MAIL=',JSON::PP->new->encode({domain_id=>$d->{'id'},ssl_cert=>$d->{'ssl_cert'},ssl_key=>$d->{'ssl_key'}});""",
+        {"domain": domain, "owner": owner},
+    )
+    marker = Path(str(metadata["home"])) / "public_html/pre-handover-archive.txt"
+    assert hashlib.sha256(marker.read_bytes()).hexdigest() == metadata["marker_sha256"]
+    prepare_due_certificate(domain, restored)
+    perl(
+        """my $d=&get_domain_by('dom',$p->{'domain'});&lock_domain($d);$d=&get_domain($d->{'id'},undef,1);
+die 'Actual archive owner flag was repaired before the emitter proof' if $d->{'letsencrypt_email'} ne '0';
+$d->{'letsencrypt_last'}=0;delete $d->{'letsencrypt_first_failure'};&save_domain($d);&unlock_domain($d);
+&save_module_config_keys({last_letsencrypt_mass_renewal=>0});&apply_letsencrypt_cert_renewals();
+# Isolate the subsequent primary-domain renewal controls; this is fixture-only.
+&lock_domain($d);$d=&get_domain($d->{'id'},undef,1);$d->{'letsencrypt_renew'}=0;&save_domain($d);&unlock_domain($d);
+print 'PRAHO_NATIVE_MAIL={}';""",
+        {"domain": domain},
+    )
+    assert CUSTOMER not in sink.attempts, "Actual pre-handover archive reopened native customer mail"
+    assert OPERATORS["acme"] in sink.attempts, "Native restored-domain master alert was lost"
+    return {
+        "archive_sha256": metadata["archive_sha256"],
+        "restored_domain_id": restored["domain_id"],
+        "native_cli_restore": True,
+        "public_platform_restore": False,
+    }
+
+
 def prepare_permissive_source(domain: str) -> dict[str, object]:
     metadata = perl(
-        """my $d=&get_domain_by('dom',$p->{'domain'});die 'Missing fixture' if !$d;
+        r"""my $d=&get_domain_by('dom',$p->{'domain'});die 'Missing fixture' if !$d;
 my $t={%{&get_template(0)}};delete $t->{'id'};delete $t->{'standard'};delete $t->{'default'};
 $t->{'name'}='PRAHO native mail fixture';$t->{'mail_on'}='yes';$t->{'mail'}='Native signup fixture';
 $t->{'newuser_on'}='yes';$t->{'newuser'}='Native user fixture';$t->{'updateuser_on'}='yes';
@@ -191,8 +270,12 @@ if($m->{'type'} eq 'sslcert'){$m->{'url'}='https://127.0.0.1:443/';}
 my $b={dest=>'/root/praho-native-mail/scheduled-backup.tar.gz',fmt=>0,doms=>$d->{'id'},
 features=>'dir',email=>$p->{'backup_operator'},email_doms=>1,email_err=>0,enabled=>0};
 &save_scheduled_backup($b);
+my @extra;for my $kind ('customer','mixed') {
+my $email=$p->{'customer'}.($kind eq 'mixed' ? ','.$p->{'backup_operator'} : '');
+my $other={%$b,dest=>'/root/praho-native-mail/scheduled-backup-'.$kind.'.tar.gz',email=>$email,email_doms=>0};
+delete $other->{'id'};&save_scheduled_backup($other);push @extra,$other->{'id'};}
 print 'PRAHO_NATIVE_MAIL=',JSON::PP->new->canonical->encode({domain_id=>$d->{'id'},template=>$t->{'id'},
-backup=>$b->{'id'},home=>$d->{'home'},ssl_cert=>$d->{'ssl_cert'},ssl_key=>$d->{'ssl_key'}});""",
+backup=>$b->{'id'},backup_extra=>\@extra,home=>$d->{'home'},ssl_cert=>$d->{'ssl_cert'},ssl_key=>$d->{'ssl_key'}});""",
         {"domain": domain, "customer": CUSTOMER, **{name + "_operator": value for name, value in OPERATORS.items()}},
     )
     run(["/usr/bin/perl", "/usr/share/webmin/status/monitor.pl", "--force"])
@@ -295,38 +378,7 @@ def contact_form(owner: str, domain: str, home: Path) -> None:
         time.sleep(0.1)
 
 
-def exercise_emitters(domain: str, metadata: dict[str, object], *, suffix: str) -> set[str]:
-    user = "inbox" + suffix
-    run(
-        [
-            VMIN,
-            "create-user",
-            "--domain",
-            domain,
-            "--user",
-            user,
-            "--pass",
-            PASSWORD,
-            "--real",
-            "Native mailbox fixture",
-        ]
-    )
-    run([VMIN, "modify-user", "--domain", domain, "--user", user, "--real", "Updated fixture", "--send-update-email"])
-    perl(
-        r"""my $d=&get_domain_by('dom',$p->{'domain'});&lock_domain($d);$d=&get_domain($d->{'id'},undef,1);
-$d->{'quota'}=1;$d->{'bw_limit'}=1;$d->{'bw_notify'}=0;$d->{'quota_notify'}='';$d->{'letsencrypt_email_master'}=1;
-$d->{'letsencrypt_renew'}=1;$d->{'letsencrypt_last'}=0;delete $d->{'letsencrypt_first_failure'};
-&save_domain($d);&unlock_domain($d);my $bw=&get_bandwidth($d);$bw->{'web_'.int(time()/86400)}=1000000;
-&save_bandwidth($d,$bw);my $app=$d->{'home'}.'/public_html/native-app';&make_dir($app,0755);
-my @scripts=&list_domain_scripts($d);if(!@scripts){&add_domain_script($d,'phpmyadmin','0.1',{path=>$app},'Native old application fixture','/native-app');}
-my @up=&list_script_upgrades([$d]);die 'Native app fixture has no genuine version upgrade' if !@up;
-&save_module_config_keys({last_letsencrypt_mass_renewal=>0});
-&foreign_require('status');my @ids;for my $m (&status::list_services()) {next if $m->{'virtualmin'} ne $d->{'id'};
-$m->{'fails'}=1;$m->{'nosched'}=0;if($m->{'type'} eq 'http'){$m->{'host'}='127.0.0.1';$m->{'port'}=9;$m->{'ssl'}=0;}
-&status::save_service($m);push @ids,$m->{'id'};}
-print 'PRAHO_NATIVE_MAIL=',JSON::PP->new->canonical->encode({ids=>\@ids});""",
-        {"domain": domain},
-    )
+def prepare_due_certificate(domain: str, metadata: dict[str, object]) -> None:
     run(
         [
             "/usr/bin/openssl",
@@ -352,10 +404,47 @@ die 'Native ACME fixture is not due' if &parse_notafter_date($i->{'notafter'})-t
 print 'PRAHO_NATIVE_MAIL={}';""",
         {"domain": domain},
     )
+
+
+def exercise_emitters(domain: str, metadata: dict[str, object], *, suffix: str) -> set[str]:
+    user = "inbox" + suffix
+    run(
+        [
+            VMIN,
+            "create-user",
+            "--domain",
+            domain,
+            "--user",
+            user,
+            "--pass",
+            PASSWORD,
+            "--real",
+            "Native mailbox fixture",
+        ]
+    )
+    run([VMIN, "modify-user", "--domain", domain, "--user", user, "--real", "Updated fixture", "--send-update-email"])
+    perl(
+        r"""my $d=&get_domain_by('dom',$p->{'domain'});&lock_domain($d);$d=&get_domain($d->{'id'},undef,1);
+$d->{'quota'}=1;$d->{'bw_limit'}=1;$d->{'bw_notify'}=0;$d->{'quota_notify'}='';$d->{'letsencrypt_email_master'}=1;
+$d->{'letsencrypt_email'}=0; # An old restored owner flag must not reopen the ACME customer branch.
+$d->{'letsencrypt_renew'}=1;$d->{'letsencrypt_last'}=0;delete $d->{'letsencrypt_first_failure'};
+&save_domain($d);&unlock_domain($d);my $bw=&get_bandwidth($d);$bw->{'web_'.int(time()/86400)}=1000000;
+&save_bandwidth($d,$bw);my $app=$d->{'home'}.'/public_html/native-app';&make_dir($app,0755);
+my @scripts=&list_domain_scripts($d);if(!@scripts){&add_domain_script($d,'phpmyadmin','0.1',{path=>$app},'Native old application fixture','/native-app');}
+my @up=&list_script_upgrades([$d]);die 'Native app fixture has no genuine version upgrade' if !@up;
+&save_module_config_keys({last_letsencrypt_mass_renewal=>0});
+&foreign_require('status');my @ids;for my $m (&status::list_services()) {next if $m->{'virtualmin'} ne $d->{'id'};
+$m->{'fails'}=1;$m->{'nosched'}=0;if($m->{'type'} eq 'http'){$m->{'host'}='127.0.0.1';$m->{'port'}=9;$m->{'ssl'}=0;}
+&status::save_service($m);push @ids,$m->{'id'};}
+print 'PRAHO_NATIVE_MAIL=',JSON::PP->new->canonical->encode({ids=>\@ids});""",
+        {"domain": domain},
+    )
+    prepare_due_certificate(domain, metadata)
     run(["/usr/bin/perl", "/usr/share/webmin/virtual-server/quotas.pl"])
     run(["/usr/bin/perl", "/usr/share/webmin/virtual-server/bw.pl", domain])
     run(["/usr/bin/perl", "/usr/share/webmin/virtual-server/scriptwarn.pl"])
-    run(["/usr/bin/perl", "/usr/share/webmin/virtual-server/backup.pl", "--id", str(metadata["backup"])], timeout=180)
+    for backup in [metadata["backup"], *metadata["backup_extra"]]:
+        run(["/usr/bin/perl", "/usr/share/webmin/virtual-server/backup.pl", "--id", str(backup)], timeout=180)
     perl("&apply_letsencrypt_cert_renewals();print 'PRAHO_NATIVE_MAIL={}';")
     monitor = ["/usr/bin/perl", "/usr/share/webmin/status/monitor.pl", "--force"]
     run(monitor)
@@ -377,6 +466,46 @@ print 'PRAHO_NATIVE_MAIL={}';""",
 def assert_operator_controls(sink: MailSink) -> None:
     missing = sorted(name for name, recipient in OPERATORS.items() if recipient not in sink.attempts)
     assert not missing, "Native operator positive controls did not attempt their expected sends: " + ", ".join(missing)
+
+
+def verify_os_warning_refusal(request: dict[str, object]) -> None:
+    """Actual root configuration/refusal proof; no quota binary or kernel fixture is invoked."""
+    from praho_hosting_node import os_quota_notification_inventory  # noqa: PLC0415 -- Installed production helper.
+
+    assert os_quota_notification_inventory()[0], "Use a fresh fixture with the supported disabled stock OS route"
+    defaults = Path("/etc/default/quota")
+    original = defaults.read_bytes() if defaults.exists() else None
+    original_mode = defaults.stat().st_mode & 0o777 if original is not None else None
+    protected = [Path("/etc/webmin/virtual-server/config"), Path("/usr/share/webmin/virtual-server/feature-ssl.pl")]
+    before = [hashlib.sha256(path.read_bytes()).hexdigest() for path in protected]
+    try:
+        defaults.write_text('run_warnquota="true"\nRPCRQUOTADOPTS=\n')
+        defaults.chmod(0o600)
+        try:
+            run(
+                ["/usr/bin/python3", "/usr/local/lib/praho/praho_hosting_node.py", "handover"],
+                payload=json.dumps(request),
+            )
+        except AssertionError as error:
+            assert "OS quota warning route" in str(error), error
+        else:
+            raise AssertionError("Enabled OS customer warnings were accepted as Platform-owned")
+        assert not Path("/var/lib/praho/hosting/notification-owner").exists()
+        assert [hashlib.sha256(path.read_bytes()).hexdigest() for path in protected] == before
+    finally:
+        if original is None:
+            defaults.unlink()
+        else:
+            defaults.write_bytes(original)
+            defaults.chmod(original_mode)
+    assert os_quota_notification_inventory()[0]
+
+
+def handover_with_archive(request: dict[str, object], archived: dict[str, object], sink: MailSink) -> dict[str, object]:
+    verify_os_warning_refusal(request)
+    run(["/usr/bin/python3", "/usr/local/lib/praho/praho_hosting_node.py", "handover"], payload=json.dumps(request))
+    sink.attempts.clear()
+    return restore_after_handover(archived, sink)
 
 
 def post_handover_proofs(sink: MailSink) -> dict[str, object]:
@@ -455,6 +584,7 @@ def main() -> None:
         identity = unix_identity(owner)
         assert_retained_services(owner, domain, PASSWORD, identity)
         retained = mailbox_contents(owner)
+        archived = archive_before_handover(stem)
         baseline = stem + "b.praho.test"
         create_domain(baseline, stem + "b", template=str(metadata["template"]), notify=True)
         assert CUSTOMER in sink.attempts, "Permissive native signup did not reproduce a customer send attempt"
@@ -474,8 +604,7 @@ def main() -> None:
         verify_resource_only_policy(domain, sink)
         token = str(uuid4())
         request = {"identity": "a" * 64, "token": token, "operator_emails": sorted(OPERATORS.values())}
-        run(["/usr/bin/python3", "/usr/local/lib/praho/praho_hosting_node.py", "handover"], payload=json.dumps(request))
-        sink.attempts.clear()
+        archive_proof = handover_with_archive(request, archived, sink)
         created = stem + "c.praho.test"
         create_domain(created, stem + "c", template=str(metadata["template"]), notify=True)
         tested = exercise_emitters(domain, metadata, suffix="one") | {"domain_signup"}
@@ -509,6 +638,10 @@ $d->{'letsencrypt_email'}=0;&save_domain($d);require '/usr/local/lib/praho/praho
             "resource_policy_preserves_native_warnings": True,
             "emitters_exercised": sorted(tested),
             "native_kernel_proof": False,
+            "os_quota_configuration_refusal": True,
+            "scheduled_explicit_recipients_verified": True,
+            "old_acme_owner_flag_suppressed_before_repair": True,
+            "pre_handover_archive_restore": archive_proof,
         }
         print(json.dumps(proof, sort_keys=True))
     finally:
