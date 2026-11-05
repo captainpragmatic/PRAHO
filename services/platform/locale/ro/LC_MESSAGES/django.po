@@ -34895,3 +34895,67 @@ msgstr ""
 #| msgid "Retained source:"
 msgid "Retire source"
 msgstr "Retrageți sursa"
+
+#: apps/provisioning/virtualmin_security_apply.py
+#, python-format
+msgid "The panel at %(host)s:%(port)s could not be reached (%(detail)s); interactive access has not been restricted"
+msgstr "Panoul de la %(host)s:%(port)s nu a putut fi contactat (%(detail)s); accesul interactiv nu a fost restricționat"
+
+#: apps/provisioning/virtualmin_security_apply.py
+#, python-format
+msgid "The panel refused the API check (%(detail)s); interactive access has not been restricted"
+msgstr "Panoul a refuzat verificarea API (%(detail)s); accesul interactiv nu a fost restricționat"
+
+#: apps/provisioning/virtualmin_security_apply.py
+#, python-format
+msgid "The panel check failed (%(detail)s); interactive access has not been restricted"
+msgstr "Verificarea panoului a eșuat (%(detail)s); accesul interactiv nu a fost restricționat"
+
+#: apps/provisioning/virtualmin_security_execution.py
+#, python-format
+msgid "The panel could not be reached after hardening (%(detail)s)."
+msgstr "Panoul nu a putut fi contactat după securizare (%(detail)s)."
+
+#: apps/provisioning/virtualmin_security_execution.py
+#, python-format
+msgid "The panel refused the API check after hardening (%(detail)s)."
+msgstr "Panoul a refuzat verificarea API după securizare (%(detail)s)."
+
+#: apps/provisioning/virtualmin_security_execution.py
+#, python-format
+msgid "The panel check failed after hardening (%(detail)s)."
+msgstr "Verificarea panoului a eșuat după securizare (%(detail)s)."
+
+#: apps/provisioning/virtualmin_security_views.py
+#, python-format
+msgid "Platform source addresses %(addresses)s are missing from the node admin allowlist. The node firewall drops Platform's connections from these addresses, so hardening this node would cut Platform off from it."
+msgstr "Adresele sursă ale Platform %(addresses)s lipsesc din lista de acces administrativ pentru noduri. Firewall-ul nodului blochează conexiunile Platform de la aceste adrese, așa că securizarea acestui nod ar tăia accesul Platform la el."
+
+#: apps/infrastructure/views.py
+#, python-format
+msgid "Platform source addresses %(addresses)s are missing from the node admin allowlist. The node firewall drops Platform's connections from these addresses, so a deploy that connects from one of them fails at hardening."
+msgstr "Adresele sursă ale Platform %(addresses)s lipsesc din lista de acces administrativ pentru noduri. Firewall-ul nodului blochează conexiunile Platform de la aceste adrese, așa că o instalare care se conectează de la una dintre ele eșuează la etapa de securizare."
+
+#: apps/provisioning/hosting_notification_completion.py:155
+msgid "Native customer notification policy could not be verified; review the node before continuing."
+msgstr "Politica nodului privind notificările către clienți nu a putut fi verificată; verificați nodul înainte de a continua."
+
+#: apps/provisioning/hosting_notification_completion.py:85
+msgid "Accepted native notification ownership changed"
+msgstr "Responsabilitatea acceptată pentru notificările native s-a schimbat."
+
+#: apps/provisioning/hosting_notification_completion.py:93
+msgid "Native notification account scope changed"
+msgstr "Contextul contului pentru notificările native s-a schimbat."
+
+#: apps/provisioning/hosting_notification_completion.py:128
+msgid "Native notification inspection has no current lifecycle claim"
+msgstr "Verificarea notificărilor native nu aparține unei execuții curente."
+
+#: apps/provisioning/hosting_notification_completion.py:133
+msgid "The supplied native notification endpoint is stale"
+msgstr "Punctul de acces furnizat pentru notificările native nu mai este actual."
+
+#: apps/provisioning/hosting_notification_completion.py:145
+msgid "Native notification inspection lost its accepted scope or claim"
+msgstr "Verificarea notificărilor native a pierdut contextul acceptat sau dreptul de execuție."

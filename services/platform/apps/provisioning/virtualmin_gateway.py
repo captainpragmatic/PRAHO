@@ -7,6 +7,7 @@ Secure API integration for Virtualmin server management with multi-path authenti
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import logging
 import math
@@ -20,9 +21,11 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache, wraps
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
+from urllib.parse import urlsplit
 
 import requests
+import urllib3
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -310,6 +313,31 @@ MAX_RESPONSE_SIZE_BYTES = MAX_RESPONSE_SIZE_MB * 1024 * 1024
 
 
 @dataclass(frozen=True)
+class PanelCheckFailure:
+    """Preserve the reason a panel check could not prove API access."""
+
+    kind: Literal["unreachable", "rejected", "refused", "failed"]
+    detail: str
+
+
+def _transport_address_suffix(error: requests.exceptions.RequestException) -> str:
+    """Report the pinned IP from the failed request without resolving DNS again."""
+    request = getattr(error, "request", None)
+    try:
+        host = urlsplit(getattr(request, "url", None) or "").hostname
+        address = ipaddress.ip_address(host or "")
+    except ValueError:
+        return ""
+    return f" ({address}, IPv{address.version})"
+
+
+def _connection_not_established(error: requests.exceptions.ConnectionError) -> bool:
+    """Whether the TCP connect itself failed; a dropped or stalled response also arrives as ConnectionError."""
+    cause = error.args[0] if error.args else None
+    return isinstance(getattr(cause, "reason", None), urllib3.exceptions.ConnectTimeoutError)
+
+
+@dataclass(frozen=True)
 class VirtualminResponse:
     """Normalized Virtualmin API response"""
 
@@ -515,6 +543,10 @@ class VirtualminTransientError(VirtualminAPIError):
     """Temporary or ambiguous failure - retry only when the operation policy permits."""
 
     default_retriability = Retriability.UNKNOWN
+
+
+class VirtualminUnreachableError(VirtualminTransientError):
+    """The connection to the panel could not be made, so the panel never answered."""
 
 
 class VirtualminQuotaExceededError(VirtualminAPIError):
@@ -1119,13 +1151,15 @@ class VirtualminGateway:
             return response
 
         except requests.exceptions.ConnectTimeout as e:
-            raise VirtualminTransientError(
-                f"Connection timeout to {self.server.hostname}",
+            raise VirtualminUnreachableError(
+                f"Connection timeout to {self.server.hostname}{_transport_address_suffix(e)}",
                 self.server.hostname,
                 retriability=Retriability.RETRIABLE,
             ) from e
         except requests.exceptions.ReadTimeout as e:
-            raise VirtualminTransientError(f"Read timeout from {self.server.hostname}", self.server.hostname) from e
+            raise VirtualminTransientError(
+                f"Read timeout from {self.server.hostname}{_transport_address_suffix(e)}", self.server.hostname
+            ) from e
         except requests.exceptions.SSLError as e:
             # SSLError subclasses ConnectionError, so it MUST be caught first —
             # otherwise a TLS/cert failure is misread as a transient connection
@@ -1137,8 +1171,9 @@ class VirtualminGateway:
                 retriability=Retriability.NOT_RETRIABLE,
             ) from e
         except requests.exceptions.ConnectionError as e:
-            raise VirtualminTransientError(
-                f"Connection error to {self.server.hostname}: {e}", self.server.hostname
+            failure = VirtualminUnreachableError if _connection_not_established(e) else VirtualminTransientError
+            raise failure(
+                f"Connection error to {self.server.hostname}: {e}{_transport_address_suffix(e)}", self.server.hostname
             ) from e
         except OutboundSecurityError as e:
             raise VirtualminAPIError(
@@ -1262,6 +1297,30 @@ class VirtualminGateway:
             raise VirtualminAPIError(
                 f"Client error: HTTP {response.status_code}", self.server.hostname, http_status=response.status_code
             )
+
+    def check_api(self) -> Result[None, PanelCheckFailure]:
+        """Require affirmative API success while retaining the failure category."""
+        try:
+            result = self.call("info", correlation_id=f"health_check_{int(time.time())}")
+            if result.is_err():
+                error = result.unwrap_err()
+                kind: Literal["unreachable", "rejected", "refused", "failed"]
+                if isinstance(error, VirtualminUnreachableError):
+                    kind = "unreachable"
+                elif isinstance(error, VirtualminAuthError):
+                    kind = "rejected"
+                else:
+                    kind = "failed"
+                return Err(PanelCheckFailure(kind, str(error)), retriability=retriability_of(result))
+            response = result.unwrap()
+            if response.success is not True:
+                detail = str(
+                    response.data.get("error") or response.data.get("message") or "API check was not successful"
+                )
+                return Err(PanelCheckFailure("refused", detail))
+            return Ok(None)
+        except Exception as error:
+            return Err(PanelCheckFailure("failed", str(error)))
 
     def test_connection(self) -> Result[dict[str, Any], str]:
         """

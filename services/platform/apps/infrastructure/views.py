@@ -38,6 +38,7 @@ from apps.infrastructure.provider_config import get_provider_sync_fn, get_provid
 from apps.infrastructure.provider_sync import PROVIDERS_WITH_LOCATION_DATA
 from apps.settings.services import SettingsService
 
+from .ansible_service import uncovered_platform_egress
 from .cloud_destroy_service import DestroyApproval, approve_destroy, inspect_destroy
 from .deployment_preflight import deployment_configuration_issues, validate_deployment_dns_zone
 from .forms import (
@@ -337,6 +338,17 @@ def deployment_create(request: HttpRequest) -> HttpResponse:
         messages.error(request, zone_result.unwrap_err())
         return redirect("infrastructure:deployment_list")
     dns_zone = zone_result.unwrap()
+
+    if request.method == "GET" and (uncovered := uncovered_platform_egress()):
+        messages.warning(
+            request,
+            _(
+                "Platform source addresses %(addresses)s are missing from the node admin allowlist. "
+                "The node firewall drops Platform's connections from these addresses, so a deploy that connects "
+                "from one of them fails at hardening."
+            )
+            % {"addresses": ", ".join(uncovered)},
+        )
 
     if request.method == "POST":
         form = NodeDeploymentForm(request.POST, dns_zone=dns_zone)

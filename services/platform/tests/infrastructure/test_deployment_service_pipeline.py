@@ -373,6 +373,42 @@ class TestDeployNodeReachesCompletedThroughFSM(TestCase):
         self.assertEqual(set(CloudResourceOwnership.objects.filter(deployment=deployment).values_list("kind", "resource_id")),
                          {("server", "srv-1"), ("ssh_key", "key-1"), ("primary_ip", "ip-1")})
 
+    def test_uncovered_egress_logs_a_warning_and_deployment_still_completes(self) -> None:
+        deployment = _create_deployment("pending")
+        service = _make_service()
+        registered = MagicMock(id=7)
+        service._registration.verify_and_activate.return_value = Ok(registered)
+        gateway = TestCredentialSeamWiring._wire_happy_path(service, registered=registered)
+        self.assertEqual(deployment.status, "pending")
+        self.assertIsNone(deployment.operation_token)
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+            patch(
+                "apps.infrastructure.deployment_service.uncovered_platform_egress",
+                return_value=["2a01:4f9:c015:4d96::1"],
+                create=True,
+            ) as egress,
+            self.assertLogs("apps.infrastructure.deployment_service", level="WARNING") as captured,
+        ):
+            result = service.deploy_node(deployment, credentials={"api_token": "test-token"})
+        self.assertTrue(result.is_ok(), result)
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "completed")
+        egress.assert_called_once_with()
+        warning = NodeDeploymentLog.objects.get(deployment=deployment, level="WARNING")
+        self.assertEqual(warning.phase, "init")
+        self.assertIn("2a01:4f9:c015:4d96::1", warning.message)
+        self.assertIn("firewall drops Platform's connections", warning.message)
+        self.assertIn("fails at hardening", warning.message)
+        self.assertEqual(
+            [line for line in captured.output if warning.message in line],
+            [f"WARNING:apps.infrastructure.deployment_service:[Deployment:{deployment.hostname}] {warning.message}"],
+        )
+        gateway.create_server.assert_called_once()
+        service._registration.verify_and_activate.assert_called_once_with(registered)
+
     def test_blesta_keeps_its_provider_firewall(self) -> None:
         deployment = _create_deployment("pending")
         deployment.panel_type, _ = PanelType.objects.get_or_create(

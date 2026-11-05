@@ -9,11 +9,14 @@ without an operation lease left the old status message.
 from __future__ import annotations
 
 from typing import Any
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.contrib.messages import WARNING, get_messages
 from django.test import TestCase
 from django.urls import reverse
 
+from apps.common.types import Ok
 from apps.infrastructure.models import NodeDeployment
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment, _make_service
 
@@ -42,6 +45,30 @@ class ModelPredicateTests(TestCase):
 class DeploymentPagesTests(TestCase):
     def setUp(self) -> None:
         self.client.force_login(User.objects.create_superuser(email="ui@test.com", password="testpass123"))
+
+    def _create_warnings(self, uncovered):
+        with (
+            patch("apps.infrastructure.views.deployment_configuration_issues", return_value=[]) as prerequisites,
+            patch("apps.infrastructure.views.validate_deployment_dns_zone", return_value=Ok("test.example.com")),
+            patch(
+                "apps.infrastructure.views.uncovered_platform_egress", return_value=uncovered, create=True
+            ) as egress,
+        ):
+            self.assertEqual(prerequisites.return_value, [])
+            response = self.client.get(reverse("infrastructure:deployment_create"))
+        self.assertEqual(response.status_code, 200)
+        egress.assert_called_once_with()
+        return [str(message) for message in get_messages(response.wsgi_request) if message.level == WARNING]
+
+    def test_create_warns_when_platform_egress_is_uncovered(self):
+        warnings = self._create_warnings(["2a01:4f9:c015:4d96::1"])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("2a01:4f9:c015:4d96::1", warnings[0])
+        self.assertIn("firewall drops Platform's connections", warnings[0])
+        self.assertIn("fails at hardening", warnings[0])
+
+    def test_create_does_not_warn_when_platform_egress_is_covered(self):
+        self.assertEqual(self._create_warnings([]), [])
 
     def _detail(self, deployment: NodeDeployment) -> Any:
         return self.client.get(reverse("infrastructure:deployment_detail", args=[deployment.pk]))

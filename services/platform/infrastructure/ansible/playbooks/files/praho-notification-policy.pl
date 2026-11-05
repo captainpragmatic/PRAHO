@@ -3,7 +3,7 @@
 package virtual_server;
 use JSON::PP;
 use Digest::SHA qw(sha256_hex);
-use Fcntl qw(S_ISREG);
+use Fcntl qw(S_ISREG O_RDONLY O_NOFOLLOW);
 use IO::Handle;
 
 sub praho_probe_identity_file {
@@ -146,14 +146,24 @@ sub praho_apply_resource_policy {
     }
 }
 
+sub praho_native_customer_notifications {
+    my $owner = '/var/lib/praho/hosting/notification-owner';
+    return 1 if !-e $owner && !-l $owner;
+    my @info = lstat($owner);
+    die 'Unprotected native notification ownership' if !@info || !S_ISREG($info[2]) || $info[4]
+        || ($info[2] & 0022) || !($info[2] & 0400);
+    sysopen(my $in, $owner, O_RDONLY | O_NOFOLLOW) or die 'Cannot read native notification ownership';
+    my @opened = stat($in);
+    die 'Native notification ownership changed' if !@opened || $opened[0] != $info[0] || $opened[1] != $info[1];
+    my $count = read($in, my $current, 65);
+    close($in);
+    die 'Unknown native notification owner' if !defined($count) || $current ne "platform\n";
+    return 0;
+}
+
 sub praho_enforce_domain_notifications {
     my ($domain) = @_;
-    my $owner = '/var/lib/praho/hosting/notification-owner';
-    return if !-f $owner; # Import/kernel adoption never implies customer-mail handover.
-    open(my $in, '<', $owner) or die 'Cannot read native notification ownership';
-    my $current = <$in>;
-    close($in);
-    die 'Unknown native notification owner' if $current ne "platform\n";
+    return if &praho_native_customer_notifications(); # Import/kernel adoption never implies handover.
     die 'Approved operator policy is missing' if !-f '/var/lib/praho/hosting/operators.json';
     my $operators = &praho_operator_policy(0, []);
     my %allowed = map { lc($_) => 1 } @$operators;
@@ -210,7 +220,8 @@ sub praho_notification_inventory {
         push @inventory, { type => 'domain', map { $_ => $d->{$_} // '' } qw(id template emailto letsencrypt_email letsencrypt_email_master) };
     }
     for my $b (@backups) {
-        $emitters{'backup_owners'} = JSON::PP::false if $b->{'email_doms'};
+        $emitters{'backup_owners'} = JSON::PP::false if $b->{'email_doms'}
+            || grep { !$operators{$_} } &praho_addresses($b->{'email'});
         push @inventory, { type => 'backup', map { $_ => $b->{$_} // '' } qw(id email_doms email email_err) };
     }
     for my $m (@monitors) {
@@ -244,9 +255,13 @@ sub praho_apply_notification_policy {
         &save_template($t);
     }
     for my $b (&list_scheduled_backups()) {
-        next if !$b->{'email_doms'};
+        my %approved = map { lc($_) => 1 } @$operators;
+        my @addresses = &praho_addresses($b->{'email'});
+        my $unapproved = grep { !$approved{$_} } @addresses;
+        next if !$b->{'email_doms'} && !$unapproved;
         $b->{'email_doms'} = 0;
-        &save_scheduled_backup($b); # Preserve explicit operator email and enabled schedule.
+        $b->{'email'} = join(',', grep { $approved{$_} } @addresses) if $unapproved;
+        &save_scheduled_backup($b); # Preserve approved operator recipients, error policy and enabled schedule.
     }
     for my $d (&list_domains()) {
         &lock_domain($d);

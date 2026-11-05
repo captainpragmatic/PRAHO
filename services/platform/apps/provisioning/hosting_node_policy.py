@@ -32,6 +32,7 @@ NOTIFICATION_EMITTERS = (
     "new_users",
     "updated_users",
     "quota_warnings",
+    "os_quota_warnings",
     "bandwidth_warnings",
     "bandwidth_actions",
     "backup_owners",
