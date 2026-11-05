@@ -60,7 +60,13 @@ jobs:
             echo "lab=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Any other event is a merge group. An empty base fails open below: no diff, so the lab runs.
+          # Any other event is a merge group. Without a base there is no diff and no base copy of the rules
+          # (`git show :path` would read the pull request's own copy from the index), so the lab runs.
+          if [ -z "${BASE_SHA}" ]; then
+            echo "Lab needed: true (no base commit)"
+            echo "lab=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # A diff that cannot be computed feeds the script nothing, and nothing means "run the lab".
           # --no-renames lists a moved file's old path too, so moving code out of a lab path still counts.
           changed="$(git diff --no-renames --name-only "${BASE_SHA}...HEAD" 2>/dev/null)" || changed=""
