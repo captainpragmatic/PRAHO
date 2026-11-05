@@ -34,7 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **The merge queue no longer waits about two hours on every pull request.** The native deployment acceptance runs only when a change can reach a native deploy (deploy files, settings, dependencies, the Makefile and scripts), failing open and judged by the base branch's rules; master pushes always run it. When it runs, its 17 split-host cases run as five parallel shards of about 40 minutes instead of one 115-minute job. The lab and native selections also run their checks when the merge group has no base commit, instead of reading the pull request's own copy of the rules.
+- **The merge queue no longer waits about two hours on every pull request.** The native deployment acceptance is skipped only when a change cannot reach a native deploy (prose, other layers' tests, other workflows, CI-only scripts), failing open and judged by the base branch's rules; master pushes always run it. When it runs, its 17 split-host cases run as four parallel shards of about 35-47 minutes instead of one 115-minute job, so the Virtualmin lab sets the queue's pace again. The lab and native selections also run their checks when the merge group has no base commit, instead of reading the pull request's own copy of the rules.
 
 - **A release no longer needs a self-hosted native runner.** The release candidate again requires the latest full Virtualmin lab on master to have passed: the container job, or an optional native `full` dispatch when one has run. Native acceptance stays available as a manual run but does not gate a release; node deploy and kernel, filesystem and cloud-image behaviour are proven on staging by a test node deploy after the promote.
 

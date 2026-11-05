@@ -10,19 +10,6 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 SPLIT = ("prod", "split")
-PROFILES: dict[str, tuple[tuple[str, str] | None, int]] = {
-    "all": (None, 29),
-    "split-prod": (SPLIT, 17),
-    "combined-staging": (("staging", "combined"), 6),
-    "combined-prod": (("prod", "combined"), 6),
-    # CI runs the split cases as parallel shards. Each shard bootstraps its own split lab (about 16 minutes),
-    # so they are balanced on measured case times to finish in about 40 minutes each.
-    "split-prod-1": (SPLIT, 9),
-    "split-prod-2": (SPLIT, 3),
-    "split-prod-3": (SPLIT, 3),
-    "split-prod-4": (SPLIT, 1),
-    "split-prod-5": (SPLIT, 1),
-}
 
 _FAULT = "test_real_failures_leave_durable_holds_and_allow_coordinated_recovery"
 _ROLLBACK = "test_code_only_rollback_refuses_an_applied_migration_absent_from_target"
@@ -45,8 +32,17 @@ SHARD_CASES: dict[str, frozenset[str]] = {
     "split-prod-3": frozenset(
         {f"{_FAULT}[sha]", f"{_FAULT}[interrupt]", "test_actual_queue_work_drains_before_the_recovery_backup"}
     ),
-    "split-prod-4": frozenset({f"{_ROLLBACK}[platform]"}),
-    "split-prod-5": frozenset({f"{_ROLLBACK}[portal]"}),
+    "split-prod-4": frozenset({f"{_ROLLBACK}[platform]", f"{_ROLLBACK}[portal]"}),
+}
+
+PROFILES: dict[str, tuple[tuple[str, str] | None, int]] = {
+    "all": (None, 29),
+    "split-prod": (SPLIT, 17),
+    "combined-staging": (("staging", "combined"), 6),
+    "combined-prod": (("prod", "combined"), 6),
+    # CI runs the split cases as parallel shards. Each shard bootstraps its own split lab (about 16 minutes),
+    # so they are balanced on measured case times: about 35-47 minutes each, under the lab's run.
+    **{name: (SPLIT, len(cases)) for name, cases in SHARD_CASES.items()},
 }
 
 

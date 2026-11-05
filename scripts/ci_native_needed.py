@@ -9,9 +9,10 @@ that breaks a native deploy merge untested. The rules therefore fail open, as ci
 - they list what cannot reach a native deploy, not what can; a path nobody listed runs it;
 - no input (the diff could not be computed, or it was empty) prints ``true``.
 
-Application code is outside: the Platform, Portal and server checks already prove it, and every push
-to master still runs the native jobs. Settings, dependencies, the Makefile, deploy files and their
-scripts are inside.
+Application code is inside: the native deploy migrates, collects static files and runs management
+commands, and its cases assert views, templates and messages (and hard-code the latest migrations).
+What is outside: prose, other layers' tests, other workflows and the CI-only scripts. Every push to
+master runs the native jobs whatever changed.
 
 integration.yml runs the BASE branch's copy of this file, so a pull request cannot change the rules
 that judge it, and lists renames as both paths (``--no-renames``).
@@ -31,9 +32,9 @@ OUTSIDE_NATIVE_DEPLOY: tuple[re.Pattern[str], ...] = tuple(
         r"\.md$",
         r"^docs/",
         r"^LICENSE",
-        r"^services/(platform|portal)/(apps|templates|static|locale|tests)/",
-        r"^shared/ui/",
-        r"^tests/(?!deploy/)",
+        r"^services/(platform|portal)/tests/",
+        # Other layers' test directories; top-level files such as native_role_helpers.py stay inside.
+        r"^tests/(?!deploy/)[^/]+/",
         r"^\.github/rulesets/",
         r"^\.github/workflows/(?!integration\.yml$)",
         # CI-only scripts: the release gate and the CI selectors never run on a deployed host.

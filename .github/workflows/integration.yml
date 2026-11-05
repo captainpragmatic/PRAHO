@@ -348,7 +348,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [split-prod-1, split-prod-2, split-prod-3, split-prod-4, split-prod-5, combined-staging, combined-prod]
+        profile: [split-prod-1, split-prod-2, split-prod-3, split-prod-4, combined-staging, combined-prod]
     env:
       PRAHO_NATIVE_ACCEPTANCE_PROFILE: ${{ matrix.profile }}
     steps:
@@ -369,11 +369,14 @@ jobs:
     - name: Native split and combined deployment acceptance
       run: make test-native-deploy
 
+    # Not profile-specific: one matrix entry runs it.
     - uses: hashicorp/setup-terraform@v3
+      if: matrix.profile == 'combined-prod'
       with:
         terraform_version: 1.13.5
 
     - name: Native infrastructure topology and adoption safety
+      if: matrix.profile == 'combined-prod'
       run: make test-native-infra
 
   # Preserve the required check name and reject failed, cancelled or skipped suites.

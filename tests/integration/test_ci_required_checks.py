@@ -372,8 +372,17 @@ def test_the_lab_selection_fails_open(changed: list[str], expected: bool) -> Non
         # A path nobody listed runs it: the rules list what cannot reach native deploy.
         (["services/platform/requirements-extra.txt"], True),
         (["docs/deployment/DEPLOYMENT.md", "CHANGELOG.md"], False),
-        (["services/portal/templates/x.html", "services/platform/apps/billing/models.py"], False),
-        (["services/platform/locale/ro/LC_MESSAGES/django.po", "shared/ui/components/button.html"], False),
+        # The native deploy migrates, collects static files and runs management commands, and its cases
+        # assert views, templates and messages: application code reaches it.
+        (["services/platform/apps/common/migrations/0007_x.py"], True),
+        (["services/platform/apps/common/management/commands/setup_initial_data.py"], True),
+        (["services/portal/templates/x.html"], True),
+        (["services/platform/static/css/x.css"], True),
+        (["services/platform/locale/ro/LC_MESSAGES/django.po"], True),
+        (["shared/ui/components/button.html"], True),
+        # Top-level test helpers are imported by the native cases; other layers' test directories are not.
+        (["tests/native_role_helpers.py"], True),
+        (["tests/conftest.py"], True),
         (["services/platform/tests/billing/test_x.py", "tests/integration/test_y.py"], False),
         ([".github/workflows/virtualmin-lab.yml", ".github/rulesets/master.json"], False),
         # CI-only scripts: the release gate (#866) and the selectors cannot change a deploy.
