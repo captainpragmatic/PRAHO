@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from fixture_images import fixture_image
 
 ROOT = Path(__file__).resolve().parents[2]
 DOCKER = shutil.which("docker") or "docker"
@@ -26,7 +27,7 @@ def docker(*args: str, input_text: str | None = None, check: bool = True) -> sub
 @pytest.fixture(params=["24.04", "26.04"])
 def ssh_target(request: pytest.FixtureRequest) -> Iterator[str]:
     version = str(request.param)
-    image = f"praho-ssh-test:{version}"
+    image = fixture_image(f"praho-ssh-test:{version}")
     built = docker(
         "build",
         "--build-arg",

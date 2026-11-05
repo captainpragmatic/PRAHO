@@ -621,11 +621,14 @@ class VirtualminProvisioningService:
         )
         if job.hosting_limit_application_id is not None:
             from .hosting_limit_policy import effective_disk_limit  # noqa: PLC0415
-            from .hosting_parent_limits import frozen_parent_application  # noqa: PLC0415
+            from .hosting_limit_review import reviewed_job_application  # noqa: PLC0415
 
-            frozen = frozen_parent_application(job)
+            frozen = reviewed_job_application(job)
             params.update(
-                quota_parameters(effective_disk_limit(frozen.disk_allowance_mib), frozen.bandwidth_allowance_mib)
+                quota_parameters(
+                    effective_disk_limit(frozen.disk_allowance_mib, extra_mib=frozen.overlay_extra_mib),
+                    frozen.bandwidth_allowance_mib,
+                )
             )
         return params
 
@@ -1467,9 +1470,12 @@ class VirtualminProvisioningService:
                 VirtualminServer.objects.select_for_update(of=("self",)).get(pk=account.server_id)
                 from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Native admission
                     maintenance_refusal,
+                    native_account_observation_refusal,
                 )
 
-                if node_refusal := maintenance_refusal(account.server_id):
+                if node_refusal := maintenance_refusal(account.server_id) or native_account_observation_refusal(
+                    account.pk
+                ):
                     _clear_idempotency_key(idempotency_key, operation="delete", domain=account.domain)
                     return Err(node_refusal, retriability=Retriability.RETRIABLE)
                 admission_refusal: Result[bool, str] | None
@@ -2523,6 +2529,7 @@ class VirtualminBackupManagementService:
                 return Err("Account moved to another server since this request began; retry")
             from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Shared server admission
                 maintenance_refusal,
+                native_account_observation_refusal,
             )
 
             node_id = locked.server_id if source_bound else self.server.pk
@@ -2530,6 +2537,8 @@ class VirtualminBackupManagementService:
             if refusal := self._backup_server_refusal(locked, target_server, operation, parameters):
                 return Err(refusal)
             if refusal := maintenance_refusal(node_id):
+                return Err(refusal)
+            if refusal := native_account_observation_refusal(locked.pk):
                 return Err(refusal)
             if account_has_active_operation(locked):
                 return Err(ACCOUNT_BUSY_REFUSAL)

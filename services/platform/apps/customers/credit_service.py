@@ -118,7 +118,7 @@ class CustomerCreditService:
                 from apps.customers.models import Customer  # noqa: PLC0415  # Deferred: avoids circular import
 
                 with transaction.atomic():
-                    locked = Customer.objects.select_for_update(of=("self",)).get(id=customer.id)
+                    locked = Customer.objects.select_for_update(of=("self",), no_key=True).get(id=customer.id)
                     locked_meta = locked.meta or {}
                     # Use stored score from locked row (authoritative), fall back to computed score
                     current_score = locked_meta.get("credit_score", fallback_score)
@@ -231,7 +231,7 @@ class CustomerCreditService:
 
                 with transaction.atomic():
                     # of=("self",) locks only the Customer row, not any joined tables.
-                    locked = Customer.objects.select_for_update(of=("self",)).get(id=customer.id)
+                    locked = Customer.objects.select_for_update(of=("self",), no_key=True).get(id=customer.id)
                     locked_meta = locked.meta or {}
                     # Use stored score from locked row (authoritative), fall back to computed score
                     current_score = locked_meta.get("credit_score", fallback_score)

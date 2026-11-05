@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% load i18n ui_components %}
+{% block title %}{% trans "Hosting warning preferences" %} - {{ company.brand_name }}{% endblock %}
+{% block content %}
+<div class="max-w-2xl mx-auto px-4 py-8">
+    {% trans "Hosting warning preferences" as page_title %}
+    {% page_header title=page_title icon="bell" %}{% end_page_header %}
+    <a href="{% url 'users:company_profile' %}" class="text-slate-400 hover:text-white">{% trans "Back to Company" %}</a>
+    {% section_card title=page_title icon="bell" %}
+        <p class="mb-4 text-slate-300">{% trans "Choose whether this customer receives optional 80% and 95% hosting allowance warnings." %}</p>
+        <p class="mb-4 text-slate-300">{% trans "Critical allowance notices remain enabled. Delivery still requires current ownership, a valid recipient and no hard delivery block." %}</p>
+        {% if global_unsubscribe %}
+            <p class="mb-4 text-amber-300">{% trans "Your global email opt-out also blocks optional hosting warnings." %}</p>
+        {% endif %}
+        {% if save_failed %}
+            <p role="alert" class="mb-4 text-red-300">{% trans "The preference could not be saved. Please try again." %}</p>
+        {% elif load_failed %}
+            <p role="alert" class="mb-4 text-red-300">{% trans "The preference could not be loaded. Please try again." %}</p>
+        {% endif %}
+        {% if not load_failed %}
+            <form method="post">
+                {% csrf_token %}
+                {% trans "Receive optional hosting allowance warnings" as optional_label %}
+                {% checkbox_field "quota_warnings" html_id="quota_warnings" label=optional_label checked=form.quota_warnings.value %}
+                {{ form.quota_warnings.errors }}
+                <div class="mt-6">
+                    {% trans "Save preferences" as save_label %}
+                    {% button save_label type="submit" variant="primary" icon="save" class_="min-h-11" %}
+                </div>
+            </form>
+        {% endif %}
+    {% end_section_card %}
+</div>
+{% endblock %}

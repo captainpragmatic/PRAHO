@@ -204,7 +204,9 @@ jobs:
     # by a list someone has to keep current. tests/integration/test_postgres_gated_tests_run_in_ci.py
     # fails if this step goes missing or a gate idiom the scan cannot see appears.
     - name: PostgreSQL-gated tests (derived from the tests themselves)
-      timeout-minutes: 30
+      # Match the Platform workflow's budget for the same expanded serial suite.
+      # A 30-minute run timed out during steady progress near its final tests.
+      timeout-minutes: 45
       env:
         DJANGO_SETTINGS_MODULE: config.settings.ci
         DB_NAME: postgres

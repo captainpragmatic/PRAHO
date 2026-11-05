@@ -23,6 +23,9 @@ from apps.users.models import User
 class GiftFundingAttemptTests(TestCase):
     def setUp(self) -> None:
         self.currency = Currency.objects.get_or_create(code="RON", defaults={"symbol": "RON"})[0]
+        # A preceding TransactionTestCase flush may remove migration seed rows.
+        # Establish the ordinary selling policy before exercising a later switch.
+        get_selling_currency_policy(lock=True)
         self.customer = Customer.objects.create(
             name="Funding buyer", customer_type="individual", primary_email="buyer@example.test"
         )
@@ -145,7 +148,8 @@ class GiftFundingAttemptTests(TestCase):
                 source="bnr", source_reference="https://bnr.ro/rate", fetched_at=timezone.now(),
             )
             purchases.append(create_purchase(self.customer, currency, 5000, code, actor=self.actor))
-        SettingsService.update_setting("billing.default_currency", "EUR")
+        updated = SettingsService.update_setting("billing.default_currency", "EUR")
+        self.assertTrue(updated.is_ok(), updated)
         self.assertEqual(get_selling_currency_policy().currency_code, "EUR")
         for purchase in purchases:
             self.purchase = purchase

@@ -407,10 +407,14 @@ class VirtualminMigrationService:
     def _local_preflight(
         self, account: VirtualminAccount, target: VirtualminServer, *, component_scope: bool = False
     ) -> None:
+        from apps.infrastructure.node_maintenance_gate import native_account_observation_refusal  # noqa: PLC0415
+
         from .managed_dns_service import assert_move_ready  # noqa: PLC0415  # Customer zone integration
 
         if not self.enabled:
             raise ValueError("Virtualmin migration is disabled")
+        if refusal := native_account_observation_refusal(account.pk):
+            raise ValueError(refusal)
         if account_has_active_operation(account):
             raise ValueError(ACCOUNT_BUSY_REFUSAL)
         assert_move_ready(account)

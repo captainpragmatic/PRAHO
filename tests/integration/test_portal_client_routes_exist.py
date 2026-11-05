@@ -90,6 +90,7 @@ METHOD_ROUTES = {
     "PlatformAPIClient.toggle_customer_user_status": "api:customers:customer-users-toggle",
     "PlatformAPIClient.update_customer_company_profile": "api:customers:customer-update",
     "PlatformAPIClient.get_customer_tax_profile": "api:customers:customer-detail",
+    "PlatformAPIClient.hosting_warning_preferences": "api:customers:customer-notification-preferences",
     "PlatformAPIClient.update_customer_tax_profile": "api:customers:customer-tax-profile",
     "PlatformAPIClient.get_customer_addresses": "api:customers:customer-addresses-list",
     "PlatformAPIClient.add_customer_address": "api:customers:customer-addresses-add",
@@ -123,6 +124,7 @@ METHOD_ROUTES = {
 }
 
 METHOD_ROUTE_CASES = {
+    "PlatformAPIClient.hosting_warning_preferences:update": "api:customers:customer-notification-preferences",
     "DnsAPIClient.zone_action:confirm": "api:dns:zone_confirm",
     "DnsAPIClient.zone_action:switch": "api:dns:zone_switch",
     "DnsAPIClient.zone_action:delete": "api:dns:zone_delete",
@@ -274,6 +276,7 @@ methods = {
     "PlatformAPIClient.toggle_customer_user_status": lambda: base.toggle_customer_user_status(1, 1, 2),
     "PlatformAPIClient.update_customer_company_profile": lambda: base.update_customer_company_profile(1, 1, {}),
     "PlatformAPIClient.get_customer_tax_profile": lambda: base.get_customer_tax_profile(1, 1),
+    "PlatformAPIClient.hosting_warning_preferences": lambda: base.hosting_warning_preferences(1, 1),
     "PlatformAPIClient.update_customer_tax_profile": lambda: base.update_customer_tax_profile(1, 1, {}),
     "PlatformAPIClient.get_customer_addresses": lambda: base.get_customer_addresses(1, 1),
     "PlatformAPIClient.add_customer_address": lambda: base.add_customer_address(1, 1, {}),
@@ -308,6 +311,9 @@ methods = {
     "DnsAPIClient.export_zone": lambda: dns.export_zone(1, 1, UUID(EXPORT_ID)),
 }
 method_cases = {
+    "PlatformAPIClient.hosting_warning_preferences:update": lambda: base.hosting_warning_preferences(
+        1, 1, quota_warnings=False
+    ),
     **{
         f"DnsAPIClient.zone_action:{action}": lambda action=action: dns.zone_action(
             1, 1, UUID(EXPORT_ID), action, {"expected_revision": 1}
@@ -485,6 +491,24 @@ class PortalClientRoutesExistTests(SimpleTestCase):
         made = sorted(record["entry"] for record in self.records)
         expected = sorted({**METHOD_ROUTES, **METHOD_ROUTE_CASES, **CALL_SITE_ROUTES})
         self.assertEqual(made, expected, f"Recorder stderr:\n{self.recorder_stderr}")
+
+    def test_warning_preferences_read_and_boolean_update_use_the_exact_post_route(self) -> None:
+        entry = "PlatformAPIClient.hosting_warning_preferences"
+        self.assertIn(entry, self.discovered)
+        cases = (entry, f"{entry}:update")
+        self.assertEqual(
+            {case: {**METHOD_ROUTES, **METHOD_ROUTE_CASES}[case] for case in cases},
+            dict.fromkeys(cases, "api:customers:customer-notification-preferences"),
+        )
+        calls = sorted(
+            (record["entry"], record["method"], record["path_url"])
+            for record in self.records
+            if record["entry"] in cases
+        )
+        self.assertEqual(
+            calls,
+            [(case, "POST", "/api/customers/notification-preferences/") for case in cases],
+        )
 
     def test_every_recorded_request_reaches_its_platform_view(self) -> None:
         expected_views = {**METHOD_ROUTES, **METHOD_ROUTE_CASES, **CALL_SITE_ROUTES}

@@ -334,6 +334,10 @@ def service_detail(request: HttpRequest, service_id: int) -> HttpResponse:
             "domains": domains,
             "can_manage": service.get("status") in {"active", "suspended"} and role in {"owner", "billing", "tech"},
             "can_manage_dns": role in {"owner", "tech"},
+            "can_change_plan": role in {"owner", "billing"}
+            and service.get("status") == "active"
+            and service.get("plan_changes_enabled") is True,
+            "can_review_plan_change": role in {"owner", "billing"} and bool(service.get("plan_change")),
             "usage_period": "30d",
             "usage_history_period_options": [
                 {"value": "7d", "label": _("Last 7 days")},

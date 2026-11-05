@@ -45,10 +45,18 @@ password change. Native Platform recovery remains a separate staff-facing flow.
 
 ## Service requests
 
-Active owners, billing members and technical members can request upgrades or
-downgrades for their customer's active or suspended services. Suspension and
-cancellation require an owner or billing role and a reason. Plan cards are informational; staff agrees the
-requested plan and any billing effects with the customer through the ticket.
+Active owners, billing members and technical members can open support requests for
+upgrades or downgrades for their customer's active or suspended services. Suspension
+and cancellation requests require an owner or billing role and a reason. This
+ticket path is separate from commercial checkout: a request or approval creates no
+payment, accepted tariff or resource assignment.
+
+When paid plan changes are enabled and the active service is eligible, owners and
+billing members use Portal **Change plan** for the actual quote/acceptance/payment
+flow. Technical members keep the support path and cannot accept or pay a commercial
+change. Compatible targets and the next recurring amount come from Platform, not
+the displayed catalog card or a ticket note. See
+[ADR-0074](../ADRs/ADR-0074-paid-hosting-plan-changes.md).
 
 Portal calls `POST /api/services/<id>/actions/` with signed customer and user IDs,
 action, reason, and a submission UUID. Platform creates the ticket and its
@@ -72,8 +80,18 @@ The Platform ticket includes a staff-only panel:
 - **Mark completed** records manual completion and closes an approved request.
 
 Approval itself does not modify service status, provider resources, subscriptions,
-prices, or invoices. Staff carries out and verifies the agreed change before
-marking it completed. Unsupported automated plan changes remain unavailable.
+prices, or invoices. For a supported paid change, billing staff opens the service's
+commercial proposal page and shares its customer Portal login/checkout link. The
+customer signs in and accepts/pays; the link grants no staff consent or payment
+authority. A different authorized billing viewer may inspect status and cancel
+where permitted, but acceptance/payment stay with the original requester.
+
+Resource-only staff exceptions remain a separate named workflow with the proper
+authority, same-customer ticket, reason, current revision/idempotent submission and
+explicit acknowledgement that billing is unchanged. They do not fulfil a paid
+upgrade by themselves. Verify the actual commercial and native outcome before
+marking a ticket completed. Unsupported changes remain support/accounting work;
+never revive the retired engine or edit service/subscription prices directly.
 
 Decisions and their notes are private. Customer APIs return only the submission
 receipt and normal customer-visible ticket data. Staff sends any public explanation
@@ -88,6 +106,12 @@ the request's internal review state.
 
 Deploy Platform and apply migrations before updating Portal. The migrations create
 request storage; earlier failed submissions have no records to backfill.
+
+Deploy commercial checkout schema/API and its payment/review/fulfilment workers
+before exposing Portal checkout. Keep `billing.hosting_plan_changes_enabled` off
+until [the paid-change gates](../deployment/DEPLOYMENT.md#paid-hosting-plan-changes)
+pass. Disabling new checkout must preserve existing accepted-change status and
+recovery; it does not remove the support-ticket path.
 
 Local browser verification uses the dedicated E2E databases and a file-based email
 backend under `logs/e2e-mail/`. These messages are not sent externally. A production

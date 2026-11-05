@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% load i18n ui_components formatting %}
+{% block title %}{% trans "Customer plan change links" %}{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-3xl space-y-6 py-8">
+  <h1 class="text-2xl font-semibold text-white">{% trans "Customer plan change links" %}</h1>
+  <p class="text-slate-300">{{ service.service_name }} · {{ service.domain }}</p>
+  <p class="text-slate-300">{% trans "Share a link with the customer through the existing support conversation. The customer reviews and accepts the final quote in Portal." %}</p>
+  {% if current_change %}
+    <section class="rounded-lg border border-slate-700 bg-slate-800 p-5">
+      <h2 class="font-semibold text-white">{% trans "Existing plan change" %}</h2>
+      <p class="text-slate-300">{{ current_change.get_status_display }}</p>
+      {% if current_checkout_url %}<a class="break-all text-blue-300 underline" href="{{ current_checkout_url }}">{{ current_checkout_url }}</a>{% endif %}
+    </section>
+  {% else %}
+    {% for option in options %}
+      <section class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-5">
+        <h2 class="text-lg font-semibold text-white">{{ option.name }}</h2>
+        <dl class="space-y-2 text-slate-300">
+          <div><dt>{% trans "Recurring price before VAT" %}</dt><dd>{{ option.net_cents|cents_to_currency|romanian_currency:service.currency_id }}</dd></div>
+          <div><dt>{% trans "VAT" %}</dt><dd>{{ option.tax_cents|cents_to_currency|romanian_currency:service.currency_id }}</dd></div>
+          <div><dt>{% trans "Recurring total including VAT" %}</dt><dd>{{ option.total_cents|cents_to_currency|romanian_currency:service.currency_id }}</dd></div>
+          <div><dt>{% trans "Proposed disk allowance" %}</dt><dd>{{ option.limits.disk_allowance_mib }} MiB</dd></div>
+          <div><dt>{% trans "Proposed monthly bandwidth allowance" %}</dt><dd>{{ option.limits.bandwidth_allowance_mib }} MiB</dd></div>
+        </dl>
+        {% if option.proposal_url %}<a class="block break-all text-blue-300 underline" href="{{ option.proposal_url }}">{{ option.proposal_url }}</a>{% else %}<p class="text-amber-300">{% trans "Configure the public Portal address before sharing checkout links." %}</p>{% endif %}
+      </section>
+    {% empty %}<p class="text-slate-300">{% trans "No new customer plan links are currently available. Review the service or billing configuration." %}</p>{% endfor %}
+  {% endif %}
+  {% url 'provisioning:service_detail' service.pk as service_url %}{% trans "Back to service" as back_label %}{% button back_label href=service_url variant="secondary" %}
+</div>
+{% endblock %}

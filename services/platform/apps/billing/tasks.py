@@ -1816,10 +1816,7 @@ def _bind_replayed_recurring_intent(payment_id: int, intent_id: str, client_secr
     from apps.billing.payment_models import Payment  # noqa: PLC0415
 
     with transaction.atomic():
-        payment = (
-            Payment.objects.select_for_update(of=("self",))
-            .get(id=payment_id)
-        )
+        payment = Payment.objects.select_for_update(of=("self",)).get(id=payment_id)
         if payment.gateway_txn_id and payment.gateway_txn_id != intent_id:
             raise RuntimeError("Gateway returned a different intent for the same recurring payment attempt")
         if Payment.objects.filter(gateway_txn_id=intent_id).exclude(id=payment.id).exists():
@@ -2221,6 +2218,26 @@ def setup_billing_scheduled_tasks() -> dict[str, str]:
             "billing-recurring-payment-reconciliation",
             "apps.billing.tasks.reconcile_recurring_payment_submissions",
             "*/10 * * * *",
+        ),
+        (
+            "billing-plan-change-payments",
+            "apps.billing.plan_change_payment_service.recover_plan_change_payments",
+            "*/5 * * * *",
+        ),
+        (
+            "billing-scheduled-plan-changes",
+            "apps.billing.plan_change_lifecycle.activate_scheduled_plan_changes",
+            "*/5 * * * *",
+        ),
+        (
+            "billing-plan-change-financial-review",
+            "apps.billing.plan_change_review_service.sweep_financial_reviews",
+            "*/5 * * * *",
+        ),
+        (
+            "billing-plan-change-fulfilment",
+            "apps.billing.plan_change_operations.sweep_plan_change_fulfilment",
+            "*/5 * * * *",
         ),
     )
     results: dict[str, str] = {}

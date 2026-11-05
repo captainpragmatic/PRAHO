@@ -110,7 +110,7 @@ def select_recovery_backups(account: VirtualminAccount, archives: list[dict[str,
 class VirtualminRecoveryService(VirtualminMigrationService):
     """Uses migration leases/exclusion and the same atomic point of no return; no source operations."""
 
-    def start_recovery(  # noqa: C901, PLR0913  # Keep archive, fencing and both node admissions in one atomic review.
+    def start_recovery(  # noqa: C901, PLR0912, PLR0913 -- Keep archive, fencing, account probe and node admission checks atomic.
         self,
         account: VirtualminAccount,
         target: VirtualminServer,
@@ -140,11 +140,14 @@ class VirtualminRecoveryService(VirtualminMigrationService):
                 source, target = servers[locked.server_id], servers[target.pk]
                 from apps.infrastructure.node_maintenance_gate import (  # noqa: PLC0415  # Both server gates
                     maintenance_refusal,
+                    native_account_observation_refusal,
                 )
 
                 for server_id in servers:
                     if refusal := maintenance_refusal(server_id):
                         raise ValueError(refusal)
+                if refusal := native_account_observation_refusal(locked.pk):
+                    raise ValueError(refusal)
                 if locked.server_id == target.pk or locked.status not in {"active", "suspended"}:
                     raise ValueError("Recover an active or suspended account onto a different node")
                 if not AccountHostname.objects.filter(

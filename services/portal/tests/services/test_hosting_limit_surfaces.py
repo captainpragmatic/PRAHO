@@ -37,6 +37,7 @@ class HostingLimitTemplateTests(SimpleTestCase):
             "service_name": "Pinned hosting",
             "domain": "example.com",
             "currency_code": "RON",
+            "plan_changes_enabled": True,
             "service_plan": {"name": "Twenty", "disk_space_gb": 10},
             "hosting_limits": {
                 "state": "pending",
@@ -70,6 +71,7 @@ class HostingLimitTemplateTests(SimpleTestCase):
         self.assertContains(response, "not yet verified")
         self.assertContains(response, "Last verified allowance")
         self.assertNotContains(response, "22 GiB")
+        self.assertContains(response, 'href="/services/5/change-plan/"')
 
     def test_service_cards_show_pending_state_without_advertising_requested_space_as_operational(self) -> None:
         service = {

@@ -9,7 +9,7 @@ from django.db import connection
 
 if TYPE_CHECKING:
     from .hosting_limit_execution_models import HostingLimitExecution
-    from .virtualmin_models import VirtualminServer
+    from .virtualmin_models import VirtualminAccount, VirtualminServer
 
 
 def run_quota_operation(server: VirtualminServer, action: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -21,17 +21,31 @@ def run_quota_operation(server: VirtualminServer, action: str, request: dict[str
 
 
 def probe_account_quota(execution: HostingLimitExecution) -> dict[str, Any]:
+    job = execution.job
+    account = job.account
+    if account is None:
+        raise ValueError("The quota application has no account identity.")
+    return probe_registered_account_quota(
+        account, job.server, execution.identity, token=str(job.execution_token), generation=execution.account_epoch
+    )
+
+
+def probe_registered_account_quota(
+    account: VirtualminAccount,
+    server: VirtualminServer,
+    expected_identity: dict[str, Any],
+    *,
+    token: str,
+    generation: int,
+) -> dict[str, Any]:
+    """One owner-checked read path for quota workers and separately admitted observations."""
     from .virtualmin_gateway import (  # noqa: PLC0415 -- Native read boundary.
         VirtualminConfig,
         VirtualminGateway,
         listing_attribute,
     )
 
-    job = execution.job
-    account = job.account
-    if account is None:
-        raise ValueError("The quota application has no account identity.")
-    result = VirtualminGateway(VirtualminConfig(server=job.server)).call(
+    result = VirtualminGateway(VirtualminConfig(server=server)).call(
         "list-domains",
         {"domain": account.domain, "multiline": ""},
     )
@@ -55,13 +69,13 @@ def probe_account_quota(execution: HostingLimitExecution) -> dict[str, Any]:
         # historical verification. Mutation still requires the complete exact
         # observed/adopted boot in its separately admitted request.
         "identity": {
-            **{key: value for key, value in execution.identity.items() if key != "boot_id"},
+            **{key: value for key, value in expected_identity.items() if key != "boot_id"},
             "domain_id": domain_id,
             "domain": account.domain,
         },
-        "token": str(job.execution_token),
-        "generation": execution.account_epoch,
+        "token": token,
+        "generation": generation,
         "disk_limit_kib": 0,
         "bandwidth_limit_bytes": 0,
     }
-    return run_quota_operation(job.server, "probe", request)
+    return run_quota_operation(server, "probe", request)

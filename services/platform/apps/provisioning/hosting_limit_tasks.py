@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from uuid import NAMESPACE_URL, UUID, uuid5
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Exists, F, OuterRef, Q
 from django.utils import timezone
@@ -31,16 +32,34 @@ def enqueue_application(application_id: UUID | str) -> None:
 
 def current_application(service_id: int) -> HostingLimitApplication:
     """Materialize initial/import-adopted policy without rereading mutable catalog defaults."""
+    from .hosting_raise_service import (  # noqa: PLC0415 -- Expiry materialization before native selection.
+        expire_hosting_raise,
+    )
+
+    expire_hosting_raise(service_id)
+    from .hosting_raise_expiry import (  # noqa: PLC0415 -- Recover pinned cleanup before a pending desire.
+        pending_expiry_cleanup,
+    )
+
+    if cleanup := pending_expiry_cleanup(service_id):
+        return cleanup
     with transaction.atomic():
         service = Service.objects.select_for_update(of=("self",), no_key=True).get(pk=service_id)
         limits = ServiceHostingLimits.objects.get(service_id=service_id)
-        existing = HostingLimitApplication.objects.filter(service_id=service_id, revision=limits.revision).first()
+        from .hosting_raise_service import current_raise_terms  # noqa: PLC0415 -- Service owns composed outbox.
+
+        overlay = current_raise_terms(service.pk, service.customer_id)
+        existing = HostingLimitApplication.objects.filter(
+            service_id=service_id, revision=limits.revision, overlay_revision=overlay.revision
+        ).first()
         if existing is not None:
             return existing
         return HostingLimitApplication.objects.create(
             service_id=service_id,
             revision=limits.revision,
-            submission_id=uuid5(NAMESPACE_URL, f"praho:initial-quota:{service_id}:{limits.revision}"),
+            submission_id=uuid5(
+                NAMESPACE_URL, f"praho:initial-quota:{service_id}:{limits.revision}:{overlay.revision}"
+            ),
             expected_plan_id=limits.assigned_plan_id,
             target_plan_id=limits.assigned_plan_id,
             disk_allowance_mib=limits.disk_allowance_mib,
@@ -48,12 +67,15 @@ def current_application(service_id: int) -> HostingLimitApplication:
             policy_version=limits.policy_version,
             reason="Apply pinned hosting allowance after explicit node adoption",
             authority={"kind": "native_policy_reconciliation", "customer_id": service.customer_id},
+            **overlay.application_fields(),
         )
 
 
 def dispatch_hosting_limits() -> dict[str, int]:
     from .hosting_limit_execution import recover_quota_executions  # noqa: PLC0415 -- Task entrypoint.
+    from .hosting_raise_service import expire_hosting_raises  # noqa: PLC0415
 
+    expire_hosting_raises()
     recovered = recover_quota_executions()
     reviewed_adoption = HostingLimitApplication.objects.filter(
         service_id=OuterRef("service_id"),
@@ -94,7 +116,13 @@ def dispatch_hosting_limits() -> dict[str, int]:
             )
     queued = 0
     for _limits_id, service_id in pending:
-        application = current_application(service_id)
+        try:
+            application = current_application(service_id)
+        except ValidationError as error:
+            # Per-service authority refusal retains that pending obligation; it
+            # must not stop unrelated expiry, recovery or native scheduling.
+            logger.warning("Quota scheduling deferred for service %s: %s", service_id, error)
+            continue
         enqueue_application(application.pk)
         queued += 1
     return {"queued": queued, "recovered": recovered}

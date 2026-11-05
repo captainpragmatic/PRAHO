@@ -28219,6 +28219,9 @@ msgstr "DNS"
 #~ msgid "RON"
 #~ msgstr "RON"
 
+#: templates/security/dashboard.html:58
+msgid "Reset"
+msgstr "Resetați"
 
 #, python-format
 #~ msgid ""
@@ -32917,6 +32920,1311 @@ msgstr "Puneți acțiunea verificată în coadă"
 msgid "Hosting policy"
 msgstr "Politică de găzduire"
 
+#: apps/api/services/plan_change_views.py:40
+#| msgid "Expected a text reason."
+msgid "Expected an explicit boolean acceptance."
+msgstr "Este necesară o confirmare explicită printr-o valoare booleană."
+
+#: apps/api/services/plan_change_views.py:121
+#: apps/api/services/plan_change_views.py:246
+#: apps/api/services/plan_change_views.py:249
+#: apps/api/services/plan_change_views.py:276
+#: apps/api/services/plan_change_views.py:281
+#| msgid "Invoice not found."
+msgid "Plan change not found."
+msgstr "Schimbarea de plan nu a fost găsită."
+
+#: apps/api/services/plan_change_views.py:144
+#| msgid "Service temporarily unavailable"
+msgid "Card checkout is temporarily unavailable."
+msgstr "Plata cu cardul este temporar indisponibilă."
+
+#: apps/api/services/plan_change_views.py:173
+#| msgid "Price requires review"
+msgid "This checkout requires staff review."
+msgstr "Această plată necesită verificarea personalului."
+
+#: apps/api/services/plan_change_views.py:255
+#| msgid "Price requires review"
+msgid "This plan change requires staff review."
+msgstr "Această schimbare de plan necesită verificarea personalului."
+
+#: apps/audit/models.py:514
+msgid "Hosting Plan Change Needs Staff Review"
+msgstr "Schimbarea planului de găzduire necesită verificarea personalului"
+
+#: apps/billing/cycle_terms.py:119
+msgid "Pinned resource allowances require known nonnegative decimal quantities."
+msgstr "Limitele de resurse fixate necesită valori zecimale cunoscute și nenegative."
+
+#: apps/billing/plan_change_escalation.py:61
+#| msgid "The original renewal price needs staff review."
+msgid "Scheduled downgrade limits need staff review."
+msgstr "Limitele trecerii programate la un plan inferior necesită verificarea personalului."
+
+#: apps/billing/plan_change_financial.py:35
+#: apps/billing/plan_change_financial.py:44
+#: apps/billing/plan_change_financial.py:53
+msgid "Original billing coverage changed and requires financial review."
+msgstr "Acoperirea inițială a perioadelor facturate s-a schimbat și necesită o verificare financiară."
+
+#: apps/billing/plan_change_financial.py:48
+#| msgid "The original payment allocation needs review before refunding."
+msgid "Original supplement allocations require financial review."
+msgstr "Alocările inițiale ale sumelor suplimentare necesită o verificare financiară."
+
+#: apps/billing/plan_change_financial.py:55
+msgid "The plan-change payment no longer provides undisputed paid coverage."
+msgstr "Plata pentru schimbarea planului nu mai asigură o acoperire achitată și necontestată."
+
+#: apps/billing/plan_change_financial.py:109
+msgid "Financial coverage requires review before dispatching this plan's native limits."
+msgstr "Acoperirea financiară necesită verificare înainte de a lansa aplicarea limitelor native ale acestui plan."
+
+#: apps/billing/plan_change_historical_coverage.py:21
+#| msgid "Original currency %(currency)s is unavailable; review is required"
+msgid "Original plan coverage is unavailable and requires review."
+msgstr "Acoperirea inițială a planului nu este disponibilă și necesită verificare."
+
+#: apps/billing/plan_change_historical_coverage.py:25
+#| msgid "The original gift-card funding details require review."
+msgid "Original plan coverage identities require review."
+msgstr "Datele de identificare ale acoperirii inițiale a planului necesită verificare."
+
+#: apps/billing/plan_change_historical_coverage.py:32
+msgid "Original plan coverage no longer belongs to this quantity-one service."
+msgstr "Acoperirea inițială a planului nu mai aparține acestui serviciu cu o singură unitate."
+
+#: apps/billing/plan_change_historical_coverage.py:43
+msgid "An original plan coverage interval is missing or belongs to another subscription."
+msgstr "Un interval din acoperirea inițială a planului lipsește sau aparține altui abonament."
+
+#: apps/billing/plan_change_historical_coverage.py:46
+#| msgid "The original gift-card funding details require review."
+msgid "Original current-period paid coverage requires review."
+msgstr "Acoperirea inițială prin plată a perioadei curente necesită verificare."
+
+#: apps/billing/plan_change_historical_coverage.py:50
+#| msgid "The original create no longer owns its recovery claim."
+msgid "The original current interval no longer has paid coverage."
+msgstr "Intervalul curent inițial nu mai are acoperire prin plată."
+
+#: apps/billing/plan_change_holds.py:35
+msgid "Resolve the unsettled plan-change payment before preparing or collecting this renewal"
+msgstr "Clarificați plata nefinalizată pentru schimbarea planului înainte de a pregăti sau încasa această reînnoire"
+
+#: apps/billing/plan_change_lifecycle.py:47
+#| msgid "The active series changed. Reload and try again."
+msgid "The commercial document changed. Reload this plan change."
+msgstr "Documentul comercial s-a schimbat. Reîncărcați această schimbare de plan."
+
+#: apps/billing/plan_change_lifecycle.py:66
+msgid "Current billing authority for this service is required to cancel its plan change."
+msgstr "Anularea schimbării planului necesită drepturi curente de facturare pentru acest serviciu."
+
+#: apps/billing/plan_change_lifecycle.py:68
+#| msgid "The scheduling policy changed. Reload the current policy and preview."
+msgid "The accepted quote changed. Reload its current fingerprint."
+msgstr "Oferta acceptată s-a schimbat. Reîncărcați amprenta sa curentă."
+
+#: apps/billing/plan_change_lifecycle.py:80
+msgid "This downgrade already has a committed renewal document and requires staff review."
+msgstr "Această trecere la un plan inferior are deja un document de reînnoire asociat și necesită verificarea personalului."
+
+#: apps/billing/plan_change_lifecycle.py:97
+msgid "This committed plan change requires the existing billing review process."
+msgstr "Această schimbare de plan deja confirmată necesită procedura existentă de verificare a facturării."
+
+#: apps/billing/plan_change_models.py:18 apps/billing/plan_change_models.py:21
+msgid "Plan changes require audited lifecycle transitions."
+msgstr "Schimbările de plan necesită tranziții de stare înregistrate în audit."
+
+#: apps/billing/plan_change_models.py:24
+#| msgid "Hosting assignments must be accepted and audited individually."
+msgid "Plan changes must be accepted and audited individually."
+msgstr "Schimbările de plan trebuie acceptate și auditate individual."
+
+#: apps/billing/plan_change_models.py:27 apps/billing/plan_change_models.py:202
+#| msgid "Hosting review history cannot be deleted."
+msgid "Commercial plan-change evidence cannot be deleted."
+msgstr "Dovezile comerciale ale schimbării de plan nu pot fi șterse."
+
+#: apps/billing/plan_change_models.py:177
+#| msgid "An accepted currency-change notice cannot be rewritten; create a new offer"
+msgid "A commercial quote cannot be rewritten; request a fresh quote."
+msgstr "O ofertă comercială nu poate fi rescrisă; solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_models.py:188
+#| msgid "A committed domain renewal document cannot be replaced"
+msgid "Accepted commercial document and authority bindings cannot be replaced."
+msgstr "Legăturile acceptate cu documentul comercial și cu autorizarea sa nu pot fi înlocuite."
+
+#: apps/billing/plan_change_models.py:266
+#: apps/billing/plan_change_models.py:296
+#| msgid "The original payment submission time cannot change."
+msgid "The original payment attempt has no terminal cancellation proof."
+msgstr "Încercarea inițială de plată nu are dovada unei anulări definitive."
+
+#: apps/billing/plan_change_models.py:301
+#: apps/billing/plan_change_models.py:304
+#: apps/billing/plan_change_models.py:310
+#: apps/billing/plan_change_models.py:343
+#: apps/billing/plan_change_models.py:348
+msgid "Commercial interval evidence is immutable."
+msgstr "Dovezile intervalelor comerciale sunt imuabile."
+
+#: apps/billing/plan_change_models.py:307
+#| msgid "Security reviews must be recorded individually."
+msgid "Commercial interval evidence must be audited individually."
+msgstr "Dovezile intervalelor comerciale trebuie auditate individual."
+
+#: apps/billing/plan_change_notice_models.py:16
+#: apps/billing/plan_change_notice_models.py:78
+#| msgid "Accepted node hosting history cannot be deleted."
+msgid "Plan-change phase delivery ownership cannot be deleted."
+msgstr "Responsabilitatea pentru livrarea notificării unei etape a schimbării de plan nu poate fi ștearsă."
+
+#: apps/billing/plan_change_notice_models.py:22
+msgid "Plan-change notices require their durable delivery service."
+msgstr "Notificările privind schimbarea planului necesită serviciul lor de livrare cu stare persistentă."
+
+#: apps/billing/plan_change_notice_models.py:26
+#| msgid "An import revision cannot be rewritten"
+msgid "Plan-change delivery evidence cannot be rewritten in bulk."
+msgstr "Dovezile livrării notificărilor privind schimbarea planului nu pot fi rescrise în bloc."
+
+#: apps/billing/plan_change_notice_models.py:70
+#| msgid "An existing credit cannot be relabelled in another currency."
+msgid "A notice cannot be retargeted to another customer agreement or phase."
+msgstr "O notificare nu poate fi redirecționată către alt acord cu clientul sau către altă etapă."
+
+#: apps/billing/plan_change_notice_models.py:74
+msgid "A closed notification phase cannot authorize another message."
+msgstr "O etapă de notificare închisă nu poate autoriza un alt mesaj."
+
+#: apps/billing/plan_change_operations.py:92
+msgid "Another resource assignment requires review of this plan's verification."
+msgstr "O altă alocare de resurse impune reexaminarea verificării acestui plan."
+
+#: apps/billing/plan_change_operations.py:108
+msgid "Your agreed price is retained while the resource change needs verification."
+msgstr "Prețul convenit este păstrat cât timp schimbarea resurselor necesită verificare."
+
+#: apps/billing/plan_change_operations.py:125
+msgid "The current service owner or customer lifecycle requires review."
+msgstr "Proprietarul curent al serviciului sau starea clientului necesită verificare."
+
+#: apps/billing/plan_change_operations.py:130
+msgid "The accepted payment coverage requires financial review."
+msgstr "Acoperirea acceptată prin plată necesită o verificare financiară."
+
+#: apps/billing/plan_change_payment_models.py:15
+msgid "Plan payment attempts require their durable submission service."
+msgstr "Încercările de plată a planului necesită serviciul lor de trimitere cu stare persistentă."
+
+#: apps/billing/plan_change_payment_models.py:18
+#| msgid "An import revision cannot be rewritten"
+msgid "Plan payment attempts cannot be rewritten in bulk."
+msgstr "Încercările de plată a planului nu pot fi rescrise în bloc."
+
+#: apps/billing/plan_change_payment_models.py:21
+#: apps/billing/plan_change_payment_models.py:75
+#| msgid "Security review history cannot be deleted."
+msgid "Plan payment evidence cannot be deleted."
+msgstr "Dovezile plății planului nu pot fi șterse."
+
+#: apps/billing/plan_change_payment_models.py:71
+#| msgid "The original payment provider identity cannot change."
+msgid "A plan payment's original payload and identity cannot be replaced."
+msgstr "Datele și identitatea inițială ale unei plăți a planului nu pot fi înlocuite."
+
+#: apps/billing/plan_change_payment_service.py:60
+msgid "Confirm a positive standalone proforma before reserving payment."
+msgstr "Confirmați o proformă separată cu valoare pozitivă înainte de a rezerva plata."
+
+#: apps/billing/plan_change_payment_service.py:66
+#| msgid "This execution changed. Reload and review its current phase."
+msgid "The commercial document changed; reload its current payment context."
+msgstr "Documentul comercial s-a schimbat; reîncărcați contextul său curent de plată."
+
+#: apps/billing/plan_change_payment_service.py:94
+msgid "The plan payment's durable owner, document or payload differs."
+msgstr "Proprietarul, documentul sau datele persistente ale plății planului diferă."
+
+#: apps/billing/plan_change_payment_service.py:141
+msgid "This payment does not belong to the requested customer and accepted quote."
+msgstr "Această plată nu aparține clientului solicitat și ofertei acceptate."
+
+#: apps/billing/plan_change_payment_service.py:143
+#| msgid "The scheduling policy changed. Reload the current policy and preview."
+msgid "The payment quote changed. Reload its current fingerprint."
+msgstr "Oferta de plată s-a schimbat. Reîncărcați amprenta sa curentă."
+
+#: apps/billing/plan_change_payment_service.py:159
+msgid "The confirmed standalone quote is no longer payable."
+msgstr "Oferta separată confirmată nu mai poate fi achitată."
+
+#: apps/billing/plan_change_payment_service.py:423
+msgid "A settled or disputed payment cannot be cancelled by checkout."
+msgstr "O plată finalizată sau contestată nu poate fi anulată din pagina de plată."
+
+#: apps/billing/plan_change_quote_service.py:53
+#| msgid "Keep this much free space outside pending native quota reservations before accepting a positive cap change."
+msgid "Refresh this service's bound native safety observation before accepting a downgrade."
+msgstr "Actualizați verificarea nativă de siguranță asociată acestui serviciu înainte de a accepta trecerea la un plan inferior."
+
+#: apps/billing/plan_change_quote_service.py:71
+#| msgid "Current usage exceeds the requested cap; limits remain pending for review."
+msgid "Current usage exceeds the proposed assigned disk allowance."
+msgstr "Utilizarea curentă depășește limita propusă pentru spațiul pe disc alocat."
+
+#: apps/billing/plan_change_quote_service.py:103
+msgid "Tax policy changed while calculating this quote. Request a fresh quote."
+msgstr "Politica fiscală s-a schimbat în timpul calculării acestei oferte. Solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_quote_service.py:130
+msgid "This service has no single active billing subscription."
+msgstr "Acest serviciu nu este asociat unui singur abonament activ de facturare."
+
+#: apps/billing/plan_change_quote_service.py:133
+msgid "Only an active independently billed service can change plans."
+msgstr "Numai un serviciu activ, facturat separat, poate schimba planul."
+
+#: apps/billing/plan_change_quote_service.py:139
+#| msgid "Resolve the original currency before using this benefit."
+msgid "Resolve cancellation or currency changes before changing this plan."
+msgstr "Rezolvați anularea sau schimbările valutare înainte de a schimba acest plan."
+
+#: apps/billing/plan_change_quote_service.py:154
+msgid "Choose a different available product from the curated plan targets."
+msgstr "Alegeți un alt produs disponibil dintre destinațiile de plan configurate."
+
+#: apps/billing/plan_change_quote_service.py:171
+#| msgid "Every selected product must be present."
+msgid "The selected product has no compatible service plan."
+msgstr "Produsul selectat nu are un plan de servicii compatibil."
+
+#: apps/billing/plan_change_quote_service.py:186
+msgid "This curated product, price or assigned allowance changed. Request a fresh quote."
+msgstr "Produsul configurat, prețul sau limita alocată s-a schimbat. Solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_quote_service.py:201
+msgid "The quoted catalog configuration changed before acceptance. Request a fresh quote."
+msgstr "Configurația catalogului folosită în ofertă s-a schimbat înainte de acceptare. Solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_quote_service.py:217
+msgid "Committed renewal periods have a gap or overlap and require staff review."
+msgstr "Perioadele de reînnoire deja stabilite au un gol sau se suprapun și necesită verificarea personalului."
+
+#: apps/billing/plan_change_quote_service.py:294
+#| msgid "This submission was already used for a different request."
+msgid "This submission was already used for a different plan-change request."
+msgstr "Această trimitere a fost deja utilizată pentru o altă solicitare de schimbare a planului."
+
+#: apps/billing/plan_change_quote_service.py:302
+#| msgid "Resolve the existing retained source identity before starting another component move."
+msgid "Resolve the existing service plan change before requesting another."
+msgstr "Rezolvați schimbarea existentă a planului serviciului înainte de a solicita alta."
+
+#: apps/billing/plan_change_quote_service.py:305
+#| msgid "The active series changed. Reload and try again."
+msgid "The assigned resource revision changed. Reload the available plans."
+msgstr "Revizia resurselor alocate s-a schimbat. Reîncărcați planurile disponibile."
+
+#: apps/billing/plan_change_quote_service.py:420
+#| msgid "This reset link is no longer valid. Please request a new one."
+msgid "This quote is no longer awaiting acceptance. Request a fresh quote."
+msgstr "Această ofertă nu mai așteaptă acceptarea. Solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_quote_service.py:431
+msgid "This service's original quoted terms changed. Request a fresh quote."
+msgstr "Condițiile inițiale din oferta acestui serviciu s-au schimbat. Solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_quote_service.py:434
+msgid "The committed period coverage changed. Request a fresh quote."
+msgstr "Acoperirea perioadelor deja stabilite s-a schimbat. Solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_quote_service.py:439
+msgid "Another renewal was committed. Request its current downgrade date."
+msgstr "A fost stabilită încă o reînnoire. Solicitați data actualizată pentru trecerea la un plan inferior."
+
+#: apps/billing/plan_change_quote_service.py:452
+msgid "The fiscal tax classification or amounts changed. Request a fresh quote."
+msgstr "Încadrarea fiscală sau sumele s-au schimbat. Solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_quote_service.py:529
+msgid "Explicitly confirm this no-charge upgrade."
+msgstr "Confirmați explicit această trecere la un plan superior fără plată."
+
+#: apps/billing/plan_change_quote_service.py:544
+#| msgid "Service must belong to same customer as group"
+msgid "This accepted quote belongs to another customer or requester."
+msgstr "Această ofertă acceptată aparține altui client sau altui solicitant."
+
+#: apps/billing/plan_change_quote_service.py:547
+#| msgid "The active series changed. Reload and try again."
+msgid "This quote fingerprint changed. Reload the original quote."
+msgstr "Amprenta acestei oferte s-a schimbat. Reîncărcați oferta inițială."
+
+#: apps/billing/plan_change_renewals.py:114
+#| msgid "This operation requires review before it can be retried."
+msgid "The accepted plan's renewal terms require review before another document is prepared."
+msgstr "Condițiile de reînnoire ale planului acceptat necesită verificare înainte de a pregăti un alt document."
+
+#: apps/billing/plan_change_renewals.py:122
+msgid "The accepted plan's document identity requires review."
+msgstr "Datele de identificare a documentului planului acceptat necesită verificare."
+
+#: apps/billing/plan_change_renewals.py:156
+#| msgid "The original gift-card funding details require review."
+msgid "The frozen renewal's accepted document identity requires review."
+msgstr "Datele de identificare a documentului acceptat pentru reînnoirea înghețată necesită verificare."
+
+#: apps/billing/plan_change_review_models.py:15
+msgid "Financial review facts require their audited processing service."
+msgstr "Evenimentele de verificare financiară necesită serviciul lor de procesare auditată."
+
+#: apps/billing/plan_change_review_models.py:18
+#: apps/billing/plan_change_review_models.py:70
+#| msgid "Hosting review history cannot be deleted."
+msgid "Financial review evidence cannot be deleted."
+msgstr "Dovezile verificării financiare nu pot fi șterse."
+
+#: apps/billing/plan_change_review_models.py:21
+#| msgid "An import revision cannot be rewritten"
+msgid "Financial review evidence cannot be rewritten in bulk."
+msgstr "Dovezile verificării financiare nu pot fi rescrise în bloc."
+
+#: apps/billing/plan_change_review_models.py:24
+#| msgid "Security reviews must be recorded individually."
+msgid "Financial review facts must be recorded and audited individually."
+msgstr "Evenimentele de verificare financiară trebuie înregistrate și auditate individual."
+
+#: apps/billing/plan_change_review_models.py:66
+#| msgid "A committed domain renewal document cannot be replaced"
+msgid "A recorded financial review fact cannot be replaced or retargeted."
+msgstr "Un eveniment de verificare financiară înregistrat nu poate fi înlocuit sau redirecționat."
+
+#: apps/billing/plan_change_settlement.py:47
+msgid "The paid quote no longer has current application authority."
+msgstr "Oferta achitată nu mai are o autorizare curentă pentru aplicare."
+
+#: apps/billing/plan_change_settlement.py:62
+msgid "The service's accepted owner, period or commercial terms changed."
+msgstr "Proprietarul, perioada sau condițiile comerciale acceptate ale serviciului s-au schimbat."
+
+#: apps/billing/plan_change_settlement.py:70
+msgid "The customer no longer permits an automatic plan application."
+msgstr "Clientul nu mai permite aplicarea automată a planului."
+
+#: apps/billing/plan_change_settlement.py:73
+msgid "Another resource assignment superseded this paid quote."
+msgstr "O altă alocare de resurse a înlocuit această ofertă achitată."
+
+#: apps/billing/plan_change_settlement.py:76
+msgid "Original period coverage changed after the quote was accepted."
+msgstr "Acoperirea inițială a perioadelor s-a schimbat după acceptarea ofertei."
+
+#: apps/billing/plan_change_settlement.py:78
+#| msgid "The accepted email does not match the exact currency offer"
+msgid "The accepted interval allocations do not match the settled amount."
+msgstr "Alocările acceptate pentru intervale nu corespund sumei achitate."
+
+#: apps/billing/plan_change_settlement.py:167
+#| msgid "Only an unclaimed scheduled window can be moved or cancelled."
+msgid "Only an accepted scheduled downgrade can activate at its recorded renewal date."
+msgstr "Numai o trecere acceptată și programată la un plan inferior poate fi activată la data de reînnoire înregistrată."
+
+#: apps/billing/plan_change_settlement.py:188
+msgid "The scheduled downgrade's current owner or billing lifecycle requires review."
+msgstr "Proprietarul curent sau starea facturării pentru trecerea programată la un plan inferior necesită verificare."
+
+#: apps/billing/plan_change_settlement.py:210
+msgid "Another resource assignment superseded the accepted downgrade; review its limits."
+msgstr "O altă alocare de resurse a înlocuit trecerea acceptată la un plan inferior; verificați limitele acesteia."
+
+#: apps/billing/plan_change_settlement.py:217
+msgid "The accepted hosting profile changed; the lower price remains and limits need review."
+msgstr "Profilul de găzduire acceptat s-a schimbat; prețul redus se păstrează, iar limitele necesită verificare."
+
+#: apps/billing/plan_change_settlement.py:249
+#| msgid "Awaiting outcome verification"
+msgid "Your agreed plan is waiting for resource verification."
+msgstr "Planul convenit așteaptă verificarea resurselor."
+
+#: apps/billing/plan_change_settlement.py:259
+msgid "The plan-change invoice has no undisputed paid coverage."
+msgstr "Factura pentru schimbarea planului nu este acoperită de o plată necontestată."
+
+#: apps/billing/plan_change_settlement.py:268
+#| msgid "The linked domain does not match the purchased line."
+msgid "The settled document does not match the accepted plan quote."
+msgstr "Documentul achitat nu corespunde ofertei acceptate pentru plan."
+
+#: apps/billing/plan_change_settlement.py:287
+msgid "The accepted plan change is bound to another invoice."
+msgstr "Schimbarea de plan acceptată este asociată altei facturi."
+
+#: apps/billing/plan_change_settlement.py:311
+msgid "Only a confirmed zero-due quote without payment evidence can use no-charge acceptance."
+msgstr "Numai o ofertă confirmată cu zero de plată și fără dovezi de plată poate fi acceptată fără plată."
+
+#: apps/billing/plan_change_settlement.py:318
+#| msgid "The original gift-card funding details require review."
+msgid "The no-charge assignment requires review."
+msgstr "Alocarea fără plată necesită verificare."
+
+#: apps/billing/plan_change_settlement.py:321
+msgid "The no-charge quote expired before acceptance."
+msgstr "Oferta fără plată a expirat înainte de acceptare."
+
+#: apps/billing/plan_change_validation.py:35
+#| msgid "New promotions are temporarily unavailable."
+msgid "New hosting plan changes are temporarily disabled."
+msgstr "Schimbările noi ale planurilor de găzduire sunt temporar dezactivate."
+
+#: apps/billing/plan_change_validation.py:41
+#| msgid "The canonical target has no current verified managed quota receipt."
+msgid "This service has no current managed quota capability."
+msgstr "Acest serviciu nu are în prezent capacitatea verificată de gestionare a cotelor."
+
+#: apps/billing/plan_change_validation.py:64
+#| msgid "Resolve the currency transition before granting a resource exception."
+msgid "Resolve the current hosting operation before reserving a plan-change charge."
+msgstr "Rezolvați operațiunea curentă de găzduire înainte de a rezerva o plată pentru schimbarea planului."
+
+#: apps/billing/plan_change_validation.py:67
+msgid "Fresh usage and current managed quota verification are required before payment."
+msgstr "Înainte de plată sunt necesare date recente de utilizare și o verificare curentă a cotelor gestionate."
+
+#: apps/billing/plan_change_validation.py:79
+#| msgid "Resolve the currency transition before granting a resource exception."
+msgid "Resolve the currency transition before reserving a plan-change charge."
+msgstr "Rezolvați tranziția valutară înainte de a rezerva o plată pentru schimbarea planului."
+
+#: apps/billing/plan_change_validation.py:81
+#| msgid "Resolve the pending subscription change before granting a resource exception."
+msgid "Resolve the pending subscription change before reserving another charge."
+msgstr "Rezolvați schimbarea în așteptare a abonamentului înainte de a rezerva o altă plată."
+
+#: apps/billing/plan_change_validation.py:88
+#| msgid "Resolve the existing retained source identity before starting another component move."
+msgid "Resolve the in-flight renewal charge before accepting another commercial change."
+msgstr "Clarificați plata de reînnoire în curs înainte de a accepta o altă schimbare comercială."
+
+#: apps/billing/plan_change_validation.py:99
+msgid "The requester no longer has billing authority for this customer."
+msgstr "Solicitantul nu mai are drepturi de facturare pentru acest client."
+
+#: apps/billing/plan_change_validation.py:102
+msgid "This customer no longer permits a new plan-change charge."
+msgstr "Acest client nu mai permite o nouă plată pentru schimbarea planului."
+
+#: apps/billing/plan_change_validation.py:112
+msgid "The accepted plan change has no bound payable document."
+msgstr "Schimbarea de plan acceptată nu are un document asociat care poate fi achitat."
+
+#: apps/billing/plan_change_validation.py:124
+msgid "The payable plan-change document changed or already owns a payment attempt."
+msgstr "Documentul de plată pentru schimbarea planului s-a schimbat sau are deja o încercare de plată asociată."
+
+#: apps/billing/plan_change_validation.py:140
+msgid "This plan-change quote or its payment authority expired. Request a fresh quote."
+msgstr "Oferta pentru schimbarea planului sau autorizarea plății sale a expirat. Solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_validation.py:147
+msgid "Explicitly confirm a payable upgrade before reserving its first charge."
+msgstr "Confirmați explicit o trecere cu plată la un plan superior înainte de a rezerva prima plată."
+
+#: apps/billing/plan_change_validation.py:165
+#| msgid "The service's owner changed. Reload and authorize the current owner."
+msgid "The service's owner or commercial terms changed. Request a fresh quote."
+msgstr "Proprietarul serviciului sau condițiile comerciale s-au schimbat. Solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_validation.py:168
+msgid "Another resource assignment superseded this quote."
+msgstr "O altă alocare de resurse a înlocuit această ofertă."
+
+#: apps/billing/plan_change_validation.py:171
+#| msgid "Native restore metadata belongs to another domain."
+msgid "The accepted resource terms belong to another plan."
+msgstr "Condițiile de resurse acceptate aparțin altui plan."
+
+#: apps/billing/plan_change_validation.py:174
+msgid "Unlimited native disk capacity requires an explicit staff capacity review before payment."
+msgstr "Un plafon nativ nelimitat pentru spațiul pe disc necesită o verificare explicită a capacității de către personal înainte de plată."
+
+#: apps/billing/plan_change_validation.py:179
+msgid "The accepted period coverage changed. Request a fresh quote."
+msgstr "Acoperirea acceptată a perioadelor s-a schimbat. Solicitați o ofertă nouă."
+
+#: apps/billing/plan_change_validation.py:181
+#| msgid "The accepted email does not match this exact domain offer"
+msgid "The accepted interval amounts do not match this quote."
+msgstr "Sumele acceptate pentru intervale nu corespund acestei oferte."
+
+#: apps/infrastructure/node_maintenance_gate.py:150
+msgid "A native safety observation is running. Retry after it finishes."
+msgstr "O verificare nativă de siguranță este în curs. Încercați din nou după finalizarea acesteia."
+
+#: apps/products/upgrade_path_views.py:26
+#| msgid "Upgrade request"
+msgid "Upgrade target"
+msgstr "Produs țintă pentru trecerea la un plan superior"
+
+#: apps/products/upgrade_path_views.py:27
+#| msgid "Display Order"
+msgid "Display order"
+msgstr "Ordine de afișare"
+
+#: apps/products/upgrade_path_views.py:90
+#| msgid "Upload paths"
+msgid "Upgrade path saved."
+msgstr "Tranziția la un plan superior a fost salvată."
+
+#: apps/products/upgrade_path_views.py:110
+#| msgid "Upgrade request"
+msgid "Upgrade path removed."
+msgstr "Tranziția la un plan superior a fost eliminată."
+
+#: apps/products/upgrade_paths.py:59
+msgid "Hosting upgrade path created."
+msgstr "Tranziția la un plan superior de găzduire a fost creată."
+
+#: apps/products/upgrade_paths.py:60
+#| msgid "Hosting software updates"
+msgid "Hosting upgrade path updated."
+msgstr "Tranziția la un plan superior de găzduire a fost actualizată."
+
+#: apps/products/upgrade_paths.py:61
+msgid "Hosting upgrade path removed."
+msgstr "Tranziția la un plan superior de găzduire a fost eliminată."
+
+#: apps/products/upgrade_paths.py:76
+#| msgid "Service cannot be related to itself"
+msgid "A product cannot upgrade to itself."
+msgstr "Un produs nu poate avea o tranziție la un plan superior către el însuși."
+
+#: apps/products/upgrade_paths.py:81
+#| msgid "A user with email {email} already exists. Please choose \"Link existing user\" instead."
+msgid "This upgrade path already exists. Edit the existing link instead."
+msgstr "Această tranziție la un plan superior există deja. Editați legătura existentă."
+
+#: apps/products/upgrade_paths.py:88
+msgid "An active upgrade path already exists in the opposite direction."
+msgstr "Există deja o tranziție activă la un plan superior în sens opus."
+
+#: apps/products/upgrade_paths.py:93
+#| msgid "This relationship would create a circular dependency"
+msgid "This upgrade path would create a cycle."
+msgstr "Această tranziție la un plan superior ar crea un ciclu."
+
+#: apps/products/upgrade_paths.py:110
+msgid "Choose a valid active state and non-negative display order."
+msgstr "Alegeți o stare de activare validă și o ordine de afișare nenegativă."
+
+#: apps/products/upgrade_paths.py:117
+#| msgid "Select an existing resource plan."
+msgid "Select an existing target product."
+msgstr "Selectați un produs țintă existent."
+
+#: apps/promotions/gift_cards.py:360
+msgid "Use the plan-change checkout to pay for this change."
+msgstr "Utilizați pagina de plată a schimbării de plan pentru a achita această schimbare."
+
+#: apps/promotions/locking.py:43
+#| msgid "The source belongs to a different customer."
+msgid "The plan-change document belongs to another customer."
+msgstr "Documentul pentru schimbarea planului aparține altui client."
+
+#: apps/provisioning/hosting_limit_override_service.py:33
+#| msgid "Resolve the pending subscription change before granting a resource exception."
+msgid "Resolve the active commercial plan change before granting a resource exception."
+msgstr "Rezolvați schimbarea comercială activă a planului înainte de a acorda o excepție de resurse."
+
+#: apps/provisioning/hosting_safety_observation.py:84
+msgid "Safety refresh requires exact current service and requester identities."
+msgstr "Actualizarea verificării de siguranță necesită identitățile curente exacte ale serviciului și solicitantului."
+
+#: apps/provisioning/hosting_safety_observation.py:87
+#| msgid "This line has no service to retry."
+msgid "This service has no registered native account."
+msgstr "Acest serviciu nu are un cont nativ înregistrat."
+
+#: apps/provisioning/hosting_safety_observation.py:99
+msgid "The current service does not permit a native safety refresh."
+msgstr "Starea curentă a serviciului nu permite actualizarea verificării native de siguranță."
+
+#: apps/provisioning/hosting_safety_observation.py:110
+msgid "Original safety refresh authority expired."
+msgstr "Autorizarea inițială pentru actualizarea verificării de siguranță a expirat."
+
+#: apps/provisioning/hosting_safety_observation.py:153
+msgid "Safety observation scope or execution authority changed."
+msgstr "Domeniul verificării de siguranță sau autorizarea execuției s-a schimbat."
+
+#: apps/provisioning/hosting_safety_observation.py:217
+#| msgid "Requalify this node after its reboot before using managed quotas."
+msgid "Requalify this node after reboot before refreshing current safety."
+msgstr "Recalificați acest nod după repornire înainte de a actualiza verificarea curentă de siguranță."
+
+#: apps/provisioning/hosting_safety_observation.py:232
+#| msgid "Native receipt no longer matches the inspected node."
+msgid "Fresh native safety no longer matches this service scope."
+msgstr "Noua verificare nativă de siguranță nu mai corespunde domeniului acestui serviciu."
+
+#: apps/provisioning/hosting_safety_observation.py:290
+msgid "Read-only native safety observation did not complete."
+msgstr "Verificarea nativă de siguranță fără modificări nu s-a finalizat."
+
+#: apps/provisioning/hosting_safety_observation.py:305
+msgid "Read-only observation execution budget expired."
+msgstr "Timpul alocat execuției verificării fără modificări a expirat."
+
+#: apps/provisioning/plan_change_proposal_views.py:39
+#| msgid "This customer has not been billed yet."
+msgid "This customer is outside your billing access."
+msgstr "Nu aveți drepturi de facturare pentru acest client."
+
+#: apps/provisioning/plan_change_proposal_views.py:46
+#| msgid "This invoice cannot accept payment."
+msgid "This service cannot currently accept a plan proposal."
+msgstr "Acest serviciu nu poate accepta în prezent o propunere de plan."
+
+#: apps/provisioning/plan_change_proposal_views.py:56
+msgid "Refresh this customer's billing details before preparing a plan link."
+msgstr "Actualizați datele de facturare ale acestui client înainte de a pregăti un link pentru schimbarea planului."
+
+#: apps/provisioning/virtualmin_models.py:665
+#| msgid "Accepted hosting assignments cannot be overwritten."
+msgid "Accepted safety observation scope cannot be overwritten."
+msgstr "Domeniul verificării de siguranță acceptate nu poate fi suprascris."
+
+#: apps/provisioning/virtualmin_models.py:667
+msgid "Safety observations require a new individually admitted job."
+msgstr "Verificările de siguranță necesită o sarcină nouă, admisă individual."
+
+#: apps/provisioning/virtualmin_models.py:672
+#| msgid "Provider resource history cannot be overwritten."
+msgid "Published safety observations cannot be overwritten."
+msgstr "Verificările de siguranță publicate nu pot fi suprascrise."
+
+#: apps/provisioning/virtualmin_models.py:681
+#| msgid "Node hosting executions must be transitioned and audited individually."
+msgid "Safety observation jobs must be transitioned individually."
+msgstr "Sarcinile de verificare a siguranței trebuie să își schimbe starea individual."
+
+#: apps/provisioning/virtualmin_models.py:687
+msgid "Safety observations require individual admission and audit."
+msgstr "Verificările de siguranță necesită admitere și audit individual."
+
+#: apps/provisioning/virtualmin_models.py:692
+msgid "Conflict updates cannot replace accepted safety observations."
+msgstr "Actualizările efectuate la apariția unui conflict nu pot înlocui verificările de siguranță acceptate."
+
+#: apps/provisioning/virtualmin_models.py:814
+#| msgid "Observed at"
+msgid "Observe Hosting Safety"
+msgstr "Verificați siguranța găzduirii"
+
+#: apps/provisioning/virtualmin_models.py:996
+#| msgid "A user with this email already exists."
+msgid "Accepted safety observation identity already exists."
+msgstr "Identificatorul verificării de siguranță acceptate există deja."
+
+#: apps/provisioning/virtualmin_models.py:998
+msgid "Admit safety observations as new pending read-only jobs."
+msgstr "Admiteți verificările de siguranță ca sarcini noi, în așteptare, fără modificări."
+
+#: apps/provisioning/virtualmin_models.py:1002
+msgid "Safety observation cannot replace another native operation."
+msgstr "Verificarea de siguranță nu poate înlocui o altă operațiune nativă."
+
+#: apps/provisioning/virtualmin_models.py:1013
+#| msgid "Accepted node hosting authority cannot be overwritten."
+msgid "Accepted safety observation scope or publication cannot be overwritten."
+msgstr "Domeniul sau rezultatul publicat al verificării de siguranță acceptate nu poate fi suprascris."
+
+#: apps/settings/catalog.py:734
+#| msgid "Hosting plan"
+msgid "Hosting plan changes"
+msgstr "Schimbări ale planurilor de găzduire"
+
+#: apps/settings/catalog.py:735
+msgid "Allow new paid hosting plan changes"
+msgstr "Permiteți schimbări noi cu plată ale planurilor de găzduire"
+
+#: apps/settings/catalog.py:739
+msgid "Enable new acceptance only after native qualification. Existing payment recovery and fulfilment remain active when disabled."
+msgstr "Activați acceptarea de solicitări noi numai după calificarea nativă. Recuperarea plăților și aplicarea solicitărilor existente rămân active și când opțiunea este dezactivată."
+
+#: templates/products/product_detail.html:33
+#: templates/products/upgrade_paths.html:3
+#: templates/products/upgrade_paths.html:7
+#| msgid "Upload paths"
+msgid "Upgrade paths"
+msgstr "Tranziții la planuri superioare"
+
+#: templates/products/upgrade_path_form.html:3
+#: templates/products/upgrade_path_form.html:6
+#| msgid "Edit Order Item"
+msgid "Edit upgrade path"
+msgstr "Editați tranziția la un plan superior"
+
+#: templates/products/upgrade_path_form.html:3
+#: templates/products/upgrade_path_form.html:6
+#: templates/products/upgrade_paths.html:13
+#| msgid "Add Order Item"
+msgid "Add upgrade path"
+msgstr "Adăugați o tranziție la un plan superior"
+
+#: templates/products/upgrade_path_form.html:7
+#| msgid "Source Node"
+msgid "Source product:"
+msgstr "Produs sursă:"
+
+#: templates/products/upgrade_path_form.html:11
+msgid "Save upgrade path"
+msgstr "Salvați tranziția la un plan superior"
+
+#: templates/products/upgrade_paths.html:10
+#| msgid "Product Details"
+msgid "Product details"
+msgstr "Detaliile produsului"
+
+#: templates/products/upgrade_paths.html:17
+msgid "Forward links curate upgrades; the same links in reverse curate downgrades. A quote also checks current availability, price, resources and compatibility."
+msgstr "Legăturile directe stabilesc trecerile permise la planuri superioare; aceleași legături în sens invers stabilesc trecerile la planuri inferioare. Oferta verifică și disponibilitatea curentă, prețul, resursele și compatibilitatea."
+
+#: templates/products/upgrade_paths.html:22
+#| msgid "Upgrade request"
+msgid "Upgrade targets"
+msgstr "Destinații pentru planuri superioare"
+
+#: templates/products/upgrade_paths.html:35
+#| msgid "Remove line"
+msgid "Remove link"
+msgstr "Eliminați legătura"
+
+#: templates/products/upgrade_paths.html:40
+#| msgid "No providers configured"
+msgid "No upgrade targets configured."
+msgstr "Nu sunt configurate destinații pentru planuri superioare."
+
+#: templates/products/upgrade_paths.html:44
+#| msgid "Downgrade"
+msgid "Downgrade paths"
+msgstr "Tranziții la planuri inferioare"
+
+#: templates/products/upgrade_paths.html:50
+msgid "Managed from the source product's upgrade paths."
+msgstr "Se gestionează din tranzițiile la planuri superioare ale produsului sursă."
+
+#: templates/products/upgrade_paths.html:52
+#| msgid "No servers configured."
+msgid "No reverse paths configured."
+msgstr "Nu sunt configurate tranziții în sens invers."
+
+#: templates/provisioning/plan_change_proposal.html:3
+#: templates/provisioning/plan_change_proposal.html:6
+#| msgid "Customer Management"
+msgid "Customer plan change links"
+msgstr "Linkuri pentru schimbarea planului clientului"
+
+#: templates/provisioning/plan_change_proposal.html:8
+msgid "Share a link with the customer through the existing support conversation. The customer reviews and accepts the final quote in Portal."
+msgstr "Trimiteți clientului un link prin conversația de asistență existentă. Clientul verifică și acceptă oferta finală în Portal."
+
+#: templates/provisioning/plan_change_proposal.html:11
+#| msgid "Hosting plan"
+msgid "Existing plan change"
+msgstr "Schimbare de plan existentă"
+
+#: templates/provisioning/plan_change_proposal.html:20
+msgid "Recurring price before VAT"
+msgstr "Preț recurent fără TVA"
+
+#: templates/provisioning/plan_change_proposal.html:22
+msgid "Recurring total including VAT"
+msgstr "Total recurent inclusiv TVA"
+
+#: templates/provisioning/plan_change_proposal.html:23
+#| msgid "Hosting allowances"
+msgid "Proposed disk allowance"
+msgstr "Limită propusă pentru spațiul pe disc"
+
+#: templates/provisioning/plan_change_proposal.html:24
+msgid "Proposed monthly bandwidth allowance"
+msgstr "Limită propusă pentru traficul lunar"
+
+#: templates/provisioning/plan_change_proposal.html:26
+#| msgid "Configure the source and target bridge IPv4 addresses before starting this migration."
+msgid "Configure the public Portal address before sharing checkout links."
+msgstr "Configurați adresa publică a portalului înainte de a trimite linkuri de plată."
+
+#: templates/provisioning/plan_change_proposal.html:28
+msgid "No new customer plan links are currently available. Review the service or billing configuration."
+msgstr "Nu sunt disponibile în prezent linkuri noi pentru schimbarea planului clientului. Verificați configurația serviciului sau a facturării."
+
+#: templates/provisioning/plan_change_proposal.html:30
+#| msgid "Back to Service"
+msgid "Back to service"
+msgstr "Înapoi la serviciu"
+
+#: templates/provisioning/service_detail.html:66
+#| msgid "Customer name"
+msgid "Customer plan change"
+msgstr "Schimbarea planului clientului"
+
+#: apps/notifications/models.py:251
+#| msgid "Hosting allowances"
+msgid "Hosting Allowance Warnings"
+msgstr "Avertizări privind resursele incluse în găzduire"
+
+#: apps/notifications/models.py:1043
+msgid "Receive optional hosting allowance warnings; critical allowance notices remain enabled."
+msgstr "Primiți avertizări opționale privind resursele incluse în găzduire; notificările critice rămân activate."
+
+#: apps/provisioning/hosting_limit_commercial.py:28
+msgid "The composed hosting allowance has no matching original financial authority."
+msgstr "Resursele de găzduire rezultate din combinare nu corespund unei autorizări financiare inițiale."
+
+#: apps/provisioning/hosting_limit_execution.py:849
+msgid "The temporary resource application has no exact expiry."
+msgstr "Aplicarea resurselor temporare nu are un termen exact de expirare."
+
+#: apps/provisioning/hosting_limit_execution.py:899
+msgid "Prepare the current quota helper protocol before applying temporary resources."
+msgstr "Pregătiți protocolul curent al utilitarului de cote înainte de a aplica resurse temporare."
+
+#: apps/provisioning/hosting_limit_execution.py:957
+msgid "The native helper did not verify the temporary resource protocol."
+msgstr "Utilitarul nativ nu a verificat protocolul pentru resurse temporare."
+
+#: apps/provisioning/hosting_limit_review.py:43
+#| msgid "The native quota job has no immutable hosting application."
+msgid "This migration has no supported immutable hosting-limit review."
+msgstr "Această migrare nu are o evaluare imuabilă acceptată a limitelor de găzduire."
+
+#: apps/provisioning/hosting_limit_review.py:71
+msgid "The migration's reviewed allowance or overlay evidence changed."
+msgstr "Resursele evaluate pentru migrare sau dovezile privind suplimentul temporar s-au modificat."
+
+#: apps/provisioning/hosting_limit_review.py:104
+msgid "Current temporary resources exceed the immutable native-parent review."
+msgstr "Resursele temporare curente depășesc evaluarea imuabilă a operațiunii native părinte."
+
+#: apps/provisioning/hosting_limit_review.py:110
+msgid "The existing reviewed overlay application has different terms."
+msgstr "Aplicarea existentă și evaluată a suplimentului temporar are alți termeni."
+
+#: apps/provisioning/hosting_raise_expiry.py:75
+#: apps/provisioning/hosting_raise_expiry.py:99
+msgid "Temporary resource expiry requires this owner's recorded operational native base."
+msgstr "Expirarea resurselor temporare necesită baza operațională nativă înregistrată pentru acest proprietar."
+
+#: apps/provisioning/hosting_raise_expiry.py:105
+msgid "The existing expiry application has different operational authority."
+msgstr "Aplicarea existentă a expirării are o altă autorizare operațională."
+
+#: apps/provisioning/hosting_raise_expiry.py:199
+msgid "Expiry requires its recorded finite operational base."
+msgstr "Expirarea necesită baza operațională finită înregistrată pentru aceasta."
+
+#: apps/provisioning/hosting_raise_expiry.py:205
+msgid "Expiry cannot increase either independently observed native hard cap."
+msgstr "Expirarea nu poate mări niciuna dintre limitele native stricte observate independent."
+
+#: apps/provisioning/hosting_raise_models.py:17
+#: apps/provisioning/hosting_raise_models.py:58
+#| msgid "Resolve the existing service plan change before requesting another."
+msgid "Use the reviewed hosting raise service to change temporary resources."
+msgstr "Folosiți serviciul cu evaluare pentru suplimentarea resurselor de găzduire pentru a modifica resursele temporare."
+
+#: apps/provisioning/hosting_raise_models.py:21
+#: apps/provisioning/hosting_raise_models.py:24
+#| msgid "Security reviews must be recorded individually."
+msgid "Temporary hosting raises must be reviewed individually."
+msgstr "Suplimentările temporare ale resurselor de găzduire trebuie evaluate individual."
+
+#: apps/provisioning/hosting_raise_models.py:27
+#: apps/provisioning/hosting_raise_models.py:62
+#| msgid "Hosting review history cannot be deleted."
+msgid "Temporary hosting raise identity and history cannot be reset."
+msgstr "Identitatea și istoricul suplimentării temporare a resurselor de găzduire nu pot fi resetate."
+
+#: apps/provisioning/hosting_raise_service.py:153
+msgid "Verify the current purchased base before requesting a new temporary allowance."
+msgstr "Verificați resursele de bază achiziționate în prezent înainte de a solicita resurse temporare noi."
+
+#: apps/provisioning/hosting_raise_service.py:166
+msgid "Refresh verified native safety and protocol 2 helpers before requesting temporary resources."
+msgstr "Actualizați verificarea siguranței native și utilitarele pentru protocolul 2 înainte de a solicita resurse temporare."
+
+#: apps/provisioning/hosting_raise_service.py:177
+#| msgid "Insufficient verified unreserved node capacity for this increase."
+msgid "Refresh sufficient unreserved node capacity before requesting temporary resources."
+msgstr "Actualizați verificarea capacității nerezervate suficiente pe nod înainte de a solicita resurse temporare."
+
+#: apps/provisioning/hosting_raise_service.py:187
+#| msgid "Administrator or manager authority is required for a resource-only exception."
+msgid "Administrator or manager authority is required for a temporary resource raise."
+msgstr "Suplimentarea temporară a resurselor necesită drepturi de administrator sau manager."
+
+#: apps/provisioning/hosting_raise_service.py:196
+#| msgid "Resource exceptions require an active customer."
+msgid "Temporary resources require the active service's current customer."
+msgstr "Resursele temporare necesită clientul curent al serviciului activ."
+
+#: apps/provisioning/hosting_raise_service.py:222
+msgid "Give a positive integer disk raise and an explicit reason."
+msgstr "Introduceți o suplimentare a spațiului pe disc ca număr întreg pozitiv și un motiv explicit."
+
+#: apps/provisioning/hosting_raise_service.py:224
+msgid "Load the current base and temporary resource versions first."
+msgstr "Încărcați mai întâi versiunile curente ale resurselor de bază și temporare."
+
+#: apps/provisioning/hosting_raise_service.py:226
+#| msgid "Select a valid timezone."
+msgid "Select an exact expiry with a timezone."
+msgstr "Selectați un termen exact de expirare, cu fus orar."
+
+#: apps/provisioning/hosting_raise_service.py:246
+#| msgid "The service's owner changed. Reload and authorize the current owner."
+msgid "The service's owner changed. Reload and review the current customer."
+msgstr "Proprietarul serviciului s-a schimbat. Reîncărcați pagina și verificați clientul curent."
+
+#: apps/provisioning/hosting_raise_service.py:251
+#| msgid "This submission was already used for a different request."
+msgid "This submission was already used for different temporary resource terms."
+msgstr "Această solicitare a fost deja folosită pentru alți termeni privind resursele temporare."
+
+#: apps/provisioning/hosting_raise_service.py:255
+msgid "New temporary hosting raises are disabled until rollout qualification is complete."
+msgstr "Suplimentările temporare noi ale resurselor de găzduire sunt dezactivate până la finalizarea verificărilor pentru lansare."
+
+#: apps/provisioning/hosting_raise_service.py:260
+#| msgid "The assigned allowance changed. Reload before submitting again."
+msgid "The base allowance or temporary resources changed. Reload before retrying."
+msgstr "Resursele de bază sau temporare s-au modificat. Reîncărcați pagina înainte de a reîncerca."
+
+#: apps/provisioning/hosting_raise_service.py:262
+msgid "Temporary disk resources are limited to one quarter of the allowance or 5 GiB."
+msgstr "Resursele temporare de disc sunt limitate la un sfert din spațiul inclus sau la 5 GiB."
+
+#: apps/provisioning/hosting_raise_service.py:273
+msgid "A temporary raise must expire within seven days of its first grant."
+msgstr "O suplimentare temporară trebuie să expire în cel mult șapte zile de la prima acordare."
+
+#: apps/provisioning/hosting_raise_service.py:275
+msgid "An active raise can only extend its expiry, with the same fixed disk amount."
+msgstr "Pentru o suplimentare activă se poate doar prelungi termenul de expirare, păstrând aceeași cantitate fixă de spațiu pe disc."
+
+#: apps/provisioning/hosting_raise_views.py:33
+#| msgid "Disk Capacity (GB)"
+msgid "Extra disk capacity (MiB)"
+msgstr "Spațiu suplimentar pe disc (MiB)"
+
+#: apps/provisioning/hosting_raise_views.py:46
+msgid "I authorize automatic removal of this temporary capacity at expiry, including if usage is still above the plan allowance."
+msgstr "Autorizez eliminarea automată a acestei capacități temporare la expirare, inclusiv dacă utilizarea depășește în continuare resursele incluse în plan."
+
+#: apps/provisioning/hosting_raise_views.py:58
+#, python-format
+msgid "Up to %(maximum)d MiB. An existing raise can only extend its expiry."
+msgstr "Cel mult %(maximum)d MiB. Pentru o suplimentare existentă se poate doar prelungi termenul de expirare."
+
+#: apps/provisioning/hosting_raise_views.py:60
+#, python-format
+#| msgid "Expiry notices"
+msgid "Expiry (%(timezone)s)"
+msgstr "Expirare (%(timezone)s)"
+
+#: apps/provisioning/hosting_raise_views.py:73
+#| msgid "Administrator or manager authority is required for a resource-only exception."
+msgid "Administrator or manager authority is required for temporary resource relief."
+msgstr "Acordarea temporară de resurse suplimentare necesită drepturi de administrator sau manager."
+
+#: apps/provisioning/hosting_raise_views.py:105
+#| msgid "Node check queued. Refresh this page shortly for results."
+msgid "Usage check queued. Reload this page after it finishes."
+msgstr "Verificarea utilizării a fost adăugată în coadă. Reîncărcați această pagină după finalizare."
+
+#: apps/provisioning/hosting_raise_views.py:108
+#: templates/provisioning/service_hosting_raise.html:23
+msgid "This raise has reached its original seven-day limit."
+msgstr "Această suplimentare a atins limita inițială de șapte zile."
+
+#: apps/provisioning/hosting_raise_views.py:122
+msgid "Temporary relief requested. Capacity remains pending until verified."
+msgstr "Resursele suplimentare temporare au fost solicitate. Capacitatea rămâne în așteptare până la verificare."
+
+#: apps/provisioning/hosting_warning_models.py:24
+#: apps/provisioning/hosting_warning_models.py:29
+#: apps/provisioning/hosting_warning_models.py:50
+#| msgid "Hosting review history cannot be overwritten."
+msgid "Warning evidence cannot be overwritten."
+msgstr "Dovezile avertizărilor nu pot fi suprascrise."
+
+#: apps/provisioning/hosting_warning_models.py:191
+msgid "A warning delivery requires its stored email before queue publication."
+msgstr "Livrarea unei avertizări necesită stocarea e-mailului înainte de publicarea în coadă."
+
+#: apps/provisioning/hosting_warning_staff.py:67
+#| msgid "Awaiting Review"
+msgid "Awaiting delivery"
+msgstr "În așteptarea livrării"
+
+#: apps/provisioning/hosting_warning_staff.py:69
+#| msgid "Outcome unconfirmed"
+msgid "Dispatch started; outcome unconfirmed"
+msgstr "Trimiterea a început; rezultatul nu este confirmat"
+
+#: apps/provisioning/hosting_warning_staff.py:70
+#: apps/provisioning/hosting_warning_staff.py:71
+#| msgid "Add your first provider"
+msgid "Accepted by email provider"
+msgstr "Acceptat de furnizorul de e-mail"
+
+#: apps/provisioning/hosting_warning_staff.py:72
+#| msgid "Refunded"
+msgid "Refused"
+msgstr "Refuzat"
+
+#: apps/provisioning/hosting_warning_staff.py:74
+#: apps/provisioning/hosting_warning_staff.py:197
+#| msgid "New status"
+msgid "Unknown status"
+msgstr "Stare necunoscută"
+
+#: apps/provisioning/hosting_warning_staff.py:81
+#| msgid "Recipient email address"
+msgid "Recipient suppressed"
+msgstr "Destinatar exclus de la trimitere"
+
+#: apps/provisioning/hosting_warning_staff.py:82
+#| msgid "Optional friendly name"
+msgid "Optional warnings disabled"
+msgstr "Avertizări opționale dezactivate"
+
+#: apps/provisioning/hosting_warning_staff.py:83
+#| msgid "Recipient"
+msgid "Recipient changed"
+msgstr "Destinatar modificat"
+
+#: apps/provisioning/hosting_warning_staff.py:84
+#| msgid "Last changed"
+msgid "Ownership changed"
+msgstr "Proprietar modificat"
+
+#: apps/provisioning/hosting_warning_staff.py:85
+#| msgid "No customers available"
+msgid "Customer unavailable"
+msgstr "Client indisponibil"
+
+#: apps/provisioning/hosting_warning_staff.py:86
+#| msgid "Service price"
+msgid "Service inactive"
+msgstr "Serviciu inactiv"
+
+#: apps/provisioning/hosting_warning_staff.py:87
+msgid "Platform notification handover pending"
+msgstr "Preluarea notificărilor de către Platform este în așteptare"
+
+#: apps/provisioning/hosting_warning_staff.py:88
+#| msgid "User who made the change"
+msgid "Usage month changed"
+msgstr "Luna de utilizare s-a schimbat"
+
+#: apps/provisioning/hosting_warning_staff.py:89
+#| msgid "Price unavailable"
+msgid "Fresh usage unavailable"
+msgstr "Date recente de utilizare indisponibile"
+
+#: apps/provisioning/hosting_warning_staff.py:90
+#| msgid "Operational allowance"
+msgid "Operational allowance changed"
+msgstr "Resurse operaționale modificate"
+
+#: apps/provisioning/hosting_warning_staff.py:91
+msgid "Temporary relief changed"
+msgstr "Resurse suplimentare temporare modificate"
+
+#: apps/provisioning/hosting_warning_staff.py:92
+#| msgid "Storage configuration changed"
+msgid "Usage condition changed"
+msgstr "Nivel de utilizare modificat"
+
+#: apps/provisioning/hosting_warning_staff.py:93
+msgid "Warning episode superseded"
+msgstr "Episod de avertizare înlocuit"
+
+#: apps/provisioning/hosting_warning_staff.py:94
+#| msgid "Delivery disabled"
+msgid "Warning delivery disabled"
+msgstr "Livrarea avertizărilor este dezactivată"
+
+#: apps/provisioning/hosting_warning_staff.py:95
+#| msgid "Triggers urgent renewal notifications."
+msgid "Delivery refused; review notification status."
+msgstr "Livrarea a fost refuzată; verificați starea notificării."
+
+#: apps/provisioning/hosting_warning_staff.py:109
+msgid "Fresh reading"
+msgstr "Citire recentă"
+
+#: apps/provisioning/hosting_warning_staff.py:110
+msgid "Incomplete monthly coverage"
+msgstr "Acoperire lunară incompletă"
+
+#: apps/provisioning/hosting_warning_staff.py:111
+#| msgid "Sending"
+msgid "Stale reading"
+msgstr "Citire învechită"
+
+#: apps/provisioning/hosting_warning_staff.py:112
+#: templates/provisioning/partials/hosting_warning_history.html:8
+#| msgid "Unknown"
+msgid "Usage unknown"
+msgstr "Utilizare necunoscută"
+
+#: apps/provisioning/hosting_warning_staff.py:115
+#: apps/provisioning/hosting_warning_staff.py:204
+#| msgid "Monthly bandwidth:"
+msgid "Monthly bandwidth"
+msgstr "Trafic lunar"
+
+#: apps/provisioning/hosting_warning_staff.py:194
+#| msgid "Not inspected"
+msgid "Not dispatched"
+msgstr "Netrimis"
+
+#: apps/provisioning/hosting_warning_staff.py:195
+msgid "Delivery outcome uncertain"
+msgstr "Rezultatul livrării este incert"
+
+#: apps/provisioning/hosting_warning_staff.py:196
+#| msgid "Provider has not accepted the notice"
+msgid "Provider acceptance recorded"
+msgstr "Acceptarea de către furnizor a fost înregistrată"
+
+#: apps/settings/catalog.py:2806
+#| msgid "Hosting allowances"
+msgid "Platform hosting allowance warnings"
+msgstr "Avertizări Platform privind resursele incluse în găzduire"
+
+#: apps/settings/catalog.py:2808
+#| msgid "Deploy and enable the Platform warning pipeline before handing over native customer notifications."
+msgid "Enable the durable Platform warning pipeline before explicitly handing over native customer notifications."
+msgstr "Activați fluxul durabil de avertizări Platform înainte de a prelua explicit notificările native pentru clienți."
+
+#: apps/settings/catalog.py:3236
+msgid "Allow new temporary disk raises"
+msgstr "Permiteți suplimentări temporare noi ale spațiului pe disc"
+
+#: apps/settings/catalog.py:3240
+#| msgid "Enable new acceptance only after native qualification. Existing payment recovery and fulfilment remain active when disabled."
+msgid "Enable after current workers and protocol 2 native helpers are qualified. Existing expiry and recovery remain active when disabled."
+msgstr "Activați după verificarea proceselor curente de lucru și a utilitarelor native pentru protocolul 2. Expirarea și recuperarea existente rămân active când opțiunea este dezactivată."
+
+#: templates/provisioning/partials/hosting_warning_history.html:3
+msgid "Usage trend and warning history"
+msgstr "Evoluția utilizării și istoricul avertizărilor"
+
+#: templates/provisioning/partials/hosting_warning_history.html:9
+#: templates/provisioning/partials/hosting_warning_history.html:26
+#| msgid "Observed at"
+msgid "Observed"
+msgstr "Observat"
+
+#: templates/provisioning/partials/hosting_warning_history.html:9
+#, python-format
+msgid "%(hours)s hour ago"
+msgid_plural "%(hours)s hours ago"
+msgstr[0] "acum %(hours)s oră"
+msgstr[1] "acum %(hours)s ore"
+msgstr[2] "acum %(hours)s de ore"
+
+#: templates/provisioning/partials/hosting_warning_history.html:13
+msgid "Disk usage over the last 30 days"
+msgstr "Utilizarea spațiului pe disc în ultimele 30 de zile"
+
+#: templates/provisioning/partials/hosting_warning_history.html:15
+msgid "Disk usage trend; daily values follow below"
+msgstr "Evoluția utilizării spațiului pe disc; valorile zilnice sunt prezentate mai jos"
+
+#: templates/provisioning/partials/hosting_warning_history.html:16
+msgid "Daily accepted readings"
+msgstr "Citiri zilnice acceptate"
+
+#: templates/provisioning/partials/hosting_warning_history.html:18
+msgid "No accepted disk readings for the current ownership period."
+msgstr "Nu există citiri acceptate ale spațiului pe disc pentru perioada proprietarului curent."
+
+#: templates/provisioning/partials/hosting_warning_history.html:20
+#| msgid "Type of event being delivered"
+msgid "Recent warning deliveries"
+msgstr "Livrări recente de avertizări"
+
+#: templates/provisioning/partials/hosting_warning_history.html:21
+msgid "Latest 50 warnings and 200 delivery attempts for the current ownership period. Provider acceptance confirms submission, not inbox delivery."
+msgstr "Ultimele 50 de avertizări și 200 de încercări de livrare pentru perioada proprietarului curent. Acceptarea de către furnizor confirmă trimiterea, nu livrarea în căsuța de e-mail."
+
+#: templates/provisioning/partials/hosting_warning_history.html:26
+#| msgid "Records"
+msgid "Recorded"
+msgstr "Înregistrat"
+
+#: templates/provisioning/partials/hosting_warning_history.html:31
+#| msgid "Next delivery attempt"
+msgid "No delivery attempt recorded."
+msgstr "Nu există nicio încercare de livrare înregistrată."
+
+#: templates/provisioning/partials/hosting_warning_history.html:34
+msgid "No warning history for the current ownership period."
+msgstr "Nu există istoric de avertizări pentru perioada proprietarului curent."
+
+#: templates/provisioning/service_detail.html:84
+#: templates/provisioning/service_hosting_raise.html:3
+#: templates/provisioning/service_hosting_raise.html:6
+msgid "Temporary disk relief"
+msgstr "Spațiu suplimentar temporar pe disc"
+
+#: templates/provisioning/service_hosting_raise.html:8
+msgid "The customer's purchased allowance and billing stay unchanged. Capacity remains pending until verified. A raise expires within seven days of its first grant."
+msgstr "Resursele achiziționate de client și facturarea rămân neschimbate. Capacitatea rămâne în așteptare până la verificare. O suplimentare expiră în cel mult șapte zile de la prima acordare."
+
+#: templates/provisioning/service_hosting_raise.html:9
+#| msgid "Recorded problems"
+msgid "Recorded expiry"
+msgstr "Termen de expirare înregistrat"
+
+#: templates/provisioning/service_hosting_raise.html:12
+#| msgid "Refresh Cache"
+msgid "Refresh usage check"
+msgstr "Actualizați verificarea utilizării"
+
+#: templates/provisioning/service_hosting_raise.html:20
+#| msgid "Request data deletion"
+msgid "Request temporary relief"
+msgstr "Solicitați resurse suplimentare temporare"
+
+#: apps/audit/models.py:515
+msgid "Plan Change Payment Binding Rejected"
+msgstr "Asocierea plății pentru schimbarea planului a fost refuzată"
+
+#: apps/audit/models.py:516
+msgid "Plan Change Submission Conflict"
+msgstr "Conflict la trimiterea cererii de schimbare a planului"
+
+#: apps/api/customers/notification_preferences.py:23
+msgid "This form changes optional hosting warnings only."
+msgstr "Acest formular modifică numai avertizările opționale privind găzduirea."
+
+#: apps/api/customers/notification_preferences.py:25
+#| msgid "Expected an explicit boolean acceptance."
+msgid "Submit an explicit boolean quota warning preference."
+msgstr "Trimiteți o valoare booleană explicită pentru preferința avertizărilor privind resursele de găzduire."
 
 #: apps/provisioning/crowdsec_policy.py:80
 msgid ""
@@ -33816,11 +35124,6 @@ msgstr ""
 msgid "Recorded security actions"
 msgstr "Acțiuni de securitate înregistrate"
 
-#: templates/security/action_list.html:13
-#| msgid "Records"
-msgid "Recorded"
-msgstr "Înregistrat"
-
 #: templates/security/action_list.html:16
 #| msgid "Manual Payment"
 msgid "Manual ban"
@@ -33929,10 +35232,6 @@ msgstr "Înregistrări de securitate"
 #| msgid "Descriptions"
 msgid "Decisions"
 msgstr "Decizii"
-
-#: templates/security/dashboard.html:58
-msgid "Reset"
-msgstr "Resetați"
 
 #: templates/security/dashboard.html:62
 #| msgid "Node security review"

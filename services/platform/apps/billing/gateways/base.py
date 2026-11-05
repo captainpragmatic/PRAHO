@@ -166,6 +166,37 @@ class BasePaymentGateway(ABC):
     ) -> PaymentIntentResult:
         """Create and confirm a saved-method payment for a typed PRAHO document."""
 
+    def create_on_session_document_intent(  # noqa: PLR0913 -- Typed document checkout contract.
+        self,
+        *,
+        document_id: str,
+        document_type: str,
+        amount_cents: int,
+        currency: str,
+        metadata: dict[str, str],
+        idempotency_key: str,
+    ) -> PaymentIntentResult:
+        """Optional customer-present checkout; unsupported gateways fail before charging."""
+        return PaymentIntentResult(
+            success=False,
+            payment_intent_id="",
+            client_secret=None,
+            error="This gateway does not support customer-present document checkout",
+            retryable=False,
+        )
+
+    def cancel_on_session_document_intent(
+        self,
+        *,
+        payment_intent_id: str,
+        amount_cents: int,
+        currency: str,
+        metadata: dict[str, str],
+        idempotency_key: str,
+    ) -> PaymentConfirmResult:
+        """Unsupported cancellation retains the original uncertain ownership."""
+        return PaymentConfirmResult(success=False, status="unknown", error="Verified cancellation is unsupported")
+
     @abstractmethod
     def create_setup_intent(
         self,

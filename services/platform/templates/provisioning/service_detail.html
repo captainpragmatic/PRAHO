@@ -61,6 +61,10 @@
 
             <!-- Action Bar -->
             <div class="flex flex-wrap gap-2 mt-4 md:mt-0 mobile-stacked">
+                {% if user.can_manage_financial_data %}
+                  {% url 'provisioning:service_plan_change_proposal' service.pk as commercial_url %}
+                  {% trans "Customer plan change" as commercial_label %}{% button commercial_label variant="primary" href=commercial_url %}
+                {% endif %}
                 {% if can_manage %}
                     {% if service.status == 'active' %}
                         {% url 'provisioning:service_suspend' service.pk as suspend_url %}
@@ -76,6 +80,8 @@
                     {% if can_override_resources %}
                       {% url 'provisioning:service_resource_override' service.pk as override_url %}
                       {% trans "Resource-only exception" as override_label %}{% button override_label variant="secondary" href=override_url %}
+                      {% url 'provisioning:service_hosting_raise' service.pk as relief_url %}
+                      {% trans "Temporary disk relief" as relief_label %}{% button relief_label variant="secondary" href=relief_url %}
                     {% endif %}
                 {% endif %}
                 {% url 'provisioning:services' as services_url %}
@@ -280,6 +286,10 @@
                 </div>
 
             </div>
+
+            {% if staff_hosting_history %}
+              {% include "provisioning/partials/hosting_warning_history.html" with history=staff_hosting_history only %}
+            {% endif %}
 
             <!-- Status Timeline -->
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">

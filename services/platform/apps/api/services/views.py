@@ -32,6 +32,7 @@ from apps.provisioning.hosting_limit_selectors import (
     operational_allowances,
     usage_percentage,
 )
+from apps.provisioning.hosting_warning_policy import WarningLevel
 from apps.provisioning.service_models import Service, ServicePlan
 
 from .serializers import (
@@ -211,7 +212,22 @@ def customer_service_detail_api(request: HttpRequest, customer: Customer, servic
         if observations_apply(service):
             usage_trends = usage_history(service)
 
-        return Response({"success": True, "data": {"service": serializer.data, "usage_trends": usage_trends}})
+        from apps.billing.plan_change_models import PlanChange  # noqa: PLC0415 -- Accepted checkout navigation.
+        from apps.settings.services import SettingsService  # noqa: PLC0415 -- New acceptance rollout flag.
+
+        data = serializer.data
+        current = (
+            PlanChange.objects.filter(service=service, customer=customer)
+            .exclude(status__in=("cancelled", "expired"))
+            .order_by("-created_at", "-pk")
+            .values("id", "status")
+            .first()
+        )
+        data["plan_change"] = {"id": str(current["id"]), "status": current["status"]} if current else None
+        data["plan_changes_enabled"] = SettingsService.get_boolean_setting(
+            "billing.hosting_plan_changes_enabled", False
+        )
+        return Response({"success": True, "data": {"service": data, "usage_trends": usage_trends}})
 
     except Exception as e:
         logger.error(f"🔥 [Services API] Error fetching service detail {service_id}: {e}")
@@ -311,6 +327,26 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
 
         # Calculate usage statistics
         values = ServiceListSerializer(services, many=True).data
+        warning_conditions = [
+            max(
+                (
+                    resource["condition"] or 0
+                    for resource in item["hosting_warnings"].values()
+                    if resource["availability"] in {"fresh", "partial", "stale"}
+                ),
+                default=0,
+            )
+            for item in values
+            if item["status"] == "active"
+        ]
+        warning_month_ends = [
+            item["hosting_warnings"]["bandwidth"]["period_end"]
+            for item in values
+            if item["status"] == "active"
+            and (item["hosting_warnings"]["bandwidth"]["condition"] or 0) >= WarningLevel.HIGH
+            and item["hosting_warnings"]["bandwidth"]["availability"] in {"fresh", "partial", "stale"}
+            and item["hosting_warnings"]["bandwidth"]["period_end"] is not None
+        ]
         disk_values = [item["disk_usage_gb"] for item in values]
         bandwidth_values = [item["bandwidth_usage_gb"] for item in values]
         total_disk_usage_gb = round(sum(disk_values), 2) if all(value is not None for value in disk_values) else None
@@ -342,6 +378,11 @@ def customer_services_summary_api(request: HttpRequest, customer: Customer) -> R
             "monthly_costs_by_currency": monthly_costs,
             "total_disk_usage_gb": total_disk_usage_gb,
             "total_bandwidth_usage_gb": total_bandwidth_usage_gb,
+            "hosting_warning_counts": {
+                "critical": warning_conditions.count(WarningLevel.CRITICAL),
+                "warning": warning_conditions.count(WarningLevel.HIGH),
+            },
+            "hosting_warning_counts_valid_until": min(warning_month_ends) if warning_month_ends else None,
             "service_types": service_types,
             "recent_services": recent_services_serializer.data,
         }

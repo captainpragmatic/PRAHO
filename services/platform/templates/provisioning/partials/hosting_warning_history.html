@@ -1,0 +1,36 @@
+{% load i18n localisation_tags %}
+<section class="rounded-xl border border-slate-700 bg-slate-800 p-6" aria-labelledby="hosting-history-heading">
+  <h3 id="hosting-history-heading" class="mb-4 text-lg font-semibold text-white">{% trans "Usage trend and warning history" %}</h3>
+  <div class="grid gap-4 sm:grid-cols-2">
+    {% for reading in history.usage %}
+      <div>
+        <h4 class="font-medium text-white">{{ reading.resource }}</h4>
+        <p class="text-slate-300">{% if reading.gib is not None %}{{ reading.gib|floatformat:3 }} GiB{% else %}{% trans "Usage unknown" %}{% endif %} · {{ reading.availability }}</p>
+        {% if reading.observed_at %}<p class="text-sm text-slate-400">{% trans "Observed" %}: {% localised_date reading.observed_at "datetime" %} · {% blocktrans count hours=reading.age_hours %}{{ hours }} hour ago{% plural %}{{ hours }} hours ago{% endblocktrans %}</p>{% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  <h4 class="mb-2 mt-5 font-medium text-white">{% trans "Disk usage over the last 30 days" %}</h4>
+  {% if history.disk_trend %}
+    <svg viewBox="0 0 300 65" role="img" aria-label="{% trans 'Disk usage trend; daily values follow below' %}" class="h-24 w-full text-slate-300"><polyline points="{{ history.disk_sparkline }}" fill="none" stroke="currentColor" stroke-width="2" /></svg>
+    <details class="text-sm text-slate-300"><summary>{% trans "Daily accepted readings" %}</summary><ul class="mt-2 space-y-1">{% for point in history.disk_trend %}<li>{% localised_date point.taken_at "datetime" %}: {{ point.gib|floatformat:3 }} GiB</li>{% endfor %}</ul></details>
+  {% else %}
+    <p class="text-sm text-slate-400">{% trans "No accepted disk readings for the current ownership period." %}</p>
+  {% endif %}
+  <h4 class="mb-2 mt-5 font-medium text-white">{% trans "Recent warning deliveries" %}</h4>
+  <p class="mb-3 text-xs text-slate-400">{% trans "Latest 50 warnings and 200 delivery attempts for the current ownership period. Provider acceptance confirms submission, not inbox delivery." %}</p>
+  <ol class="space-y-4">
+    {% for warning in history.warnings %}
+      <li class="rounded border border-slate-700 p-3">
+        <p class="font-medium text-white">{{ warning.resource }} · {{ warning.threshold }}% · {{ warning.phase }}</p>
+        <p class="text-xs text-slate-400">{% trans "Recorded" %}: {% localised_date warning.created_at "datetime" %}{% if warning.observed_at %} · {% trans "Observed" %}: {% localised_date warning.observed_at "datetime" %}{% endif %}</p>
+        {% if warning.refusal %}<p class="text-sm text-amber-300">{{ warning.refusal }}</p>{% endif %}
+        <ul class="mt-2 space-y-2 text-sm text-slate-300">
+          {% for attempt in warning.attempts %}
+            <li>{{ attempt.phase }} · {{ attempt.certainty }} · {% localised_date attempt.created_at "datetime" %}{% if attempt.accepted_at %} · {% trans "Accepted" %}: {% localised_date attempt.accepted_at "datetime" %}{% endif %}{% if attempt.refusal %}<p class="text-amber-300">{{ attempt.refusal }}</p>{% endif %}</li>
+          {% empty %}<li>{% trans "No delivery attempt recorded." %}</li>{% endfor %}
+        </ul>
+      </li>
+    {% empty %}<li class="text-sm text-slate-400">{% trans "No warning history for the current ownership period." %}</li>{% endfor %}
+  </ol>
+</section>

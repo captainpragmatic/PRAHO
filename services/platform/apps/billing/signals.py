@@ -1211,6 +1211,15 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
     with best_effort_atomic(logger=logger, scope="Customer Credit", message="Credit score update failed"):
         if (payment.meta or {}).get("reservation_abandoned") is True:
             return
+        if (
+            (payment.meta or {}).get("source") == "hosting_plan_change"
+            and payment.status == "succeeded"
+            and old_status == "pending"
+        ):
+            # The gateway fact transaction owns Payment before Customer. Its
+            # durable attempt journal applies this reversible effect later,
+            # under the complete document-first customer context.
+            return
 
         event_type = None
         reverted_event_type = None
@@ -1235,6 +1244,17 @@ def _update_customer_payment_credit(payment: Payment, old_status: str) -> None:
                 payment.customer.id,
                 reverted_event_type,
             )
+
+
+def settle_plan_change_payment_credit(payment: Payment) -> None:
+    """Apply once while the caller holds document context, Customer and Payment."""
+    if (
+        (payment.meta or {}).get("source") != "hosting_plan_change"
+        or payment.status != "succeeded"
+        or _get_payment_credit_adjustment(payment, "positive_payment") is not None
+    ):
+        return
+    _apply_customer_payment_credit(payment, "positive_payment")
 
 
 def _get_payment_credit_adjustment(payment: Payment, event_type: str) -> int | None:
@@ -1681,6 +1701,10 @@ def _invoice_email_context(invoice: Invoice) -> dict[str, object]:
 
 def _send_invoice_created_email(invoice: Invoice) -> None:
     """Send invoice created notification"""
+    from .plan_change_notices import plan_change_for_document
+
+    if plan_change_for_document(invoice_id=invoice.pk) is not None:
+        return  # This standalone checkout publishes its one legal invoice-issued phase.
     with best_effort_atomic(logger=logger, scope="Invoice", message="Failed to send created email"):
         from apps.notifications.services import EmailService
 
@@ -1693,6 +1717,10 @@ def _send_invoice_created_email(invoice: Invoice) -> None:
 
 def _send_invoice_issued_email(invoice: Invoice) -> None:
     """Send invoice issued notification"""
+    from .plan_change_notices import publish_document_notice
+
+    if publish_document_notice(invoice_id=invoice.pk, phase="invoice_issued"):
+        return
     with best_effort_atomic(logger=logger, scope="Invoice", message="Failed to send issued email"):
         from apps.notifications.services import EmailService
 
@@ -1706,6 +1734,10 @@ def _send_invoice_issued_email(invoice: Invoice) -> None:
 
 def _send_payment_received_email(invoice: Invoice) -> None:
     """Send payment received confirmation"""
+    from .plan_change_notices import publish_document_notice
+
+    if publish_document_notice(invoice_id=invoice.pk, phase="payment_received"):
+        return
     with best_effort_atomic(logger=logger, scope="Invoice", message="Failed to send payment received email"):
         from apps.notifications.services import EmailService
 
@@ -1746,6 +1778,10 @@ def _send_invoice_voided_email(invoice: Invoice) -> None:
 
 def _send_payment_success_email(payment: Payment) -> None:
     """Send payment success notification"""
+    from .plan_change_notices import plan_change_for_document
+
+    if plan_change_for_document(proforma_id=payment.proforma_id, invoice_id=payment.invoice_id) is not None:
+        return  # Its paid invoice owns the single durable payment-received message.
     with best_effort_atomic(logger=logger, scope="Payment Email", message="Failed to send notification"):
         from apps.notifications.services import EmailService
 

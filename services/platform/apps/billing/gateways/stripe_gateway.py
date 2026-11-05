@@ -21,7 +21,7 @@ from .base import (
     SetupIntentResult,
     SetupIntentStatusResult,
 )
-from .stripe_contract import STRIPE_API_VERSION
+from .stripe_contract import CURRENCY_CODE_LENGTH, STRIPE_API_VERSION, STRIPE_IDEMPOTENCY_KEY_MAX_LENGTH
 
 logger = logging.getLogger(__name__)
 
@@ -312,6 +312,146 @@ class StripeGateway(BasePaymentGateway):
                 usage="",
                 metadata={},
                 error=f"Unexpected error: {e}",
+            )
+
+    def create_on_session_document_intent(  # noqa: PLR0913 -- Mirrors the typed document checkout contract.
+        self,
+        *,
+        document_id: str,
+        document_type: str,
+        amount_cents: int,
+        currency: str,
+        metadata: dict[str, str],
+        idempotency_key: str,
+    ) -> PaymentIntentResult:
+        """Create an unconfirmed card intent for Stripe-hosted customer authentication.
+
+        No Order, saved PaymentMethod, future usage or mandate authority is
+        implied. off_session is omitted: Stripe permits it only with confirm=true.
+        The service persists this exact payload/key before calling the gateway.
+        """
+        if (
+            document_type not in {"invoice", "proforma"}
+            or not document_id
+            or type(amount_cents) is not int
+            or amount_cents <= 0
+            or not isinstance(currency, str)
+            or len(currency) != CURRENCY_CODE_LENGTH
+            or not currency.isascii()
+            or not currency.isalpha()
+            or not isinstance(idempotency_key, str)
+            or not 1 <= len(idempotency_key) <= STRIPE_IDEMPOTENCY_KEY_MAX_LENGTH
+        ):
+            return PaymentIntentResult(
+                success=False,
+                payment_intent_id="",
+                client_secret=None,
+                error="Invalid customer-present document payment payload",
+                retryable=False,
+            )
+        safe_metadata = {
+            key: value
+            for key, value in metadata.items()
+            if key
+            not in {
+                "platform",
+                "praho_order_id",
+                "vat_rate",
+                "praho_invoice_id",
+                "praho_proforma_id",
+                "invoice_id",
+                "proforma_id",
+            }
+        }
+        try:
+            intent = self._stripe.PaymentIntent.create(
+                amount=amount_cents,
+                currency=currency.lower(),
+                payment_method_types=["card"],
+                confirm=False,
+                metadata={
+                    **safe_metadata,
+                    "platform": "PRAHO",
+                    f"praho_{document_type}_id": document_id,
+                    f"{document_type}_id": document_id,
+                },
+                idempotency_key=idempotency_key,
+            )
+            return PaymentIntentResult(
+                success=True, payment_intent_id=intent.id, client_secret=intent.client_secret, error=None
+            )
+        except (self._stripe.error.APIConnectionError, self._stripe.error.APIError, self._stripe.error.RateLimitError):
+            self.logger.warning("Customer-present payment response is uncertain for %s %s", document_type, document_id)
+            return PaymentIntentResult(
+                success=False,
+                payment_intent_id="",
+                client_secret=None,
+                error="The payment attempt requires recovery; reuse its original request",
+                retryable=True,
+            )
+        except self._stripe.error.StripeError:
+            self.logger.warning("Customer-present payment request was refused for %s %s", document_type, document_id)
+            return PaymentIntentResult(
+                success=False,
+                payment_intent_id="",
+                client_secret=None,
+                error="The payment gateway refused this document checkout",
+                retryable=False,
+            )
+
+    def cancel_on_session_document_intent(
+        self,
+        *,
+        payment_intent_id: str,
+        amount_cents: int,
+        currency: str,
+        metadata: dict[str, str],
+        idempotency_key: str,
+    ) -> PaymentConfirmResult:
+        """Cancel only the exact original customer-present intent, never a guessed payment."""
+
+        def verified(intent: Any) -> bool:
+            values = getattr(intent, "metadata", {})
+            return bool(
+                getattr(intent, "id", None) == payment_intent_id
+                and type(getattr(intent, "amount", None)) is int
+                and intent.amount == amount_cents
+                and str(getattr(intent, "currency", "")).upper() == currency.upper()
+                and getattr(intent, "customer", None) is None
+                and all(values.get(key) == value for key, value in metadata.items())
+            )
+
+        if (
+            not isinstance(payment_intent_id, str)
+            or not payment_intent_id.startswith("pi_")
+            or type(amount_cents) is not int
+            or amount_cents <= 0
+            or not metadata
+            or metadata.get("source") != "hosting_plan_change"
+            or not 1 <= len(idempotency_key) <= STRIPE_IDEMPOTENCY_KEY_MAX_LENGTH
+        ):
+            return PaymentConfirmResult(success=False, status="unknown", error="Invalid bound cancellation request")
+        try:
+            intent = self._stripe.PaymentIntent.retrieve(payment_intent_id)
+            if not verified(intent):
+                return PaymentConfirmResult(success=False, status="unknown", error="Original payment authority differs")
+            if intent.status not in {"succeeded", "canceled"}:
+                intent = self._stripe.PaymentIntent.cancel(payment_intent_id, idempotency_key=idempotency_key)
+            if not verified(intent):
+                return PaymentConfirmResult(success=False, status="unknown", error="Cancellation authority differs")
+            return PaymentConfirmResult(
+                success=True,
+                status=intent.status,
+                error=None,
+                amount=intent.amount,
+                amount_received=getattr(intent, "amount_received", 0),
+                currency=intent.currency,
+                customer_id=None,
+                metadata=dict(intent.metadata),
+            )
+        except self._stripe.error.StripeError:
+            return PaymentConfirmResult(
+                success=False, status="unknown", error="Original cancellation requires recovery"
             )
 
     def create_off_session_payment_intent(  # noqa: PLR0913

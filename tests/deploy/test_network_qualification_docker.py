@@ -8,6 +8,7 @@ from collections.abc import Iterator
 
 import pytest
 from django.core.exceptions import ValidationError
+from fixture_images import fixture_image
 from test_ssh_hardening_docker import ROOT, docker
 
 from apps.provisioning.virtualmin_security_policy import verify_network_ingress
@@ -18,7 +19,7 @@ pytestmark = pytest.mark.docker
 @pytest.fixture(params=["24.04", "26.04"])
 def network_target(request: pytest.FixtureRequest) -> Iterator[str]:
     version = str(request.param)
-    base = f"praho-ssh-test:{version}"
+    base = fixture_image(f"praho-ssh-test:{version}")
     built = docker(
         "build",
         "--build-arg",
@@ -31,7 +32,7 @@ def network_target(request: pytest.FixtureRequest) -> Iterator[str]:
         check=False,
     )
     assert built.returncode == 0, built.stderr[-3000:]
-    image = f"praho-network-proof:{version}"
+    image = fixture_image(f"praho-network-proof:{version}")
     nft = docker(
         "build",
         "-t",

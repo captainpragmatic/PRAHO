@@ -31,6 +31,33 @@ _PROBE_DEADLINE: ContextVar[float | None] = ContextVar("quota_probe_deadline", d
 DOMAIN_ROOT = Path("/etc/webmin/virtual-server/domains")
 
 
+def _overlay_window(request: dict[str, object]) -> bool:
+    """Recheck after long probes and before each native mutation phase."""
+    policy = request.get("policy")
+    if policy is None:
+        return False
+    if not isinstance(policy, dict) or type(policy.get("expiry_reduction")) is not bool:
+        raise ValueError("An exact temporary quota policy is required")
+    if type(policy.get("monotonic_reduction")) is not bool or (
+        policy["monotonic_reduction"] and not policy["expiry_reduction"]
+    ):
+        raise ValueError("An exact native expiry decrease policy is required")
+    expiry = datetime.fromisoformat(policy["expires_at"])
+    if expiry.tzinfo is None:
+        raise ValueError("An exact temporary quota expiry is required")
+    expired = expiry <= datetime.now(UTC)
+    if policy.get("extra_mib") and expired:
+        raise ValueError("The temporary quota overlay expired before native mutation")
+    if policy["expiry_reduction"] and (policy.get("extra_mib") != 0 or not expired):
+        raise ValueError("A preauthorized quota expiry requires an expired zero-extra overlay")
+    return policy["expiry_reduction"]
+
+
+def _no_cap_increase(limit: int, user_hard: object, group_hard: object) -> None:
+    if limit <= 0 or any(type(value) is not int or value < limit for value in (user_hard, group_hard)):
+        raise ValueError("Expiry cannot increase either independently observed native hard cap")
+
+
 def _read(path: Path) -> str:
     if path.resolve() != path:
         raise ValueError("Native quota metadata cannot traverse symlinks")
@@ -407,6 +434,7 @@ class NativeQuotaBackend:
         observation = disk_measurement(Path(account.pw_dir), databases, budget_seconds=budget)
         return {
             "schema": 1,
+            "quota_protocol": 2,
             "identity": identity,
             "observed_at": datetime.now(UTC).isoformat(),
             "filesystem": "ext4",
@@ -449,8 +477,14 @@ class NativeQuotaBackend:
         bandwidth = request["bandwidth_limit_bytes"]
         if type(limit) is not int or type(bandwidth) is not int or min(limit, bandwidth) < 0:
             raise ValueError("Native limits must be explicit nonnegative integers")
+        expiry_reduction = _overlay_window(request)
+        policy = request.get("policy")
+        monotonic_reduction = isinstance(policy, dict) and policy["monotonic_reduction"] is True
+        if monotonic_reduction:
+            _no_cap_increase(limit, before.get("uid_hard_kib"), before.get("gid_hard_kib"))
         if (
             limit
+            and not expiry_reduction
             and max(before["uid_used_bytes"], before["gid_used_bytes"], before["observation"]["total_bytes"])
             > limit * 1024
         ):
@@ -474,6 +508,13 @@ class NativeQuotaBackend:
             or filesystem_uuid != identity["filesystem_uuid"]
         ):
             raise ValueError("The native quota owner or filesystem changed before the kernel update")
+        _overlay_window(request)
+        if monotonic_reduction:
+            _no_cap_increase(
+                limit,
+                _kernel_quota(device, identity["uid"], group=False).hard,
+                _kernel_quota(device, identity["gid"], group=True).hard,
+            )
         # Always target the immutable reviewed numeric owner, never a newly
         # retargeted UID/GID obtained from a later local metadata read.
         _set_kernel_quota(device, identity["uid"], limit, group=False)

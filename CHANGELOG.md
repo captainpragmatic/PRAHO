@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Hosting usage warnings and temporary disk relief (#783): owner-scoped 80/95/100-percent warnings, optional-mail preferences, current and pending allowance details, and staff delivery history. Audited raises expire against the current operational limit without changing billing. Platform owns warning delivery after explicit native mail handover; activation remains gated by native acceptance.
+
+- Customer-accepted paid hosting plan changes (#840), behind `billing.hosting_plan_changes_enabled` (off by default): curated catalog paths, itemized on-session upgrade supplements, explicit no-charge acceptance, scheduled renewal-boundary downgrades, durable payment recovery and verified native completion. Accepted per-service renewal terms preserve frozen documents and purchased allowances. Staff shares a customer checkout proposal; resource-only overrides stay separate. Native/provider-DNS and end-to-end rollout gates remain required; see [ADR-0074](docs/ADRs/ADR-0074-paid-hosting-plan-changes.md).
+
 - Native production deployment can place Portal and Platform on separate hosts, with filtered Portal credentials, peer-restricted HTTPS APIs, coordinated maintenance and code rollback. New staging defaults to one host; combined production requires an explicit topology selection. See [the native operations guide](docs/deployment/NATIVE_TOPOLOGY.md) before adoption or cutover.
 
 - Audited host-security actions and approved scenario sharing (#767): administrators can issue finite bans, reconcile staff allowlists and approve qualified detections for copying. Support and managers can revoke decisions and their PRAHO copies. Per-target receipts preserve uncertain outcomes after timeouts; copies keep their original expiry, capped at five minutes on Portal hosts.

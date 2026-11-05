@@ -13,5 +13,9 @@ class BillingConfig(AppConfig):
     def ready(self) -> None:
         """Register checks, signals and issuers; schedules belong to explicit setup."""
         from . import checks, signals  # noqa: F401  # System-check + signal registration
+        from . import plan_change_signals  # noqa: F401  # Immutable commercial promise auditing.
+        from . import plan_change_payment_signals  # noqa: F401  # Secret-safe durable checkout ownership audit.
+        from . import plan_change_review_signals  # noqa: F401  # Payment-first facts; document-first review.
+        from . import plan_change_notice_signals  # noqa: F401  # Phase delivery ownership without rendered mail.
         from .issuers import builtin  # noqa: F401  # Registers the built-in invoice issuer
         from .issuers.smartbill import issuer  # noqa: F401  # Registers the SmartBill issuer

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from fixture_images import fixture_image
 from test_ssh_hardening_docker import ROOT, docker
 
 pytestmark = pytest.mark.docker
@@ -110,7 +111,7 @@ finally: os.close(descriptor)
 
 
 def build_component_image(version: str) -> str:
-    image = f"praho-component-php:{version}"
+    image = fixture_image(f"praho-component-php:{version}")
     built = docker(
         "build", "--build-arg", f"UBUNTU_VERSION={version}", "-t", image,
         "-f", str(ROOT / "tests/deploy/component/Dockerfile"), str(ROOT / "tests/deploy/component"), check=False,

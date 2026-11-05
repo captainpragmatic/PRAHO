@@ -83,6 +83,13 @@
 
           <!-- Quick Actions -->
           <div class="flex flex-col sm:flex-row sm:flex-wrap gap-2 mt-4 lg:mt-0 lg:ml-6">
+            {% if can_review_plan_change %}
+              {% url 'services:plan_change_detail' service_id=service_id change_id=service.plan_change.id as plan_change_url %}
+              {% trans "Review plan change" as plan_change_label %}{% button plan_change_label href=plan_change_url variant="primary" %}
+            {% elif can_change_plan %}
+              {% url 'services:change_plan' service_id=service_id as plan_change_url %}
+              {% trans "Change plan" as plan_change_label %}{% button plan_change_label href=plan_change_url variant="primary" %}
+            {% endif %}
             <!-- Service Actions -->
             {% if can_manage %}
             <a href="{% url 'services:request_action' service_id=service_id %}"
@@ -153,6 +160,8 @@
 
   <!-- Main Content -->
   {% include "services/partials/hosting_limits.html" with limits=service.hosting_limits %}
+  {% include "services/partials/hosting_raise.html" with relief=service.hosting_raise %}
+  {% include "services/partials/hosting_warnings.html" with warnings=service.hosting_warnings limits=service.hosting_limits %}
   <div class="space-y-8" x-data="tabGroup">
       <!-- Navigation Tabs -->
       <div class="bg-slate-800 rounded-lg border border-slate-700">

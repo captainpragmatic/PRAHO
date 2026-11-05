@@ -4,6 +4,8 @@ import json
 import logging
 import time
 from collections.abc import Callable
+from copy import deepcopy
+from dataclasses import replace
 from http import HTTPStatus
 from typing import Any
 from uuid import UUID
@@ -15,11 +17,11 @@ from django.utils import timezone
 
 from apps.billing.models import Payment
 from apps.common.encryption import DecryptionError
-from apps.common.types import Retriability, retriability_of
+from apps.common.types import Ok, Result, Retriability, retriability_of
 from apps.customers.models import Customer
 from apps.integrations.models import WebhookEvent
 
-from .base import BaseWebhookProcessor, WebhookConfigurationError, verify_stripe_signature
+from .base import BaseWebhookProcessor, WebhookConfigurationError, WebhookContext, verify_stripe_signature
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +66,32 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
     def extract_event_type(self, payload: dict[str, Any]) -> str:
         """🏷️ Extract Stripe event type"""
         return str(payload.get("type", ""))
+
+    @staticmethod
+    def _plan_payload_without_secret(payload: dict[str, Any]) -> dict[str, Any]:
+        data = payload.get("data")
+        obj = data.get("object") if isinstance(data, dict) else None
+        metadata = obj.get("metadata", {}) if isinstance(obj, dict) else {}
+        if (
+            str(payload.get("type", "")).startswith("payment_intent.")
+            and isinstance(obj, dict)
+            and isinstance(metadata, dict)
+            and metadata.get("source") == "hosting_plan_change"
+            and "client_secret" in obj
+        ):
+            sanitized = deepcopy(payload)
+            sanitized["data"]["object"].pop("client_secret", None)
+            return sanitized
+        return payload
+
+    def _verify_signature_with_context(self, context: WebhookContext) -> Result[WebhookContext, str]:
+        verified = super()._verify_signature_with_context(context)
+        if verified.is_err():
+            return verified
+        # Verification used the ORIGINAL raw bytes. Only the trusted stored
+        # representation changes; all financial/identity facts remain intact.
+        current = verified.unwrap()
+        return Ok(replace(current, payload=self._plan_payload_without_secret(current.payload)))
 
     def verify_signature(
         self, payload: dict[str, Any], signature: str, headers: dict[str, str], raw_body: bytes | None = None
@@ -131,6 +159,10 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
         """🎯 Handle Stripe webhook event using handler registry"""
         event_type = webhook_event.event_type
         payload = webhook_event.payload
+        sanitized = self._plan_payload_without_secret(payload)
+        if sanitized is not payload:
+            webhook_event.payload = payload = sanitized
+            webhook_event.save(update_fields=["payload"])
 
         try:
             # Find appropriate handler using registry
@@ -196,6 +228,10 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
             logger.critical("Stripe success convergence rejected for %s: %s", stripe_payment_id, error)
             return False, error
         payment = convergence.unwrap()
+        if (payment.meta or {}).get("source") == "hosting_plan_change" and transaction.get_connection().in_atomic_block:
+            # PaymentSuccessService persisted the required recovery journal and
+            # registered a callback at the OUTERMOST transaction boundary.
+            return True, "Standalone payment facts recorded; document convergence queued"
 
         if payment.proforma_id is None:
             proforma_id_from_meta = (payment.meta or {}).get("proforma_id")
@@ -265,6 +301,16 @@ class StripeWebhookProcessor(BaseWebhookProcessor):
 
         if not stripe_payment_id:
             return False, "Missing PaymentIntent ID"
+
+        metadata = payment_intent.get("metadata")
+        if event_type != "payment_intent.succeeded" and (
+            (isinstance(metadata, dict) and metadata.get("source") == "hosting_plan_change")
+            or Payment.objects.filter(gateway_txn_id=stripe_payment_id, meta__source="hosting_plan_change").exists()
+        ):
+            from apps.billing.plan_change_payment_service import observe_plan_change_intent  # noqa: PLC0415
+
+            observed = observe_plan_change_intent(stripe_payment_id, payment_intent)
+            return (False, observed.unwrap_err()) if observed.is_err() else (True, "Standalone payment state verified")
 
         if event_type != "payment_intent.succeeded":
             from apps.promotions.gift_funding import converge_gift_funding  # noqa: PLC0415  # ADR-0007

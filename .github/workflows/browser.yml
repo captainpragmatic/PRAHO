@@ -35,10 +35,17 @@ concurrency:
 
 jobs:
   browser-e2e:
+    needs: [browser-hosting-checkout]
+    if: always()
     runs-on: ubuntu-24.04  # Playwright 1.58 does not support Ubuntu 26.04.
     timeout-minutes: 60
 
     steps:
+    - name: Require full hosting checkout acceptance
+      env:
+        HOSTING_CHECKOUT_RESULT: ${{ needs.browser-hosting-checkout.result }}
+      run: test "$HOSTING_CHECKOUT_RESULT" = success
+
     - uses: actions/checkout@v4
       with:
         persist-credentials: false
@@ -73,6 +80,12 @@ jobs:
     - name: Browser suite
       run: make test-e2e
 
+    - name: Portal checkout browser boundary acceptance
+      run: make test-portal-checkout-browser
+
+    - name: Portal hosting warnings and relief browser acceptance
+      run: make test-portal-hosting-warnings-browser
+
     - name: Stop the browser-test stack
       if: always()
       run: make stop-e2e
@@ -84,7 +97,57 @@ jobs:
         name: browser-e2e-evidence
         path: |
           output/playwright/runs/
+          output/playwright/hosting-plan-checkout-boundary/
+          output/playwright/hosting-warning-boundary/
           logs/
+        if-no-files-found: warn
+        retention-days: 14
+
+  browser-hosting-checkout:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      DB_USER: praho_hosting_test
+      DB_PASSWORD: praho_hosting_local_fixture
+      DB_NAME: hosting_browser
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    - name: Start isolated PostgreSQL
+      run: make ci-postgres-start CI_POSTGRES_IMAGE_TAG=16
+      env:
+        CI_POSTGRES_USER: ${{ env.DB_USER }}
+        POSTGRES_PASSWORD: ${{ env.DB_PASSWORD }}
+    - uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: uv.lock
+    - name: Install Python dependencies
+      run: |
+        uv python install
+        uv sync --all-groups
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: npm
+    - name: Install frontend dependencies
+      run: npm ci
+    - name: Install Chromium
+      run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
+    - name: Real Portal and Platform hosting checkout
+      run: make test-hosting-plan-checkout-full HOSTING_BROWSER_DB_PORT="$DB_PORT"
+    - name: Stop isolated PostgreSQL
+      if: always()
+      run: make ci-postgres-stop
+    - name: Upload full checkout evidence
+      uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: hosting-checkout-full-evidence
+        path: output/playwright/hosting-plan-checkout-full/
         if-no-files-found: warn
         retention-days: 14
 

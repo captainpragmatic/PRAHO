@@ -1,6 +1,8 @@
 """Stripe request and webhook rendering contracts; version upgrades are deliberate."""
 
 STRIPE_API_VERSION = "2023-10-16"
+STRIPE_IDEMPOTENCY_KEY_MAX_LENGTH = 255
+CURRENCY_CODE_LENGTH = 3
 STRIPE_REQUIRED_WEBHOOK_EVENTS = frozenset(
     {
         "payment_intent.succeeded",
