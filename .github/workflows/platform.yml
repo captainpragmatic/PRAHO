@@ -164,7 +164,9 @@ jobs:
   # first ran after merge, in the nightly, so a PR could break one and still merge green.
   platform-postgres:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The scanner-derived gate now includes over 1,100 tests plus real schema setup.
+    # Keep a finite budget with room for the full serial gate on hosted runners.
+    timeout-minutes: 45
 
     env:
       DJANGO_SETTINGS_MODULE: config.settings.ci
