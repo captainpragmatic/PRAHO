@@ -27,6 +27,7 @@ import pytest
 import yaml
 
 from scripts.ci_lab_needed import lab_needed
+from scripts.ci_native_needed import native_needed
 
 pytestmark = pytest.mark.integration
 
@@ -204,7 +205,8 @@ def _lab_decision(repo: Path, event: str, base: str) -> str:
     output = repo / "github_output"
     output.write_text("")
     env = {**os.environ, "EVENT": event, "BASE_SHA": base, "GITHUB_OUTPUT": str(output)}
-    subprocess.run(["bash", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)  # noqa: S603, S607
+    # GitHub runs a `run:` step with `bash -e {0}`.
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)  # noqa: S603, S607
     return output.read_text().strip()
 
 
@@ -230,8 +232,12 @@ def test_the_lab_runs_in_the_queue_only_and_fails_open_there(tmp_path: Path) -> 
     assert _lab_decision(tmp_path, "pull_request", "") == "lab=false"
     # In the queue the base branch's rules decide: prose cannot reach the lab.
     assert _lab_decision(tmp_path, "merge_group", base) == "lab=false"
-    # A base the step cannot read gives no diff, and no diff runs the lab.
+    # A base the step cannot read gives no diff, and no diff runs the lab, even when the checkout's own
+    # copy of the rules (what `git show :path` would read from the index) always says false.
+    (tmp_path / "scripts" / "ci_lab_needed.py").write_text("print('false')\n")
+    _git(tmp_path, "add", "scripts/ci_lab_needed.py")
     assert _lab_decision(tmp_path, "merge_group", "") == "lab=true"
+    _git(tmp_path, "checkout", "--quiet", "HEAD", "--", "scripts/ci_lab_needed.py")
     (tmp_path / "services" / "platform").mkdir(parents=True)
     (tmp_path / "services" / "platform" / "x.py").write_text("x = 1\n")
     _git(tmp_path, "add", ".")
@@ -288,7 +294,9 @@ def test_only_a_real_trailer_signs_a_description_or_a_squash(tmp_path: Path, bod
     assert _dco(tmp_path, "pull_request", signed, signed, body=body) != 0
     assert _dco(tmp_path, "merge_group", base, squash) != 0
     # GitHub keeps the carriage returns of a description typed in the browser.
-    assert _dco(tmp_path, "pull_request", signed, signed, body="Summary.\r\n\r\nSigned-off-by: A <a@example.com>\r\n") == 0
+    assert (
+        _dco(tmp_path, "pull_request", signed, signed, body="Summary.\r\n\r\nSigned-off-by: A <a@example.com>\r\n") == 0
+    )
 
 
 def test_a_changed_description_is_checked_again() -> None:
@@ -333,11 +341,141 @@ def test_no_workflow_runs_pull_request_code_on_a_comment() -> None:
         (["README.md", "deploy/virtualmin-lab/compose.yml"], True),
         # Imported by provisioning, and nobody had listed them: an allowlist of what reaches the lab goes stale.
         (["services/platform/apps/orders/tasks.py", "services/platform/apps/tickets/models.py"], True),
-        (["services/platform/tests/billing/test_x.py", "tests/integration/test_y.py", ".github/rulesets/master.json"], False),
+        (
+            [
+                "services/platform/tests/billing/test_x.py",
+                "tests/integration/test_y.py",
+                ".github/rulesets/master.json",
+            ],
+            False,
+        ),
     ],
 )
 def test_the_lab_selection_fails_open(changed: list[str], expected: bool) -> None:
     assert lab_needed(changed) is expected
+
+
+@pytest.mark.parametrize(
+    ("changed", "expected"),
+    [
+        ([], True),  # the diff could not be computed: run
+        (["", "  "], True),
+        (["deploy/ansible/roles/praho-native/tasks/main.yml"], True),
+        (["services/platform/config/settings/prod.py"], True),
+        (["services/portal/config/settings/base.py"], True),
+        (["Makefile"], True),
+        (["uv.lock"], True),
+        (["tests/deploy/test_native_acceptance.py"], True),
+        ([".github/workflows/integration.yml"], True),
+        (["scripts/run_native_acceptance.py"], True),
+        (["services/platform/manage.py"], True),
+        # A path nobody listed runs it: the rules list what cannot reach native deploy.
+        (["services/platform/requirements-extra.txt"], True),
+        (["docs/deployment/DEPLOYMENT.md", "CHANGELOG.md"], False),
+        # The native deploy migrates, collects static files and runs management commands, and its cases
+        # assert views, templates and messages: application code reaches it.
+        (["services/platform/apps/common/migrations/0007_x.py"], True),
+        (["services/platform/apps/common/management/commands/setup_initial_data.py"], True),
+        (["services/portal/templates/x.html"], True),
+        (["services/platform/static/css/x.css"], True),
+        (["services/platform/locale/ro/LC_MESSAGES/django.po"], True),
+        (["shared/ui/components/button.html"], True),
+        # Top-level test helpers are imported by the native cases; other layers' test directories are not.
+        (["tests/native_role_helpers.py"], True),
+        (["tests/conftest.py"], True),
+        (["services/platform/tests/billing/test_x.py", "tests/integration/test_y.py"], False),
+        ([".github/workflows/virtualmin-lab.yml", ".github/rulesets/master.json"], False),
+        # CI-only scripts: the release gate (#866) and the selectors cannot change a deploy.
+        (["scripts/verify_release_candidate.py", "scripts/ci_lab_needed.py", "scripts/ci_native_needed.py"], False),
+        (["docs/x.md", "deploy/scripts/native_env.py"], True),
+    ],
+)
+def test_the_native_deploy_selection_fails_open(changed: list[str], expected: bool) -> None:
+    assert native_needed(changed) is expected
+
+
+def _native_decision(repo: Path, event: str, base: str) -> str:
+    """Run integration.yml's own native selection step in ``repo`` and return what it wrote."""
+    (step,) = [
+        step
+        for step in load_workflow(WORKFLOWS / "integration.yml")["jobs"]["native-changes"]["steps"]
+        if step.get("id") == "decide"
+    ]
+    output = repo / "github_output"
+    output.write_text("")
+    env = {**os.environ, "EVENT": event, "BASE_SHA": base, "GITHUB_OUTPUT": str(output)}
+    # GitHub runs a `run:` step with `bash -e {0}`.
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)  # noqa: S603, S607
+    return output.read_text().strip()
+
+
+def test_native_deploy_selection_uses_the_base_rules_and_fails_open(tmp_path: Path) -> None:
+    _git(tmp_path, "init", "--quiet")
+    _git(tmp_path, "config", "user.email", "ci@example.com")
+    _git(tmp_path, "config", "user.name", "CI")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts" / "ci_native_needed.py").write_text((REPO / "scripts" / "ci_native_needed.py").read_text())
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "--quiet", "-m", "base")
+    base = _git(tmp_path, "rev-parse", "HEAD")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "note.md").write_text("prose\n")
+    # A pull request cannot talk itself out of the check by rewriting the rules it is judged by.
+    (tmp_path / "scripts" / "ci_native_needed.py").write_text("print('false')\n")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "--quiet", "-m", "docs, and rules that always say false")
+
+    # Master (push) and a dispatch always run native deploy.
+    assert _native_decision(tmp_path, "push", base) == "native=true"
+    assert _native_decision(tmp_path, "workflow_dispatch", "") == "native=true"
+    # A pull request and a merge group are judged by the base branch's rules on their diff.
+    assert _native_decision(tmp_path, "pull_request", base) == "native=false"
+    assert _native_decision(tmp_path, "merge_group", base) == "native=false"
+    # A base the step cannot read gives no diff, and no diff runs native deploy.
+    assert _native_decision(tmp_path, "merge_group", "") == "native=true"
+    (tmp_path / "deploy").mkdir()
+    (tmp_path / "deploy" / "site.yml").write_text("- hosts: all\n")
+    _git(tmp_path, "add", ".")
+    _git(tmp_path, "commit", "--quiet", "-m", "deploy change")
+    assert _native_decision(tmp_path, "merge_group", base) == "native=true"
+    assert _native_decision(tmp_path, "pull_request", base) == "native=true"
+
+
+def test_native_deploy_runs_unless_the_selection_answered_false() -> None:
+    jobs = load_workflow(WORKFLOWS / "integration.yml")["jobs"]
+    assert jobs["native-deploy"]["needs"] == "native-changes"
+    assert jobs["native-deploy"]["if"] == "!cancelled() && needs.native-changes.outputs.native != 'false'"
+    assert "native-changes" in jobs["integration-test"]["needs"]
+
+
+@pytest.mark.parametrize(
+    ("general", "native", "selection", "selected", "passes"),
+    [
+        ("success", "success", "success", "true", True),
+        ("success", "skipped", "success", "false", True),  # selection answered false: a deliberate skip
+        ("success", "skipped", "success", "true", False),  # skipped although selected
+        ("success", "skipped", "failure", "", False),  # no recorded answer: a skip is not a pass
+        ("success", "failure", "success", "true", False),
+        ("success", "cancelled", "success", "true", False),
+        ("failure", "skipped", "success", "false", False),
+    ],
+)
+def test_the_aggregate_accepts_a_native_skip_only_when_selection_said_false(
+    general: str, native: str, selection: str, selected: str, passes: bool
+) -> None:
+    job = load_workflow(WORKFLOWS / "integration.yml")["jobs"]["integration-test"]
+    (step,) = job["steps"]
+    env = {
+        **os.environ,
+        "GENERAL_RESULT": general,
+        "NATIVE_RESULT": native,
+        "SELECTION_RESULT": selection,
+        "NATIVE_SELECTED": selected,
+    }
+    # GitHub runs a `run:` step with `bash -eo pipefail {0}`: the first failed test ends it.
+    result = subprocess.run(["bash", "-eo", "pipefail", "-c", step["run"]], env=env, capture_output=True, check=False)  # noqa: S603, S607
+    assert (result.returncode == 0) is passes, result.stdout + result.stderr
+    assert set(job["env"]) >= {"GENERAL_RESULT", "NATIVE_RESULT", "SELECTION_RESULT", "NATIVE_SELECTED"}
 
 
 class TestReleaseCandidate:
@@ -347,7 +485,7 @@ class TestReleaseCandidate:
     def test_only_a_master_dispatch_may_vouch_for_a_commit(self) -> None:
         assert list(self.workflow["on"]) == ["workflow_dispatch"]
         script = str(self.jobs["resolve"]["steps"])
-        assert 'refs/heads/master' in script and "merge-base --is-ancestor" in script
+        assert "refs/heads/master" in script and "merge-base --is-ancestor" in script
 
     def test_the_candidate_is_verified_by_the_tested_script(self) -> None:
         # tests/integration/test_verify_release_candidate.py drives the script's decisions.

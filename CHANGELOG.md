@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The merge queue no longer waits about two hours on every pull request.** The native deployment acceptance is skipped only when a change cannot reach a native deploy (prose, other layers' tests, other workflows, CI-only scripts), failing open and judged by the base branch's rules; master pushes always run it. When it runs, its 17 split-host cases run as four parallel shards of about 35-47 minutes instead of one 115-minute job, so the Virtualmin lab sets the queue's pace again. The lab and native selections also run their checks when the merge group has no base commit, instead of reading the pull request's own copy of the rules.
+
 - **A release no longer needs a self-hosted native runner.** The release candidate again requires the latest full Virtualmin lab on master to have passed: the container job, or an optional native `full` dispatch when one has run. Native acceptance stays available as a manual run but does not gate a release; node deploy and kernel, filesystem and cloud-image behaviour are proven on staging by a test node deploy after the promote.
 
 - **One button component for the look-alike buttons.** It gained icon-only, loading, `formaction`, input-group, Alpine and `hx_disabled_elt` options and ghost, link, outline, soft and inverse variants (all checked for WCAG contrast), and about forty hand-styled buttons across both services moved onto it (ADR-0035, amended).
@@ -49,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verified off-server Platform database/media backup pairs, native systemd backup scheduling, Docker streaming publication and bounded Platform-managed customer backups. Imported Virtualmin servers support explicit root-key archive transport with enrolled host trust.
 
 ### Fixed
+
+- **New Ubuntu 26.04 nodes are no longer left disabled after a successful deploy.** Ubuntu 25.10+ ships chrony, which listens on loopback UDP 323; node policy verification rejected it, and the node registered disabled with only "Effective inbound firewall policy is incomplete or admits unreviewed traffic." Loopback-only UDP 323 is now allowed, as loopback UDP 53 already was; a wildcard or public address on that port is still refused. The evidence checks now name what they rejected (listeners, services, Webmin principals, versions, firewall facts and admin grants), for example "unreviewed listener: 'udp … 0.0.0.0:323'", quoting and bounding text from the node; a malformed row is refused by name instead of crashing the check.
 
 - Native quota acceptance requires an OS quota-exceeded diagnostic and a neighboring tenant's verified write and commit after denial. Similar SQL error numbers cannot qualify the node (#776).
 
