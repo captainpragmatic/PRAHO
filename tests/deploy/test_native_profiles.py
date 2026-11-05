@@ -9,12 +9,19 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
+import yaml
 
 from scripts import run_native_acceptance
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE_ENV = "PRAHO_NATIVE_ACCEPTANCE_PROFILE"
-COUNTS = {"all": 29, "split-prod": 17, "combined-staging": 6, "combined-prod": 6}
+SHARD_COUNTS = {"split-prod-1": 9, "split-prod-2": 3, "split-prod-3": 3, "split-prod-4": 2}
+COUNTS = {"all": 29, "split-prod": 17, "combined-staging": 6, "combined-prod": 6, **SHARD_COUNTS}
+
+
+def ci_matrix_profiles() -> list[str]:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/integration.yml").read_text(encoding="utf-8"))
+    return list(workflow["jobs"]["native-deploy"]["strategy"]["matrix"]["profile"])
 
 
 def collect(profile: str) -> subprocess.CompletedProcess[str]:
@@ -64,6 +71,35 @@ def test_ci_profiles_partition_every_real_case_exactly_once(selections: dict[str
     assert split | staging | combined == selections["all"]
 
 
+def test_split_shards_partition_the_split_profile_exactly(selections: dict[str, set[str]]) -> None:
+    shards = [selections[name] for name in SHARD_COUNTS]
+    assert sum(len(shard) for shard in shards) == len(set().union(*shards)), "a case runs in two shards"
+    assert set().union(*shards) == selections["split-prod"], "a split case is in no shard"
+
+
+def test_the_ci_matrix_runs_every_real_case_exactly_once(selections: dict[str, set[str]]) -> None:
+    # The matrix is what CI runs: it must cover every case once, whichever profiles it names.
+    profiles = ci_matrix_profiles()
+    assert "all" not in profiles and "split-prod" not in profiles, "the matrix must run the shards, not the whole split"
+    chosen = [selections[name] for name in profiles]
+    assert sum(len(cases) for cases in chosen) == len(selections["all"]), "a case runs twice, or one is missing"
+    assert set().union(*chosen) == selections["all"]
+
+
+def test_native_infrastructure_checks_run_once_not_per_profile() -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/integration.yml").read_text(encoding="utf-8"))
+    (infra,) = [
+        step for step in workflow["jobs"]["native-deploy"]["steps"] if step.get("run") == "make test-native-infra"
+    ]
+    assert infra.get("if") == "matrix.profile == 'combined-prod'"
+    assert "combined-prod" in ci_matrix_profiles()
+
+
+def test_shard_counts_are_the_shard_case_lists() -> None:
+    for name, cases in run_native_acceptance.SHARD_CASES.items():
+        assert run_native_acceptance.PROFILES[name][1] == len(cases)
+
+
 @pytest.mark.parametrize("profile", ["", "unknown"])
 def test_invalid_profile_cannot_silently_qualify_another_topology(profile: str) -> None:
     result = collect(profile)
@@ -82,6 +118,9 @@ def test_invalid_profile_cannot_silently_qualify_another_topology(profile: str) 
         ("combined-staging", 29, False, False),
         ("combined-prod", 6, False, True),
         ("combined-prod", 6, True, False),
+        ("split-prod-1", 9, False, True),
+        ("split-prod-1", 17, False, False),
+        ("split-prod-4", 2, False, True),
     ],
 )
 def test_runner_requires_the_complete_requested_profile(
