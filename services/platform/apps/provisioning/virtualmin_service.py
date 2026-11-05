@@ -45,6 +45,7 @@ from .virtualmin_create_node_identity import lock_create_retry_node
 from .virtualmin_create_retry_binding import (
     CreateRetryBinding,
     binding_current,
+    create_binding_snapshot,
     park_changed_binding,
     password_fingerprint,
     retry_binding,
@@ -673,6 +674,11 @@ class VirtualminProvisioningService:
             )
             if refusal is not None:
                 return refusal
+            created_binding = create_binding_snapshot(
+                account,
+                job,
+                origin_server_id=VirtualminAccount.objects.values_list("server_id", flat=True).get(pk=account.pk),
+            )
             result = gateway.call(
                 "create-domain",
                 params,
@@ -688,7 +694,13 @@ class VirtualminProvisioningService:
 
                     quotas = ensure_managed_limits(account, parent_job=job, native_server=account.server)
                     if quotas.is_err():
-                        job.mark_attention(quotas.unwrap_err(), response.data)
+                        park_changed_binding(
+                            created_binding,
+                            job.pk,
+                            native_outcome="created",
+                            reason=quotas.unwrap_err(),
+                            response_data=response.data,
+                        )
                         return Err(quotas.unwrap_err(), retriability=Retriability.UNKNOWN)
                     if settle_created is not None:
                         # Retry settlement owns its fresh binding/claim checks.
@@ -1689,7 +1701,7 @@ class VirtualminProvisioningService:
         if create_retry_policy(account, job).allowed:
             verified = ensure_managed_limits(account, parent_job=job, native_server=job.server)
             if verified.is_err() and create_retry_policy(account, job).allowed:
-                job.mark_attention(verified.unwrap_err())
+                park_changed_binding(binding, job.pk, native_outcome="adopted", reason=verified.unwrap_err())
                 return Err(verified.unwrap_err(), retriability=Retriability.UNKNOWN)
         with transaction.atomic():
             target = lock_create_retry_node(account, job)

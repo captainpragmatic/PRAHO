@@ -307,7 +307,7 @@ class ComponentMigrationWorker(VirtualminMigrationService):
             "backing_up": self._backup,
             "fetching": self._transfer,
             "pushing": self._transfer,
-            "restoring": self._restore,
+            "restoring": self._restore_with_notification_policy,
             "verifying": self._verify,
             "activating": self._activate,
             "bridging": self._bridge,

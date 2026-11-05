@@ -34073,3 +34073,27 @@ msgstr "Adresele sursă ale Platform %(addresses)s lipsesc din lista de acces ad
 #, python-format
 msgid "Platform source addresses %(addresses)s are missing from the node admin allowlist. The node firewall drops Platform's connections from these addresses, so a deploy that connects from one of them fails at hardening."
 msgstr "Adresele sursă ale Platform %(addresses)s lipsesc din lista de acces administrativ pentru noduri. Firewall-ul nodului blochează conexiunile Platform de la aceste adrese, așa că o instalare care se conectează de la una dintre ele eșuează la etapa de securizare."
+
+#: apps/provisioning/hosting_notification_completion.py:155
+msgid "Native customer notification policy could not be verified; review the node before continuing."
+msgstr "Politica nodului privind notificările către clienți nu a putut fi verificată; verificați nodul înainte de a continua."
+
+#: apps/provisioning/hosting_notification_completion.py:85
+msgid "Accepted native notification ownership changed"
+msgstr "Responsabilitatea acceptată pentru notificările native s-a schimbat."
+
+#: apps/provisioning/hosting_notification_completion.py:93
+msgid "Native notification account scope changed"
+msgstr "Contextul contului pentru notificările native s-a schimbat."
+
+#: apps/provisioning/hosting_notification_completion.py:128
+msgid "Native notification inspection has no current lifecycle claim"
+msgstr "Verificarea notificărilor native nu aparține unei execuții curente."
+
+#: apps/provisioning/hosting_notification_completion.py:133
+msgid "The supplied native notification endpoint is stale"
+msgstr "Punctul de acces furnizat pentru notificările native nu mai este actual."
+
+#: apps/provisioning/hosting_notification_completion.py:145
+msgid "Native notification inspection lost its accepted scope or claim"
+msgstr "Verificarea notificărilor native a pierdut contextul acceptat sau dreptul de execuție."

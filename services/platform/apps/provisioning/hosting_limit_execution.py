@@ -886,6 +886,7 @@ def ensure_managed_limits(  # noqa: C901, PLR0911, PLR0912 -- Preserve independe
     """
     from .hosting_limit_tasks import current_application  # noqa: PLC0415
     from .hosting_node_policy_models import NodeHostingPolicy  # noqa: PLC0415
+    from .hosting_notification_completion import verify_lifecycle_notification_policy  # noqa: PLC0415
 
     staged_server = native_server
     account.refresh_from_db()
@@ -896,10 +897,16 @@ def ensure_managed_limits(  # noqa: C901, PLR0911, PLR0912 -- Preserve independe
             account.server = staged_server
         if account.quota_managed:
             return Err("This managed account requires a currently qualified target node before native completion.")
-        return Ok(False)
+        mail = verify_lifecycle_notification_policy(
+            account, native_server=target, parent_job=parent_job, migration=migration
+        )
+        return Err(mail.unwrap_err()) if mail.is_err() else Ok(False)
     if not account.quota_managed and parent_job is not None and parent_job.operation == "restore_domain":
         # Restoring an imported account is not implicit quota-policy adoption.
-        return Ok(False)
+        mail = verify_lifecycle_notification_policy(
+            account, native_server=target, parent_job=parent_job, migration=migration
+        )
+        return Err(mail.unwrap_err()) if mail.is_err() else Ok(False)
     parent: dict[str, Any] = {}
     if parent_job is not None:
         parent = {"job_id": str(parent_job.pk), "token": str(parent_job.execution_token or "")}

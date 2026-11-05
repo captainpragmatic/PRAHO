@@ -64,6 +64,19 @@ the enabled schedule, destination and `email_err` policy. In pinned Virtualmin8.
 `email_doms`; there is no fallback when both are empty/false.
 [Pinned backup sender](https://github.com/virtualmin/virtualmin-gpl/blob/8.3.0/backup.pl#L244).
 
+## Lifecycle verification
+
+Restores and archive migrations inspect the installed protection before dispatch.
+Completion checks also run where quota policy remains unadopted. A guarded old
+archive can complete without changing its historical notification preference or
+adopting quotas. Missing protection refuses dispatch; lost verification after an
+issued restore keeps the existing uncertain outcome and never replays it.
+
+Each check retains the operation's actual claim contract. Restores use their
+execution token and deadline; creates and retries use their frozen account binding
+and claimed/started timestamps, with nullable tokens. An old worker can park only
+its own claim generation, preserving a newer worker's state and the native result.
+
 ## Evidence boundaries
 
 Unit tests execute the actual patched Perl ACME branch with captured mail calls;
