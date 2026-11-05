@@ -105,7 +105,8 @@ def _domain_admission_refusal(order: Order) -> str | None:
     seen: set[str] = set()
     for item in order.domain_items.filter(action__in=ORDERABLE_DOMAIN_ACTIONS).order_by("created_at", "pk"):
         if item.domain_name in seen:
-            return f"{item.domain_name}: {_('This domain is on the order twice.')}"
+            reason = _("This domain is on the order twice.")
+            return f"{item.domain_name}: {reason}"
         seen.add(item.domain_name)
         refusal = DomainOrderService.admission_refusal(item.domain_name, item.action, exclude_order_id=order.pk)
         if refusal is not None:
