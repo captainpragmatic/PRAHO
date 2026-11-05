@@ -28,3 +28,10 @@ all:
     praho:
       hosts:
         praho-server:
+
+    praho_platform:
+      hosts:
+        praho-server:
+    praho_portal:
+      hosts:
+        praho-server:

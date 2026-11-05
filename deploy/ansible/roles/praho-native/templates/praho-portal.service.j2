@@ -3,8 +3,11 @@
 
 [Unit]
 Description=PRAHO Portal (Django customer-facing service)
-After=praho-platform.service network.target
+After=network-online.target
+{% if native_topology | default('combined') == 'combined' %}
+After=praho-platform.service
 Wants=praho-platform.service
+{% endif %}
 
 [Service]
 Type=notify
@@ -39,7 +42,11 @@ PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
 ReadWritePaths=/var/log/praho/portal {{ portal_state_directory }}
-InaccessiblePaths={{ project_root }}/.env {{ project_root }}/credentials {{ project_root }}/media
+InaccessiblePaths=-{{ project_root }}/.env -{{ project_root }}/credentials -{{ project_root }}/media
+InaccessiblePaths=-{{ project_root }}/.platform-deploy.env
+{% if (deployed_env | default({})).get('MEDIA_ROOT', project_root + '/media') != project_root + '/media' %}
+InaccessiblePaths=-{{ deployed_env.MEDIA_ROOT }}
+{% endif %}
 
 [Install]
 WantedBy=multi-user.target

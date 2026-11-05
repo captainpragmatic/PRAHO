@@ -180,7 +180,7 @@ def test_a_restore_without_a_media_archive_says_the_media_was_left_alone(project
 # --- Native backups -------------------------------------------------------------------------------
 
 
-def _render(template: str, root: Path) -> str:
+def _render(template: str, root: Path, **context: object) -> str:
     environment = jinja2.Environment(undefined=jinja2.StrictUndefined, autoescape=False)  # noqa: S701  # Shell, not HTML
     environment.filters["quote"] = shlex.quote
     return environment.from_string((TEMPLATES / template).read_text()).render(
@@ -191,6 +191,7 @@ def _render(template: str, root: Path) -> str:
         platform_port=8700,
         portal_port=8701,
         deployed_env={"DB_PASSWORD": "x", "DB_USER": "praho", "DB_NAME": "praho"},
+        **context,
     )
 
 
@@ -256,6 +257,27 @@ def test_a_native_backup_archives_the_media_directory(tmp_path: Path) -> None:
     media = root / "backups" / dump.name.replace(".dump", ".media.tar.gz")
     with tarfile.open(media) as archive:
         assert "media/efactura/response.zip" in archive.getnames()
+
+
+def test_native_backup_preserves_the_configured_media_directory(tmp_path: Path) -> None:
+    root, env = _native(tmp_path)
+    custom = root / "customer-uploads"
+    (root / "media").rename(custom)
+    env["MEDIA_ROOT"] = str(custom)
+    result = _run(_render("backup-native.sh.j2", root), env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    [archive] = (root / "backups").glob("*.media.tar.gz")
+    with tarfile.open(archive) as media:
+        assert "customer-uploads/efactura/response.zip" in media.getnames()
+
+
+def test_missing_native_media_directory_cannot_publish_a_successful_pair(tmp_path: Path) -> None:
+    root, env = _native(tmp_path)
+    env["MEDIA_ROOT"] = str(root / "missing-media")
+    result = _run(_render("backup-native.sh.j2", root), env)
+    assert result.returncode != 0 and "Media directory" in result.stderr
+    assert "Backup completed successfully" not in result.stdout
+    assert not list((root / "backups").glob("*.dump"))
 
 
 def _tar_exiting(tmp_path: Path, status: int) -> None:

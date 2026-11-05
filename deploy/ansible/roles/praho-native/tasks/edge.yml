@@ -1,0 +1,64 @@
+---
+- name: Install Caddy APT prerequisites
+  apt:
+    name:
+      - curl
+      - gnupg
+      - ca-certificates
+      - debian-keyring
+      - debian-archive-keyring
+      - apt-transport-https
+    state: present
+    update_cache: true
+
+- name: Add Caddy GPG key
+  shell: curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+  args:
+    creates: /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+
+- name: Add Caddy APT repository
+  shell: curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+  args:
+    creates: /etc/apt/sources.list.d/caddy-stable.list
+
+- name: Install Caddy
+  apt:
+    name: caddy
+    state: present
+    update_cache: yes
+
+- name: Create Caddy log directory
+  file:
+    path: /var/log/caddy
+    state: directory
+    owner: caddy
+    group: caddy
+    mode: "0755"
+
+- name: Create Caddy log files with correct ownership
+  file:
+    path: "/var/log/caddy/{{ item }}"
+    state: touch
+    owner: caddy
+    group: caddy
+    mode: "0644"
+    modification_time: preserve
+    access_time: preserve
+  loop:
+    - portal-access.log
+    - platform-access.log
+
+- name: Template Caddyfile
+  tags: [caddy]
+  template:
+    src: Caddyfile.native.j2
+    dest: /etc/caddy/Caddyfile
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "caddy validate --config %s --adapter caddyfile"
+  notify: restart caddy
+
+# ---------------------------------------------------------------------------
+# 9. Systemd services
+# ---------------------------------------------------------------------------

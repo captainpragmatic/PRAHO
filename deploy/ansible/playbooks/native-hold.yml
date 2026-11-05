@@ -1,0 +1,51 @@
+---
+- name: Preserve maintenance after a failed coordinated operation
+  hosts: praho
+  become: true
+  gather_facts: false
+  ignore_unreachable: true
+  tasks:
+    - name: Verify this controller owns failure recovery
+      include_tasks: native/lock-owner.yml
+    - name: Reestablish the durable gate directory on reachable hosts
+      file:
+        path: /etc/praho-native
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+    - name: Reassert every owned gate
+      copy:
+        dest: "/etc/praho-native/{{ item }}"
+        content: "Deployment failed. Resume using the coordinated native launcher.\n"
+        owner: root
+        group: root
+        mode: '0644'
+      loop: "{{ (['hold-platform', 'hold-workers'] if inventory_hostname in groups.praho_platform else []) + (['hold-portal', 'hold-callbacks'] if inventory_hostname in groups.praho_portal else []) }}"
+      register: native_reasserted
+    - name: Discover running units
+      service_facts:
+      register: native_recovery_services
+    - name: Keep business workers and backup scheduling disabled
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+        enabled: false
+      loop: [praho-qcluster.service, praho-backup.timer]
+      when: item in ansible_facts.services | default({})
+    - name: Report the reachable checkout SHA for recovery
+      command: "git -C {{ project_root }}/src rev-parse HEAD"
+      become_user: "{{ project_user }}"
+      changed_when: false
+      register: native_failure_sha
+      failed_when: false
+    - name: Report failure recovery state without configuration values
+      when: not (native_reasserted.unreachable | default(false)) and not (native_recovery_services.unreachable | default(false))
+      debug:
+        msg: "{{ inventory_hostname }} release={{ native_failure_sha.stdout | default('unavailable', true) }}; ingress and workers held"
+    - name: Refuse to claim recovery of an unreachable origin
+      assert:
+        that:
+          - not (native_reasserted.unreachable | default(false))
+          - not (native_recovery_services.unreachable | default(false))
+        fail_msg: "SSH unavailable: maintenance and worker hold recovery is unverified; inspect this host through console access."

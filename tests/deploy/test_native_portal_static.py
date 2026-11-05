@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import os
 import secrets
 import subprocess
@@ -10,8 +9,9 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 from jinja2 import Environment, StrictUndefined
+
+from tests.native_role_helpers import native_tasks
 
 ROOT = Path(__file__).resolve().parents[2]
 ROLE = ROOT / "deploy/ansible/roles/praho-native"
@@ -21,11 +21,11 @@ PORTAL_SIGNING_KEY = secrets.token_urlsafe(48)  # A portal's own key, never the 
 
 
 def portal_environment(root: Path, profile: str) -> dict[str, str]:
-    tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+    tasks = native_tasks(ROLE / "tasks/main.yml")
     task = next(task for task in tasks if task["name"] == "Set Portal Django environment")
     template = Environment(undefined=StrictUndefined)  # noqa: S701 -- Ansible env values, not HTML.
     context = {
-        "project_root": str(root), "platform_port": 8700, "portal_state_directory": str(root / "portal-state"),
+        "native_topology": "combined", "project_root": str(root), "platform_port": 8700, "portal_state_directory": str(root / "portal-state"),
         "django_settings_module": f"config.settings.{profile}",
         "deployed_env": {"PORTAL_DOMAIN": "portal.example.test", "PORTAL_DJANGO_SECRET_KEY": PORTAL_KEY,
                          "DJANGO_SECRET_KEY": "s" * 60, "DB_PASSWORD": "private-platform-password",
@@ -45,11 +45,17 @@ def test_collectstatic_and_rendered_portal_use_the_caddy_directory(tmp_path: Pat
     assert environment["STATIC_ROOT"] == str(tmp_path / "portal-static")
     assert environment["DJANGO_SECRET_KEY"] == PORTAL_KEY
     assert not {"DB_PASSWORD", "CREDENTIAL_VAULT_MASTER_KEY", "DJANGO_ENCRYPTION_KEY", "HMAC_SECRET"} & environment.keys()
-    tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+    tasks = native_tasks(ROLE / "tasks/main.yml")
     collect = next(task for task in tasks if task["name"] == "Collect Portal static files")
     renderer = Environment(undefined=StrictUndefined)  # noqa: S701 -- Deployment environment, not HTML.
     renderer.filters["combine"] = lambda left, right: {**left, **right}
-    environment = ast.literal_eval(renderer.from_string(collect["environment"]).render(portal_django_env=environment))
+    build = next(task for task in tasks if task["name"] == "Install private filtered Portal build environment")
+    renderer.filters["native_systemd_env"] = lambda values: values
+    # Render the same expression used to write the private on-host build environment.
+    expression = build["copy"]["content"].removeprefix("{{").removesuffix("}}")
+    environment = renderer.compile_expression(expression)(portal_django_env=environment)
+    assert ".portal-static.env --" in collect["command"]
+    assert build["copy"]["mode"] == "0600" and build["no_log"] and build["diff"] is False
     # The project user can write static assets but cannot enter Portal's private logs.
     assert environment["PORTAL_LOG_DIR"] == ""
     environment["PLATFORM_TO_PORTAL_WEBHOOK_SECRET"] = "w" * 48
@@ -86,7 +92,7 @@ def test_unit_and_counter_cron_only_read_filtered_environment() -> None:
     unit = (ROLE / "templates/praho-portal.service.j2").read_text()
     assert "EnvironmentFile={{ project_root }}/.portal.env" in unit
     assert "EnvironmentFile={{ project_root }}/.env\n" not in unit
-    tasks = yaml.safe_load((ROLE / "tasks/main.yml").read_text())
+    tasks = native_tasks(ROLE / "tasks/main.yml")
     install = next(task for task in tasks if task["name"] == "Install filtered Portal runtime environment")
     assert install["copy"]["content"] == "{{ portal_django_env | native_systemd_env }}"
     assert install["no_log"] and install["diff"] is False and install["copy"]["mode"] == "0640"

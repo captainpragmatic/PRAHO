@@ -1,0 +1,19 @@
+---
+- name: Setup Portal counter cull cron job
+  cron:
+    name: "PRAHO Portal counter cull"
+    minute: "30"
+    hour: "2"
+    job: >-
+      cd {{ project_root }}/src/services/portal &&
+      set -a && . {{ project_root }}/.portal.env && set +a &&
+      SESSION_DB_PATH={{ portal_django_env.SESSION_DB_PATH }}
+      PYTHONPATH={{ project_root }}/src/services/portal
+      DJANGO_SETTINGS_MODULE={{ django_settings_module }}
+      {{ project_root }}/.venv-linux/bin/python manage.py cull_counters
+      >> /var/log/praho/portal/cull.log 2>&1
+    user: "{{ portal_user }}"
+
+# ---------------------------------------------------------------------------
+# 11. Health check
+# ---------------------------------------------------------------------------

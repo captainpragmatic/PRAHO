@@ -1,0 +1,149 @@
+---
+- name: Validate .env file exists locally
+  stat:
+    path: "{{ env_file_path }}"
+  delegate_to: localhost
+  become: false
+  register: env_file_check
+
+- name: Fail if .env file not found
+  fail:
+    msg: >
+      Environment file not found at {{ env_file_path }}.
+      Copy .env.example.{{ praho_env }} to .env.{{ praho_env }} and fill in values.
+      See docs/deployment/DEPLOYMENT.md for details.
+  when: not env_file_check.stat.exists
+
+- name: Copy environment file to server
+  copy:
+    content: "{{ native_configuration['systemd'] }}"
+    dest: "{{ project_root }}/.env"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0600"
+  no_log: true
+  diff: false
+  notify:
+    - restart praho-platform
+    - restart praho-portal
+    - restart praho-qcluster
+
+- name: Create private credential directory
+  file:
+    path: "{{ project_root }}/credentials"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0700"
+
+- name: Install private PostgreSQL passfile for unattended backups
+  copy:
+    content: "{{ native_configuration['pgpass'] }}"
+    dest: "{{ project_root }}/credentials/postgresql.pgpass"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0600"
+  no_log: true
+  diff: false
+
+# deployed_env is already set from step 0 (parsed from local .env file)
+
+# ---------------------------------------------------------------------------
+# 7. Django setup
+# ---------------------------------------------------------------------------
+
+# migrate and collectstatic run with this environment, not the services' EnvironmentFile, and production
+# settings don't load the .env, so pass the keys production refuses to import without. Only those the
+# .env defines are passed, so a staging environment is unchanged.
+- name: Set Django environment variables from .env file
+  no_log: true
+  set_fact:
+    django_env: "{{ praho_django_env_base | combine(deployed_env | dict2items | selectattr('key', 'in', praho_passthrough) | items2dict) }}"
+  vars:
+    praho_passthrough:
+      - PORTAL_HMAC_MODE
+      - PORTAL_SESSION_REQUIRED
+      - CUSTOMER_VIEW_ENABLED
+      - PRAHO_CROWDSEC_SYNC_ENABLED
+      - PRAHO_CROWDSEC_LOCAL_SOURCE_ENABLED
+      - PRAHO_CROWDSEC_SSH_PUBLIC_KEY_PATH
+      - PRAHO_CROWDSEC_SSH_PRIVATE_KEY_PATH
+      - PRAHO_CROWDSEC_ACTIONS_ENABLED
+      - PRAHO_CROWDSEC_REPLICATION_ENABLED
+      - CROWDSEC_CUSTOMER_IP_OBSERVATIONS_ENABLED
+      - PORTAL_PUBLIC_ORIGIN
+      - PORTAL_HMAC_CREDENTIALS
+      - PLATFORM_TO_PORTAL_WEBHOOK_SECRET
+      - DJANGO_ENCRYPTION_KEY
+      - DJANGO_ENCRYPTION_KEY_PREVIOUS
+      - CREDENTIAL_VAULT_MASTER_KEY
+      - COMPANY_NAME
+      - COMPANY_CUI
+      - COMPANY_COUNTRY_CODE
+      - TIME_ZONE
+      - BRAND_DIR
+      # The services already read it through EnvironmentFile; this keeps the deploy-time
+      # commands from running with its default of true on a host that switched ANAF off.
+      - ANAF_TRANSPORT_ENABLED
+      # Deploy-time commands write audit rows too; their session digests must use the same key.
+      - AUDIT_SESSION_DIGEST_SECRET
+      # Deploy-time commands can store an email; its recipient digests must use the same key.
+      - EMAIL_RECIPIENT_DIGEST_SECRET
+    praho_django_env_base:
+      PYTHONPATH: "{{ project_root }}/src/services/platform"
+      DJANGO_SETTINGS_MODULE: "{{ django_settings_module }}"
+      # Read all vars from the deployed .env file
+      DB_NAME: "{{ deployed_env.DB_NAME | default('praho') }}"
+      DB_USER: "{{ deployed_env.DB_USER | default('praho') }}"
+      DB_PASSWORD: "{{ deployed_env.DB_PASSWORD }}"
+      DB_HOST: "{{ deployed_env.DB_HOST | default('localhost') }}"
+      DB_PORT: "{{ deployed_env.DB_PORT | default('5432') }}"
+      DB_SSLMODE: "{{ deployed_env.DB_SSLMODE | default('disable') }}"
+      DJANGO_SECRET_KEY: "{{ deployed_env.DJANGO_SECRET_KEY }}"
+      HMAC_SECRET: "{{ deployed_env.HMAC_SECRET | default('') }}"
+      PLATFORM_API_SECRET: "{{ deployed_env.PLATFORM_API_SECRET | default(deployed_env.HMAC_SECRET | default('')) }}"
+      STATIC_ROOT: "{{ deployed_env.STATIC_ROOT | default(project_root + '/static') }}"
+      MEDIA_ROOT: "{{ deployed_env.MEDIA_ROOT | default(project_root + '/media') }}"
+      ALLOWED_HOSTS: "{{ deployed_env.PORTAL_DOMAIN }},{{ deployed_env.PLATFORM_DOMAIN }},localhost,127.0.0.1"
+      PORTAL_DOMAIN: "{{ deployed_env.PORTAL_DOMAIN }}"
+      PLATFORM_DOMAIN: "{{ deployed_env.PLATFORM_DOMAIN }}"
+      PORTAL_PAYMENT_WEBHOOK_URL: "{{ deployed_env.PORTAL_PAYMENT_WEBHOOK_URL | default('https://' + deployed_env.PORTAL_DOMAIN + '/order/payment/webhook/') }}"
+      DJANGO_SECURE_SSL_REDIRECT: "{{ deployed_env.DJANGO_SECURE_SSL_REDIRECT | default('false') }}"
+
+- name: Install private Platform management environment
+  copy:
+    content: "{{ django_env | native_systemd_env }}"
+    dest: "{{ project_root }}/.platform-deploy.env"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: '0600'
+  no_log: true
+  diff: false
+
+- name: Install recovery tooling before the first business migration can write data
+  include_tasks: platform-backup-files.yml
+
+- name: Run database migrations
+  no_log: true
+  command: >
+    /usr/local/lib/praho/native_exec.sh {{ project_root }}/.platform-deploy.env -- {{ project_root }}/.venv-linux/bin/python manage.py migrate --noinput
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+
+- name: Create database cache table
+  no_log: true
+  command: >
+    /usr/local/lib/praho/native_exec.sh {{ project_root }}/.platform-deploy.env -- {{ project_root }}/.venv-linux/bin/python manage.py createcachetable
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"
+  failed_when: false
+
+- name: Collect Platform static files
+  no_log: true
+  command: >
+    /usr/local/lib/praho/native_exec.sh {{ project_root }}/.platform-deploy.env -- {{ project_root }}/.venv-linux/bin/python manage.py collectstatic --noinput
+  args:
+    chdir: "{{ project_root }}/src/services/platform"
+  become_user: "{{ project_user }}"

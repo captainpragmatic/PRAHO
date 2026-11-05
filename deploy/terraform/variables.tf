@@ -18,6 +18,16 @@ variable "environment" {
   }
 }
 
+variable "native_topology" {
+  description = "split or combined; defaults to split in prod and combined elsewhere. Existing two-server staging MUST set split before adoption."
+  type        = string
+  default     = null
+  validation {
+    condition     = var.native_topology == null ? true : contains(["split", "combined"], var.native_topology)
+    error_message = "native_topology must be split or combined."
+  }
+}
+
 variable "ssh_public_key" {
   description = "SSH public key for server access"
   type        = string
@@ -96,8 +106,9 @@ locals {
   platform_type = var.platform_server_type != "" ? var.platform_server_type : local.default_server_type[var.environment]
   portal_type   = var.portal_server_type != "" ? var.portal_server_type : local.default_server_type[var.environment]
 
-  # Dev = single all-in-one server; staging/prod = separate platform + portal
-  deploy_portal = var.environment != "dev"
+  # Explicit selection also protects adoption of existing split staging.
+  native_topology = coalesce(var.native_topology, var.environment == "prod" ? "split" : "combined")
+  deploy_portal   = local.native_topology == "split"
 
   # Common labels applied to all resources
   common_labels = {

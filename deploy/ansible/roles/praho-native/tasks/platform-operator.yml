@@ -1,0 +1,39 @@
+---
+- name: Create read-only runtime Ansible collection directory
+  file:
+    path: /opt/praho-ansible/collections
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install pinned runtime Ansible collections
+  command: >-
+    {{ project_root }}/.venv-linux/bin/ansible-galaxy collection install
+    -r {{ project_root }}/src/services/platform/infrastructure/ansible/requirements.yml
+    -p /opt/praho-ansible/collections
+  environment:
+    ANSIBLE_LOCAL_TEMP: /tmp
+  register: runtime_collections
+  changed_when: "'Installing' in runtime_collections.stdout"
+
+- name: Install runtime OpenSSH client tools
+  apt:
+    name: openssh-client
+    state: present
+
+- name: Create read-only node operator key directory
+  file:
+    path: /etc/praho
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install approved public keys for managed-node deployment
+  copy:
+    content: "{{ ssh_operator_public_keys | join('\n') }}\n"
+    dest: /etc/praho/operator_authorized_keys
+    owner: root
+    group: root
+    mode: '0644'

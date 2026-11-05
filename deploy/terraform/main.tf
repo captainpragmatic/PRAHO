@@ -5,7 +5,7 @@
 #
 # Topology:
 #   dev     → 1 server  (all-in-one: Platform + Portal + DB + Caddy)
-#   staging → 2 servers (platform + portal, mirrors prod)
+#   staging → 1 server by default; existing two-server staging explicitly retains split
 #   prod    → 2 servers (platform + portal)
 #
 # Usage:
@@ -107,8 +107,77 @@ resource "hcloud_firewall" "praho" {
 # =============================================================================
 # Platform Server (all environments)
 # =============================================================================
-# In dev: runs all-in-one (Platform + Portal + DB + Caddy)
-# In staging/prod: runs Platform + DB + Caddy
+# Combined: Platform + Portal + DB + Caddy. Split: Platform + DB + Caddy.
+
+resource "hcloud_firewall" "portal" {
+  count = local.deploy_portal ? 1 : 0
+  name  = "praho-${var.environment}-portal-fw"
+
+  labels = merge(local.common_labels, {
+    role = "firewall"
+  })
+
+  # SSH
+  rule {
+    direction   = "in"
+    protocol    = "tcp"
+    port        = "22"
+    source_ips  = var.firewall_ssh_sources
+    description = "SSH access"
+  }
+
+  # HTTP (Caddy / Let's Encrypt)
+  rule {
+    direction   = "in"
+    protocol    = "tcp"
+    port        = "9876"
+    source_ips  = var.firewall_ssh_sources
+    description = "Key-only SSH after verified bootstrap"
+  }
+
+  rule {
+    direction   = "in"
+    protocol    = "tcp"
+    port        = "80"
+    source_ips  = ["0.0.0.0/0", "::/0"]
+    description = "HTTP"
+  }
+
+  # HTTPS
+  rule {
+    direction   = "in"
+    protocol    = "tcp"
+    port        = "443"
+    source_ips  = ["0.0.0.0/0", "::/0"]
+    description = "HTTPS"
+  }
+
+  # Allow all outbound TCP
+  rule {
+    direction       = "out"
+    protocol        = "tcp"
+    port            = "any"
+    destination_ips = ["0.0.0.0/0", "::/0"]
+    description     = "All outbound TCP"
+  }
+
+  # Allow all outbound UDP
+  rule {
+    direction       = "out"
+    protocol        = "udp"
+    port            = "any"
+    destination_ips = ["0.0.0.0/0", "::/0"]
+    description     = "All outbound UDP"
+  }
+
+  # ICMP outbound
+  rule {
+    direction       = "out"
+    protocol        = "icmp"
+    destination_ips = ["0.0.0.0/0", "::/0"]
+    description     = "ICMP outbound"
+  }
+}
 
 resource "hcloud_server" "platform" {
   name        = var.environment == "dev" ? "praho-dev" : "praho-${var.environment}-platform"
@@ -129,7 +198,7 @@ resource "hcloud_server" "platform" {
   }
 
   lifecycle {
-    prevent_destroy = false
+    prevent_destroy = true
   }
 }
 
@@ -153,7 +222,7 @@ resource "hcloud_server" "portal" {
   location    = var.location
 
   ssh_keys     = [hcloud_ssh_key.praho.id]
-  firewall_ids = [hcloud_firewall.praho.id]
+  firewall_ids = [hcloud_firewall.portal[0].id]
 
   labels = merge(local.common_labels, {
     role = "portal"
@@ -165,7 +234,7 @@ resource "hcloud_server" "portal" {
   }
 
   lifecycle {
-    prevent_destroy = false
+    prevent_destroy = true
   }
 }
 

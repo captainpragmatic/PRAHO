@@ -28,20 +28,20 @@ output "platform_status" {
   value       = hcloud_server.platform.status
 }
 
-# Portal server (staging/prod only)
+# Separate Portal server (split topology only)
 output "portal_server_id" {
-  description = "Portal server Hetzner ID (null in dev)"
+  description = "Separate Portal server Hetzner ID (null in combined topology)"
   value       = local.deploy_portal ? hcloud_server.portal[0].id : null
 }
 
 output "portal_server_name" {
-  description = "Portal server name (null in dev)"
+  description = "Separate Portal server name (null in combined topology)"
   value       = local.deploy_portal ? hcloud_server.portal[0].name : null
 }
 
 output "portal_ipv4" {
-  description = "Portal server public IPv4 address (null in dev)"
-  value       = local.deploy_portal ? hcloud_server.portal[0].ipv4_address : null
+  description = "Portal role public IPv4 address (shared with Platform in combined topology)"
+  value       = local.deploy_portal ? hcloud_server.portal[0].ipv4_address : hcloud_server.platform.ipv4_address
 }
 
 # Summary
@@ -63,4 +63,24 @@ output "ssh_key_fingerprint" {
 output "firewall_id" {
   description = "Cloud firewall ID"
   value       = hcloud_firewall.praho.id
+}
+
+output "native_topology" {
+  value = local.native_topology
+}
+
+output "platform_firewall_id" {
+  value = hcloud_firewall.praho.id
+}
+
+output "portal_firewall_id" {
+  value = local.deploy_portal ? hcloud_firewall.portal[0].id : hcloud_firewall.praho.id
+}
+
+output "platform_ipv6" {
+  value = hcloud_server.platform.ipv6_address
+}
+
+output "portal_ipv6" {
+  value = local.deploy_portal ? hcloud_server.portal[0].ipv6_address : hcloud_server.platform.ipv6_address
 }

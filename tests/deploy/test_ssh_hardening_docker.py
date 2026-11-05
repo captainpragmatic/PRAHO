@@ -394,7 +394,9 @@ def test_application_python_and_postgresql_on_supported_ubuntu(ssh_target: str) 
         "Add PostgreSQL APT repository",
         "Install PostgreSQL 16",
     }
-    package_tasks = [task for task in yaml.safe_load(native.read_text()) if task.get("name") in package_names]
+    from tests.native_role_helpers import native_tasks  # noqa: PLC0415
+
+    package_tasks = [task for task in native_tasks(native) if task.get("name") in package_names]
     assert len(package_tasks) == len(package_names)
     playbook = [
         {

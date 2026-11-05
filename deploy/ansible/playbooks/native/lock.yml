@@ -1,0 +1,24 @@
+---
+- name: Acquire the Platform operation lock atomically across controllers
+  command:
+    argv: [mkdir, -m, '0700', "{{ native_operation_lock_directory }}"]
+  register: native_operation_lock_acquired
+  failed_when: false
+- name: Refuse overlapping operations or an interrupted controller's persistent lock
+  assert:
+    that: native_operation_lock_acquired.rc == 0
+    fail_msg: "Native operation lock exists on Platform. Wait for the active controller; after an abrupt controller loss, follow the documented lock recovery procedure."
+- name: Record this operation's lock ownership
+  copy:
+    content: "{{ native_operation_token }}\n"
+    dest: "{{ native_operation_lock_directory }}/owner"
+    owner: root
+    group: root
+    mode: '0600'
+- name: Journal the acquired lock for controller cleanup
+  copy:
+    content: "{{ native_operation_token }}\n"
+    dest: "{{ native_journal_directory }}/operation-acquired"
+    mode: '0600'
+  delegate_to: localhost
+  become: false

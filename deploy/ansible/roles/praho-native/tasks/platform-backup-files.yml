@@ -1,0 +1,57 @@
+---
+- name: Template backup script
+  template:
+    src: backup-native.sh.j2
+    dest: "{{ project_root }}/scripts/backup.sh"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0700"
+  diff: false
+  # Coordinated deployments always require a recovery pair, even with scheduling disabled.
+
+- name: Template restore script
+  template:
+    src: restore-platform-native.sh.j2
+    dest: "{{ project_root }}/scripts/restore-platform.sh"
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: "0700"
+  diff: false
+
+- name: Remove obsolete generic restore entrypoint
+  file:
+    path: "{{ project_root }}/scripts/restore.sh"
+    state: absent
+
+- name: Create the private Platform backup directory
+  file:
+    path: "{{ backup_directory }}"
+    state: directory
+    owner: "{{ project_user }}"
+    group: "{{ project_group }}"
+    mode: '0700'
+
+- name: Install the Platform backup service and timer
+  template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: '0644'
+  loop:
+    - praho-backup.service
+    - praho-backup.timer
+
+- name: Remove the replaced Platform backup cron job
+  cron:
+    name: "PRAHO database backup"
+    user: "{{ project_user }}"
+    state: absent
+
+- name: Apply the Platform backup timer
+  when: not native_coordinated
+  systemd:
+    name: praho-backup.timer
+    daemon_reload: true
+    enabled: "{{ backup_enabled }}"
+    state: "{{ 'started' if backup_enabled else 'stopped' }}"

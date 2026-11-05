@@ -15,11 +15,19 @@
 
 ---
 - name: Backup PRAHO Database
-  hosts: praho
+  hosts: praho_platform
   become: yes
   gather_facts: no
 
   tasks:
+    - name: Inspect a coordinated backup hold
+      stat:
+        path: /etc/praho-native/hold-workers
+      register: native_backup_hold
+    - name: Refuse independent backup during coordinated recovery
+      assert:
+        that: not native_backup_hold.stat.exists
+        fail_msg: "A coordinated native operation owns the backup window. Resume that operation before requesting an independent backup."
     - name: Detect the environment-aware backup service
       stat:
         path: /etc/systemd/system/praho-backup.service

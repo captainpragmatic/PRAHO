@@ -1,0 +1,19 @@
+---
+- name: Disable backup scheduling and drain the queue controller
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: [praho-backup.timer, praho-qcluster.service]
+  when: item in ansible_facts.services
+- name: Require successful drain of a previously running worker
+  command: systemctl show --property=Result --value praho-qcluster.service
+  register: native_worker_drain
+  changed_when: false
+  failed_when: native_worker_drain.stdout != 'success'
+  when: "'praho-qcluster.service' in ansible_facts.services and ansible_facts.services['praho-qcluster.service'].state == 'running'"
+- name: Wait for an existing backup to finish
+  command: "flock -w 10800 {{ backup_directory }}/.backup.lock /usr/bin/true"
+  changed_when: false
+  become_user: "{{ project_user }}"
+  when: native_checkout.stat.exists

@@ -38,7 +38,7 @@ NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
 ProtectHome=yes
-ReadWritePaths={{ project_root }}/static {{ project_root }}/media {{ project_root }}/logs /var/log/praho
+ReadWritePaths={{ deployed_env.STATIC_ROOT | default(project_root + '/static') }} {{ deployed_env.MEDIA_ROOT | default(project_root + '/media') }} {{ project_root }}/logs /var/log/praho
 
 [Install]
 WantedBy=multi-user.target

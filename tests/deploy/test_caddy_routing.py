@@ -183,7 +183,9 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
     if name != "platform":
         portal = _one(sites, PORTAL_HOST).children
         assert all(target.endswith(":8701") for target in _proxy_targets(portal))
-        assert _proxy_targets(_one(portal, "handle", "/status/").children)
+        if name == "native":
+            portal = _one(portal, "route").children
+        assert _proxy_targets(_one(portal, "handle", "@portal_health" if name == "native" else "/status/").children)
         static = _one(portal, "handle_path", "/static/*").children
         expected_root = "/srv/static" if name == "portal" else "/srv/portal-static"
         _one(static, "root", "*", expected_root)
@@ -197,8 +199,10 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
         _one(proxy, "response_buffers", "10MiB")
     if name != "portal":
         platform = _one(sites, PLATFORM_HOST).children
+        if name == "native":
+            platform = _one(platform, "route").children
         handles = [node for node in platform if node.words[0] == "handle"]
-        assert [node.words for node in handles] == [
+        expected_handles = [
             ("handle", "/api/users/health/*"),
             ("handle", "/integrations/webhooks/*"),
             ("handle", "/notifications/webhooks/*"),
@@ -206,11 +210,14 @@ def _assert_contract(name: str, source: str, allowed: list[str] | None = None) -
             ("handle", "/api/*"),
             ("handle", "@staff"),
         ]
+        if name == "native":
+            expected_handles = [("handle", "@platform_health"), ("handle", "@api"), *expected_handles[1:4], ("handle", "@staff")]
+        assert [node.words for node in handles] == expected_handles
         _one(platform, "@staff", "remote_ip", *(allowed or LOOPBACK))
         denial = _one(platform, "respond", "Access denied", "403")
         assert platform.index(denial) > platform.index(handles[-1])
         assert all(target.endswith(":8700") for target in _proxy_targets(platform))
-        for public in handles[:5]:
+        for public in (handles[2:5] if name == "native" else handles[:5]):
             assert len(_proxy_targets(public.children)) == 1
             # Unauthenticated handles must not stream an unbounded body into a worker.
             _one(_one(public.children, "request_body").children, "max_size", PLATFORM_PUBLIC_BODY_CAP)
@@ -551,18 +558,19 @@ def _request(  # noqa: PLR0913  # Explicit transport, host, path and request dat
 
 
 @contextmanager
-def _running_edge(
+def _running_edge(  # noqa: PLR0913 -- Independent ACL, body and HTTPS probes share one real edge fixture.
     name: str,
     tmp_path: Path,
     *,
     upstream_reads_body: bool = False,
     praho_env: str = "prod",
+    allowed: list[str] | None = None,
     forwarding_probe: bool = False,
 ) -> Iterator[tuple[str, str, str]]:
     suffix = uuid4().hex[:12]
     network, edge, peer = (f"routing-{suffix}-{part}" for part in ("net", "edge", "peer"))
     config = tmp_path / "Caddyfile"
-    fixture = _http_fixture(_config(name, praho_env=praho_env))
+    fixture = _http_fixture(_config(name, allowed=allowed, praho_env=praho_env))
     if forwarding_probe:
         for host in (PORTAL_HOST, PLATFORM_HOST):
             fixture = fixture.replace("http://" + host + " {", "https://" + host + " {\n    tls internal")
@@ -634,6 +642,13 @@ def _running_edge(
         else:
             raise AssertionError(_docker("logs", edge).stderr)
         if forwarding_probe:
+            if name == "native":
+                # The health surface admits monitors separately from public Portal pages.
+                peer_ip = json.loads(_docker_ok("inspect", peer))[0]["NetworkSettings"]["Networks"][network]["IPAddress"]
+                marker = "@health_denied not remote_ip "
+                assert marker in fixture
+                config.write_text(fixture.replace(marker, marker + str(ipaddress.ip_address(peer_ip)) + "/32 ", 1))
+                _docker_ok("exec", edge, "caddy", "reload", "--config", "/etc/caddy/Caddyfile")
             for _ in range(30):
                 tls_ready = _docker(
                     "exec", peer, "wget", "--no-check-certificate", "-q", "-O", "-", f"https://{PORTAL_HOST}/status/"
@@ -651,7 +666,15 @@ def _running_edge(
 
 
 @pytest.mark.docker
-def test_staging_blocks_every_route_before_upstreams(tmp_path: Path, docker_daemon: None) -> None:
+def test_staging_local_health_and_callback_probes_are_independent_of_staff_sources(tmp_path: Path, docker_daemon: None) -> None:
+    with _running_edge("native", tmp_path, praho_env="staging", allowed=["198.51.100.10/32"]) as (edge, _peer, _published):
+        for host, path in ((PORTAL_HOST, "/status/"), (PLATFORM_HOST, "/api/users/health/"), (PORTAL_HOST, "/order/payment/webhook/")):
+            status, body, _ = _request(edge, "127.0.0.1", host, path, edge=edge)
+            assert status == 200 and body.startswith("portal" if host == PORTAL_HOST else "platform")
+
+
+@pytest.mark.docker
+def test_staging_restricts_customer_pages_and_retains_surface_specific_platform_policy(tmp_path: Path, docker_daemon: None) -> None:
     with _running_edge("native", tmp_path, praho_env="staging") as (edge, peer, published):
         for host in (PORTAL_HOST, PLATFORM_HOST):
             for path in (
@@ -664,7 +687,8 @@ def test_staging_blocks_every_route_before_upstreams(tmp_path: Path, docker_daem
                 denied, _, _ = _request(
                     peer, edge, host, path, headers=("X-Forwarded-For: 127.0.0.1", "X-Real-IP: 127.0.0.1"), edge=edge
                 )
-                assert denied == 403, (host, path)
+                expected = 200 if host == PLATFORM_HOST and path == "/integrations/webhooks/stripe/" else 403
+                assert denied == expected, (host, path)
             allowed, body, _ = _request(edge, "127.0.0.1", host, "/auth/login/", edge=edge)
             assert allowed == 200
             assert body.startswith("portal" if host == PORTAL_HOST else "platform")
@@ -677,11 +701,13 @@ def _ownership_table(name: str) -> Iterator[tuple[str, str, str, str]]:
     for path in sorted(PUBLIC_ROUTED_PATHS):
         public.extend((("GET", path), ("GET", path + "/")))
     if name != "platform":
-        for method, path in [("GET", "/status/"), *public, *(("GET", path) for path in SHARED_PATHS)]:
+        for method, path in [*([("GET", "/status/")] if name != "native" else []), *public, *(("GET", path) for path in SHARED_PATHS)]:
             yield PORTAL_HOST, method, path, "portal"
         yield PORTAL_HOST, "POST", "/i18n/setlang/", "portal"
     if name != "portal":
         for method, path in public:
+            if name == "native" and path.startswith("/api/"):
+                continue
             yield PLATFORM_HOST, method, path, "platform"
 
 
@@ -717,6 +743,11 @@ def test_live_routing_spoofed_headers_and_published_port(name: str, tmp_path: Pa
             assert not ipaddress.ip_address(remote).is_loopback
         if name == "portal":
             return
+        if name == "native":
+            for path in ("/api/users/login/", "/api/users/health", "/api/users/health/", "/api/users/health/deep"):
+                for headers in ((), ("X-Forwarded-For: 127.0.0.1",), ("X-Real-IP: ::1",)):
+                    status, _, _ = _request(peer, edge, PLATFORM_HOST, path, headers=headers, edge=edge)
+                    assert status == 403, (path, headers)
         for path in (*SHARED_PATHS, "/static/probe.css", "/media/probe.txt", "/unknown/"):
             status, _, _ = _request(peer, edge, PLATFORM_HOST, path, edge=edge)
             assert status == 403
@@ -823,8 +854,9 @@ def test_live_platform_public_body_cap(name: str, tmp_path: Path, docker_daemon:
     limit = 10 * 1024 * 1024
     with _running_edge(name, tmp_path, upstream_reads_body=True) as (edge, peer, _published):
         for path in ("/integrations/webhooks/stripe/", "/api/users/login/"):
-            assert _post_size(peer, edge, path, limit) == 200, path
-            assert _post_size(peer, edge, path, limit + 1) == 413, path
+            source, destination = (edge, "127.0.0.1") if name == "native" and path.startswith("/api/") else (peer, edge)
+            assert _post_size(source, destination, path, limit) == 200, path
+            assert _post_size(source, destination, path, limit + 1) == 413, path
 
 
 @pytest.mark.docker

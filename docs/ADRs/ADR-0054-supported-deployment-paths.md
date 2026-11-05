@@ -59,19 +59,37 @@ Both deploy paths read the operator's `.env.prod` / `.env.staging`. A new settin
 `.env.example.prod` and `.env.example.staging` and read by both paths; neither gets a vocabulary of its
 own.
 
-### A separate portal host
+### Native host topology (amended for #769)
 
-Until the native role deploys two hosts, the two-server layout is deployed by hand with Compose:
+The existing native role owns shared, Platform, Portal and edge responsibilities. The controller
+(`deploy/scripts/native_env.py`) validates one normalized topology for deployment, SSH preparation,
+Caddy updates, backup and coordinated code rollback. Production defaults to separate hosts; new
+staging/dev default to combined. Combined production is explicit. Existing two-server staging must
+retain `split` in both native configuration and Terraform during adoption.
 
-- **Platform server:** `deploy.sh platform-only --full`.
-- **Portal server:** `deploy.sh portal-only --with-caddy`, with an env file written by
-  `deploy/scripts/portal-env.sh` on the machine that holds the full one.
+`praho_platform` and `praho_portal` inventory groups select responsibilities. Portal-only hosts receive
+filtered configuration on transfer, an isolated OS identity and private session state. They receive
+no business database, full environment, passfile, worker/Platform units or installed node tooling.
+Contaminated Portal targets are refused without removing contents. Both hosts deploy one controller-
+resolved immutable SHA, with persistent root-owned ingress and worker holds around migrations and
+recovery. Public HTTPS carries the existing two independent HMAC schemes, with certificate verification
+and connection-peer CIDRs at native Caddy. Staff and monitoring lists are independent. Provider callbacks
+and unsubscribe links retain their public application-verified routes. Origins must be direct; CDN-aware
+ingress remains separate work. Optional paired address-check origins serve only the observed peer.
 
-A portal host holds only the variables the portal-only stack uses, plus its own
-`PORTAL_DJANGO_SECRET_KEY`; `deploy.sh portal-only` refuses a file with anything else (#630). The split
-stacks publish their application port on loopback only (#631). The portal reaches the platform at
-`https://<platform domain>/api` through the platform's Caddy, where `/api/*` is public and Django's HMAC
-check guards it.
+Terraform retains existing server/RDNS addresses and the original Platform firewall, adds a Portal
+firewall and protects servers from destruction. Adoption uses saved plans with no server deletions or
+replacements. Live cutover and Terraform apply remain separate operator operations.
+
+See [native deployment and recovery](../deployment/NATIVE_TOPOLOGY.md) for configuration, maintenance,
+rollback, acceptance and the guided cutover. An old local Portal origin remains a maintenance-only
+site through DNS expiry. Session moves may require a new sign-in. Webhook failures during maintenance
+require provider-specific redelivery and reconciliation; this decision adds no webhook broker or
+universal zero-loss guarantee.
+
+Compose remains a supported independent path. On separate Docker hosts use `platform-only` and
+`portal-only --with-caddy`, with `portal-env.sh` filtering on the machine holding the full environment.
+Compose's existing API routing behavior is unchanged by the native peer policy.
 
 ### Pairs to change together
 
@@ -82,7 +100,7 @@ runtime. A change to one side is checked against the other:
 |---------|--------|---------|
 | Edge (TLS, HSTS, routing, staff allowlist) | `roles/praho-native/templates/Caddyfile.native.j2` | `deploy/caddy/Caddyfile`, `Caddyfile.platform`, `Caddyfile.portal` |
 | Backup, restore, health | `roles/praho-native/templates/{backup-native,restore-platform-native,health-check}.sh.j2` | `deploy/scripts/{backup,restore-platform,health-check}.sh` |
-| Required production variables | `playbooks/native-single-server.yml` preflight | `deploy/scripts/lib/compose.sh` and the compose files' `${VAR:?}` |
+| Required production variables | `deploy/scripts/native_env.py` controller preflight | `deploy/scripts/lib/compose.sh` and the compose files' `${VAR:?}` |
 
 ## Consequences
 
@@ -91,10 +109,6 @@ runtime. A change to one side is checked against the other:
 - Ansible no longer installs Docker or schedules backups on a Docker host. `deploy.sh` expects a host
   with Docker Compose v2, and an operator schedules `deploy/scripts/backup.sh` there.
 - `make deploy-dev-native` replaces `make deploy-dev` for the remote dev box; it uses the same inventory.
-- The two-server staging and production layout has no automated deploy. `restore-platform.sh` can restore the
-  bundled database and existing local writers on a platform-only host; it does not operate the remote
-  portal or an external database. Full rollback accepts an explicit checksummed database/media pair
-  with source-image and PostgreSQL-major metadata for either local topology. It prepares and verifies
-  target images before downtime, restores with writers stopped, then starts only the selected images.
-  Version-only rollback still assumes single-server. Before a split portal host goes live,
-  coordinated recovery needs a tested procedure for both hosts.
+- Native split-host deployment and code rollback coordinate both hosts. Data recovery remains an
+  explicit validated database/media restore; reverse migrations never run automatically. The controller
+  refuses code rollback when the target revision omits an applied business migration.
