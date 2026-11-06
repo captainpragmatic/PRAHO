@@ -39,6 +39,10 @@ def test_the_master_nightly_tests_exactly_the_commit_its_run_names() -> None:
     jobs = yaml.safe_load((ROOT / ".github/workflows/nightly.yml").read_text())["jobs"]
     checkout = next(step for step in jobs["nightly"]["steps"] if step.get("uses", "").startswith("actions/checkout@"))
     assert checkout["with"]["ref"] == "${{ matrix.branch == 'master' && github.sha || matrix.branch }}"
+    # The release verifier recognises a pinned nightly by this exact text in the commit's nightly.yml.
+    from scripts.verify_release_candidate import NIGHTLY_CHECKOUT_PIN  # noqa: PLC0415
+
+    assert NIGHTLY_CHECKOUT_PIN in (ROOT / ".github/workflows/nightly.yml").read_text()
 
 
 def test_native_nightly_failure_reaches_the_existing_scheduled_failure_notification() -> None:

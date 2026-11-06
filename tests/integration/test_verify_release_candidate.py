@@ -6,6 +6,7 @@ decisions with fixtures shaped like that data, and its lookups with a stand-in f
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from typing import Any
 import pytest
 
 from scripts.verify_release_candidate import (
+    NIGHTLY_CHECKOUT_PIN,
     RELEASE_SCOPES,
     VerificationError,
     check_conclusions,
@@ -133,6 +135,7 @@ def nightly_run(  # noqa: PLR0913  # One fixture field per fact a nightly run ca
         "head_sha": sha,
         "head_branch": branch,
         "conclusion": "success",
+        "updated_at": f"2026-11-01T00:{run_id % 60:02d}:00Z",
         "jobs": [
             {
                 "name": "nightly (master)",
@@ -160,14 +163,20 @@ def lab_run(
 class FakeGitHub:
     """Answers the lookups the verifier makes, and records them."""
 
-    def __init__(self, runs: list[dict[str, Any]], evidence: list[dict[str, Any]] | None = None) -> None:
+    def __init__(
+        self, runs: list[dict[str, Any]], evidence: list[dict[str, Any]] | None = None, *, pinned: bool = True
+    ) -> None:
         self.runs = runs
+        self.pinned = pinned
         self.evidence = [nightly_run(900), lab_run(901)] if evidence is None else evidence
         self.paths: list[str] = []
 
     def __call__(self, path: str) -> Any:
         self.paths.append(path)
         every = self.runs + self.evidence
+        if "/contents/.github/workflows/nightly.yml" in path:
+            text = NIGHTLY_CHECKOUT_PIN if self.pinned else "ref: ${{ matrix.branch }}"
+            return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
         if "/jobs?" in path:
             run_id = int(path.split("/runs/")[1].split("/")[0])
             return {"jobs": next(run["jobs"] for run in every if run["id"] == run_id)}
@@ -192,11 +201,9 @@ def all_green() -> list[dict[str, Any]]:
     return [{"id": 7, "path": PLATFORM, "conclusion": "success", "jobs": jobs}]
 
 
-def decisions(evidence: list[dict[str, Any]], sha: str = SHA) -> dict[str, str]:
-    return {
-        scope: answer.split()[0]
-        for scope, answer in release_evidence(sha, "owner/repo", FakeGitHub([], evidence)).items()
-    }
+def decisions(evidence: list[dict[str, Any]], sha: str = SHA, *, pinned: bool = True) -> dict[str, str]:
+    github = FakeGitHub([], evidence, pinned=pinned)
+    return {scope: answer.split()[0] for scope, answer in release_evidence(sha, "owner/repo", github).items()}
 
 
 def test_a_commit_the_queue_tested_green_is_vouched_for() -> None:
@@ -290,6 +297,20 @@ def test_the_newest_run_that_ran_a_scope_decides() -> None:
     assert decisions([newer, older, lab_run(937)])["postgres"] == "run"
     newer_lab, older_lab = lab_run(939, outcome="failure"), lab_run(938)
     assert decisions([nightly_run(940), newer_lab, older_lab])["lab"] == "run"
+
+
+def test_a_rerun_that_failed_after_a_newer_pass_decides() -> None:
+    # Run 945 passed; run 944 was then re-run and failed: the latest execution decides, not the run ID.
+    passed = nightly_run(945)
+    rerun = {**nightly_run(944, postgres="failure"), "updated_at": "2026-11-02T09:00:00Z"}
+    assert decisions([passed, rerun, lab_run(946)])["postgres"] == "run"
+
+
+def test_step_evidence_needs_the_pinned_nightly_checkout() -> None:
+    # Before the master leg checked out github.sha, a nightly could test a later master than its head_sha.
+    answers = decisions([nightly_run(947), lab_run(948)], pinned=False)
+    assert answers["postgres"] == "run" and answers["crowdsec"] == "run"
+    assert answers["native"] == "reuse" and answers["lab"] == "reuse"
 
 
 def test_the_lab_under_its_earlier_job_name_still_counts() -> None:

@@ -65,6 +65,17 @@ def preflight(
     native_env = _native_env(release)
     values = native_env.read_env(env_file)
     problems: list[str] = []
+    # As in run_native: shell connection settings merge under the env file, and the allowlists among them
+    # also reach the application configuration that is validated.
+    connection_keys = getattr(native_env, "CONNECTION_KEYS", set())
+    connection_values = {
+        key: value
+        for key, value in os.environ.items()
+        if key in connection_keys or key.startswith(("PRAHO_PLATFORM_", "PRAHO_PORTAL_"))
+    }
+    connection_values.update(values)
+    allowlist_keys = getattr(native_env, "ALLOWLIST_KEYS", ())
+    values = {**values, **{name: connection_values[name] for name in allowlist_keys if name in connection_values}}
     validate = getattr(native_env, "validate_application_configuration", None)
     if validate is not None:
         try:
@@ -73,15 +84,7 @@ def preflight(
             problems.append(f"configuration: {error}")
     if not _edge_enforced(release):
         return problems
-    # Resolve targets exactly as the release's run_native does: shell connection settings merged under the
-    # env file, then each target's SSH port recovered with its pinned identity.
-    connection_keys = getattr(native_env, "CONNECTION_KEYS", set())
-    connection_values = {
-        key: value
-        for key, value in os.environ.items()
-        if key in connection_keys or key.startswith(("PRAHO_PLATFORM_", "PRAHO_PORTAL_"))
-    }
-    connection_values.update(values)
+    # Resolve targets exactly as the release's run_native does, then recover each SSH port with its pinned identity.
     try:
         topology = native_env.normalize_topology(connection_values, ENVIRONMENT)
         targets = []

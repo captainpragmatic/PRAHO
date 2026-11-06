@@ -29,6 +29,7 @@ def read_env(path):
 {validate}
 
 CONNECTION_KEYS = {{"PRAHO_SSH_KEY", "PRAHO_SSH_PORT"}}
+ALLOWLIST_KEYS = ("PRAHO_PLATFORM_WEBHOOK_SOURCE_CIDRS",)
 
 @dataclass(frozen=True)
 class Target:
@@ -173,6 +174,13 @@ def test_a_legacy_ssh_port_is_recovered_before_the_probe(tmp_path: Path) -> None
     assert preflight(release(tmp_path), env_file(tmp_path, PRAHO_SSH_PORT="22", **GOOD), run=ssh) == []
     (call,) = ssh.calls
     assert call[call.index("-p") + 1] == "9876"
+
+
+def test_a_shell_supplied_allowlist_satisfies_validation_as_in_the_deploy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PRAHO_PLATFORM_WEBHOOK_SOURCE_CIDRS", "192.0.2.10/32")
+    assert preflight(release(tmp_path), env_file(tmp_path), run=FakeSSH()) == []
 
 
 def test_the_edge_probe_only_reads() -> None:

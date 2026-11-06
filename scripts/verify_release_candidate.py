@@ -27,6 +27,7 @@ Needs `gh` (authenticated).
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import subprocess
@@ -132,6 +133,19 @@ RELEASE_SCOPES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     "lab": ("virtualmin-lab.yml", ("nightly-containers", "nightly-full"), None),
 }
 _EVIDENCE_RUNS = 20  # runs of one workflow on one commit: dispatches and reruns
+# Step evidence from nightly.yml counts only when that commit's own nightly.yml checks out the run's exact
+# commit (a scheduled run uses the workflow file at its head_sha). Before this pin, the master leg checked
+# out the branch name, which can be a later commit than the one the run is credited to.
+NIGHTLY_CHECKOUT_PIN = "ref: ${{ matrix.branch == 'master' && github.sha || matrix.branch }}"
+
+
+def _nightly_pinned(sha: str, repo: str, gh: Callable[[str], Any]) -> bool:
+    try:
+        content = gh(f"repos/{repo}/contents/.github/workflows/nightly.yml?ref={sha}")
+    except subprocess.CalledProcessError:
+        return False
+    text = base64.b64decode(content.get("content", "")).decode("utf-8", errors="replace")
+    return NIGHTLY_CHECKOUT_PIN in text
 
 
 def _ran(job: JSONObject, step_name: str | None) -> bool:
@@ -154,15 +168,23 @@ def release_evidence(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> dic
     """Per scope: ``reuse <run id>`` if a master run on exactly ``sha`` proved it, else ``run``."""
     answers: dict[str, str] = {}
     runs_by_workflow: dict[str, list[JSONObject]] = {}
+    pinned: bool | None = None
     for scope, (workflow, job_names, step_name) in RELEASE_SCOPES.items():
+        if workflow == "nightly.yml" and step_name is not None:
+            if pinned is None:
+                pinned = _nightly_pinned(sha, repo, gh)
+            if not pinned:
+                answers[scope] = "run"
+                continue
         if workflow not in runs_by_workflow:
             listed = gh(
                 f"repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&branch=master"
                 f"&status=completed&per_page={_EVIDENCE_RUNS}"
             )["workflow_runs"]
+            # Latest execution first: a re-run of an older run updates it after a newer run finished.
             runs = sorted(
                 (run for run in listed if run.get("head_sha") == sha and run.get("head_branch") == "master"),
-                key=lambda run: int(run["id"]),
+                key=lambda run: (str(run.get("updated_at", "")), int(run["id"])),
                 reverse=True,
             )
             for run in runs:
