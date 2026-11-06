@@ -84,8 +84,15 @@ def _first_failure_line(stdout: str, stderr: str) -> str:
 def failure_detail(stdout: str, stderr: str) -> str:
     """Why a playbook failed: its first error or fatal task, else the start of stderr.
 
-    Ansible prints the failing task to stdout; stderr often carries only deprecation warnings."""
-    return _first_failure_line(stdout, stderr) or stderr.strip()[:500]
+    Ansible prints the failing task to stdout; stderr often carries only deprecation warnings. Since
+    ansible-core 2.19 the first error is generic ("Module failed: non-zero return code"), so the task's
+    Origin line and its fatal result (which holds the command's stderr) are kept with it."""
+    first = _first_failure_line(stdout, stderr) or stderr.strip()[:500]
+    lines = [line.strip() for line in stdout.splitlines()]
+    origin = next((line for line in lines if line.startswith("Origin:")), "")
+    fatal = next((line for line in lines if re.match(r"fatal: \[.*\]: FAILED! =>", line)), "")
+    parts = [first] + [part[:600] for part in (origin, fatal) if part and part[:300] not in first]
+    return " | ".join(part for part in parts if part)[:1500]
 
 
 def node_admin_allowed_cidrs() -> list[str]:

@@ -154,3 +154,23 @@ class FailureDetailTests(TestCase):
         # Without a recognisable failure line the stderr text is kept, as before.
         self.assertEqual(failure_detail("PLAY RECAP\n", "  controller died\n"), "controller died")
         self.assertEqual(failure_detail("", ""), "")
+
+    def test_a_2_19_task_error_keeps_its_origin_and_the_fatal_result(self) -> None:
+        # ansible-core 2.19 prints a generic [ERROR] first; the task and the command's stderr follow it.
+        stdout = (
+            "TASK [Install Virtualmin] ******\n"
+            "[ERROR]: Task failed: Module failed: non-zero return code\n"
+            "Origin: /x/playbooks/virtualmin.yml:120:7\n"
+            "\n"
+            "120     - name: Install Virtualmin\n"
+            "         ^ column 7\n"
+            "\n"
+            'fatal: [1.2.3.4]: FAILED! => {"changed": true, "rc": 1, "stderr": "E: Unable to locate package x"}\n'
+            "PLAY RECAP\n"
+        )
+        detail = failure_detail(stdout, "[DEPRECATION WARNING]: noise")
+        self.assertIn("[ERROR]: Task failed: Module failed: non-zero return code", detail)
+        self.assertIn("Origin: /x/playbooks/virtualmin.yml:120:7", detail)
+        self.assertIn("E: Unable to locate package x", detail)
+        self.assertNotIn("noise", detail)
+        self.assertLessEqual(len(failure_detail(stdout.replace("package x", "x" * 5000), "")), 1500)
