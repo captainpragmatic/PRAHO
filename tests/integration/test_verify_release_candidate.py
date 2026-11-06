@@ -182,7 +182,7 @@ class FakeGitHub:
             run = next(run for run in every if run["id"] == run_id)
             # GitHub's filter=latest hides earlier attempts of a re-run; filter=all lists them too.
             jobs = run.get("earlier_attempts", []) + run["jobs"] if "filter=all" in path else run["jobs"]
-            return {"jobs": jobs}
+            return {"total_count": run.get("total_jobs", len(jobs)), "jobs": jobs}
         if "/actions/workflows/" in path:
             workflow = path.split("/actions/workflows/")[1].split("/")[0]
             listed = [run for run in self.evidence if run["workflow"] == workflow]
@@ -335,6 +335,13 @@ def test_a_truncated_history_is_no_proof(monkeypatch: pytest.MonkeyPatch) -> Non
     evidence = [nightly_run(957), nightly_run(956), nightly_run(955, postgres="failure"), lab_run(958)]
     assert decisions(evidence)["postgres"] == "run"
     assert decisions([nightly_run(959), lab_run(960)])["postgres"] == "reuse"
+
+
+def test_an_incomplete_job_history_is_no_proof() -> None:
+    # More jobs than one page returned: a failed attempt may sit on a page not read.
+    run = {**nightly_run(961), "total_jobs": 150}
+    answers = decisions([run, lab_run(962)])
+    assert answers["postgres"] == "run" and answers["native"] == "run" and answers["lab"] == "reuse"
 
 
 def test_step_evidence_needs_the_pinned_nightly_checkout() -> None:

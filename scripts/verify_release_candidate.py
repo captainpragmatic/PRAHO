@@ -190,7 +190,10 @@ def release_evidence(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> dic
             truncated = len(listed) >= _EVIDENCE_RUNS
             for run in runs:
                 # filter=all: a failed earlier attempt of a re-run must count too.
-                run["jobs"] = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100")["jobs"]
+                page = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100")
+                run["jobs"] = page["jobs"]
+                # More jobs than one page: a failed attempt may be on a page not read.
+                truncated = truncated or int(page.get("total_count", len(run["jobs"]))) > len(run["jobs"])
             runs_by_workflow[workflow] = [] if truncated else runs
         # Monotone: reuse only if every execution of the scope on this commit passed. Any failure on the
         # commit, in any run or re-run, means `run`; no timestamp order decides. A run that skipped the job
