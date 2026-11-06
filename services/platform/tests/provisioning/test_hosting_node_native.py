@@ -63,6 +63,29 @@ class HostingNodeNativeTests(SimpleTestCase):
             playbook.index("Exclude the database writer quota bypass capability"),
         )
 
+    def test_first_install_guard_names_what_occupies_the_node(self):
+        import subprocess  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+
+        import yaml  # noqa: PLC0415
+
+        playbook = yaml.safe_load(
+            (Path(settings.BASE_DIR) / "infrastructure/ansible/playbooks/virtualmin.yml").read_text()
+        )
+        (task,) = [
+            t for t in playbook[0]["tasks"] if t.get("name") == "Refuse occupied or ambiguous first-install nodes"
+        ]
+        script = task["ansible.builtin.command"]["argv"][2]
+        # The playbook's own guard script, run on a temporary root.
+        with TemporaryDirectory() as root:
+            clean = subprocess.run([sys.executable, "-c", script, root], capture_output=True, text=True, check=False)  # noqa: S603
+            self.assertEqual(clean.returncode, 0, clean.stderr)
+            (Path(root) / "home" / "zed").mkdir(parents=True)
+            (Path(root) / "home" / "alpha").mkdir()
+            occupied = subprocess.run([sys.executable, "-c", script, root], capture_output=True, text=True, check=False)  # noqa: S603
+        self.assertNotEqual(occupied.returncode, 0)
+        self.assertIn("Tenant or unknown homes exist: alpha, zed", occupied.stderr)
+
     def test_source_only_mail_inventory_survives_an_unavailable_quota_runtime(self):
         notifications = {
             "evidence": {

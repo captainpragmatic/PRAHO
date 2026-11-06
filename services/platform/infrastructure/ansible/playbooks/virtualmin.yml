@@ -66,14 +66,20 @@
           - /usr/bin/python3
           - -c
           - |
+            import sys
             from pathlib import Path
-            homes = Path('/home')
-            domains = Path('/etc/webmin/virtual-server/domains')
-            databases = Path('/var/lib/mysql')
-            assert not Path('/etc/praho-virtualmin-install').exists(), 'Prior installation requires explicit preparation'
-            assert not homes.exists() or not any(homes.iterdir()), 'Tenant or unknown homes exist'
-            assert not domains.exists() or not any(domains.iterdir()), 'Native domain inventory exists'
-            assert not databases.exists() or not any(databases.iterdir()), 'Database storage exists'
+            # The root argument is for tests; on the node it is /.
+            root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('/')
+            def present(path):
+                return sorted(entry.name for entry in path.iterdir())[:10] if path.is_dir() else []
+            assert not (root / 'etc/praho-virtualmin-install').exists(), 'Prior installation requires explicit preparation'
+            for path, refusal in (
+                (root / 'home', 'Tenant or unknown homes exist'),
+                (root / 'etc/webmin/virtual-server/domains', 'Native domain inventory exists'),
+                (root / 'var/lib/mysql', 'Database storage exists'),
+            ):
+                found = present(path)
+                assert not found, refusal + ': ' + ', '.join(found)
       changed_when: false
       when: not virtualmin_installed.stat.exists
 
