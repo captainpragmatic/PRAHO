@@ -33,6 +33,18 @@ def test_native_nightly_uses_workflow_harness_when_staging_predates_the_make_tar
     assert job["if"] == jobs["nightly"]["if"], "Native qualification must run for every active nightly"
 
 
+def test_the_master_nightly_tests_exactly_the_commit_its_run_names() -> None:
+    # The release candidate credits a nightly step to the run's head_sha, so the master leg must check out
+    # that exact commit, not whatever the branch points at when the job starts (or is re-run).
+    jobs = yaml.safe_load((ROOT / ".github/workflows/nightly.yml").read_text())["jobs"]
+    checkout = next(step for step in jobs["nightly"]["steps"] if step.get("uses", "").startswith("actions/checkout@"))
+    assert checkout["with"]["ref"] == "${{ matrix.branch == 'master' && github.sha || matrix.branch }}"
+    # The release verifier recognises a pinned nightly by this exact text in the commit's nightly.yml.
+    from scripts.verify_release_candidate import NIGHTLY_CHECKOUT_PIN  # noqa: PLC0415
+
+    assert NIGHTLY_CHECKOUT_PIN in (ROOT / ".github/workflows/nightly.yml").read_text()
+
+
 def test_native_nightly_failure_reaches_the_existing_scheduled_failure_notification() -> None:
     jobs, native = native_nightly_jobs()
     assert set(native) <= set(jobs["notify-scheduled-failure"]["needs"])

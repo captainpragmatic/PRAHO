@@ -56,14 +56,12 @@ retains its separate documented controls. This full job does not claim those
 additional scenarios merely because its foundation capability check passed.
 
 Native acceptance is optional and does not gate a release. No self-hosted runner
-exists, so release-candidate verification requires the latest full Virtualmin lab
-on `master` to have passed: the container job (`nightly-containers`, nightly or a
-`containers` dispatch) or, when one has run, a native `full` dispatch. A failed or
-cancelled latest full lab refuses; drift runs, quiet nights and `full` dispatches
-refused at admission are passed over. Kernel, filesystem and cloud-image behaviour
+exists. The release candidate reuses a nightly container lab (`nightly-containers`)
+that ran on its exact commit, or runs the container lab on the candidate itself
+(scripts/verify_release_candidate.py, `lab` scope). Kernel, filesystem and cloud-image behaviour
 (quotas, image defaults) and node deploy are proven on staging by deploying a test
 node after the promote, until a disposable-VM native check runs on hosted runners.
-The lab evidence is master's latest full lab, not a run on the candidate itself.
+The lab evidence is a container lab run on the candidate's exact commit, nightly or run by the release candidate.
 A previously approved staging rollback keeps the release-candidate requirements it
 was qualified under and is not requalified retroactively.
 

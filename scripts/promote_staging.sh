@@ -102,6 +102,13 @@ method="$(PYTHONPATH="$release/deploy/scripts" "$python" -c \
     "$env_file")" || die "Could not read $env_file with the deploy's parser"
 [ "$method" = "git" ] || die "DEPLOY_METHOD is '$method' in .env.staging: only a git deploy installs exactly the approved commit"
 
+# The release's own configuration checks and a read-only edge probe: what the real deploy would refuse
+# surfaces here, in the dry run too, before anything on the host changes. The checker comes from this
+# clone, the checks from the release (an older release is not held to checks it does not enforce).
+info "Checking what the deploy of $sha would refuse (configuration, edge)..."
+"$python" "$root/scripts/promote_preflight.py" "$release" "$env_file" \
+    || die "The deploy of $sha would be refused (see above); nothing on staging changed."
+
 if [ "$dry_run" -eq 1 ]; then
     echo "✅ Dry run: every check passed. A real run deploys $sha from a clean checkout of it, then moves staging."
     exit 0

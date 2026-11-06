@@ -3,15 +3,17 @@
 # ===============================================================================
 # Dispatched by hand: Actions → Release candidate → Run workflow, or
 # `gh workflow run release-candidate.yml [-f candidate_sha=<sha>]`. A blank candidate means the master
-# commit at the moment of the dispatch; the run title names the commit either way.
+# commit at the moment of the dispatch; the run title names the commit either way (promote-staging finds
+# the run by that title). `python3 scripts/verify_release_candidate.py --pick` prints the newest master
+# commit the nightly proved in every scope: dispatch with that SHA for the one-minute release.
 #
-# The merge queue ran every required check on this exact commit, the Virtualmin lab suites among them,
-# before master moved to it. `resolve` proves that from the queue's own runs on the candidate (an owner
-# bypass merges around the queue), and that the latest nightly full Virtualmin lab on master passed:
-# node deploy, fault injection and its browser tests run there, every night master changed, so the
-# candidate does not run them again (ADR-0036). Then only the whole platform suite on PostgreSQL runs
-# here, on the candidate SHA (pull requests run it on SQLite plus the PostgreSQL-gated tests).
-# When it passes, `record` posts the commit status `release-candidate` = success, which
+# `resolve` proves from the merge queue's own runs that the candidate passed every required check (an
+# owner bypass merges around the queue). Then, per release scope (scripts/verify_release_candidate.py
+# RELEASE_SCOPES: the whole Platform suite on PostgreSQL, CrowdSec qualification, native deploy and the
+# Virtualmin lab), it answers `reuse` when a nightly run on master proved that scope on exactly this commit,
+# or `run`. Only the `run` scopes execute here, on the candidate SHA: a release cut from a nightly-proven
+# commit costs about a minute (ADR-0036). Evidence from any other commit never counts.
+# When every scope is proven, `record` posts the commit status `release-candidate` = success, which
 # `make promote-staging SHA=<sha>` requires before it deploys anything.
 #
 # Security: anyone who can push could post a commit status named `release-candidate`, so
@@ -27,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Master commit to test (blank = the current master commit)
+        description: Master commit to qualify (blank = the current master commit)
         type: string
         default: ''
 
@@ -51,6 +53,10 @@ jobs:
       pull-requests: read
     outputs:
       sha: ${{ steps.resolve.outputs.sha }}
+      postgres: ${{ steps.verify.outputs.postgres }}
+      crowdsec: ${{ steps.verify.outputs.crowdsec }}
+      native: ${{ steps.verify.outputs.native }}
+      lab: ${{ steps.verify.outputs.lab }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -82,17 +88,20 @@ jobs:
           echo "### Release candidate \`$sha\`" >> "$GITHUB_STEP_SUMMARY"
 
       # The merge queue must have passed every check master requires on the candidate itself, read per
-      # workflow from its merge_group runs (scripts/verify_release_candidate.py says why each rule exists;
-      # tests/integration/test_verify_release_candidate.py pins them).
-      - name: The merge queue passed every required check on the candidate
+      # workflow from its merge_group runs; then each release scope is reused or run. The script says why
+      # each rule exists; tests/integration/test_verify_release_candidate.py pins them.
+      - name: The merge queue passed every required check on the candidate; reuse or run each scope
+        id: verify
+        shell: bash  # GitHub adds `-o pipefail` only for an explicit bash shell: a refusal must fail the step
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.resolve.outputs.sha }}
-        run: python3 scripts/verify_release_candidate.py "$SHA"
+        run: python3 scripts/verify_release_candidate.py "$SHA" | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Not named after a PR check: a same-named job here could stand in for a required check.
   rc-platform-postgres:
     needs: resolve
+    if: needs.resolve.outputs.postgres == 'run'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
@@ -131,12 +140,119 @@ jobs:
         if: always()
         run: make ci-postgres-stop
 
+  rc-crowdsec:
+    needs: resolve
+    if: needs.resolve.outputs.crowdsec == 'run'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install the frozen qualification dependencies
+        run: |
+          uv python install
+          uv sync --all-groups --frozen
+
+      - name: CrowdSec native artifact qualification
+        run: make test-crowdsec-docker
+
+  # The split cases run as shards (scripts/run_native_acceptance.py), each on its own lab.
+  rc-native:
+    needs: resolve
+    if: needs.resolve.outputs.native == 'run'
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [split-prod-1, split-prod-2, split-prod-3, split-prod-4, combined-staging, combined-prod]
+    env:
+      PRAHO_NATIVE_ACCEPTANCE_PROFILE: ${{ matrix.profile }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      - name: Install the frozen qualification dependencies
+        run: |
+          uv python install
+          uv sync --all-groups --frozen
+
+      - name: Native split and combined deployment acceptance
+        run: make test-native-deploy
+
+      # Not profile-specific: one matrix entry runs it.
+      - uses: hashicorp/setup-terraform@v3
+        if: matrix.profile == 'combined-prod'
+        with:
+          terraform_version: 1.13.5
+
+      - name: Native infrastructure topology and adoption safety
+        if: matrix.profile == 'combined-prod'
+        run: make test-native-infra
+
+  # The container lab, through the lab workflow's own reusable entry, on the candidate.
+  rc-lab:
+    needs: resolve
+    if: needs.resolve.outputs.lab == 'run'
+    # A called workflow cannot raise the caller's token, so every permission its jobs declare is granted
+    # here (GitHub refuses the call otherwise), even for jobs that never run on a call.
+    permissions:
+      contents: read
+      pull-requests: read  # the called workflow's scheduled activity check
+      issues: write  # the called workflow's scheduled-failure notifier
+    uses: ./.github/workflows/virtualmin-lab.yml
+    with:
+      suite: containers
+      ref: ${{ needs.resolve.outputs.sha }}
+
   record:
-    needs: [resolve, rc-platform-postgres]
+    needs: [resolve, rc-platform-postgres, rc-crowdsec, rc-native, rc-lab]
+    # Reached even when reused scopes were skipped; the gate step decides, fail-closed.
+    if: always()
     runs-on: ubuntu-latest
     permissions:
       statuses: write
+    env:
+      RESOLVE_RESULT: ${{ needs.resolve.result }}
+      POSTGRES_DECISION: ${{ needs.resolve.outputs.postgres }}
+      POSTGRES_RESULT: ${{ needs.rc-platform-postgres.result }}
+      CROWDSEC_DECISION: ${{ needs.resolve.outputs.crowdsec }}
+      CROWDSEC_RESULT: ${{ needs.rc-crowdsec.result }}
+      NATIVE_DECISION: ${{ needs.resolve.outputs.native }}
+      NATIVE_RESULT: ${{ needs.rc-native.result }}
+      LAB_DECISION: ${{ needs.resolve.outputs.lab }}
+      LAB_RESULT: ${{ needs.rc-lab.result }}
     steps:
+      - name: Every release scope was proven on the candidate
+        run: |
+          test "$RESOLVE_RESULT" = success
+          for scope in POSTGRES CROWDSEC NATIVE LAB; do
+            decision_var="${scope}_DECISION"; result_var="${scope}_RESULT"
+            decision="${!decision_var}"; result="${!result_var}"
+            echo "$scope: $decision -> $result"
+            if [ "$result" = success ]; then continue; fi
+            # A skip proves nothing unless the verifier found nightly proof on this exact commit.
+            # (Explicit exit: `set -e` ignores a failure inside an && list that is not its last command.)
+            if [ "$result" = skipped ] && [ "$decision" = reuse ]; then continue; fi
+            echo "::error::$scope was neither run successfully nor proven by a nightly run on this commit"
+            exit 1
+          done
+
       - name: Mark the commit as a release candidate
         env:
           GH_TOKEN: ${{ github.token }}

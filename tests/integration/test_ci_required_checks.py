@@ -21,7 +21,7 @@ import re
 import shlex
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 import yaml
@@ -492,7 +492,7 @@ class TestReleaseCandidate:
     def test_the_candidate_is_verified_by_the_tested_script(self) -> None:
         # tests/integration/test_verify_release_candidate.py drives the script's decisions.
         runs = [step.get("run", "") for step in self.jobs["resolve"]["steps"]]
-        assert 'python3 scripts/verify_release_candidate.py "$SHA"' in runs
+        assert any(run.startswith('python3 scripts/verify_release_candidate.py "$SHA" |') for run in runs)
 
     def test_every_job_tests_the_resolved_candidate(self) -> None:
         for job_id, job in self.jobs.items():
@@ -506,18 +506,96 @@ class TestReleaseCandidate:
             for step in checkouts:
                 assert step["with"]["ref"] == "${{ needs.resolve.outputs.sha }}", job_id
 
-    def test_the_candidate_runs_no_lab_of_its_own(self) -> None:
-        # The queue ran the lab suites on the candidate, and the verifier requires the latest nightly
-        # full lab on master to have passed (scripts/verify_release_candidate.py).
+    SCOPE_JOBS: ClassVar[dict[str, str]] = {
+        "postgres": "rc-platform-postgres",
+        "crowdsec": "rc-crowdsec",
+        "native": "rc-native",
+        "lab": "rc-lab",
+    }
+
+    def test_each_release_scope_runs_only_when_no_nightly_proved_it(self) -> None:
+        # scripts/verify_release_candidate.py answers reuse/run per scope; tests/integration/
+        # test_verify_release_candidate.py drives those answers.
+        from scripts.verify_release_candidate import RELEASE_SCOPES  # noqa: PLC0415
+
+        assert set(self.SCOPE_JOBS) == set(RELEASE_SCOPES)
+        outputs = self.jobs["resolve"]["outputs"]
+        for scope, job_id in self.SCOPE_JOBS.items():
+            assert outputs[scope] == f"${{{{ steps.verify.outputs.{scope} }}}}"
+            assert self.jobs[job_id]["needs"] == "resolve"
+            assert self.jobs[job_id]["if"] == f"needs.resolve.outputs.{scope} == 'run'"
+
+    def test_the_lab_scope_calls_the_lab_on_the_candidate(self) -> None:
+        lab = self.jobs["rc-lab"]
+        assert lab["uses"] == "./.github/workflows/virtualmin-lab.yml"
+        assert lab["with"] == {"suite": "containers", "ref": "${{ needs.resolve.outputs.sha }}"}
+
+    def test_the_lab_caller_grants_every_permission_the_lab_asks_for(self) -> None:
+        # A called workflow cannot raise the caller's token: GitHub refuses the call at validation.
+        called = yaml.safe_load((WORKFLOWS / "virtualmin-lab.yml").read_text(encoding="utf-8"))
+        asked = [called.get("permissions", {})] + [job.get("permissions", {}) for job in called["jobs"].values()]
+        needed = {(scope, level) for permissions in asked for scope, level in permissions.items()}
+        granted = self.jobs["rc-lab"]["permissions"]
+        assert ("pull-requests", "read") in needed
+        for scope, level in needed:
+            assert granted.get(scope) in ({level, "write"} if level == "read" else {level}), scope
+
+    def test_the_run_title_names_the_candidate_promote_looks_for(self) -> None:
+        # promote_staging.sh finds the approved run by the title "Release candidate <sha>".
+        assert self.workflow["run-name"] == "Release candidate ${{ inputs.candidate_sha || github.sha }}"
+        script = str(self.jobs["resolve"]["steps"])
+        assert 'sha="${CANDIDATE:-$DISPATCH_SHA}"' in script and "--pick" not in script
+
+    def test_a_piped_step_runs_with_pipefail(self) -> None:
+        # GitHub adds `-o pipefail` only for an explicit `shell: bash`; the default is `bash -e {0}`.
         for job_id, job in self.jobs.items():
-            assert "virtualmin-lab" not in str(job.get("uses", "")), job_id
+            for step in job.get("steps", []):
+                if " | " in step.get("run", ""):
+                    assert step.get("shell") == "bash", (job_id, step.get("name"))
 
     def test_the_status_is_posted_only_after_every_check(self) -> None:
         record = self.jobs["record"]
         assert set(record["needs"]) == set(self.jobs) - {"record"}
-        assert "if" not in record, "an `always()` here would vouch for a failed run"
+        assert record["if"] == "always()", "the gate step below decides; a skipped reuse scope must reach it"
         assert record["permissions"] == {"statuses": "write"}
         assert self.workflow["permissions"] == {"contents": "read"}
+        _gate, post = record["steps"]
+        assert "if" not in post, "the status is posted only when the gate step passed"
+
+
+SCOPES = ("postgres", "crowdsec", "native", "lab")
+
+
+def _record_gate(resolve: str, decisions: dict[str, str], results: dict[str, str]) -> int:
+    record = load_workflow(WORKFLOWS / "release-candidate.yml")["jobs"]["record"]
+    gate = record["steps"][0]
+    env = {**os.environ, "RESOLVE_RESULT": resolve}
+    for scope in SCOPES:
+        env[f"{scope.upper()}_DECISION"] = decisions[scope]
+        env[f"{scope.upper()}_RESULT"] = results[scope]
+    for name, expression in record["env"].items():
+        assert "needs." in expression, name
+    assert set(record["env"]) == set(env) - set(os.environ), "the table must exercise every input the gate reads"
+    # GitHub runs a `run:` step with `bash -eo pipefail {0}`.
+    completed = subprocess.run(  # noqa: S603 -- the repository's own gate script
+        ["bash", "-eo", "pipefail", "-c", gate["run"]],  # noqa: S607
+        env=env,
+        capture_output=True,
+        check=False,
+    )
+    return completed.returncode
+
+
+@pytest.mark.parametrize("resolve", ["success", "failure"])
+@pytest.mark.parametrize("decision", ["reuse", "run", ""])
+@pytest.mark.parametrize("result", ["success", "skipped", "failure", "cancelled"])
+def test_the_release_record_accepts_only_proven_scopes(resolve: str, decision: str, result: str) -> None:
+    # One scope varies; the others are cleanly reused, so the varied scope alone decides.
+    decisions = dict.fromkeys(SCOPES, "reuse")
+    results = dict.fromkeys(SCOPES, "skipped")
+    decisions["native"], results["native"] = decision, result
+    proven = result == "success" or (result == "skipped" and decision == "reuse")
+    assert (_record_gate(resolve, decisions, results) == 0) is (resolve == "success" and proven)
 
 
 def test_a_failing_credential_check_fails_the_security_lint() -> None:
