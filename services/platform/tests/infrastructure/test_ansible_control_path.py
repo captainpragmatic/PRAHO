@@ -189,3 +189,25 @@ class FailureDetailTests(TestCase):
         detail = failure_detail(stdout, "")
         self.assertIn("AssertionError: Tenant or unknown homes exist", detail)
         self.assertNotIn("PLAY RECAP", detail)
+
+    def test_a_long_echoed_command_does_not_crowd_out_the_stderr(self) -> None:
+        script = "\n".join(f"            line {n} of the inline script" for n in range(200))
+        stdout = (
+            "[ERROR]: Task failed: Module failed: non-zero return code\n"
+            "fatal: [node]: FAILED! =>\n"
+            "    changed: false\n"
+            "    cmd:\n"
+            "    - /usr/bin/python3\n"
+            "    - -c\n"
+            "    - |-\n"
+            f"{script}\n"
+            "    msg: non-zero return code\n"
+            "    rc: 1\n"
+            "    stderr: |-\n"
+            "        Traceback (most recent call last):\n"
+            "        AssertionError: Tenant or unknown homes exist: lost+found\n"
+            "    stderr_lines: []\n"
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("AssertionError: Tenant or unknown homes exist: lost+found", detail)
+        self.assertNotIn("inline script", detail)

@@ -94,12 +94,21 @@ def failure_detail(stdout: str, stderr: str) -> str:
     at = next((index for index, line in enumerate(raw) if re.match(r"fatal: \[.*\]: FAILED! =>", line.strip())), None)
     fatal = ""
     if at is not None:
-        # The YAML callback writes the result on the following indented lines (msg, rc, stderr).
+        # The YAML callback writes the result on the following indented lines. Keep the fields that say why
+        # (msg, rc, stderr); the echoed cmd and stdout can be long enough to crowd them out.
         block = [raw[at].strip()]
+        key_indent: int | None = None
+        keep = False
         for line in raw[at + 1 :]:
             if line and not line.startswith((" ", "\t")):
                 break
-            if line.strip():
+            if not line.strip():
+                continue
+            indent = len(line) - len(line.lstrip())
+            key_indent = indent if key_indent is None else key_indent
+            if indent == key_indent:
+                keep = line.strip().split(":", 1)[0] in {"msg", "rc", "stderr"}
+            if keep:
                 block.append(line.strip())
         fatal = " ".join(block)
     parts = [first] + [part[:900] for part in (origin, fatal) if part and part[:300] not in first]
