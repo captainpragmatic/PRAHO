@@ -530,6 +530,16 @@ class TestReleaseCandidate:
         assert lab["uses"] == "./.github/workflows/virtualmin-lab.yml"
         assert lab["with"] == {"suite": "containers", "ref": "${{ needs.resolve.outputs.sha }}"}
 
+    def test_the_lab_caller_grants_every_permission_the_lab_asks_for(self) -> None:
+        # A called workflow cannot raise the caller's token: GitHub refuses the call at validation.
+        called = yaml.safe_load((WORKFLOWS / "virtualmin-lab.yml").read_text(encoding="utf-8"))
+        asked = [called.get("permissions", {})] + [job.get("permissions", {}) for job in called["jobs"].values()]
+        needed = {(scope, level) for permissions in asked for scope, level in permissions.items()}
+        granted = self.jobs["rc-lab"]["permissions"]
+        assert ("pull-requests", "read") in needed
+        for scope, level in needed:
+            assert granted.get(scope) in ({level, "write"} if level == "read" else {level}), scope
+
     def test_the_run_title_names_the_candidate_promote_looks_for(self) -> None:
         # promote_staging.sh finds the approved run by the title "Release candidate <sha>".
         assert self.workflow["run-name"] == "Release candidate ${{ inputs.candidate_sha || github.sha }}"

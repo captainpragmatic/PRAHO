@@ -209,9 +209,12 @@ jobs:
   rc-lab:
     needs: resolve
     if: needs.resolve.outputs.lab == 'run'
+    # A called workflow cannot raise the caller's token, so every permission its jobs declare is granted
+    # here (GitHub refuses the call otherwise), even for jobs that never run on a call.
     permissions:
       contents: read
-      issues: write  # the called workflow's scheduled-failure notifier; it never runs for a call
+      pull-requests: read  # the called workflow's scheduled activity check
+      issues: write  # the called workflow's scheduled-failure notifier
     uses: ./.github/workflows/virtualmin-lab.yml
     with:
       suite: containers

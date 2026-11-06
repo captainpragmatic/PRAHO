@@ -192,6 +192,9 @@ class FakeGitHub:
             if "branch=" in path:
                 branch = path.split("branch=")[1].split("&")[0]
                 listed = [run for run in listed if run["head_branch"] == branch]
+            if "status=" in path:
+                status = path.split("status=")[1].split("&")[0]
+                listed = [run for run in listed if run.get("status", "completed") == status]
             if "per_page=" in path:
                 listed = sorted(listed, key=lambda run: int(run["id"]), reverse=True)
                 listed = listed[: int(path.split("per_page=")[1].split("&")[0])]
@@ -335,6 +338,13 @@ def test_a_truncated_history_is_no_proof(monkeypatch: pytest.MonkeyPatch) -> Non
     evidence = [nightly_run(957), nightly_run(956), nightly_run(955, postgres="failure"), lab_run(958)]
     assert decisions(evidence)["postgres"] == "run"
     assert decisions([nightly_run(959), lab_run(960)])["postgres"] == "reuse"
+
+
+def test_a_run_still_in_progress_on_the_commit_is_no_proof() -> None:
+    # A re-run in progress keeps its failed earlier attempt; a finished green run must not outvote it.
+    rerun = {**nightly_run(963, postgres="failure"), "status": "in_progress"}
+    answers = decisions([rerun, nightly_run(964), lab_run(965)])
+    assert answers["postgres"] == "run" and answers["native"] == "run" and answers["lab"] == "reuse"
 
 
 def test_an_incomplete_job_history_is_no_proof() -> None:

@@ -177,9 +177,9 @@ def release_evidence(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> dic
                 answers[scope] = "run"
                 continue
         if workflow not in runs_by_workflow:
+            # Every status: a re-run still in progress holds its failed earlier attempt.
             listed = gh(
-                f"repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&branch=master"
-                f"&status=completed&per_page={_EVIDENCE_RUNS}"
+                f"repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&branch=master&per_page={_EVIDENCE_RUNS}"
             )["workflow_runs"]
             runs = sorted(
                 (run for run in listed if run.get("head_sha") == sha and run.get("head_branch") == "master"),
@@ -188,6 +188,8 @@ def release_evidence(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> dic
             )
             # A full page may hide an older failure beyond it: no reuse from a truncated history.
             truncated = len(listed) >= _EVIDENCE_RUNS
+            # A run not yet finished on this commit proves nothing and may yet fail: no reuse until it ends.
+            truncated = truncated or any(run.get("status", "completed") != "completed" for run in runs)
             for run in runs:
                 # filter=all: a failed earlier attempt of a re-run must count too.
                 page = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100")
