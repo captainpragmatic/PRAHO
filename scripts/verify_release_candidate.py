@@ -245,7 +245,8 @@ def main(argv: list[str]) -> int:
         print(f"usage: {argv[0]} <candidate-sha> | --pick", file=sys.stderr)
         return 2
     try:
-        repo = os.environ["GITHUB_REPOSITORY"]
+        # Outside Actions (a local --pick), gh fills {owner}/{repo} from this checkout's remote.
+        repo = os.environ.get("GITHUB_REPOSITORY") or "{owner}/{repo}"
         if argv[1] == "--pick":
             print(pick_candidate(repo))
             return 0

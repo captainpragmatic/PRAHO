@@ -380,3 +380,16 @@ def test_a_proven_commit_the_queue_did_not_vouch_for_is_skipped() -> None:
 def test_no_fully_proven_commit_refuses_to_pick() -> None:
     with pytest.raises(VerificationError, match="nightly"):
         pick_candidate("owner/repo", FakeGitHub([], [nightly_run(933, native="failure"), lab_run(934)]))
+
+
+def test_pick_runs_from_a_local_checkout_without_the_actions_environment(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Outside Actions, GITHUB_REPOSITORY is unset: gh resolves {owner}/{repo} from the checkout's remote.
+    import scripts.verify_release_candidate as module  # noqa: PLC0415  # patch the name main() calls
+
+    monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+    seen: list[str] = []
+    monkeypatch.setattr(module, "pick_candidate", lambda repo: seen.append(repo) or SHA)
+    assert module.main(["verify_release_candidate.py", "--pick"]) == 0
+    assert seen == ["{owner}/{repo}"] and capsys.readouterr().out.strip() == SHA
