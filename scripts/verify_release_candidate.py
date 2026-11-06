@@ -181,24 +181,25 @@ def release_evidence(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> dic
                 f"repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&branch=master"
                 f"&status=completed&per_page={_EVIDENCE_RUNS}"
             )["workflow_runs"]
-            # Latest execution first: a re-run of an older run updates it after a newer run finished.
             runs = sorted(
                 (run for run in listed if run.get("head_sha") == sha and run.get("head_branch") == "master"),
-                key=lambda run: (str(run.get("updated_at", "")), int(run["id"])),
+                key=lambda run: int(run["id"]),
                 reverse=True,
             )
             for run in runs:
                 run["jobs"] = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
             runs_by_workflow[workflow] = runs
-        # The newest run that actually ran the scope decides: a later failure outweighs an earlier pass,
-        # while a run that skipped the job (or lacks the step) says nothing either way.
-        answers[scope] = "run"
-        for run in runs_by_workflow[workflow]:
-            ran = [job for job in run["jobs"] if job["name"] in job_names and _ran(job, step_name)]
-            if ran:
-                if all(_proof(job, step_name) for job in ran):
-                    answers[scope] = f"reuse {run['id']}"
-                break
+        # Monotone: reuse only if every execution of the scope on this commit passed. Any failure on the
+        # commit, in any run or re-run, means `run`; no timestamp order decides. A run that skipped the job
+        # (or lacks the step) says nothing either way.
+        executed = [
+            (run, job)
+            for run in runs_by_workflow[workflow]
+            for job in run["jobs"]
+            if job["name"] in job_names and _ran(job, step_name)
+        ]
+        proven = bool(executed) and all(_proof(job, step_name) for _run, job in executed)
+        answers[scope] = f"reuse {executed[0][0]['id']}" if proven else "run"
     return answers
 
 

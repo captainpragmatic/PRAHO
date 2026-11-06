@@ -284,7 +284,7 @@ def test_a_failed_lab_run_on_the_candidate_must_run() -> None:
 
 
 def test_an_older_run_of_the_same_commit_can_still_prove_a_scope() -> None:
-    # A later dispatch on the same commit that skipped or failed a job does not erase an earlier proof.
+    # A later dispatch on the same commit that skipped the job says nothing, so the earlier proof stands.
     newer = nightly_run(922, native="skipped")
     older = nightly_run(921)
     assert decisions([newer, older, lab_run(923)])["native"] == "reuse"
@@ -304,6 +304,15 @@ def test_a_rerun_that_failed_after_a_newer_pass_decides() -> None:
     passed = nightly_run(945)
     rerun = {**nightly_run(944, postgres="failure"), "updated_at": "2026-11-02T09:00:00Z"}
     assert decisions([passed, rerun, lab_run(946)])["postgres"] == "run"
+
+
+@pytest.mark.parametrize("order", ["pass first", "fail first"])
+def test_any_failed_execution_on_the_commit_means_run(order: str) -> None:
+    # No ordering decides: an older run that finished last with an earlier pass cannot hide a failure.
+    passed = {**nightly_run(950), "updated_at": "2026-11-02T10:00:00Z"}
+    failed = {**nightly_run(951, postgres="failure"), "updated_at": "2026-11-02T09:30:00Z"}
+    runs = [passed, failed] if order == "pass first" else [failed, passed]
+    assert decisions([*runs, lab_run(952)])["postgres"] == "run"
 
 
 def test_step_evidence_needs_the_pinned_nightly_checkout() -> None:
