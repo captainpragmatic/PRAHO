@@ -132,7 +132,7 @@ RELEASE_SCOPES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
     # "nightly-full" is the container lab's name before node deploy moved to native acceptance.
     "lab": ("virtualmin-lab.yml", ("nightly-containers", "nightly-full"), None),
 }
-_EVIDENCE_RUNS = 20  # runs of one workflow on one commit: dispatches and reruns
+_EVIDENCE_RUNS = 100  # runs of one workflow on one commit; a full page is treated as truncated history
 # Step evidence from nightly.yml counts only when that commit's own nightly.yml checks out the run's exact
 # commit (a scheduled run uses the workflow file at its head_sha). Before this pin, the master leg checked
 # out the branch name, which can be a later commit than the one the run is credited to.
@@ -186,9 +186,12 @@ def release_evidence(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> dic
                 key=lambda run: int(run["id"]),
                 reverse=True,
             )
+            # A full page may hide an older failure beyond it: no reuse from a truncated history.
+            truncated = len(listed) >= _EVIDENCE_RUNS
             for run in runs:
-                run["jobs"] = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
-            runs_by_workflow[workflow] = runs
+                # filter=all: a failed earlier attempt of a re-run must count too.
+                run["jobs"] = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=all&per_page=100")["jobs"]
+            runs_by_workflow[workflow] = [] if truncated else runs
         # Monotone: reuse only if every execution of the scope on this commit passed. Any failure on the
         # commit, in any run or re-run, means `run`; no timestamp order decides. A run that skipped the job
         # (or lacks the step) says nothing either way.

@@ -179,7 +179,10 @@ class FakeGitHub:
             return {"encoding": "base64", "content": base64.b64encode(text.encode()).decode()}
         if "/jobs?" in path:
             run_id = int(path.split("/runs/")[1].split("/")[0])
-            return {"jobs": next(run["jobs"] for run in every if run["id"] == run_id)}
+            run = next(run for run in every if run["id"] == run_id)
+            # GitHub's filter=latest hides earlier attempts of a re-run; filter=all lists them too.
+            jobs = run.get("earlier_attempts", []) + run["jobs"] if "filter=all" in path else run["jobs"]
+            return {"jobs": jobs}
         if "/actions/workflows/" in path:
             workflow = path.split("/actions/workflows/")[1].split("/")[0]
             listed = [run for run in self.evidence if run["workflow"] == workflow]
@@ -189,6 +192,9 @@ class FakeGitHub:
             if "branch=" in path:
                 branch = path.split("branch=")[1].split("&")[0]
                 listed = [run for run in listed if run["head_branch"] == branch]
+            if "per_page=" in path:
+                listed = sorted(listed, key=lambda run: int(run["id"]), reverse=True)
+                listed = listed[: int(path.split("per_page=")[1].split("&")[0])]
         else:
             # The merge_group lookup filters by commit, like GitHub's; a fixture run without one matches any.
             sha = path.split("head_sha=")[1].split("&")[0] if "head_sha=" in path else None
@@ -313,6 +319,22 @@ def test_any_failed_execution_on_the_commit_means_run(order: str) -> None:
     failed = {**nightly_run(951, postgres="failure"), "updated_at": "2026-11-02T09:30:00Z"}
     runs = [passed, failed] if order == "pass first" else [failed, passed]
     assert decisions([*runs, lab_run(952)])["postgres"] == "run"
+
+
+def test_a_failed_earlier_attempt_of_a_rerun_still_counts() -> None:
+    rerun = nightly_run(953)
+    rerun["earlier_attempts"] = [
+        {"name": "nightly (master)", "conclusion": "failure", "steps": [step(POSTGRES_STEP, "failure")]}
+    ]
+    assert decisions([rerun, lab_run(954)])["postgres"] == "run"
+
+
+def test_a_truncated_history_is_no_proof(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A full page may hide an older failure on the commit beyond it, so a full page answers `run`.
+    monkeypatch.setattr("scripts.verify_release_candidate._EVIDENCE_RUNS", 2)
+    evidence = [nightly_run(957), nightly_run(956), nightly_run(955, postgres="failure"), lab_run(958)]
+    assert decisions(evidence)["postgres"] == "run"
+    assert decisions([nightly_run(959), lab_run(960)])["postgres"] == "reuse"
 
 
 def test_step_evidence_needs_the_pinned_nightly_checkout() -> None:
