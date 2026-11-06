@@ -90,8 +90,19 @@ def failure_detail(stdout: str, stderr: str) -> str:
     first = _first_failure_line(stdout, stderr) or stderr.strip()[:500]
     lines = [line.strip() for line in stdout.splitlines()]
     origin = next((line for line in lines if line.startswith("Origin:")), "")
-    fatal = next((line for line in lines if re.match(r"fatal: \[.*\]: FAILED! =>", line)), "")
-    parts = [first] + [part[:600] for part in (origin, fatal) if part and part[:300] not in first]
+    raw = stdout.splitlines()
+    at = next((index for index, line in enumerate(raw) if re.match(r"fatal: \[.*\]: FAILED! =>", line.strip())), None)
+    fatal = ""
+    if at is not None:
+        # The YAML callback writes the result on the following indented lines (msg, rc, stderr).
+        block = [raw[at].strip()]
+        for line in raw[at + 1 :]:
+            if line and not line.startswith((" ", "\t")):
+                break
+            if line.strip():
+                block.append(line.strip())
+        fatal = " ".join(block)
+    parts = [first] + [part[:900] for part in (origin, fatal) if part and part[:300] not in first]
     return " | ".join(part for part in parts if part)[:1500]
 
 

@@ -174,3 +174,18 @@ class FailureDetailTests(TestCase):
         self.assertIn("E: Unable to locate package x", detail)
         self.assertNotIn("noise", detail)
         self.assertLessEqual(len(failure_detail(stdout.replace("package x", "x" * 5000), "")), 1500)
+
+    def test_a_yaml_fatal_result_keeps_its_indented_stderr(self) -> None:
+        stdout = (
+            "[ERROR]: Task failed: Module failed: non-zero return code\n"
+            "Origin: /x/playbooks/virtualmin.yml:63:7\n"
+            "fatal: [node]: FAILED! =>\n"
+            "    changed: false\n"
+            "    rc: 1\n"
+            "    stderr: |-\n"
+            "        AssertionError: Tenant or unknown homes exist\n"
+            "PLAY RECAP\n"
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("AssertionError: Tenant or unknown homes exist", detail)
+        self.assertNotIn("PLAY RECAP", detail)
