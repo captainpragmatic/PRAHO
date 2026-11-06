@@ -29,6 +29,7 @@ from django.utils.translation import gettext
 from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 from apps.infrastructure.ansible_service import (
     AnsibleResult,
+    failure_detail,
     get_ansible_service,
     node_admin_allowed_cidrs,
     uncovered_platform_egress,
@@ -921,10 +922,9 @@ class NodeDeploymentService:
                         self._cleanup_resources(
                             gateway, created_resources, deployment, lease=lease, api_token=api_token
                         )
-                    self._mark_failed(
-                        deployment, f"Ansible {playbook} failed: {result.stderr[:500]}", stage=stage_name, lease=lease
-                    )
-                    return Err(f"Ansible {playbook} failed: {result.stderr[:500]}")
+                    failure = f"Ansible {playbook} failed: {failure_detail(result.stdout, result.stderr)}"
+                    self._mark_failed(deployment, failure, stage=stage_name, lease=lease)
+                    return Err(failure)
 
                 stages_completed.append(stage_name)
                 log_deployment("info", f"Ansible {playbook} completed successfully")
@@ -1768,7 +1768,9 @@ class NodeDeploymentService:
                 results.append(ansible_result)
 
                 if not ansible_result.success:
-                    error_msg = f"Playbook {playbook} failed: {ansible_result.stderr[:500]}"
+                    error_msg = (
+                        f"Playbook {playbook} failed: {failure_detail(ansible_result.stdout, ansible_result.stderr)}"
+                    )
                     NodeDeploymentLog.objects.create(
                         deployment=deployment,
                         level="ERROR",

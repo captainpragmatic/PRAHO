@@ -81,6 +81,13 @@ def _first_failure_line(stdout: str, stderr: str) -> str:
     return next((line.strip()[:300] for line in stderr.splitlines() if line.strip()), "")
 
 
+def failure_detail(stdout: str, stderr: str) -> str:
+    """Why a playbook failed: its first error or fatal task, else the start of stderr.
+
+    Ansible prints the failing task to stdout; stderr often carries only deprecation warnings."""
+    return _first_failure_line(stdout, stderr) or stderr.strip()[:500]
+
+
 def node_admin_allowed_cidrs() -> list[str]:
     """The node admin allowlist as explicit networks, for Webmin and UFW (ADR-0060).
 
@@ -292,7 +299,9 @@ class AnsibleService:
 
             if not playbook_result.success:
                 logger.error(f"📜 [Ansible] Playbook {playbook} failed, stopping execution")
-                return Err(f"Playbook {playbook} failed: {playbook_result.stderr[:500]}")
+                return Err(
+                    f"Playbook {playbook} failed: {failure_detail(playbook_result.stdout, playbook_result.stderr)}"
+                )
 
         logger.info(f"📜 [Ansible] All {len(results)} playbooks completed successfully")
         return Ok(results)

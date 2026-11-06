@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from apps.common.types import Ok
-from apps.infrastructure.ansible_service import AnsibleResult, AnsibleService
+from apps.infrastructure.ansible_service import AnsibleResult, AnsibleService, failure_detail
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment
 from tests.infrastructure.test_security_hardening import enrolled_node
 
@@ -144,3 +144,13 @@ class AnsibleControlPathTests(TestCase):
 
                 self.assertTrue(result.is_err())
                 self.assertEqual(result.unwrap_err(), f"{prefix}: {detail}" if detail else prefix)
+
+
+class FailureDetailTests(TestCase):
+    def test_the_fatal_task_wins_over_leading_stderr_warnings(self) -> None:
+        warnings = "[DEPRECATION WARNING]: INJECT_FACTS_AS_VARS default to `True` is deprecated."
+        fatal = 'fatal: [1.2.3.4]: FAILED! => {"msg": "the real reason"}'
+        self.assertEqual(failure_detail(f"TASK [x]\n{fatal}\n", warnings), fatal)
+        # Without a recognisable failure line the stderr text is kept, as before.
+        self.assertEqual(failure_detail("PLAY RECAP\n", "  controller died\n"), "controller died")
+        self.assertEqual(failure_detail("", ""), "")
