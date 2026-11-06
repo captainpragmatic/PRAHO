@@ -58,14 +58,14 @@ Locally, contributors and agents run only what takes seconds on what they touche
 
 `nightly.yml` runs at 02:30 UTC when there was activity: the whole platform suite on PostgreSQL (`make test-platform-postgres-full`), the full suite with coverage, integration, cache and security suites on PostgreSQL, types, Semgrep against the staging release, and the browser suite with server-side coverage. `virtualmin-lab.yml` runs the full lab nightly and a drift run against the latest Virtualmin.
 
-`release-candidate.yml` is dispatched by hand on a `master` commit (blank = the current tip). `scripts/verify_release_candidate.py` confirms that the merge queue passed every required check on that exact commit (its `merge_group` runs; a commit merged around the queue is refused), and that the latest nightly full Virtualmin lab on master passed. It then runs the whole platform suite on PostgreSQL on that SHA. It runs no lab of its own (amended 2026-10-30): the queue ran the lab suites on the candidate, and the nightly full lab runs node deploy, fault injection and the browser tests on master every night master changed. On success it posts the commit status `release-candidate` for people to read; promotion trusts the successful run itself, since anyone who can push could post a status.
+`release-candidate.yml` is dispatched by hand on a `master` commit (blank = the newest master commit the nightly runs proved in every release scope). `scripts/verify_release_candidate.py` confirms that the merge queue passed every required check on that exact commit (its `merge_group` runs; a commit merged around the queue is refused). Then, per release scope (the whole Platform suite on PostgreSQL, CrowdSec qualification, native deploy and the Virtualmin container lab), it answers `reuse` when a nightly run on master proved that scope on exactly this commit, or `run`; only the `run` scopes execute in the release candidate, on the candidate SHA (amended 2026-11-06). Evidence from any other commit never counts, so a release cut from a nightly-proven commit costs about a minute, and any other commit pays only for what it lacks. A step-proven scope reads its own step, so an unrelated failure in the same nightly job (lint runs last) does not void it. On success it posts the commit status `release-candidate` for people to read; promotion trusts the successful run itself, since anyone who can push could post a status.
 
 ### Promotion to staging
 
 `staging` is a pointer to what fi-staging runs, never a branch anyone merges into. Commits flow one way: pull request → `master` → release candidate → staging → (later) production.
 
-1. Run the release candidate and wait (an hour or more, mostly the lab). A red run changes nothing: fix it through a pull request and start a new candidate.
-2. From an approved operator IP: `make promote-staging SHA=<sha>` (`DRY_RUN=1` to see the checks only). It refuses a commit that is not on `master` or has no successful release-candidate run from `master`'s copy of the workflow, deploys from a clean detached checkout of that commit (git deploy only), and only then fast-forwards `staging` (`--rollback` deploys an older approved commit).
+1. Run the release candidate and wait: about a minute for a nightly-proven commit, up to about two hours when it must run the lab and native scopes itself. A red run changes nothing: fix it through a pull request and start a new candidate.
+2. From an approved operator IP: `make promote-staging SHA=<sha>` (`DRY_RUN=1` to see the checks only; the dry run also runs the release's own deploy-configuration validation and a read-only probe that each target host already has the maintenance-aware edge, `scripts/promote_preflight.py`). It refuses a commit that is not on `master` or has no successful release-candidate run from `master`'s copy of the workflow, deploys from a clean detached checkout of that commit (git deploy only), and only then fast-forwards `staging` (`--rollback` deploys an older approved commit).
 3. Accept on staging and record the deployed SHA.
 
 A release candidate is not a GitHub Release: a `v*` tag publishes one. For production the order will be release candidate → staging accepted → tag that same commit → deploy the tag. `.github/rulesets/staging.json` and `release-tags.json` restrict both refs to the owner.
@@ -82,7 +82,7 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 |------|---------|
 | `.github/workflows/platform.yml`, `portal.yml`, `integration.yml`, `browser.yml`, `dco-check.yml` | Tier 1 — every pull request, required |
 | `.github/workflows/virtualmin-lab-pr.yml` | Tier 1 when relevant, required |
-| `.github/workflows/virtualmin-lab.yml` | Nightly full and drift runs; the release candidate requires the latest full run on master to have passed |
+| `.github/workflows/virtualmin-lab.yml` | Nightly container lab and drift runs; the release candidate reuses a nightly lab run on its exact commit or calls this workflow on the candidate |
 | `.github/workflows/nightly.yml` | Tier 2 — scheduled nightly |
 | `.github/workflows/release-candidate.yml` | Tier 2 — the release gate before staging |
 | `.github/rulesets/*.json` | Branch and tag rules, applied with `gh api` (see that directory's README) |

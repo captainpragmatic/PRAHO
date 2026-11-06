@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Prove the merge queue tested a master commit with every required check.
 
-release-candidate.yml runs this before the expensive release checks:
+release-candidate.yml runs this before the release checks:
 
-    python3 scripts/verify_release_candidate.py <candidate-sha>
+    python3 scripts/verify_release_candidate.py <candidate-sha>     # queue evidence + per-scope decisions
+    python3 scripts/verify_release_candidate.py --pick              # newest master commit fully proven
 
 The merge queue builds each commit it lands on master and runs the required checks on that exact
 commit (event `merge_group`) before master moves to it. So the candidate is vouched for by its own runs,
@@ -16,9 +17,10 @@ when its own `changes` job succeeded in the same run and that run completed succ
 run also skips it). A commit with no merge_group run was merged around the queue (an owner bypass), and
 is refused.
 
-It also refuses unless the latest full Virtualmin lab on master passed (``latest_full_lab``): the
-candidate runs no lab of its own, since the queue ran the lab suites on it and the full container lab
-covers fault injection, browsers and the maintenance Portal. An optional manual native run counts too.
+Then, per release scope (``RELEASE_SCOPES``: the whole Platform suite on PostgreSQL, CrowdSec, native
+deploy and the Virtualmin lab), it answers ``reuse <run id>`` when a nightly run on master proved that
+scope on this exact commit, or ``run`` otherwise, and the release candidate runs those scopes on the
+candidate. Evidence from any other commit never counts: an older pass says nothing about a newer change.
 
 Needs `gh` (authenticated).
 """
@@ -29,7 +31,7 @@ import json
 import os
 import subprocess
 import sys
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -116,99 +118,99 @@ def verify(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> str:
         raise VerificationError(
             f"The merge queue did not pass every required check on {sha}:\n  " + "\n  ".join(problems)
         )
-    lab = latest_full_lab(repo, gh)
-    return f"The merge queue passed every required check on the candidate itself ({sha}), and {lab}"
+    return f"The merge queue passed every required check on the candidate itself ({sha})"
 
 
-# The full lab: the container job (nightly, or a suite=containers dispatch), its earlier version
-# "nightly-full" (the full lab before node deploy moved to native acceptance), or an optional native run.
-NIGHTLY_LAB_WORKFLOW = "virtualmin-lab.yml"
-CONTAINER_LAB_JOBS = ("nightly-containers", "nightly-full")
-FULL_LAB_JOBS = (*CONTAINER_LAB_JOBS, "native-full")
-NATIVE_ADMISSION_JOB = "native-admission"
-COMPONENTS_JOB = "components-diagnostic"
+# A release scope -> (workflow, accepted job names, the step that proves it, or None for the whole job).
+# The nightly matrix names its job after the branch it tested; only master's counts.
+RELEASE_SCOPES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
+    "postgres": ("nightly.yml", ("nightly (master)",), "Whole platform suite on PostgreSQL"),
+    # make test-integration collects tests/deploy, CrowdSec's Docker qualification among them.
+    "crowdsec": ("nightly.yml", ("nightly (master)",), "Integration tests"),
+    "native": ("nightly.yml", ("nightly-native-deploy",), None),
+    # "nightly-full" is the container lab's name before node deploy moved to native acceptance.
+    "lab": ("virtualmin-lab.yml", ("nightly-containers", "nightly-full"), None),
+}
+_EVIDENCE_RUNS = 20  # runs of one workflow on one commit: dispatches and reruns
 
 
-NIGHTLY_ACTIVITY_JOB = "check-activity"
-NIGHTLY_DRIFT_JOB = "nightly-drift"
-_MAX_PAGES = 20  # 600 runs: months of nightly and drift runs
+def _proof(job: JSONObject, step_name: str | None) -> bool:
+    """A whole-job scope needs the job's success; a step scope needs exactly that step's success, whatever an
+    unrelated step of the same job did (a lint slip must not void a passed PostgreSQL suite)."""
+    if step_name is None:
+        return job.get("conclusion") == "success"
+    steps = [step for step in job.get("steps", []) if step.get("name") == step_name]
+    return len(steps) == 1 and steps[0].get("conclusion") == "success"
 
 
-def _master_lab_runs(repo: str, gh: Callable[[str], Any]) -> Iterator[dict[str, Any]]:
-    """Completed lab runs on master, newest first, page by page until the history ends."""
-    for page in range(1, _MAX_PAGES + 1):
-        listed = gh(
-            f"repos/{repo}/actions/workflows/{NIGHTLY_LAB_WORKFLOW}/runs"
-            f"?branch=master&status=completed&per_page=30&page={page}"
-        )["workflow_runs"]
-        if not listed:
-            return
-        yield from sorted(listed, key=lambda run: int(run["id"]), reverse=True)
+def release_evidence(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> dict[str, str]:
+    """Per scope: ``reuse <run id>`` if a master run on exactly ``sha`` proved it, else ``run``."""
+    answers: dict[str, str] = {}
+    runs_by_workflow: dict[str, list[JSONObject]] = {}
+    for scope, (workflow, job_names, step_name) in RELEASE_SCOPES.items():
+        if workflow not in runs_by_workflow:
+            listed = gh(
+                f"repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&branch=master"
+                f"&status=completed&per_page={_EVIDENCE_RUNS}"
+            )["workflow_runs"]
+            runs = sorted(
+                (run for run in listed if run.get("head_sha") == sha and run.get("head_branch") == "master"),
+                key=lambda run: int(run["id"]),
+                reverse=True,
+            )
+            for run in runs:
+                run["jobs"] = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
+            runs_by_workflow[workflow] = runs
+        answers[scope] = "run"
+        for run in runs_by_workflow[workflow]:
+            if any(job["name"] in job_names and _proof(job, step_name) for job in run["jobs"]):
+                answers[scope] = f"reuse {run['id']}"
+                break
+    return answers
 
 
-def _passed_over(jobs: dict[str, JSONObject], run: JSONObject) -> bool:
-    """A run without a full lab that says nothing about the code: drift, a quiet night, a components
-    diagnostic, or a native dispatch refused before it started because no runner is configured."""
-    # Drift is a matrix: its jobs are named "nightly-drift (<runner>)". It is informational, never a gate.
-    drift = any(
-        name.startswith(NIGHTLY_DRIFT_JOB) and job.get("conclusion") not in (None, "skipped")
-        for name, job in jobs.items()
-    )
-    # A quiet night skipped the container job this gate knows. Every scheduled run also lists native-full
-    # as skipped, so that never counts: a container job it does not know was renamed, not quiet.
-    quiet = (
-        any(jobs.get(name, {}).get("conclusion") == "skipped" for name in CONTAINER_LAB_JOBS)
-        and jobs.get(NIGHTLY_ACTIVITY_JOB, {}).get("conclusion") == "success"
-        and run.get("conclusion") == "success"
-    )
-    unadmitted = jobs.get(NATIVE_ADMISSION_JOB, {}).get("conclusion") == "failure"
-    diagnostic = jobs.get(COMPONENTS_JOB, {}).get("conclusion") not in (None, "skipped")
-    return drift or quiet or unadmitted or diagnostic
-
-
-def latest_full_lab(repo: str, gh: Callable[[str], Any] = _gh) -> str:
-    """The latest completed full Virtualmin lab run on master, which must have passed.
-
-    A run without a full lab is passed over only when it says nothing about the code (``_passed_over``).
-    Anything else without one, a failed selection or a cancelled night, was interrupted and refuses.
-    A run on any other branch never counts.
-    """
-    for run in _master_lab_runs(repo, gh):
-        if run.get("head_branch") != "master":
+def pick_candidate(repo: str, gh: Callable[[str], Any] = _gh) -> str:
+    """The newest master commit a nightly run proved in every release scope."""
+    listed = gh(
+        f"repos/{repo}/actions/workflows/{RELEASE_SCOPES['postgres'][0]}/runs?branch=master"
+        f"&status=completed&per_page={_EVIDENCE_RUNS}"
+    )["workflow_runs"]
+    seen: set[str] = set()
+    for run in sorted(listed, key=lambda run: int(run["id"]), reverse=True):
+        sha = str(run.get("head_sha", ""))
+        if run.get("head_branch") != "master" or sha in seen:
             continue
-        jobs = {
-            job["name"]: job
-            for job in gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
-        }
-        ran = [name for name in FULL_LAB_JOBS if jobs.get(name, {}).get("conclusion") not in (None, "skipped")]
-        if not ran:
-            if _passed_over(jobs, run):
-                continue
-            raise VerificationError(
-                f"The lab run on master (run {run['id']}, {run.get('conclusion')}) was interrupted before it could "
-                f"run the full Virtualmin lab. Dispatch {NIGHTLY_LAB_WORKFLOW} with suite containers first."
-            )
-        outcomes = {name: jobs[name].get("conclusion") for name in ran}
-        if run.get("conclusion") != "success" or any(outcome != "success" for outcome in outcomes.values()):
-            raise VerificationError(
-                f"The latest full Virtualmin lab on master (run {run['id']}) did not pass: {outcomes}, "
-                f"run {run.get('conclusion')}. Fix it, or dispatch {NIGHTLY_LAB_WORKFLOW} with suite containers, first."
-            )
-        return f"the latest full Virtualmin lab on master passed (run {run['id']}, {', '.join(ran)})"
+        seen.add(sha)
+        if all(answer.startswith("reuse ") for answer in release_evidence(sha, repo, gh).values()):
+            return sha
     raise VerificationError(
-        f"No full Virtualmin lab run on master is on record. Dispatch {NIGHTLY_LAB_WORKFLOW} with suite containers first."
+        "No recent master commit has nightly proof in every release scope; name a candidate SHA instead "
+        "and the release candidate runs the missing scopes on it."
     )
 
 
 def main(argv: list[str]) -> int:
+    """``<sha>``: queue evidence, then per-scope decisions (written to $GITHUB_OUTPUT when set).
+    ``--pick``: print the newest master commit with nightly proof in every scope."""
     if len(argv) != 2:
-        print(f"usage: {argv[0]} <candidate-sha>", file=sys.stderr)
+        print(f"usage: {argv[0]} <candidate-sha> | --pick", file=sys.stderr)
         return 2
     try:
-        print(verify(argv[1], os.environ["GITHUB_REPOSITORY"]))
+        repo = os.environ["GITHUB_REPOSITORY"]
+        if argv[1] == "--pick":
+            print(pick_candidate(repo))
+            return 0
+        print(verify(argv[1], repo))
+        answers = release_evidence(argv[1], repo)
     except (VerificationError, subprocess.CalledProcessError, KeyError) as error:
         print(f"::error::{error}", file=sys.stderr)
         return 1
+    for scope, answer in answers.items():
+        print(f"{scope}: {answer}")
+    if output := os.environ.get("GITHUB_OUTPUT"):
+        with open(output, "a", encoding="utf-8") as handle:
+            for scope, answer in answers.items():
+                handle.write(f"{scope}={answer.split()[0]}\n")
     return 0
 
 

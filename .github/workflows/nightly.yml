@@ -179,9 +179,6 @@ jobs:
       # A staging checkout may predate new Make targets or controller dependencies.
       run: uv tool run --from ansible-core==2.20.6 ansible-galaxy collection install ansible.posix:2.2.0
 
-    - name: Full lint (every make lint phase)
-      run: make lint
-
     - name: Concurrency tests (PostgreSQL)
       # This command also creates a fresh test database and applies the complete migration graph.
       timeout-minutes: 15
@@ -304,6 +301,11 @@ jobs:
         set -euo pipefail
         git fetch origin staging
         SEMGREP_BASELINE_REF="$(git merge-base HEAD origin/staging)" make lint-security
+
+    # Last, so a lint slip cannot skip the suites a release candidate reuses as evidence
+    # (scripts/verify_release_candidate.py reads their steps); it still fails the job.
+    - name: Full lint (every make lint phase)
+      run: make lint
 
     # Artifact names may not contain `/`, which a dispatched `fix/...` branch would bring.
     - name: Name the artifact after the branch
