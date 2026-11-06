@@ -181,7 +181,9 @@ class FakeGitHub:
                 branch = path.split("branch=")[1].split("&")[0]
                 listed = [run for run in listed if run["head_branch"] == branch]
         else:
-            listed = self.runs
+            # The merge_group lookup filters by commit, like GitHub's; a fixture run without one matches any.
+            sha = path.split("head_sha=")[1].split("&")[0] if "head_sha=" in path else None
+            listed = [run for run in self.runs if sha is None or run.get("head_sha", sha) == sha]
         return {"workflow_runs": [{key: value for key, value in run.items() if key != "jobs"} for run in listed]}
 
 
@@ -281,13 +283,29 @@ def test_an_older_run_of_the_same_commit_can_still_prove_a_scope() -> None:
     assert decisions([newer, older, lab_run(923)])["native"] == "reuse"
 
 
+def test_the_newest_run_that_ran_a_scope_decides() -> None:
+    # A later run on the same commit that failed the scope outweighs an earlier pass.
+    newer = nightly_run(936, postgres="failure")
+    older = nightly_run(935)
+    assert decisions([newer, older, lab_run(937)])["postgres"] == "run"
+    newer_lab, older_lab = lab_run(939, outcome="failure"), lab_run(938)
+    assert decisions([nightly_run(940), newer_lab, older_lab])["lab"] == "run"
+
+
 def test_the_lab_under_its_earlier_job_name_still_counts() -> None:
     assert decisions([nightly_run(924), lab_run(925, job="nightly-full")])["lab"] == "reuse"
 
 
 def test_the_newest_fully_proven_master_commit_is_picked() -> None:
     evidence = [nightly_run(931, OTHER, native="failure"), lab_run(932, OTHER), nightly_run(929), lab_run(930)]
-    assert pick_candidate("owner/repo", FakeGitHub([], evidence)) == SHA
+    assert pick_candidate("owner/repo", FakeGitHub(all_green(), evidence)) == SHA
+
+
+def test_a_proven_commit_the_queue_did_not_vouch_for_is_skipped() -> None:
+    # OTHER is fully proven but has no merge_group runs (merged around the queue); SHA is next.
+    evidence = [nightly_run(942, OTHER), lab_run(943, OTHER), nightly_run(940), lab_run(941)]
+    queue = [{**run, "head_sha": SHA} for run in all_green()]
+    assert pick_candidate("owner/repo", FakeGitHub(queue, evidence)) == SHA
 
 
 def test_no_fully_proven_commit_refuses_to_pick() -> None:

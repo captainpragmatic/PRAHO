@@ -7,8 +7,8 @@
 #                  (make test-virtualmin-lab) on the PINNED version, when the change can reach the lab. It is a
 #                  workflow of its own so that its required check never shares a name with a job this workflow
 #                  skips on a schedule or a dispatch.
-#   release        release-candidate.yml runs no lab: its verifier requires the latest full lab on master to have
-#                  passed, the container job or an optional native run. No self-hosted runner is required.
+#   release        release-candidate.yml reuses a nightly container lab on its exact commit, or calls this
+#                  workflow (suite containers) on the candidate (scripts/verify_release_candidate.py).
 #   containers     03:30 UTC, skipped when nothing changed in 24h: suites, fault injection, browsers and
 #                  maintenance Portal on PINNED containers. No native kernel/deployment claim.
 #   manual full    optional: explicit suite=full only, after an isolated native runner and private authority

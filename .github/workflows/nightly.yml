@@ -147,7 +147,8 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        ref: ${{ matrix.branch }}
+        # The master leg tests exactly the run's commit: a release candidate credits its steps to that SHA.
+        ref: ${{ matrix.branch == 'master' && github.sha || matrix.branch }}
         fetch-depth: 0
 
     - name: Start PostgreSQL (registry fallback)

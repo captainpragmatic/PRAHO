@@ -134,6 +134,13 @@ RELEASE_SCOPES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
 _EVIDENCE_RUNS = 20  # runs of one workflow on one commit: dispatches and reruns
 
 
+def _ran(job: JSONObject, step_name: str | None) -> bool:
+    if step_name is None:
+        return job.get("conclusion") not in (None, "skipped")
+    steps = [step for step in job.get("steps", []) if step.get("name") == step_name]
+    return any(step.get("conclusion") not in (None, "skipped") for step in steps)
+
+
 def _proof(job: JSONObject, step_name: str | None) -> bool:
     """A whole-job scope needs the job's success; a step scope needs exactly that step's success, whatever an
     unrelated step of the same job did (a lint slip must not void a passed PostgreSQL suite)."""
@@ -161,16 +168,22 @@ def release_evidence(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> dic
             for run in runs:
                 run["jobs"] = gh(f"repos/{repo}/actions/runs/{run['id']}/jobs?filter=latest&per_page=100")["jobs"]
             runs_by_workflow[workflow] = runs
+        # The newest run that actually ran the scope decides: a later failure outweighs an earlier pass,
+        # while a run that skipped the job (or lacks the step) says nothing either way.
         answers[scope] = "run"
         for run in runs_by_workflow[workflow]:
-            if any(job["name"] in job_names and _proof(job, step_name) for job in run["jobs"]):
-                answers[scope] = f"reuse {run['id']}"
+            ran = [job for job in run["jobs"] if job["name"] in job_names and _ran(job, step_name)]
+            if ran:
+                if all(_proof(job, step_name) for job in ran):
+                    answers[scope] = f"reuse {run['id']}"
                 break
     return answers
 
 
 def pick_candidate(repo: str, gh: Callable[[str], Any] = _gh) -> str:
-    """The newest master commit a nightly run proved in every release scope."""
+    """The newest master commit the queue vouched for and a nightly run proved in every release scope.
+
+    An operator aid: dispatch the release candidate with the SHA this prints."""
     listed = gh(
         f"repos/{repo}/actions/workflows/{RELEASE_SCOPES['postgres'][0]}/runs?branch=master"
         f"&status=completed&per_page={_EVIDENCE_RUNS}"
@@ -181,8 +194,13 @@ def pick_candidate(repo: str, gh: Callable[[str], Any] = _gh) -> str:
         if run.get("head_branch") != "master" or sha in seen:
             continue
         seen.add(sha)
-        if all(answer.startswith("reuse ") for answer in release_evidence(sha, repo, gh).values()):
-            return sha
+        if not all(answer.startswith("reuse ") for answer in release_evidence(sha, repo, gh).values()):
+            continue
+        try:
+            verify(sha, repo, gh)
+        except VerificationError:
+            continue  # proven by the nightly, but the merge queue never vouched for it
+        return sha
     raise VerificationError(
         "No recent master commit has nightly proof in every release scope; name a candidate SHA instead "
         "and the release candidate runs the missing scopes on it."

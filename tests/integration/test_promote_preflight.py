@@ -28,17 +28,28 @@ def read_env(path):
 
 {validate}
 
+CONNECTION_KEYS = {{"PRAHO_SSH_KEY", "PRAHO_SSH_PORT"}}
+
 @dataclass(frozen=True)
 class Target:
     server: str
+    port: int = 9876
+    identity: str = "/keys/operator.pub"
+    user: str = "root"
+    known_hosts: str = "/keys/known_hosts"
     def connection(self):
         return {{
             "ansible_host": self.server,
-            "ansible_user": "root",
-            "ansible_port": 9876,
-            "ansible_ssh_private_key_file": "/keys/operator.pub",
+            "ansible_user": self.user,
+            "ansible_port": self.port,
+            "ansible_ssh_private_key_file": self.identity,
             "ansible_ssh_common_args": "-F /dev/null -o BatchMode=yes -o HostKeyAlias=" + self.server,
         }}
+
+def recover_ssh_port(connection, environment):
+    # The real one probes the pinned identity on 9876 after hardening moved SSH off 22.
+    if connection["PRAHO_SSH_PORT"] == "22":
+        connection["PRAHO_SSH_PORT"] = "9876"
 
 @dataclass(frozen=True)
 class Topology:
@@ -48,7 +59,10 @@ class Topology:
 
 def normalize_topology(values, environment):
     mode = values.get("PRAHO_NATIVE_TOPOLOGY", "combined")
-    return Topology(mode, Target("192.0.2.10"), Target("192.0.2.20" if mode == "split" else "192.0.2.10"))
+    port = int(values.get("PRAHO_SSH_PORT", "9876"))
+    key = values.get("PRAHO_SSH_KEY", "/keys/operator.pub")
+    platform = Target("192.0.2.10", port, key)
+    return Topology(mode, platform, Target("192.0.2.20", port, key) if mode == "split" else platform)
 """
 VALIDATE = """
 def validate_application_configuration(values, environment):
@@ -123,6 +137,42 @@ def test_an_older_release_without_the_guard_or_validation_is_not_held_to_them(tm
     ssh = FakeSSH({"192.0.2.10": 1})
     assert preflight(release(tmp_path, guard=False, validate=False), env_file(tmp_path), run=ssh) == []
     assert ssh.calls == [], "no edge probe when the release does not enforce the edge"
+
+
+def test_every_problem_is_kept_when_the_topology_also_fails(tmp_path: Path) -> None:
+    root = release(tmp_path)
+    stub = root / "deploy/scripts/native_env.py"
+    stub.write_text(
+        stub.read_text()
+        + "\n\ndef normalize_topology(values, environment):\n    raise ValueError('split requires stable egress CIDRs')\n"
+    )
+    problems = preflight(root, env_file(tmp_path), run=FakeSSH())
+    assert problems[0].startswith("configuration: ") and "topology: split requires stable egress CIDRs" in problems[1]
+
+
+def test_a_stalled_host_is_reported_not_raised(tmp_path: Path) -> None:
+    def stall(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(argv, kwargs.get("timeout", 60))
+
+    problems = preflight(release(tmp_path), env_file(tmp_path, **GOOD), run=stall)
+    assert len(problems) == 1 and "timed out" in problems[0]
+
+
+def test_shell_connection_settings_reach_the_probe_as_they_reach_the_deploy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("PRAHO_SSH_KEY", "/keys/from-shell.pub")
+    ssh = FakeSSH()
+    assert preflight(release(tmp_path), env_file(tmp_path, **GOOD), run=ssh) == []
+    (call,) = ssh.calls
+    assert call[call.index("-i") + 1] == "/keys/from-shell.pub"
+
+
+def test_a_legacy_ssh_port_is_recovered_before_the_probe(tmp_path: Path) -> None:
+    ssh = FakeSSH()
+    assert preflight(release(tmp_path), env_file(tmp_path, PRAHO_SSH_PORT="22", **GOOD), run=ssh) == []
+    (call,) = ssh.calls
+    assert call[call.index("-p") + 1] == "9876"
 
 
 def test_the_edge_probe_only_reads() -> None:

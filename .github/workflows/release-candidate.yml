@@ -2,9 +2,10 @@
 # RELEASE CANDIDATE — what pull requests cannot afford, pinned to one master commit
 # ===============================================================================
 # Dispatched by hand: Actions → Release candidate → Run workflow, or
-# `gh workflow run release-candidate.yml [-f candidate_sha=<sha>]`. A blank candidate means the newest
-# master commit that the nightly runs proved in every release scope; the run title names the commit either
-# way once resolved.
+# `gh workflow run release-candidate.yml [-f candidate_sha=<sha>]`. A blank candidate means the master
+# commit at the moment of the dispatch; the run title names the commit either way (promote-staging finds
+# the run by that title). `python3 scripts/verify_release_candidate.py --pick` prints the newest master
+# commit the nightly proved in every scope: dispatch with that SHA for the one-minute release.
 #
 # `resolve` proves from the merge queue's own runs that the candidate passed every required check (an
 # owner bypass merges around the queue). Then, per release scope (scripts/verify_release_candidate.py
@@ -22,13 +23,13 @@
 
 name: Release candidate
 
-run-name: Release candidate ${{ inputs.candidate_sha || 'newest nightly-proven master commit' }}
+run-name: Release candidate ${{ inputs.candidate_sha || github.sha }}
 
 on:
   workflow_dispatch:
     inputs:
       candidate_sha:
-        description: Master commit to qualify (blank = the newest master commit the nightly proved)
+        description: Master commit to qualify (blank = the current master commit)
         type: string
         default: ''
 
@@ -66,15 +67,15 @@ jobs:
         id: resolve
         env:
           CANDIDATE: ${{ inputs.candidate_sha }}
+          DISPATCH_SHA: ${{ github.sha }}
           DISPATCH_REF: ${{ github.ref }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if [ "$DISPATCH_REF" != "refs/heads/master" ]; then
             echo "::error::Dispatch this workflow from master; a branch's copy of it may not vouch for a commit."
             exit 1
           fi
-          sha="${CANDIDATE:-$(python3 scripts/verify_release_candidate.py --pick)}"
+          sha="${CANDIDATE:-$DISPATCH_SHA}"
           if [[ ! "$sha" =~ ^[0-9a-f]{40}$ ]]; then
             echo "::error::The candidate must be a full 40-character commit SHA."
             exit 1
@@ -91,6 +92,7 @@ jobs:
       # each rule exists; tests/integration/test_verify_release_candidate.py pins them.
       - name: The merge queue passed every required check on the candidate; reuse or run each scope
         id: verify
+        shell: bash  # GitHub adds `-o pipefail` only for an explicit bash shell: a refusal must fail the step
         env:
           GH_TOKEN: ${{ github.token }}
           SHA: ${{ steps.resolve.outputs.sha }}

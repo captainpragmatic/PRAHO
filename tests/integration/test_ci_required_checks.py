@@ -530,9 +530,18 @@ class TestReleaseCandidate:
         assert lab["uses"] == "./.github/workflows/virtualmin-lab.yml"
         assert lab["with"] == {"suite": "containers", "ref": "${{ needs.resolve.outputs.sha }}"}
 
-    def test_a_blank_candidate_is_the_newest_fully_proven_commit(self) -> None:
+    def test_the_run_title_names_the_candidate_promote_looks_for(self) -> None:
+        # promote_staging.sh finds the approved run by the title "Release candidate <sha>".
+        assert self.workflow["run-name"] == "Release candidate ${{ inputs.candidate_sha || github.sha }}"
         script = str(self.jobs["resolve"]["steps"])
-        assert "verify_release_candidate.py --pick" in script
+        assert 'sha="${CANDIDATE:-$DISPATCH_SHA}"' in script and "--pick" not in script
+
+    def test_a_piped_step_runs_with_pipefail(self) -> None:
+        # GitHub adds `-o pipefail` only for an explicit `shell: bash`; the default is `bash -e {0}`.
+        for job_id, job in self.jobs.items():
+            for step in job.get("steps", []):
+                if " | " in step.get("run", ""):
+                    assert step.get("shell") == "bash", (job_id, step.get("name"))
 
     def test_the_status_is_posted_only_after_every_check(self) -> None:
         record = self.jobs["record"]

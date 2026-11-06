@@ -19,7 +19,9 @@ An older release that does not enforce a check is not held to it. Exit 1 lists e
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
+import os
 import shlex
 import subprocess
 import sys
@@ -71,10 +73,42 @@ def preflight(
             problems.append(f"configuration: {error}")
     if not _edge_enforced(release):
         return problems
-    topology = native_env.normalize_topology(values, ENVIRONMENT)
-    targets = [topology.platform] + ([topology.portal] if topology.mode == "split" else [])
+    # Resolve targets exactly as the release's run_native does: shell connection settings merged under the
+    # env file, then each target's SSH port recovered with its pinned identity.
+    connection_keys = getattr(native_env, "CONNECTION_KEYS", set())
+    connection_values = {
+        key: value
+        for key, value in os.environ.items()
+        if key in connection_keys or key.startswith(("PRAHO_PLATFORM_", "PRAHO_PORTAL_"))
+    }
+    connection_values.update(values)
+    try:
+        topology = native_env.normalize_topology(connection_values, ENVIRONMENT)
+        targets = []
+        for target in dict.fromkeys([topology.platform] + ([topology.portal] if topology.mode == "split" else [])):
+            recover = getattr(native_env, "recover_ssh_port", None)
+            if recover is not None:
+                connection = {
+                    "PRAHO_SERVER_IP": target.server,
+                    "PRAHO_DEV_IP": target.server,
+                    "PRAHO_SSH_USER": target.user,
+                    "PRAHO_SSH_PORT": str(target.port),
+                    "PRAHO_SSH_KEY": target.identity,
+                    "PRAHO_DEPLOY_KNOWN_HOSTS_FILE": target.known_hosts,
+                }
+                recover(connection, ENVIRONMENT)
+                target = dataclasses.replace(target, port=int(connection["PRAHO_SSH_PORT"]))
+            targets.append(target)
+    except ValueError as error:
+        return [*problems, f"topology: {error}"]
+    except subprocess.TimeoutExpired:
+        return [*problems, "topology: SSH port recovery timed out"]
     for target in targets:
-        result = run(_ssh_argv(target.connection()), capture_output=True, text=True, timeout=60, check=False)
+        try:
+            result = run(_ssh_argv(target.connection()), capture_output=True, text=True, timeout=60, check=False)
+        except subprocess.TimeoutExpired:
+            problems.append(f"{target.server}: the edge check over SSH timed out")
+            continue
         if result.returncode == 1:
             problems.append(
                 f"{target.server}: the existing Caddy edge is not maintenance-aware, and this release refuses it. "
