@@ -223,6 +223,31 @@ def _write(path: Path, contents: str) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
+TUNNEL_ACCOUNT = "praho-webmin-tunnel"
+
+
+def tenant_homes(home: Path) -> list[str]:
+    """Entries under /home other than PRAHO's own operator tunnel account (ADR-0060).
+
+    The ssh-hardening role creates that system account before installation. Keep in step with the
+    first-install guard in virtualmin.yml."""
+    return sorted(entry.name for entry in home.iterdir() if not _own_tunnel_home(entry))
+
+
+def _own_tunnel_home(entry: Path) -> bool:
+    if entry.name != TUNNEL_ACCOUNT or entry.is_symlink() or not entry.is_dir():
+        return False
+    try:
+        account = pwd.getpwnam(TUNNEL_ACCOUNT)
+    except KeyError:
+        return False
+    return (
+        account.pw_dir == f"/home/{TUNNEL_ACCOUNT}"
+        and account.pw_shell == "/usr/sbin/nologin"
+        and entry.stat().st_uid == account.pw_uid
+    )
+
+
 def classic_bootstrap_allowed(inventory: dict[str, object]) -> bool:
     try:
         deployment = inventory["deployment"]
@@ -539,7 +564,7 @@ def bootstrap(deployment: str) -> dict[str, object]:
         "owned_new_deployment": marker == {"deployment": deployment, "owned_empty_first_install": True},
         "deployment": deployment,
         "domains": sum(1 for p in domains.iterdir() if p.name.isdigit()),
-        "tenant_homes": len(list(Path("/home").iterdir())),
+        "tenant_homes": len(tenant_homes(Path("/home"))),
         "tenant_databases": len(
             set(databases.splitlines()) - {"mysql", "sys", "information_schema", "performance_schema"}
         ),
