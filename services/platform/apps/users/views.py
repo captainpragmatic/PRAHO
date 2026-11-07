@@ -712,6 +712,8 @@ def _render_backup_codes(request: HttpRequest, backup_codes: list[str]) -> HttpR
         "users/mfa_backup_codes.html",
         {
             "backup_codes": backup_codes,
+            # Each code with its copy control's data-code, which copyCodeAction reads.
+            "backup_code_rows": [(code, {"data-code": code}) for code in backup_codes],
             "steps": TWO_FACTOR_STEPS,
             "current_step": 3,
             "back_url": reverse("users:user_profile"),

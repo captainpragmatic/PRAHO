@@ -66,36 +66,18 @@
                     </div>
 
                     <!-- Expand/Collapse Button -->
-                    {# tmpl-allow TMPL002: icon-only toggle whose raw chevron svg carries the chevron-icon class audit-fragments.js rotates; the button tag renders one text label and a catalog icon #}
-                    <button class="text-slate-400 hover:text-white transition-colors expand-btn"
-                            hx-get="{% url 'audit:event_detail' event.id %}"
-                            hx-target="#event-detail-{{ event.id }}"
-                            hx-swap="innerHTML"
-                            hx-indicator="#event-detail-{{ event.id }}-loading"
-                            data-action="invoke" data-invoke="toggleEventDetailAction" data-event-id="{{ event.id }}"
-                            >
-                        <svg class="w-5 h-5 transform transition-transform duration-200 chevron-icon"
-                             fill="none"
-                             stroke="currentColor"
-                             viewBox="0 0 24 24">
-                            <path stroke-linecap="round"
-                                  stroke-linejoin="round"
-                                  stroke-width="2"
-                                  d="M19 9l-7 7-7-7"></path>
-                        </svg>
-                    </button>
+                    {% trans "View Details" as details_label %}{% icon_button "chevron-down" details_label variant="bare" class="text-slate-400 hover:text-white transition-colors expand-btn" icon_size="md" svg_class="transform transition-transform duration-200 chevron-icon" hx_get=event.detail_toggle.url hx_target=event.detail_toggle.target hx_swap="innerHTML" hx_indicator=event.detail_toggle.indicator data_action="invoke" data_invoke="toggleEventDetailAction" attrs=event.detail_toggle.attrs %}
                 </div>
 
                 <!-- Expandable Details -->
-                <div id="event-detail-{{ event.id }}" class="mt-4 pt-4 border-t border-slate-700 hidden event-details">
-                    <!-- Loading indicator will be shown here -->
-                    <div id="event-detail-{{ event.id }}-loading" class="htmx-indicator">
-                        <div class="flex items-center justify-center py-4">
-                            {% spinner size="sm" color="blue" %}
-                            <span class="ml-2 text-sm text-slate-400">{% trans "Loading details..." %}</span>
-                        </div>
+                <!-- Outside the swapped container, so a second request still finds its indicator -->
+                <div id="event-detail-{{ event.id }}-loading" class="htmx-indicator">
+                    <div class="flex items-center justify-center py-4">
+                        {% spinner size="sm" color="blue" %}
+                        <span class="ml-2 text-sm text-slate-400">{% trans "Loading details..." %}</span>
                     </div>
                 </div>
+                <div id="event-detail-{{ event.id }}" class="mt-4 pt-4 border-t border-slate-700 hidden event-details"></div>
             </div>
         </div>
     {% endfor %}

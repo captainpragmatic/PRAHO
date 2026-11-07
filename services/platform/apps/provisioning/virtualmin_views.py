@@ -19,6 +19,7 @@ from django.contrib.auth.models import AnonymousUser
 from django.core.paginator import Paginator
 from django.db import connections, models, transaction
 from django.http import HttpRequest, HttpResponse, HttpResponseBadRequest, JsonResponse, QueryDict
+from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
@@ -339,6 +340,31 @@ def virtualmin_server_detail(request: HttpRequest, server_id: str) -> HttpRespon
 # ===============================================================================
 
 
+def account_action_attrs(
+    account: VirtualminAccount, *, protection_url: str, delete_url: str, csrf_token: str
+) -> dict[str, dict[str, object]]:
+    """The protection toggle's and the delete button's per-account values, which the page's confirm functions read."""
+    confirm_text = _("I really am sure I want to do this!")
+    return {
+        "protection": {
+            "data-protection-url": protection_url,
+            "data-csrf": csrf_token,
+            "data-domain": account.domain,
+            "data-protection-operation": "disable" if account.protected_from_deletion else "enable",
+            "data-confirm-title": _("Disable Protection"),
+            "data-confirm-message": _("Deletion protection will be turned off for this account."),
+            "data-confirm-text": confirm_text,
+        },
+        "delete": {
+            "data-delete-url": delete_url,
+            "data-domain": account.domain,
+            "data-confirm-title": _("Delete Account"),
+            "data-confirm-message": _("This action cannot be undone."),
+            "data-confirm-text": confirm_text,
+        },
+    }
+
+
 def _quota_text(megabytes: int | None) -> str:
     """A stored quota as a person reads it: MB below 1 GB, GB with one decimal above.
 
@@ -569,6 +595,12 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "activate_url": reverse("provisioning:virtualmin_account_activate", args=[account.id]),
         "delete_url": reverse("provisioning:virtualmin_account_delete", args=[account.id]),
         "toggle_protection_url": reverse("provisioning:virtualmin_account_toggle_protection", args=[account.id]),
+        "account_actions": account_action_attrs(
+            account,
+            protection_url=reverse("provisioning:virtualmin_account_toggle_protection", args=[account.id]),
+            delete_url=reverse("provisioning:virtualmin_account_delete", args=[account.id]),
+            csrf_token=get_token(request),
+        ),
         "account_name": staff_account_name(account),
         "repair_dns_url": reverse("provisioning:virtualmin_account_repair_dns", args=[account.id]),
     }

@@ -7,6 +7,7 @@ HTMX-powered reusable components for Romanian hosting provider interface
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, fields
 from typing import TYPE_CHECKING, Any
@@ -115,7 +116,8 @@ class ButtonConfig:
     icon_right: bool = False
     disabled: bool = False
     class_: str = ""
-    attrs: str = ""
+    # A literal string (names the component writes are dropped), or a mapping a view builds (they are refused).
+    attrs: str | Mapping[str, object] = ""
     data_action: str = ""
     data_copy: str = ""
     data_invoke: str = ""
@@ -148,6 +150,10 @@ class ButtonConfig:
     alpine_disabled: str = ""
     alpine_show: str = ""
     alpine_text: str = ""
+    # The icon: a catalog size, outline or filled, and classes for the <svg> itself (a hook a script finds).
+    icon_size: str = "sm"
+    icon_style: str = "outline"
+    svg_class: str = ""
 
 
 @dataclass
@@ -277,8 +283,15 @@ def _is_path_on_this_site(value: str) -> bool:
 
 def _check_button(config: ButtonConfig) -> None:
     """Refuse a button that would be unnamed, or would post its form somewhere else."""
-    if config.icon_only and (config.icon not in _ICON_PATHS or not config.aria_label.strip()):
-        message = "{% button %} icon_only needs a catalog icon and a non-blank aria_label"
+    if config.icon_size not in _ICON_SIZES or config.icon_style not in _ICON_STYLES:
+        message = f"{{% button %}} icon_size must be one of {sorted(_ICON_SIZES)} and icon_style one of {_ICON_STYLES}"
+        if settings.DEBUG or getattr(settings, "TESTING", False):
+            raise template.TemplateSyntaxError(message)
+        logger.warning(f"⚠️ [UI] {message}; using the small outline icon")
+        config.icon_size, config.icon_style = "sm", "outline"
+    catalog = _FILLED_ICON_PATHS if config.icon_style == "filled" else _ICON_PATHS
+    if config.icon_only and (config.icon not in catalog or not config.aria_label.strip()):
+        message = "{% button %} icon_only needs an icon in the catalog of its icon_style and a non-blank aria_label"
         if settings.DEBUG or getattr(settings, "TESTING", False):
             raise template.TemplateSyntaxError(message)
         logger.warning(f"⚠️ [UI] {message}; showing the text instead")
@@ -299,6 +312,12 @@ def _check_button(config: ButtonConfig) -> None:
             )
 
 
+def _button_icon_class(config: ButtonConfig) -> str:
+    """The icon's spacing beside a visible label, then the caller's own svg classes."""
+    spacing = "" if config.icon_only else "ml-2 order-2" if config.icon_right else "mr-2"
+    return " ".join(part for part in (spacing, config.svg_class) if part)
+
+
 @register.inclusion_tag("components/button.html")
 def button(
     text: str, *, config: ButtonConfig | None = None, htmx: HTMXAttributes | None = None, **kwargs: Any
@@ -314,13 +333,15 @@ def button(
     Args:
         text: Button text (supports Romanian diacritics)
         variant: primary|secondary|success|warning|danger|info|ghost|link|outline-primary|outline-danger|
-            soft-warning|soft-danger|soft-secondary|inverse
-        size: xs|sm|md|lg|xl
+            soft-warning|soft-danger|soft-secondary|inverse|bare (no look of its own: only the focus ring, the
+            disabled styles and class_, for a control that keeps its own class string)
+        size: xs|sm|md|lg|xl (not applied to bare)
         href: Link URL (creates <a> instead of <button>)
         type: Button type (button|submit|reset)
         hx_*: Full HTMX attribute support
         icon: Icon class name
         icon_right: Position icon on the right
+        icon_size, icon_style, svg_class: the icon's catalog size (sm), outline or filled, and <svg> classes
         disabled: Disable button
         class_: Additional CSS classes
         attrs: Additional HTML attributes
@@ -407,6 +428,117 @@ def button(
         "alpine_show": config.alpine_show,
         "alpine_text": config.alpine_text,
         "hx_disabled_elt": htmx.hx_disabled_elt,
+        "icon_size": config.icon_size,
+        "icon_style": config.icon_style,
+        "icon_class": _button_icon_class(config),
+    }
+
+
+@register.inclusion_tag("components/button.html")
+def icon_button(icon: str, aria_label: str, /, **kwargs: Any) -> dict[str, Any]:
+    """A {% button %} that shows only its icon. The name comes first and can't be blank; it is the tooltip too,
+    unless title gives another.
+
+    Usage:
+        {% trans "Copy CUI" as copy_label %}{% icon_button "copy" copy_label variant="bare" data_copy=cui %}
+    """
+    _reject_unknown("icon_button", kwargs)
+    kwargs.setdefault("title", aria_label)
+    return button(aria_label, icon=icon, icon_only=True, aria_label=aria_label, **kwargs)
+
+
+@register.inclusion_tag("components/toggle_badge.html")
+def toggle_badge(  # noqa: PLR0913
+    label: str,
+    *,
+    pressed: bool,
+    on_text: str,
+    off_text: str,
+    on_variant: str = "success",
+    off_variant: str = "secondary",
+    hx_post: str = "",
+    locked_reason: str = "",
+    html_id: str = "",
+    title: str = "",
+) -> dict[str, Any]:
+    """A flag shown as a badge that flips it in place: the endpoint at hx_post answers with this control again.
+
+    label is the property ("Active") and stays the accessible name whatever the state; aria-pressed and the badge's
+    on_text/off_text say the state. locked_reason disables it, shows why and leaves nothing that posts. html_id lets
+    focus return to the new control after the swap. Always refused without either a local hx_post or a lock: it
+    would look clickable and do nothing.
+
+    Usage:
+        {% toggle_badge active_label pressed=product.is_active on_text=active_label off_text=inactive_label
+           hx_post=toggle_url html_id="active-x" %}
+    """
+    if not str(label).strip():
+        raise template.TemplateSyntaxError("{% toggle_badge %} needs a non-blank label")
+    if not locked_reason and not _is_path_on_this_site(str(hx_post or "")):
+        raise template.TemplateSyntaxError(
+            f"{{% toggle_badge %}} needs hx_post, a path on this site, or a locked_reason; got {hx_post!r}"
+        )
+    return {
+        "label": label,
+        "pressed": bool(pressed),
+        "on_text": on_text,
+        "off_text": off_text,
+        "on_variant": on_variant,
+        "off_variant": off_variant,
+        "hx_post": hx_post,
+        "locked_reason": locked_reason,
+        "html_id": html_id,
+        "title": title,
+    }
+
+
+# A disclosure reads the page's state through a plain property path, and names its region by a plain id.
+_PROPERTY_PATH = re.compile(r"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\Z")
+_ELEMENT_ID = re.compile(r"[A-Za-z][\w-]*\Z")
+
+
+@register.inclusion_tag("components/disclosure.html")
+def disclosure(  # noqa: PLR0913
+    controls: str,
+    open_label: str,
+    closed_label: str,
+    *,
+    expanded_expr: str,
+    toggle_expr: str,
+    icon: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """The button that shows and hides a region the page already shows and hides.
+
+    The page keeps the state, and the region's own x-show stays its only owner: expanded_expr reads that state (a
+    property path such as showAdvanced) and toggle_expr flips it. controls is the region's id. open_label is shown
+    while the region is open (e.g. "Hide options"), closed_label while it is closed. class is the button's look.
+
+    Usage:
+        {% disclosure "advanced-options" hide_label show_label expanded_expr="showAdvanced"
+           toggle_expr="showAdvanced = !showAdvanced" class="flex items-center text-sm text-blue-400" %}
+    """
+    _reject_unknown("disclosure", kwargs)
+    if not (
+        _ELEMENT_ID.fullmatch(str(controls))
+        and str(open_label).strip()
+        and str(closed_label).strip()
+        and _PROPERTY_PATH.fullmatch(str(expanded_expr))
+        and str(toggle_expr).strip()
+        and (not icon or icon in _ICON_PATHS)
+    ):
+        raise template.TemplateSyntaxError(
+            "{% disclosure %} needs a region id, two non-blank labels, a property path as expanded_expr, a "
+            f"toggle_expr and a catalog icon if any; got controls={controls!r} expanded_expr={expanded_expr!r}"
+        )
+    return {
+        "controls": controls,
+        "open_label": open_label,
+        "closed_label": closed_label,
+        "expanded_expr": expanded_expr,
+        "toggle_expr": toggle_expr,
+        "icon": icon,
+        "class": next((kwargs[name] for name in ("class", "class_", "css_class") if kwargs.get(name)), ""),
     }
 
 
@@ -1410,6 +1542,8 @@ _FILLED_ICON_PATHS: dict[str, str | tuple[str, ...]] = {
     "question-mark-circle": "M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-8-3a1 1 0 00-.867.5 1 1 0 11-1.731-1A3 3 0 0113 8a3.001 3.001 0 01-2 2.83V11a1 1 0 11-2 0v-1a1 1 0 011-1 1 1 0 100-2zm0 8a1 1 0 100-2 1 1 0 000 2z",
 }
 
+_ICON_STYLES = ("outline", "filled")
+
 _ICON_SIZES: dict[str, str] = {
     "xs": "w-3 h-3",
     "sm": "w-4 h-4",
@@ -1881,3 +2015,7 @@ _TAG_ARGUMENTS: dict[str, frozenset[str]] = {
     ),
     "form_checkbox": frozenset({"container_class", "css_class", "data_attrs", "disabled", "label", "variant"}),
 }
+
+# icon_button writes these three itself.
+_TAG_ARGUMENTS["icon_button"] = _TAG_ARGUMENTS["button"] - frozenset({"icon", "icon_only", "aria_label"})
+_TAG_ARGUMENTS["disclosure"] = frozenset({"class", "class_", "css_class"})

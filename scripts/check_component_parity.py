@@ -42,6 +42,7 @@ SHARED_COMPONENTS: list[str] = [
     "card.html",
     "checkbox.html",
     "dangerous_action_modal.html",
+    "disclosure.html",
     "empty_state.html",
     "filter_select.html",
     "form_actions.html",
@@ -60,6 +61,7 @@ SHARED_COMPONENTS: list[str] = [
     "step_progress.html",
     "table.html",
     "toast.html",
+    "toggle_badge.html",
 ]
 
 

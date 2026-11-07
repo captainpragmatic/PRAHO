@@ -67,6 +67,17 @@ def _get_accessible_customer_ids(user: User) -> list[int]:
         return [c.id for c in accessible_customers] if accessible_customers else []
 
 
+def _status_action_attrs(service: Service) -> dict[str, str]:
+    """The suspend or reactivate control's confirmation and target, which confirm-navigate reads."""
+    if service.status == "active":
+        prompt, url = _("Suspend service?"), reverse("provisioning:service_suspend", args=[service.pk])
+    elif service.status == "suspended":
+        prompt, url = _("Reactivate service?"), reverse("provisioning:service_activate", args=[service.pk])
+    else:
+        return {}
+    return {"data-confirm": f"{prompt} {service.service_name}", "data-href": url}
+
+
 @login_required
 def service_list(request: HttpRequest) -> HttpResponse:
     """🚀 Display hosting services for user's customers"""
@@ -100,6 +111,7 @@ def service_list(request: HttpRequest) -> HttpResponse:
     prime_service_usage(records)
     for service in records:
         service.__dict__["hosting_allowance_display"] = hosting_limits_summary(service)
+        service.__dict__["status_action_attrs"] = _status_action_attrs(service)
     services_page.object_list = records
 
     # Only staff can manage services (edit/suspend)

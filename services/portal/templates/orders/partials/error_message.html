@@ -18,12 +18,7 @@
       <p class="font-medium">{% trans "Error" %}</p>
       <p class="text-sm opacity-90 mt-1">{{ error }}</p>
     </div>
-    {# tmpl-allow TMPL002: icon-only dismiss button with translated aria-label #}
-    <button data-action="dismiss" data-dismiss-target="#error-notification"
-            class="ml-2 text-white hover:text-gray-300 transition-colors"
-            aria-label="{% trans 'Close notification' %}">
-      <span class="text-lg leading-none">×</span>
-    </button>
+    {% trans "Close notification" as close_label %}{% icon_button "x" close_label variant="bare" class="ml-2 text-white hover:text-gray-300 transition-colors" data_action="dismiss" attrs='data-dismiss-target="#error-notification"' %}
   </div>
 
 </div>
