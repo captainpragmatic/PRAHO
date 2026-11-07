@@ -77,10 +77,10 @@
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="flex flex-wrap gap-1">
                 <!-- Active Status Toggle -->
-                {% url 'products:product_toggle_active' slug=product.slug as active_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_active" enabled=product.is_active toggle_url=active_toggle_url locked=catalog_lock control_id="active-"|add:product.slug %}
+                {% with product_key=product.pk|stringformat:"s" %}{% url 'products:product_toggle_active' slug=product.slug as active_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_active" enabled=product.is_active toggle_url=active_toggle_url locked=catalog_lock control_id="toggle-active-d-"|add:product_key %}{% endwith %}
 
                 <!-- Public Status Toggle -->
-                {% url 'products:product_toggle_public' slug=product.slug as public_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_public" enabled=product.is_public toggle_url=public_toggle_url locked=catalog_lock control_id="public-"|add:product.slug %}
+                {% with product_key=product.pk|stringformat:"s" %}{% url 'products:product_toggle_public' slug=product.slug as public_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_public" enabled=product.is_public toggle_url=public_toggle_url locked=catalog_lock control_id="toggle-public-d-"|add:product_key %}{% endwith %}
               </div>
             </td>
 
@@ -168,10 +168,10 @@
           {% badge product.get_product_type_display variant="secondary" %}
 
           <!-- Active Status Toggle -->
-          {% url 'products:product_toggle_active' slug=product.slug as active_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_active" enabled=product.is_active toggle_url=active_toggle_url locked=catalog_lock control_id="active-m-"|add:product.slug %}
+          {% with product_key=product.pk|stringformat:"s" %}{% url 'products:product_toggle_active' slug=product.slug as active_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_active" enabled=product.is_active toggle_url=active_toggle_url locked=catalog_lock control_id="toggle-active-m-"|add:product_key %}{% endwith %}
 
           <!-- Public Status Toggle -->
-          {% url 'products:product_toggle_public' slug=product.slug as public_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_public" enabled=product.is_public toggle_url=public_toggle_url locked=catalog_lock control_id="public-m-"|add:product.slug %}
+          {% with product_key=product.pk|stringformat:"s" %}{% url 'products:product_toggle_public' slug=product.slug as public_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_public" enabled=product.is_public toggle_url=public_toggle_url locked=catalog_lock control_id="toggle-public-m-"|add:product_key %}{% endwith %}
         </div>
 
         <!-- Pricing Section -->

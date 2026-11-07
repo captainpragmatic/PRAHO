@@ -42,6 +42,12 @@ def parse(html: str) -> tuple[dict[str, str | None], Parser]:
     return buttons[0], parsed
 
 
+def parse_all(html: str) -> list[tuple[str, dict[str, str | None]]]:
+    parsed = Parser()
+    parsed.feed(html)
+    return parsed.elements
+
+
 def render(arguments: str, **context: object) -> tuple[dict[str, str | None], Parser]:
     html = Template(
         '{% load i18n ui_components %}{% trans "Active" as label %}{% toggle_badge label ' + arguments + " %}"
@@ -137,3 +143,40 @@ class ToggleViewFragmentTests(TestCase):
                 button, _parsed = parse(self.toggle("active", hostile))
                 self.assertNotIn("id", button)
                 self.assertNotIn("onfocus", button)
+
+
+class ListPageControlIdTests(TestCase):
+    """The list page renders a desktop and a mobile toggle per flag; every id is unique and comes back from the view."""
+
+    def setUp(self) -> None:
+        admin = User.objects.create_user(
+            email="toggle-ids@example.com", password="Toggle-pass123!", is_staff=True, is_superuser=True
+        )
+        self.client.force_login(admin)
+
+    def control_ids(self) -> list[str]:
+        html = self.client.get(reverse("products:product_list_htmx"), HTTP_HX_REQUEST="true").content.decode()
+        return [
+            attrs["id"] or ""
+            for tag, attrs in parse_all(html)
+            if tag == "button" and "id" in attrs and "toggle-" in (attrs.get("hx-post") or "")
+        ]
+
+    def test_slugs_that_look_like_a_layout_prefix_get_distinct_ids(self) -> None:
+        for slug in ("foo", "m-foo"):
+            Product.objects.create(name=slug, slug=slug, product_type="shared_hosting")
+        ids = self.control_ids()
+        self.assertEqual(len(ids), 8)  # 2 products x (active, public) x (desktop, mobile)
+        self.assertEqual(len(set(ids)), 8, ids)
+
+    def test_the_view_echoes_every_id_the_list_page_generates_even_for_the_longest_slug(self) -> None:
+        product = Product.objects.create(name="Long", slug="s" * 100, product_type="shared_hosting")
+        ids = self.control_ids()
+        self.assertEqual(len(ids), 4)
+        for control_id in ids:
+            with self.subTest(control_id=control_id):
+                field = "active" if "-active-" in control_id else "public"
+                path = reverse(f"products:product_toggle_{field}", kwargs={"slug": product.slug})
+                response = self.client.post(path, HTTP_HX_REQUEST="true", HTTP_HX_TRIGGER=control_id)
+                button, _parsed = parse(response.content.decode().strip())
+                self.assertEqual(button.get("id"), control_id)
