@@ -9,6 +9,7 @@ from html.parser import HTMLParser
 
 from django.template import Context, Template, TemplateSyntaxError
 from django.test import SimpleTestCase
+from django.utils.safestring import mark_safe
 
 DEFAULTS = 'expanded_expr="showAdvanced" toggle_expr="showAdvanced = !showAdvanced"'
 
@@ -96,3 +97,29 @@ class DisclosureTests(SimpleTestCase):
         ):
             with self.subTest(arguments=arguments), self.assertRaises(TemplateSyntaxError):
                 render(arguments)
+
+
+class TemplateEscapingTests(SimpleTestCase):
+    """The template escapes every value itself, as button.html does its alpine_* expressions.
+
+    The tag already refuses an expression that isn't a property path; this renders the template directly, so a value
+    that got past the tag (or a safe-marked {% trans … as v %} class) still can't close its attribute.
+    """
+
+    def test_a_double_quote_cannot_break_out_of_any_attribute(self) -> None:
+        hostile = 'x" onclick="evil()'
+        html = Template(
+            '{% include "components/disclosure.html" with controls=hostile expanded_expr=hostile '
+            'toggle_expr=hostile class=hostile_class open_label="Hide" closed_label="Show" %}'
+        ).render(Context({"hostile": hostile, "hostile_class": mark_safe(hostile)}))  # noqa: S308
+        parsed = Parser()
+        parsed.feed(html)
+        for tag, attrs in parsed.elements:
+            with self.subTest(tag=tag):
+                self.assertNotIn("onclick", attrs)
+        button = next(attrs for tag, attrs in parsed.elements if tag == "button")
+        self.assertEqual(button[":aria-expanded"], hostile)
+        self.assertEqual(button["aria-controls"], hostile)
+        self.assertTrue((button["class"] or "").endswith(hostile))
+        shown = [attrs["x-show"] for tag, attrs in parsed.elements if tag == "span" and attrs.get("x-show")]
+        self.assertEqual(shown, ["!" + hostile, hostile])

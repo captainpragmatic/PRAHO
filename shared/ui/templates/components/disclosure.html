@@ -4,11 +4,11 @@ DISCLOSURE COMPONENT
 ===============================================================================
 The button that shows and hides a region the page already shows and hides. It never touches the region: the page's
 own state and the region's x-show stay the only owner. expanded_expr reads that state and toggle_expr flips it;
-controls is the region's id. open_label shows while the region is open, closed_label while it is closed.
+controls is the region's id. Every value is escaped here, once, as in button.html. open_label shows while the region is open, closed_label while it is closed.
 Usage: {% disclosure "advanced-options" hide_label show_label expanded_expr="showAdvanced" toggle_expr="showAdvanced = !showAdvanced" %}
 {% endcomment %}
 {% load ui_components %}
-<button type="button" class="ui-btn focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 {{ class }}" aria-controls="{{ controls }}" :aria-expanded="{{ expanded_expr }}" @click="{{ toggle_expr|force_escape }}">
-  <span class="inline-flex items-center gap-1">{% if icon %}{% icon icon size="sm" %}{% endif %}<span x-show="!{{ expanded_expr }}">{{ closed_label|force_escape }}</span><span x-show="{{ expanded_expr }}" x-cloak>{{ open_label|force_escape }}</span></span>
-  <span class="ml-1 inline-flex transition-transform" :class="{ 'rotate-180': {{ expanded_expr }} }">{% icon "chevron-down" size="sm" %}</span>
+<button type="button" class="ui-btn focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 {{ class|force_escape }}" aria-controls="{{ controls|force_escape }}" :aria-expanded="{{ expanded_expr|force_escape }}" @click="{{ toggle_expr|force_escape }}">
+  <span class="inline-flex items-center gap-1">{% if icon %}{% icon icon size="sm" %}{% endif %}<span x-show="!{{ expanded_expr|force_escape }}">{{ closed_label|force_escape }}</span><span x-show="{{ expanded_expr|force_escape }}" x-cloak>{{ open_label|force_escape }}</span></span>
+  <span class="ml-1 inline-flex transition-transform" :class="{ 'rotate-180': {{ expanded_expr|force_escape }} }">{% icon "chevron-down" size="sm" %}</span>
 </button>
