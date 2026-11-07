@@ -54,6 +54,7 @@ from apps.settings.services import SettingsService
 from apps.users.models import CustomerMembership, User
 from tests.helpers.task_queue import quiet_task_queue
 from tests.infrastructure import test_hosting_native_fresh_workflow as fresh
+from tests.infrastructure.native_dns_fixtures import published_dns
 from tests.provisioning.test_hosting_limit_execution import HostingLimitWorkerFixture
 from tests.provisioning.test_virtualmin_tasks import VirtualminTaskTestBase
 
@@ -398,10 +399,7 @@ class NativePeerIntentTests(TestCase):
         with (
             patch.object(native_driver(), "client", return_value=cloud),
             patch("apps.infrastructure.dns_gateway.get_dns_gateway", return_value=dns),
-            patch(
-                "apps.infrastructure.native_workflow.socket.getaddrinfo",
-                return_value=[(None, None, None, None, ("192.0.2.23", 10000))],
-            ),
+            published_dns("192.0.2.23"),
         ):
             export_peer(native_authority(self.path), self.peer_path)
             exported = native_authority(self.peer_path)

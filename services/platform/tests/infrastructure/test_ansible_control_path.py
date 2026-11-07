@@ -212,6 +212,20 @@ class FailureDetailTests(TestCase):
         self.assertIn("AssertionError: Tenant or unknown homes exist: lost+found", detail)
         self.assertNotIn("inline script", detail)
 
+    def test_the_end_of_a_long_stderr_is_kept(self) -> None:
+        noise = "    W: a repository warning that repeats\n" * 14
+        stdout = (
+            "fatal: [node]: FAILED! =>\n"
+            "    msg: non-zero return code\n"
+            "    rc: 100\n"
+            "    stderr: |-\n"
+            + noise.replace("    W:", "        W:")
+            + "        E: Unable to locate package php8.5-fpm\n"
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("E: Unable to locate package php8.5-fpm", detail)
+        self.assertIn("rc: 100", detail)
+
     def test_a_reason_given_only_on_stdout_is_kept(self) -> None:
         stdout = (
             "fatal: [node]: FAILED! =>\n"

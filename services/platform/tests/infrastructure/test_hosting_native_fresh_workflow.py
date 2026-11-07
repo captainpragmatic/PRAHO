@@ -36,6 +36,7 @@ from apps.infrastructure.native_lab import native_authority, native_driver
 from apps.infrastructure.native_workflow import require_fixture_dns, run_workflow
 from apps.provisioning.virtualmin_models import VirtualminServer
 from apps.settings.services import SettingsService
+from tests.infrastructure.native_dns_fixtures import published_dns
 
 
 class NativeFreshFixtureTests(TestCase):
@@ -204,22 +205,10 @@ class NativeFreshFixtureTests(TestCase):
             self.authority, dns_zone="lab.example.com", provider_token="native-fixture-token", zone_id="owned-zone"
         )
         deployment.ipv4_address, deployment.ipv6_address = "192.0.2.13", "2001:db8::13"
-        with patch(
-            "apps.infrastructure.native_workflow.socket.getaddrinfo",
-            return_value=[
-                (None, None, None, None, ("192.0.2.13", 10000)),
-                (None, None, None, None, ("2001:db8::13", 10000, 0, 0)),
-            ],
-        ):
+        with published_dns("192.0.2.13", "2001:db8::13"):
             require_fixture_dns(deployment, "192.0.2.13")
         with (
-            patch(
-                "apps.infrastructure.native_workflow.socket.getaddrinfo",
-                return_value=[
-                    (None, None, None, None, ("192.0.2.13", 10000)),
-                    (None, None, None, None, ("2001:db8::99", 10000, 0, 0)),
-                ],
-            ),
+            published_dns("192.0.2.13", "2001:db8::99"),
             self.assertRaisesMessage(ValueError, "exact owned VM"),
         ):
             require_fixture_dns(deployment, "192.0.2.13")
@@ -287,12 +276,7 @@ class NativeFreshFixtureTests(TestCase):
         provider.ssh_keys.get_by_id.return_value = live_key
         with (
             patch.object(native_driver(), "client", return_value=provider),
-            patch(
-                "apps.infrastructure.native_workflow.socket.getaddrinfo",
-                return_value=[
-                    (None, None, None, None, ("192.0.2.13", 10000)),
-                ],
-            ),
+            published_dns("192.0.2.13"),
         ):
             with self.assertRaisesMessage(ValueError, "creation records"):
                 publish_fresh_vm(self.authority, provider_token="native-fixture-token", zone_id="owned-zone")

@@ -81,6 +81,14 @@ def _first_failure_line(stdout: str, stderr: str) -> str:
     return next((line.strip()[:300] for line in stderr.splitlines() if line.strip()), "")
 
 
+def _bounded_field(text: str, budget: int = 400) -> str:
+    """Keep a field's start and, where it is long, its end: the final error usually follows warnings or a traceback."""
+    if len(text) <= budget:
+        return text
+    head = budget // 4
+    return f"{text[:head]} … {text[-(budget - head - 3) :]}"
+
+
 def failure_detail(stdout: str, stderr: str) -> str:
     """Why a playbook failed: its first error or fatal task, else the start of stderr.
 
@@ -112,7 +120,7 @@ def failure_detail(stdout: str, stderr: str) -> str:
                 current = key if key in {"msg", "rc", "stderr", "stdout"} else ""
             if current:
                 fields.setdefault(current, []).append(line.strip())
-        fatal = " ".join([raw[at].strip()] + [" ".join(lines)[:400] for lines in fields.values()])
+        fatal = " ".join([raw[at].strip()] + [_bounded_field(" ".join(lines)) for lines in fields.values()])
     parts = [first] + [part[:900] for part in (origin, fatal) if part and part[:300] not in first]
     return " | ".join(part for part in parts if part)[:1500]
 
