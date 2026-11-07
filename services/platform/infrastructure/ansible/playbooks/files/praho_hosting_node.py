@@ -224,6 +224,7 @@ def _write(path: Path, contents: str) -> None:
 
 
 TUNNEL_ACCOUNT = "praho-webmin-tunnel"
+_TUNNEL_HOME_CONTENT = frozenset({".ssh", ".ssh/authorized_keys", ".bashrc", ".profile", ".bash_logout"})
 
 
 def tenant_homes(home: Path) -> list[str]:
@@ -241,10 +242,14 @@ def _own_tunnel_home(entry: Path) -> bool:
         account = pwd.getpwnam(TUNNEL_ACCOUNT)
     except KeyError:
         return False
+    # Only what the ssh-hardening role creates: the skeleton files and the enrolled operator keys.
+    content = list(entry.rglob("*"))
     return (
         account.pw_dir == f"/home/{TUNNEL_ACCOUNT}"
-        and account.pw_shell == "/usr/sbin/nologin"
+        and account.pw_shell in {"/usr/sbin/nologin", "/sbin/nologin"}
         and entry.stat().st_uid == account.pw_uid
+        and {str(item.relative_to(entry)) for item in content} <= _TUNNEL_HOME_CONTENT
+        and not any(item.is_symlink() for item in content)
     )
 
 

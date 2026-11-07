@@ -211,3 +211,22 @@ class FailureDetailTests(TestCase):
         detail = failure_detail(stdout, "")
         self.assertIn("AssertionError: Tenant or unknown homes exist: lost+found", detail)
         self.assertNotIn("inline script", detail)
+
+    def test_a_reason_given_only_on_stdout_is_kept(self) -> None:
+        stdout = (
+            "fatal: [node]: FAILED! =>\n"
+            "    cmd: [/usr/bin/check]\n"
+            "    msg: non-zero return code\n"
+            "    rc: 3\n"
+            "    stderr: ''\n"
+            "    stdout: the disk layout is unsupported\n"
+            "    stdout_lines: [the disk layout is unsupported]\n"
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("the disk layout is unsupported", detail)
+        self.assertNotIn("/usr/bin/check", detail)
+        # A huge stdout is bounded and does not push out msg or rc.
+        flood = stdout.replace("the disk layout is unsupported", "x" * 5000)
+        bounded = failure_detail(flood, "")
+        self.assertIn("rc: 3", bounded)
+        self.assertLessEqual(len(bounded), 1500)

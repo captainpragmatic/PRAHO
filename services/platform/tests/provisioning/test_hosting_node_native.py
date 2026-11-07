@@ -120,16 +120,46 @@ class HostingNodeNativeTests(SimpleTestCase):
             (Path(root) / "home" / "praho-webmin-tunnel" / ".ssh").mkdir(parents=True)
             self.assertTrue((Path(root) / "home" / "praho-webmin-tunnel").is_dir())
             self._run_guard(root, self._tunnel_account(os.getuid()))  # does not raise
-            for account in (
-                self._tunnel_account(os.getuid() + 1),
-                self._tunnel_account(os.getuid(), home="/home/other"),
-                self._tunnel_account(os.getuid(), login_shell="/bin/bash"),
+            self._run_guard(root, self._tunnel_account(os.getuid(), login_shell="/sbin/nologin"))  # as the policy
+            for account, why in (
+                (self._tunnel_account(os.getuid() + 1), "owner"),
+                (self._tunnel_account(os.getuid(), home="/home/other"), "home"),
+                (self._tunnel_account(os.getuid(), login_shell="/bin/bash"), "shell"),
             ):
-                with self.subTest(account=account), self.assertRaisesRegex(AssertionError, "praho-webmin-tunnel"):
+                with self.subTest(why=why), self.assertRaisesRegex(AssertionError, rf"praho-webmin-tunnel \({why}"):
                     self._run_guard(root, account)
             (Path(root) / "home" / "tenant").mkdir()
             with self.assertRaisesRegex(AssertionError, r"Tenant or unknown homes exist: tenant$"):
                 self._run_guard(root, self._tunnel_account(os.getuid()))
+
+    def test_the_first_install_guard_refuses_a_tunnel_home_holding_anything_else(self):
+        import os  # noqa: PLC0415
+
+        with TemporaryDirectory() as root:
+            tunnel = Path(root) / "home" / "praho-webmin-tunnel"
+            (tunnel / ".ssh").mkdir(parents=True)
+            (tunnel / ".ssh" / "authorized_keys").write_text("key\n")
+            for name in (".bashrc", ".profile", ".bash_logout"):
+                (tunnel / name).write_text("")
+            self._run_guard(root, self._tunnel_account(os.getuid()))  # a fresh tunnel home passes
+            for extra in ("public_html", ".ssh/id_rsa"):
+                with self.subTest(extra=extra):
+                    (tunnel / extra).write_text("legacy")
+                    with self.assertRaisesRegex(AssertionError, "praho-webmin-tunnel"):
+                        self._run_guard(root, self._tunnel_account(os.getuid()))
+                    (tunnel / extra).unlink()
+            with patch.object(self.native.pwd, "getpwnam", return_value=self._tunnel_account(os.getuid())):
+                self.assertEqual(self.native.tenant_homes(Path(root) / "home"), [])
+                (tunnel / "public_html").write_text("legacy")
+                self.assertEqual(self.native.tenant_homes(Path(root) / "home"), ["praho-webmin-tunnel"])
+
+    def test_the_first_install_guard_refuses_a_checked_path_that_is_not_a_directory(self):
+        for checked in ("home", "var/lib/mysql", "etc/webmin/virtual-server/domains"):
+            with self.subTest(checked=checked), TemporaryDirectory() as root:
+                (Path(root) / checked).parent.mkdir(parents=True, exist_ok=True)
+                (Path(root) / checked).write_text("not a directory")
+                with self.assertRaisesRegex(AssertionError, "not a directory"):
+                    self._run_guard(root, None)
 
     def test_the_first_install_guard_refuses_a_tunnel_named_symlink(self):
         import os  # noqa: PLC0415

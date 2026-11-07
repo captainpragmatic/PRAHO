@@ -95,10 +95,11 @@ def failure_detail(stdout: str, stderr: str) -> str:
     fatal = ""
     if at is not None:
         # The YAML callback writes the result on the following indented lines. Keep the fields that say why
-        # (msg, rc, stderr); the echoed cmd and stdout can be long enough to crowd them out.
-        block = [raw[at].strip()]
+        # (msg, rc, stderr, stdout), each within its own budget, so a long one cannot crowd out the others;
+        # drop the echoed cmd.
+        fields: dict[str, list[str]] = {}
         key_indent: int | None = None
-        keep = False
+        current = ""
         for line in raw[at + 1 :]:
             if line and not line.startswith((" ", "\t")):
                 break
@@ -107,10 +108,11 @@ def failure_detail(stdout: str, stderr: str) -> str:
             indent = len(line) - len(line.lstrip())
             key_indent = indent if key_indent is None else key_indent
             if indent == key_indent:
-                keep = line.strip().split(":", 1)[0] in {"msg", "rc", "stderr"}
-            if keep:
-                block.append(line.strip())
-        fatal = " ".join(block)
+                key = line.strip().split(":", 1)[0]
+                current = key if key in {"msg", "rc", "stderr", "stdout"} else ""
+            if current:
+                fields.setdefault(current, []).append(line.strip())
+        fatal = " ".join([raw[at].strip()] + [" ".join(lines)[:400] for lines in fields.values()])
     parts = [first] + [part[:900] for part in (origin, fatal) if part and part[:300] not in first]
     return " | ".join(part for part in parts if part)[:1500]
 
