@@ -11,6 +11,7 @@ No database access — all tests use SimpleTestCase + locmem cache.
 """
 
 import json
+from html.parser import HTMLParser
 from unittest.mock import MagicMock, patch
 
 from django.test import Client, TestCase, override_settings
@@ -191,6 +192,42 @@ class TestMiniCartJustAdded(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertNotIn('data-just-added="true"', content)
+
+
+class _Elements(HTMLParser):
+    def __init__(self, markup: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.elements: list[tuple[str, dict[str, str]]] = []
+        self.feed(markup)
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self.elements.append((tag, {name: value or "" for name, value in attrs}))
+
+
+@override_settings(**_CACHE_SETTINGS)
+class TestMiniCartRemovePayload(TestCase):
+    """Each mini-cart Remove posts its own item and the page's CSRF token, both built by the view (#821)."""
+
+    setUp = TestMiniCartJustAdded.setUp
+    _populate_cart = TestMiniCartJustAdded._populate_cart
+
+    def test_the_remove_control_posts_its_item_with_the_csrf_header(self) -> None:
+        self._populate_cart("shared-hosting-basic")
+        response = self.client.get("/order/partials/mini-cart/")
+        self.assertEqual(response.status_code, 200)
+        controls = [
+            attrs
+            for tag, attrs in _Elements(response.content.decode()).elements
+            if tag == "button" and attrs.get("hx-target") == "#cart-widget"
+        ]
+        self.assertEqual(len(controls), 1)
+        self.assertEqual(
+            json.loads(controls[0]["hx-vals"]), {"product_slug": "shared-hosting-basic", "billing_period": "monthly"}
+        )
+        self.assertTrue(json.loads(controls[0]["hx-headers"])["X-CSRFToken"])
+        self.assertEqual(controls[0]["aria-label"], "Remove from cart")
+        # The session's own item is not changed by the copy the view renders.
+        self.assertNotIn("remove_vals", self.client.session["praho_portal_cart_v1"]["items"][0])
 
 
 # ---------------------------------------------------------------------------

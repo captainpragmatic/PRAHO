@@ -216,35 +216,13 @@
                             {% include "provisioning/virtualmin/partials/account_state_actions.html" %}
 
                             <!-- Protection Toggle -->
-                            {# tmpl-allow TMPL002: seven data-* attributes carry per-account values (URL, CSRF token, domain, translated confirm texts); the button tag's attrs takes one literal string the template can't build #}
-                            <button class="w-full px-4 py-2 text-sm font-medium rounded-lg transition-colors {% if account.protected_from_deletion %}text-orange-400 bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20{% else %}text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20{% endif %}"
-                                    data-protection-url="{{ toggle_protection_url }}"
-                                    data-csrf="{{ csrf_token }}"
-                                    data-domain="{{ account.domain }}"
-                                    data-protection-operation="{% if account.protected_from_deletion %}disable{% else %}enable{% endif %}"
-                                    data-confirm-title="{% trans 'Disable Protection' %}"
-                                    data-confirm-message="{% trans 'Deletion protection will be turned off for this account.' %}"
-                                    data-confirm-text="{% trans 'I really am sure I want to do this!' %}"
-                                    data-action="invoke" data-invoke="confirmProtectionToggleAction">
-                                {% if account.protected_from_deletion %}
-                                    {% icon "lock" %} {% trans "Disable Protection" %}
-                                {% else %}
-                                    {% icon "lock" %} {% trans "Enable Protection" %}
-                                {% endif %}
-                            </button>
+                            {% if account.protected_from_deletion %}{% trans "Disable Protection" as protection_label %}{% button protection_label variant="bare" icon="lock" icon_size="md" data_action="invoke" data_invoke="confirmProtectionToggleAction" attrs=account_actions.protection class="w-full px-4 py-2 text-sm font-medium rounded-lg transition-colors text-orange-400 bg-orange-500/10 border border-orange-500/20 hover:bg-orange-500/20" %}
+                            {% else %}{% trans "Enable Protection" as protection_label %}{% button protection_label variant="bare" icon="lock" icon_size="md" data_action="invoke" data_invoke="confirmProtectionToggleAction" attrs=account_actions.protection class="w-full px-4 py-2 text-sm font-medium rounded-lg transition-colors text-blue-400 bg-blue-500/10 border border-blue-500/20 hover:bg-blue-500/20" %}
+                            {% endif %}
 
                             <!-- Delete Account -->
                             {% if account.can_be_deleted %}
-                            {# tmpl-allow TMPL002: data-delete-url, data-domain and translated data-confirm-* attributes carry per-account values; the button tag's attrs takes one literal string the template can't build #}
-                            <button class="w-full px-4 py-2 text-sm font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 rounded-lg transition-colors"
-                                    data-delete-url="{{ delete_url }}"
-                                    data-domain="{{ account.domain }}"
-                                    data-confirm-title="{% trans 'Delete Account' %}"
-                                    data-confirm-message="{% trans 'This action cannot be undone.' %}"
-                                    data-confirm-text="{% trans 'I really am sure I want to do this!' %}"
-                                    data-action="invoke" data-invoke="confirmAccountDeleteAction">
-                                {% icon "x" %} {% trans "Delete Account" %}
-                            </button>
+                            {% trans "Delete Account" as delete_label %}{% button delete_label variant="bare" icon="x" icon_size="md" class="w-full px-4 py-2 text-sm font-medium text-red-400 bg-red-500/10 border border-red-500/20 hover:bg-red-500/20 rounded-lg transition-colors" data_action="invoke" data_invoke="confirmAccountDeleteAction" attrs=account_actions.delete %}
                             {% else %}
                             {# tmpl-allow TMPL002: holds a second (Protected) span beside its label; the button tag renders one text and one icon #}
                             <button class="w-full px-4 py-2 text-sm font-medium text-slate-500 bg-slate-500/10 border border-slate-500/20 rounded-lg cursor-not-allowed"

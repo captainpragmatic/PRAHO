@@ -37,10 +37,7 @@
       </div>
 
       <!-- Remove Item Button -->
-      {# tmpl-allow TMPL002: icon-only remove button with HTMX payload, CSRF header and translated aria-label #}
-      <button hx-post="{% url 'orders:remove_from_cart' %}" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-vals='{"product_slug": "{{ item.product_slug|escapejs }}", "billing_period": "{{ item.billing_period|escapejs }}"}' hx-target="#cart-widget" hx-swap="outerHTML" data-htmx-after="cart-updated" hx-confirm="{% trans 'Are you sure you want to remove this product from cart?' %}" class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1" aria-label="{% trans 'Remove from cart' %}">
-        {% icon "x" size="sm" %}
-      </button>
+      {% url 'orders:remove_from_cart' as remove_url %}{% trans 'Are you sure you want to remove this product from cart?' as remove_confirm %}{% trans "Remove from cart" as remove_label %}{% icon_button "x" remove_label variant="bare" class="ml-2 text-slate-400 hover:text-red-400 transition-colors p-1" hx_post=remove_url hx_headers=remove_headers hx_vals=item.remove_vals hx_target="#cart-widget" hx_swap="outerHTML" hx_confirm=remove_confirm attrs='data-htmx-after="cart-updated"' %}
     </div>
     {% endfor %}
 

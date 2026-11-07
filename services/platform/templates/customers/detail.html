@@ -210,7 +210,7 @@
                         <div class="flex flex-col sm:items-end gap-2">
                             <!-- Role Badge with Dropdown -->
                             <div class="relative" x-data="{ open: false }">
-                                {# tmpl-allow TMPL002: @click and @click.away Alpine bindings; components accept no executable attributes (apps/ui/attributes.py) #}
+                                {# tmpl-allow TMPL002: role drop-down trigger with two icons (the role icon and a trailing chevron) around the role name and @click.away on itself; the button tag renders one icon and one label #}
                                 <button @click="open = !open" @click.away="open = false"
                                     class="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors
                                            {% if membership.role == 'owner' %}bg-purple-900 text-purple-200 hover:bg-purple-800
@@ -415,8 +415,7 @@
                     <div class="flex">
                         <span class="text-sm font-medium text-slate-400 w-32">{% trans 'CUI/CIF' %}:</span>
                         <span class="text-sm text-white font-mono">{{ tax_profile.cui }}</span>
-                        {# tmpl-allow TMPL002: icon-only inline copy affordance named by aria-label; the button tag renders a variant-coloured padded button with a visible text label #}
-                        <button type="button" data-copy="{{ tax_profile.cui }}" data-action="copy" class="ml-2 text-slate-500 hover:text-white transition-colors" aria-label="{% trans 'Copy CUI' %}" title="{% trans 'Copy' %}">{% icon "copy" size="sm" %}</button>
+                        {% trans "Copy CUI" as copy_cui_label %}{% trans "Copy" as copy_tip %}{% icon_button "copy" copy_cui_label variant="bare" class="ml-2 text-slate-500 hover:text-white transition-colors" data_copy=tax_profile.cui data_action="copy" title=copy_tip %}
                     </div>
                     {% endif %}
                     {% if tax_profile.vat_number %}

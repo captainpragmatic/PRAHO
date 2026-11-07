@@ -204,7 +204,7 @@ class TestCartFlowFixes(TestCase):
         mini_cart_sites = [
             line
             for line in (partials_path / "mini_cart_content.html").read_text().splitlines()
-            if "remove_from_cart" in line and "hx-post" in line
+            if "remove_from_cart" in line and ("hx-post" in line or "hx_post=" in line)  # icon_button since #821
         ]
         self.assertEqual(len(mini_cart_sites), 1)
         self.assertIn('data-htmx-after="cart-updated"', mini_cart_sites[0])
@@ -239,8 +239,7 @@ class TestCartFlowFixes(TestCase):
     def test_dead_cart_event_wiring_removed(self) -> None:
         portal_root = Path(__file__).resolve().parents[2]
         template_sources = [
-            template_path.read_text()
-            for template_path in (portal_root / "templates" / "orders").rglob("*.html")
+            template_path.read_text() for template_path in (portal_root / "templates" / "orders").rglob("*.html")
         ]
         views_source = (portal_root / "apps" / "orders" / "views.py").read_text()
 

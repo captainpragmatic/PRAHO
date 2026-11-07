@@ -85,15 +85,11 @@
 
           <!-- Backup Codes Grid -->
           <div class="grid grid-cols-2 gap-3" id="backup-codes-grid">
-            {% for code in backup_codes %}
+            {% for code, copy_attrs in backup_code_rows %}
             <div class="bg-slate-900 rounded-lg p-4 border border-slate-600 hover:border-green-500 transition-colors group">
               <div class="flex items-center justify-between">
                 <code class="text-lg font-mono text-green-400 select-all">{{ code }}</code>
-                {# tmpl-allow TMPL002: icon-only copy button (clipboard icon, no text) whose data-code comes from the loop variable; the button tag renders a text label and its attrs cannot interpolate #}
-                <button data-action="invoke" data-invoke="copyCodeAction" data-code="{{ code }}"
-                        class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-green-400 transition-all ml-2">
-                  {% icon "clipboard" %}
-                </button>
+                {% trans "Copy" as copy_code_label %}{% icon_button "clipboard" copy_code_label variant="bare" icon_size="md" class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-green-400 transition-all ml-2" data_action="invoke" data_invoke="copyCodeAction" attrs=copy_attrs %}
               </div>
             </div>
             {% endfor %}

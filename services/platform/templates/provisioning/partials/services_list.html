@@ -151,21 +151,9 @@
               {% url 'provisioning:service_edit' service.pk as edit_url %}
               {% trans "Edit" as edit_label %}{% button edit_label variant="secondary" href=edit_url %}
               {% if service.status == 'active' %}
-              {# tmpl-allow TMPL002: icon-only button whose data-confirm joins a translated prompt and the service name; the button tag always renders a text label beside its icon #}
-              <button data-action="confirm-navigate"
-                      data-confirm="{% trans 'Suspend service?' %} {{ service.service_name }}"
-                      data-href="{% url 'provisioning:service_suspend' service.pk %}"
-                      class="text-red-400 hover:text-red-300 transition-colors">
-                {% icon "clock" %}
-              </button>
+              {% trans "Suspend" as suspend_label %}{% icon_button "clock" suspend_label variant="bare" icon_size="md" class="text-red-400 hover:text-red-300 transition-colors" data_action="confirm-navigate" attrs=service.status_action_attrs %}
               {% elif service.status == 'suspended' %}
-              {# tmpl-allow TMPL002: icon-only button whose data-confirm joins a translated prompt and the service name; the button tag always renders a text label beside its icon #}
-              <button data-action="confirm-navigate"
-                      data-confirm="{% trans 'Reactivate service?' %} {{ service.service_name }}"
-                      data-href="{% url 'provisioning:service_activate' service.pk %}"
-                      class="text-green-400 hover:text-green-300 transition-colors">
-                {% icon "services" %}
-              </button>
+              {% trans "Reactivate" as reactivate_label %}{% icon_button "services" reactivate_label variant="bare" icon_size="md" class="text-green-400 hover:text-green-300 transition-colors" data_action="confirm-navigate" attrs=service.status_action_attrs %}
               {% endif %}
             </div>
           </td>
@@ -230,21 +218,9 @@
           {% url 'provisioning:service_edit' service.pk as edit_url_m %}
           {% trans "Edit" as edit_label_m %}{% button edit_label_m variant="secondary" href=edit_url_m %}
           {% if service.status == 'active' %}
-          {# tmpl-allow TMPL002: icon-only button whose data-confirm joins a translated prompt and the service name; the button tag always renders a text label beside its icon #}
-          <button data-action="confirm-navigate"
-                  data-confirm="{% trans 'Suspend service?' %} {{ service.service_name }}"
-                  data-href="{% url 'provisioning:service_suspend' service.pk %}"
-                  class="text-red-400 hover:text-red-300 transition-colors text-sm">
-            {% icon "clock" %}
-          </button>
+          {% trans "Suspend" as suspend_label %}{% icon_button "clock" suspend_label variant="bare" icon_size="md" class="text-red-400 hover:text-red-300 transition-colors text-sm" data_action="confirm-navigate" attrs=service.status_action_attrs %}
           {% elif service.status == 'suspended' %}
-          {# tmpl-allow TMPL002: icon-only button whose data-confirm joins a translated prompt and the service name; the button tag always renders a text label beside its icon #}
-          <button data-action="confirm-navigate"
-                  data-confirm="{% trans 'Reactivate service?' %} {{ service.service_name }}"
-                  data-href="{% url 'provisioning:service_activate' service.pk %}"
-                  class="text-green-400 hover:text-green-300 transition-colors text-sm">
-            {% icon "services" %}
-          </button>
+          {% trans "Reactivate" as reactivate_label %}{% icon_button "services" reactivate_label variant="bare" icon_size="md" class="text-green-400 hover:text-green-300 transition-colors text-sm" data_action="confirm-navigate" attrs=service.status_action_attrs %}
           {% endif %}
         </div>
         {% endif %}
