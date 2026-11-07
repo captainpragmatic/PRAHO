@@ -139,7 +139,8 @@ class HostingNodeNativeTests(SimpleTestCase):
             tunnel = Path(root) / "home" / "praho-webmin-tunnel"
             (tunnel / ".ssh").mkdir(parents=True)
             (tunnel / ".ssh" / "authorized_keys").write_text("key\n")
-            for name in (".bashrc", ".profile", ".bash_logout"):
+            # As on an Ubuntu 26.04 cloud image: the skeleton files plus the cloud locale-test marker.
+            for name in (".bashrc", ".profile", ".bash_logout", ".cloud-locale-test.skip"):
                 (tunnel / name).write_text("")
             self._run_guard(root, self._tunnel_account(os.getuid()))  # a fresh tunnel home passes
             for extra in ("public_html", ".ssh/id_rsa"):

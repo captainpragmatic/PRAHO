@@ -224,7 +224,10 @@ def _write(path: Path, contents: str) -> None:
 
 
 TUNNEL_ACCOUNT = "praho-webmin-tunnel"
-_TUNNEL_HOME_CONTENT = frozenset({".ssh", ".ssh/authorized_keys", ".bashrc", ".profile", ".bash_logout"})
+# What the ssh-hardening role creates, plus the Ubuntu cloud image's empty locale-test marker.
+_TUNNEL_HOME_CONTENT = frozenset(
+    {".ssh", ".ssh/authorized_keys", ".bashrc", ".profile", ".bash_logout", ".cloud-locale-test.skip"}
+)
 
 
 def tenant_homes(home: Path) -> list[str]:

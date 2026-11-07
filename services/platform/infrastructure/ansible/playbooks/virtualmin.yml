@@ -86,8 +86,9 @@
                     return 'shell ' + account.pw_shell
                 if entry.stat().st_uid != account.pw_uid:
                     return 'owner uid %d, account uid %d' % (entry.stat().st_uid, account.pw_uid)
-                # Only what the role creates: the skeleton files and the enrolled operator keys.
-                expected = {'.ssh', '.ssh/authorized_keys', '.bashrc', '.profile', '.bash_logout'}
+                # Only what the role creates (the skeleton files, the enrolled operator keys) and the Ubuntu cloud
+                # image's empty locale-test marker.
+                expected = {'.ssh', '.ssh/authorized_keys', '.bashrc', '.profile', '.bash_logout', '.cloud-locale-test.skip'}
                 items = list(entry.rglob('*'))
                 extra = sorted({str(item.relative_to(entry)) for item in items} - expected)
                 if extra or any(item.is_symlink() for item in items):
