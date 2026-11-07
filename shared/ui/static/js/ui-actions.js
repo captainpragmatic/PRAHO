@@ -267,15 +267,25 @@
       keepFocus.set(detail.xhr, elt.id);
     }
   });
-  document.addEventListener("htmx:afterSettle", function (event) {
-    var xhr = event.detail && event.detail.xhr;
+  function restoreKeptFocus(xhr) {
     if (!keepFocus || !xhr || !keepFocus.has(xhr)) {
       return;
     }
-    var replacement = document.getElementById(keepFocus.get(xhr));
+    var target = document.getElementById(keepFocus.get(xhr));
     keepFocus.delete(xhr);
-    if (replacement && (document.activeElement === document.body || !document.activeElement)) {
-      replacement.focus();
+    if (target && (document.activeElement === document.body || !document.activeElement)) {
+      target.focus();
+    }
+  }
+  document.addEventListener("htmx:afterSettle", function (event) {
+    restoreKeptFocus(event.detail && event.detail.xhr);
+  });
+  // A failed request (an error status, a network error, an abort or a timeout) swaps nothing, so no settle follows.
+  // htmx has already re-enabled the same element when afterRequest fires; give focus back to it.
+  document.addEventListener("htmx:afterRequest", function (event) {
+    var detail = event.detail || {};
+    if (!detail.successful) {
+      restoreKeptFocus(detail.xhr);
     }
   });
 

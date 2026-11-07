@@ -3,6 +3,7 @@
 toggle_badge is disabled while its request runs (hx-disabled-elt), which drops focus to the body before htmx could
 restore it, so ui-actions.js remembers the focused control per request and focuses the same-id replacement when that
 request settles. Two toggles in flight at once, or an unrelated request settling first, must not lose or steal it.
+A failed request swaps nothing and never settles, so its afterRequest gives focus back to the re-enabled control.
 """
 
 from pathlib import Path
@@ -71,6 +72,31 @@ results.otherToggleDoesNotStealFocus = document.activeElement === d;
 d = swap(d);
 fire("htmx:afterSettle", {xhr: xhrD});
 results.laterFocusedToggleKeepsFocus = document.activeElement === d;
+
+// A failed request (400, 403, a network error) swaps nothing, so no settle follows: htmx re-enables the same element
+// and fires afterRequest; focus goes back to it. A later settle of that request has nothing left to restore.
+function blurred(el) { if (document.activeElement === el) document.activeElement = body; }
+let e = control("toggle-e", true); byId[e.id] = e; e.focus();
+const xhrE = {};
+fire("htmx:beforeRequest", {elt: e, xhr: xhrE});
+blurred(e);
+fire("htmx:afterRequest", {elt: e, xhr: xhrE, successful: false, failed: true});
+results.failedResponseReturnsFocus = document.activeElement === e;
+let f = control("toggle-f", true); byId[f.id] = f; f.focus();
+const xhrF = {};
+fire("htmx:beforeRequest", {elt: f, xhr: xhrF});
+blurred(f);
+fire("htmx:afterRequest", {elt: f, xhr: xhrF, successful: false});  // sendError/abort/timeout carry no `failed`
+results.sendErrorReturnsFocus = document.activeElement === f;
+// A successful request is left to its settle: afterRequest does not restore early or consume it.
+let g = control("toggle-g", true); byId[g.id] = g; g.focus();
+const xhrG = {};
+fire("htmx:beforeRequest", {elt: g, xhr: xhrG});
+g = swap(g);
+fire("htmx:afterRequest", {elt: g, xhr: xhrG, successful: true, failed: false});
+results.successWaitsForSettle = document.activeElement === body;
+fire("htmx:afterSettle", {xhr: xhrG});
+results.successSettleRestores = document.activeElement === g;
 process.stdout.write(JSON.stringify(results));
 """
 
@@ -84,5 +110,9 @@ class KeepFocusTests(SimpleTestCase):
                 "ownSettleRestoresFocus": True,
                 "otherToggleDoesNotStealFocus": True,
                 "laterFocusedToggleKeepsFocus": True,
+                "failedResponseReturnsFocus": True,
+                "sendErrorReturnsFocus": True,
+                "successWaitsForSettle": True,
+                "successSettleRestores": True,
             },
         )
