@@ -256,19 +256,24 @@
   });
 
   // A control that replaces itself (toggle_badge, data-keep-focus) is disabled while its request runs, which takes
-  // focus off it before htmx can hand focus to the new copy. Note who had focus when the request began, and give it
-  // to the element with the same id once the swap settles, unless focus has gone somewhere else meanwhile.
-  var keepFocusId = "";
+  // focus off it before htmx can hand focus to the new copy. Note who had focus when each request began, keyed by
+  // that request's xhr, and give it to the element with the same id once that request's swap settles, unless focus
+  // has gone somewhere else meanwhile. Another request's settle never consumes it.
+  var keepFocus = typeof WeakMap === "function" ? new WeakMap() : null;
   document.addEventListener("htmx:beforeRequest", function (event) {
-    var elt = event.detail && event.detail.elt;
-    keepFocusId = elt && elt.id && elt.hasAttribute("data-keep-focus") && document.activeElement === elt ? elt.id : "";
+    var detail = event.detail || {};
+    var elt = detail.elt;
+    if (keepFocus && detail.xhr && elt && elt.id && elt.hasAttribute("data-keep-focus") && document.activeElement === elt) {
+      keepFocus.set(detail.xhr, elt.id);
+    }
   });
-  document.addEventListener("htmx:afterSettle", function () {
-    if (!keepFocusId) {
+  document.addEventListener("htmx:afterSettle", function (event) {
+    var xhr = event.detail && event.detail.xhr;
+    if (!keepFocus || !xhr || !keepFocus.has(xhr)) {
       return;
     }
-    var replacement = document.getElementById(keepFocusId);
-    keepFocusId = "";
+    var replacement = document.getElementById(keepFocus.get(xhr));
+    keepFocus.delete(xhr);
     if (replacement && (document.activeElement === document.body || !document.activeElement)) {
       replacement.focus();
     }
