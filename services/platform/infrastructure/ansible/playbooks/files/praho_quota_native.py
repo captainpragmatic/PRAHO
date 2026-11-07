@@ -82,7 +82,14 @@ def _fields(path: Path) -> dict[str, str]:
     return result
 
 
-def _run(arguments: list[str], *, timeout: int = 20, lock_fd: int | None = None, payload: str | None = None) -> str:
+def _run(
+    arguments: list[str],
+    *,
+    timeout: int = 20,
+    lock_fd: int | None = None,
+    payload: str | None = None,
+    returncodes: frozenset[int] = frozenset({0}),
+) -> str:
     # All executables/options are fixed here; tenant metadata is passed as argv,
     # never shell text. Diagnostics remain on the node and never enter a receipt.
     deadline = _PROBE_DEADLINE.get()
@@ -99,9 +106,16 @@ def _run(arguments: list[str], *, timeout: int = 20, lock_fd: int | None = None,
         pass_fds=() if lock_fd is None else (lock_fd,),
         env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"},
     )
-    if result.returncode or len(result.stdout.encode()) > LIMIT:
+    if result.returncode not in returncodes or len(result.stdout.encode()) > LIMIT:
         raise ValueError("The native quota operation did not complete")
     return result.stdout.strip()
+
+
+def _quota_class_on(kind: str, flag: str) -> bool:
+    """Whether one kernel quota class is on for /. quotaon -p exits 1 when it is on (quota-tools 4.09), so the
+    printed state decides; any other non-zero exit is still a failed operation."""
+    state = _run(["/usr/sbin/quotaon", "-p", flag, "/"], returncodes=frozenset({0, 1}))
+    return re.fullmatch(kind + r" quota on [^\r\n]+ is on", state) is not None
 
 
 def _integer(value: str | None) -> int:
@@ -413,8 +427,7 @@ class NativeQuotaBackend:
         if not isinstance(expected, dict) or any(identity.get(key) != value for key, value in expected.items()):
             raise ValueError("The native quota owner, installation or filesystem changed")
         for kind, flag in (("user", "-u"), ("group", "-g")):
-            state = _run(["/usr/sbin/quotaon", "-p", flag, "/"])
-            if re.fullmatch(kind + r" quota on [^\r\n]+ is on", state) is None:
+            if not _quota_class_on(kind, flag):
                 raise ValueError("Both kernel user and group quota enforcement must already be on")
         user_quota = _kernel_quota(device, account.pw_uid, group=False)
         group_quota = _kernel_quota(device, account.pw_gid, group=True)

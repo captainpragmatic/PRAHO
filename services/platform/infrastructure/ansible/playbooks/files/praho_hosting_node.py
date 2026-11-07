@@ -174,7 +174,13 @@ def _apply_notification_source_patches() -> None:
         _write(ssl_path, corrected_ssl)
 
 
-def _run(argv: list[str], *, payload: str | None = None, pass_fds: tuple[int, ...] = ()) -> str:
+def _run(
+    argv: list[str],
+    *,
+    payload: str | None = None,
+    pass_fds: tuple[int, ...] = (),
+    returncodes: frozenset[int] = frozenset({0}),
+) -> str:
     result = subprocess.run(  # noqa: S603 -- Fixed executables; validated native values are argv, never shell.
         argv,
         input=payload,
@@ -185,9 +191,16 @@ def _run(argv: list[str], *, payload: str | None = None, pass_fds: tuple[int, ..
         pass_fds=pass_fds,
         env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"},
     )
-    if result.returncode or len(result.stdout.encode()) > LIMIT:
+    if result.returncode not in returncodes or len(result.stdout.encode()) > LIMIT:
         raise ValueError("Native hosting policy operation did not complete")
     return result.stdout.strip()
+
+
+def _quota_class_on(kind: str, flag: str) -> bool:
+    """Whether one kernel quota class is on for /. quotaon -p exits 1 when it is on (quota-tools 4.09), so the
+    printed state decides; any other non-zero exit is still a failed operation."""
+    state = _run(["/usr/sbin/quotaon", "-p", flag, "/"], returncodes=frozenset({0, 1}))
+    return re.fullmatch(kind + r" quota on [^\r\n]+ is on", state) is not None
 
 
 def _read(path: Path, *, limit: int = LIMIT) -> str:
@@ -659,8 +672,7 @@ def inspect(identity: str) -> dict[str, object]:
         if fs.get("fstype") != "ext4" or fs.get("target") != "/":
             raise ValueError("The managed root filesystem no longer matches the qualified layout")
         for kind, flag in (("user", "-u"), ("group", "-g")):
-            enabled = _run(["/usr/sbin/quotaon", "-p", flag, "/"])
-            if re.fullmatch(kind + r" quota on [^\r\n]+ is on", enabled) is None:
+            if not _quota_class_on(kind, flag):
                 raise ValueError("Both kernel quota classes must remain active")
         boot = _read(Path("/proc/sys/kernel/random/boot_id")).strip()
         if (
