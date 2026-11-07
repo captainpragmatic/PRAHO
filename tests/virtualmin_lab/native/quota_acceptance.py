@@ -78,13 +78,31 @@ def domain_row(domain: str) -> dict[str, str]:
     return rows[0]
 
 
+def unexpected_domains(rows: list[dict[str, str]], fixtures: tuple[str, str], fqdn: str) -> list[str]:
+    """Domains other than this run's fixtures and Virtualmin's own default hostname domain.
+
+    Virtualmin creates that domain for the node's hostname (it backs the hostname certificate): it is marked
+    defaulthostdomain=1 and owned by _hostname with the hidden /home/._hostname."""
+    return [
+        row.get("dom", "")
+        for row in rows
+        if row.get("dom") not in fixtures
+        and not (
+            row.get("defaulthostdomain") == "1"
+            and row.get("user") == "_hostname"
+            and row.get("home") == "/home/._hostname"
+            and row.get("dom") == fqdn
+        )
+    ]
+
+
 def prepare(run_id: str) -> None:
     from praho_quota_native import _fields  # noqa: PLC0415 -- Exact native inventory.
 
     domains = fixture_domains(run_id)
     existing = [_fields(path) for path in Path("/etc/webmin/virtual-server/domains").iterdir() if path.name.isdigit()]
-    if any(row.get("dom") not in domains for row in existing):
-        raise AssertionError("This is no longer an empty owned native test node")
+    if unexpected := unexpected_domains(existing, domains, Path("/etc/hostname").read_text().strip()):
+        raise AssertionError("This is no longer an empty owned native test node: " + ", ".join(unexpected[:5]))
     for index, domain in enumerate(domains):
         if any(row.get("dom") == domain for row in existing):
             continue

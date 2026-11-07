@@ -130,6 +130,27 @@ class NativeQuotaDatabaseProofTests(SimpleTestCase):
         with self.assertRaisesRegex(AssertionError, "did not prove EDQUOT"):
             boundary.exercise()
 
+    def test_only_fixture_domains_and_virtualmin_s_own_hostname_domain_are_expected(self):
+        fqdn = "node-001.native-acc.example.test"
+        fixtures = ("q776aaaa.example.invalid", "q776aaaan.example.invalid")
+        hostname_domain = {
+            "dom": fqdn,
+            "user": "_hostname",
+            "home": "/home/._hostname",
+            "defaulthostdomain": "1",
+        }
+        unexpected = self.acceptance.unexpected_domains
+        self.assertEqual(unexpected([hostname_domain, {"dom": fixtures[0]}], fixtures, fqdn), [])
+        for impostor in (
+            {**hostname_domain, "defaulthostdomain": "0"},
+            {**hostname_domain, "user": "tenant"},
+            {**hostname_domain, "home": "/home/tenant"},
+            {**hostname_domain, "dom": "other.example.test"},
+            {"dom": "tenant.example.test"},
+        ):
+            with self.subTest(impostor=impostor):
+                self.assertEqual(unexpected([impostor], fixtures, fqdn), [impostor["dom"]])
+
     def test_sql_error_1227_is_not_os_edquot(self):
         self.assert_not_edquot("ERROR 1227 (42000): Access denied; you need a privilege")
 
