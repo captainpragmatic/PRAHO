@@ -177,9 +177,13 @@ def unprivileged(domain: str, *, php: bool) -> None:
         "--bounding-set=-all",
     ]
     if php:
+        # At the cap the kernel returns EDQUOT to PHP's write(), but PHP 8.5's fwrite reports it as a short count
+        # (0) with no error_get_last() message (traced on Ubuntu 26.04). So any short write counts as the denial,
+        # and the check below then requires usage at the verified hard cap, which tells a quota stop apart from
+        # any other write failure.
         program = r"""$p=$argv[1]; $f=fopen($p,'wb'); $hit=false;
 for($i=0;$i<128;$i++) { $n=@fwrite($f,str_repeat('x',1048576));
-if($n!==1048576) {$e=error_get_last();$hit=(bool)preg_match('/(quota exceeded|errno=122)/i',$e['message']??'');break;}
+if($n!==1048576) {$hit=true;break;}
 if(!fflush($f)||!fsync($f)){break;}}
 fclose($f); if(!$hit){fwrite(STDERR,'PHP did not encounter EDQUOT');exit(7);} echo posix_geteuid();"""
         result = run([*prefix, "/usr/bin/php8.5", "-r", program, str(target)])
