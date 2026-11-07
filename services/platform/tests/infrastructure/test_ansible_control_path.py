@@ -244,6 +244,16 @@ class FailureDetailTests(TestCase):
             self.assertIn(end, detail)
         self.assertLessEqual(len(detail), 1500)
 
+    def test_a_reason_after_character_200_survives_deduplication(self) -> None:
+        reason = "Permission denied"
+        padding = "x" * 190
+        for stdout in (
+            f"fatal: [node]: FAILED! =>\n    changed: false\n    msg: {padding} {reason}\n",
+            f'fatal: [node]: FAILED! => {{"changed": false, "msg": "{padding} {reason}"}}\n',
+        ):
+            with self.subTest(form="yaml" if "=>\n" in stdout else "json"):
+                self.assertIn(reason, failure_detail(stdout, ""))
+
     def test_a_reason_given_only_on_stdout_is_kept(self) -> None:
         stdout = (
             "fatal: [node]: FAILED! =>\n"
