@@ -226,6 +226,24 @@ class FailureDetailTests(TestCase):
         self.assertIn("E: Unable to locate package php8.5-fpm", detail)
         self.assertIn("rc: 100", detail)
 
+    def test_several_long_fields_each_keep_their_end(self) -> None:
+        def field(name: str, end: str) -> str:
+            return f"    {name}: |-\n" + "        filler text that is not the reason\n" * 30 + f"        {end}\n"
+
+        stdout = (
+            "[ERROR]: Task failed: Module failed: non-zero return code\n"
+            "Origin: /x/playbooks/virtualmin.yml:63:7\n"
+            "fatal: [node]: FAILED! =>\n"
+            + field("msg", "MSG-END")
+            + "    rc: 1\n"
+            + field("stderr", "STDERR-END")
+            + field("stdout", "STDOUT-END")
+        )
+        detail = failure_detail(stdout, "")
+        for end in ("MSG-END", "STDERR-END", "STDOUT-END", "rc: 1", "virtualmin.yml:63:7"):
+            self.assertIn(end, detail)
+        self.assertLessEqual(len(detail), 1500)
+
     def test_a_reason_given_only_on_stdout_is_kept(self) -> None:
         stdout = (
             "fatal: [node]: FAILED! =>\n"
