@@ -27,15 +27,33 @@ class _AttributeParser(HTMLParser):
                 self.attributes = attrs
 
 
+def _mapping_attributes(raw: Mapping[object, object], owned: frozenset[str]) -> list[tuple[str, str | None]]:
+    """A mapping is built in Python, so a clash in it is a bug in the view: refuse it rather than drop a value."""
+    attributes: list[tuple[str, str | None]] = []
+    seen: set[str] = set()
+    for key, value in raw.items():
+        name = str(key).lower()
+        if name in seen:
+            raise ValueError(f"attrs names {name!r} twice (names are case-insensitive)")
+        if name == "data-action" or name in owned:
+            raise ValueError(f"attrs names {name!r}, which the component writes itself")
+        seen.add(name)
+        if value is not None:
+            attributes.append((name, str(value)))
+    return attributes
+
+
 def serialize_button_attributes(raw: object, owned: frozenset[str] = frozenset()) -> str:
     """Escape values, retain syntax quotes, and discard executable attributes.
 
     `owned` names attributes the component writes itself from an explicit argument this call uses;
     attrs never adds a second copy of one. data-action always belongs to the data_action argument.
+    A literal string drops such a name (the argument wins); a mapping refuses it, and refuses two
+    spellings of one name, with ValueError.
     """
     attributes: list[tuple[str, str | None]]
     if isinstance(raw, Mapping):
-        attributes = [(str(key).lower(), str(value)) for key, value in raw.items() if value is not None]
+        attributes = _mapping_attributes(raw, owned)
     else:
         parser = _AttributeParser()
         parser.feed("<button " + str(raw or "") + ">")

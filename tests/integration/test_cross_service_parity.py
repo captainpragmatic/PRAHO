@@ -125,6 +125,47 @@ class TestButtonTagParity(TestCase):
                 self.assertEqual(platform[part], portal[part])
 
 
+# The tags #821 added. Each is compared as written: its parameters and their defaults, the extra arguments it
+# accepts, the checks it runs and what it hands its template (or the call it delegates to).
+NEW_TAGS = ("icon_button", "toggle_badge", "disclosure")
+
+
+def _tag_contract(service: str, tag: str) -> dict[str, object]:
+    tree = ast.parse((REPO_ROOT / f"services/{service}/apps/ui/templatetags/ui_components.py").read_text())
+    contract: dict[str, object] = {}
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and node.name in {tag, f"_check_{tag}"}:
+            body = node.body[1:] if ast.get_docstring(node) else node.body
+            contract[node.name] = (
+                [ast.unparse(decorator) for decorator in node.decorator_list],
+                ast.unparse(node.args),
+                [ast.unparse(statement) for statement in body],
+            )
+        if (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "_TAG_ARGUMENTS"
+            and isinstance(node.value, ast.Dict)
+        ):
+            for key, value in zip(node.value.keys, node.value.values, strict=True):
+                if isinstance(key, ast.Constant) and key.value == tag:
+                    contract["accepted"] = ast.unparse(value)
+        if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == f"_TAG_ARGUMENTS['{tag}']":
+            contract["accepted"] = ast.unparse(node.value)
+    return contract
+
+
+class TestNewTagParity(TestCase):
+    """icon_button, toggle_badge and disclosure are the same code in both services (Contract 1 of #821)."""
+
+    def test_each_new_tag_is_the_same_in_both_services(self) -> None:
+        for tag in NEW_TAGS:
+            with self.subTest(tag=tag):
+                platform, portal = _tag_contract("platform", tag), _tag_contract("portal", tag)
+                self.assertIn(tag, platform, f"the platform has no {{% {tag} %}}")
+                self.assertEqual(platform, portal)
+
+
 class TestCustomerViewReturnPath(TestCase):
     """An ended customer view sends its tab to the customer's Platform page, a path the portal builds itself."""
 

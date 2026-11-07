@@ -77,34 +77,10 @@
             <td class="px-6 py-4 whitespace-nowrap">
               <div class="flex flex-wrap gap-1">
                 <!-- Active Status Toggle -->
-                {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
-                <button class="toggle-switch"{% if catalog_lock %} type="button" disabled title="{{ catalog_lock }}"{% else %}
-                        hx-post="{% url 'products:product_toggle_active' slug=product.slug %}" hx-sync="this:drop"
-                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-target="this"
-                        hx-swap="outerHTML"
-                        title="{% trans 'Toggle Active Status' %}"{% endif %}>
-                  {% if product.is_active %}
-                    {% trans "Active" as bt1 %}{% badge bt1 variant="success" %}
-                  {% else %}
-                    {% trans "Inactive" as bt2 %}{% badge bt2 variant="danger" %}
-                  {% endif %}
-                </button>
+                {% url 'products:product_toggle_active' slug=product.slug as active_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_active" enabled=product.is_active toggle_url=active_toggle_url locked=catalog_lock control_id="active-"|add:product.slug %}
 
                 <!-- Public Status Toggle -->
-                {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
-                <button class="toggle-switch"{% if catalog_lock %} type="button" disabled title="{{ catalog_lock }}"{% else %}
-                        hx-post="{% url 'products:product_toggle_public' slug=product.slug %}" hx-sync="this:drop"
-                        hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'
-                        hx-target="this"
-                        hx-swap="outerHTML"
-                        title="{% trans 'Toggle Public Visibility' %}"{% endif %}>
-                  {% if product.is_public %}
-                    {% trans "Public" as bt3 %}{% badge bt3 variant="info" %}
-                  {% else %}
-                    {% trans "Private" as bt4 %}{% badge bt4 variant="warning" %}
-                  {% endif %}
-                </button>
+                {% url 'products:product_toggle_public' slug=product.slug as public_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_public" enabled=product.is_public toggle_url=public_toggle_url locked=catalog_lock control_id="public-"|add:product.slug %}
               </div>
             </td>
 
@@ -192,32 +168,10 @@
           {% badge product.get_product_type_display variant="secondary" %}
 
           <!-- Active Status Toggle -->
-          {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
-          <button class="toggle-switch"{% if catalog_lock %} type="button" disabled title="{{ catalog_lock }}"{% else %}
-                  hx-post="{% url 'products:product_toggle_active' slug=product.slug %}" hx-sync="this:drop"
-                  hx-target="this"
-                  hx-swap="outerHTML"
-                  title="{% trans 'Toggle Active Status' %}"{% endif %}>
-            {% if product.is_active %}
-              {% trans "Active" as bt5 %}{% badge bt5 variant="success" %}
-            {% else %}
-              {% trans "Inactive" as bt6 %}{% badge bt6 variant="danger" %}
-            {% endif %}
-          </button>
+          {% url 'products:product_toggle_active' slug=product.slug as active_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_active" enabled=product.is_active toggle_url=active_toggle_url locked=catalog_lock control_id="active-m-"|add:product.slug %}
 
           <!-- Public Status Toggle -->
-          {# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
-          <button class="toggle-switch"{% if catalog_lock %} type="button" disabled title="{{ catalog_lock }}"{% else %}
-                  hx-post="{% url 'products:product_toggle_public' slug=product.slug %}" hx-sync="this:drop"
-                  hx-target="this"
-                  hx-swap="outerHTML"
-                  title="{% trans 'Toggle Public Visibility' %}"{% endif %}>
-            {% if product.is_public %}
-              {% trans "Public" as bt7 %}{% badge bt7 variant="info" %}
-            {% else %}
-              {% trans "Private" as bt8 %}{% badge bt8 variant="warning" %}
-            {% endif %}
-          </button>
+          {% url 'products:product_toggle_public' slug=product.slug as public_toggle_url %}{% include "products/partials/status_toggle.html" with field="is_public" enabled=product.is_public toggle_url=public_toggle_url locked=catalog_lock control_id="public-m-"|add:product.slug %}
         </div>
 
         <!-- Pricing Section -->

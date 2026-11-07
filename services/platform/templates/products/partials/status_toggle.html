@@ -1,7 +1,6 @@
-{% load ui_components %}
-{# tmpl-allow TMPL002: its content is a badge component (structured inner HTML) and it replaces itself via hx-swap="outerHTML"; the button tag renders one text and one icon #}
-<button type="button" class="toggle-switch" hx-post="{{ toggle_url }}"
-  hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' hx-target="this" hx-swap="outerHTML" hx-sync="this:drop"
-  aria-pressed="{{ enabled|yesno:'true,false' }}">
-  {% if enabled %}{% badge label variant="success" %}{% else %}{% badge label variant="secondary" %}{% endif %}
-</button>
+{% load i18n ui_components %}
+{# A product flag's toggle. The product pages include it and the toggle views return it, so a swap re-renders the same control. #}
+{% if field == "is_active" %}{% trans "Active" as label %}{% trans "Inactive" as off_text %}{% trans "Toggle Active Status" as tip %}{% toggle_badge label pressed=enabled on_text=label off_text=off_text on_variant="success" off_variant="danger" hx_post=toggle_url locked_reason=locked html_id=control_id title=tip %}
+{% elif field == "is_public" %}{% trans "Public" as label %}{% trans "Private" as off_text %}{% trans "Toggle Public Visibility" as tip %}{% toggle_badge label pressed=enabled on_text=label off_text=off_text on_variant="info" off_variant="warning" hx_post=toggle_url locked_reason=locked html_id=control_id title=tip %}
+{% else %}{% trans "Featured" as label %}{% trans "Not Featured" as off_text %}{% toggle_badge label pressed=enabled on_text=label off_text=off_text on_variant="success" off_variant="secondary" hx_post=toggle_url locked_reason=locked html_id=control_id %}
+{% endif %}
