@@ -24,6 +24,7 @@ from django.contrib import messages
 from django.core.exceptions import ValidationError
 from django.db import Error as DatabaseError
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.middleware.csrf import get_token
 from django.shortcuts import redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -1350,9 +1351,18 @@ def mini_cart_content(request: HttpRequest) -> HttpResponse:
     cart = GDPRCompliantCartSession(request.session)
     just_added_slug: str = request.GET.get("just_added", "")
 
+    # Each item's remove control posts its own product and period; copies, so the session's items stay as they are.
+    cart_items = [
+        {
+            **item,
+            "remove_vals": json.dumps({"product_slug": item["product_slug"], "billing_period": item["billing_period"]}),
+        }
+        for item in cart.get_items()[:MINI_CART_MAX_ITEMS]
+    ]
     context = {
         "cart": cart,
-        "cart_items": cart.get_items()[:MINI_CART_MAX_ITEMS],
+        "cart_items": cart_items,
+        "remove_headers": json.dumps({"X-CSRFToken": get_token(request)}),
         "total_items": cart.get_item_count(),
         "show_view_all": cart.get_item_count() > MINI_CART_MAX_ITEMS,
         "just_added_slug": just_added_slug,

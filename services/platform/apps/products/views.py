@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from django.contrib import messages
 from django.core.paginator import Paginator
@@ -337,22 +338,23 @@ def product_edit(request: HttpRequest, slug: str) -> HttpResponse:
 # ===============================================================================
 
 
+# The id of the control that posted (htmx sends it as HX-Trigger), echoed so focus returns to the new control.
+_TOGGLE_CONTROL_ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,99}\Z")
+
+
 def _toggle_response(request: HttpRequest, product: Product, field: str, message: str | Promise) -> HttpResponse:
-    """HTMX swaps HTML into the button; JSON remains available to API callers."""
+    """HTMX swaps the page's own toggle for the new state over the old one; JSON remains available to API callers."""
     enabled = getattr(product, field)
     if request.headers.get("HX-Request") == "true":
-        labels = {
-            "is_active": (_("Active"), _("Inactive")),
-            "is_public": (_("Public"), _("Private")),
-            "is_featured": (_("Featured"), _("Not Featured")),
-        }
+        trigger = request.headers.get("HX-Trigger", "")
         return render(
             request,
             "products/partials/status_toggle.html",
             {
                 "toggle_url": request.path,
                 "enabled": enabled,
-                "label": labels[field][0 if enabled else 1],
+                "field": field,
+                "control_id": trigger if _TOGGLE_CONTROL_ID.fullmatch(trigger) else "",
             },
         )
     return json_success({field: enabled, "message": message})

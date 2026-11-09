@@ -2,11 +2,7 @@
 {% load ui_components %}
 <aside class="col-span-12 lg:col-span-3" x-data="settingsSidebar">
   <div class="bg-slate-800 rounded-lg border border-slate-700 p-4 lg:sticky lg:top-4">
-    {# tmpl-allow TMPL002: @click Alpine binding and an x-text open/closed indicator span; components accept no executable attributes (apps/ui/attributes.py) #}
-    <button type="button" class="lg:hidden w-full flex items-center justify-between text-sm font-medium text-white mb-3" @click="navOpen = !navOpen">
-      <span>{% icon "menu" size="sm" %} {% trans "Settings menu" %}</span>
-      <span x-text="navOpen ? '−' : '+'"></span>
-    </button>
+    {% trans "Settings menu" as settings_menu_label %}{% disclosure "settings-nav" settings_menu_label settings_menu_label expanded_expr="navOpen" toggle_expr="navOpen = !navOpen" icon="menu" class="lg:hidden w-full flex items-center justify-between text-sm font-medium text-white mb-3" %}
     {% trans 'Search settings' as search_settings_label %}
     {% trans 'Search settings…' as search_settings_placeholder %}
     {% url 'settings:search' as settings_search_url %}
@@ -15,7 +11,7 @@
     {% if is_admin %}
     <a href="{% url 'settings:setup_checklist' %}" class="block px-3 py-2 mb-3 rounded-md text-sm font-semibold text-blue-300">{% trans "Setup checklist" %}</a>
     {% endif %}
-    <nav class="space-y-5" x-show="navOpen" x-cloak x-transition.opacity>
+    <nav id="settings-nav" class="space-y-5" x-show="navOpen" x-cloak x-transition.opacity>
       {% for zone in nav_zones %}
       <div>
         <p class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">{{ zone.label }}</p>

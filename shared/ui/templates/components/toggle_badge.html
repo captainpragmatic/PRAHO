@@ -1,0 +1,15 @@
+{% comment %}
+===============================================================================
+TOGGLE BADGE COMPONENT
+===============================================================================
+A flag shown as a badge that flips it in place. The endpoint at hx_post answers with this control for the new state,
+which replaces this one (outerHTML); keep the same html_id so focus comes back to it (ui-actions.js, data-keep-focus). hx-sync drops a second click
+while one is in flight, since the endpoint inverts the flag, and hx-disabled-elt disables the control until the answer
+arrives. The name is the stable property label; aria-pressed and the badge text say the state. A locked control is
+disabled, shows locked_reason, and carries nothing that posts.
+Usage: {% toggle_badge active_label pressed=product.is_active on_text=active_label off_text=inactive_label hx_post=url html_id="active-x" %}
+{% endcomment %}
+{% load ui_components %}
+<button type="button"{% if html_id %} id="{{ html_id }}" data-keep-focus{% endif %} class="ui-btn toggle-switch focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 disabled:cursor-not-allowed" aria-label="{{ label|force_escape }}" aria-pressed="{{ pressed|yesno:'true,false' }}"{% if locked_reason %} disabled title="{{ locked_reason|force_escape }}"{% else %} hx-post="{{ hx_post|force_escape }}" hx-target="this" hx-swap="outerHTML" hx-sync="this:drop" hx-disabled-elt="this"{% if title %} title="{{ title|force_escape }}"{% endif %}{% endif %}>
+  {% if pressed %}{% badge on_text variant=on_variant %}{% else %}{% badge off_text variant=off_variant %}{% endif %}
+</button>

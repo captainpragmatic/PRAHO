@@ -284,7 +284,16 @@ class Wp16AccountOrdersTests(SimpleTestCase):
         source = self.render(
             "orders/partials/mini_cart_content.html",
             {
-                "cart_items": [{"product_slug": "hosting", "billing_period": "annual", "product_name": "Hosting"}],
+                # The view builds each item's payload and the CSRF header (#821); TestMiniCartRemovePayload pins that.
+                "cart_items": [
+                    {
+                        "product_slug": "hosting",
+                        "billing_period": "annual",
+                        "product_name": "Hosting",
+                        "remove_vals": json.dumps({"product_slug": "hosting", "billing_period": "annual"}),
+                    }
+                ],
+                "remove_headers": json.dumps({"X-CSRFToken": "test-token"}),
                 "total_items": 1,
             },
         )

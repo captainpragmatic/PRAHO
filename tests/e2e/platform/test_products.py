@@ -552,11 +552,12 @@ def test_product_htmx_status_toggle_has_csrf(monitored_staff_page: Page) -> None
     toggle_count = toggle_buttons.count()
     assert toggle_count > 0, "Product detail should have HTMX toggle buttons"
 
-    # Verify each toggle button has hx-headers with CSRFToken
+    # Verify each toggle button sends a CSRFToken header: its own hx-headers, or the nearest ancestor's (htmx
+    # inherits it; the page gives htmx the token on <body> since the toggles became toggle_badge, #821)
     for i in range(toggle_count):
         button = toggle_buttons.nth(i)
-        hx_headers = button.get_attribute("hx-headers")
-        assert hx_headers is not None, f"Toggle button {i} missing hx-headers attribute"
+        hx_headers = button.evaluate("el => el.closest('[hx-headers]')?.getAttribute('hx-headers') ?? null")
+        assert hx_headers is not None, f"Toggle button {i} sends no hx-headers"
         assert "CSRFToken" in hx_headers or "csrftoken" in hx_headers.lower(), (
             f"Toggle button {i} hx-headers missing CSRFToken: {hx_headers}"
         )

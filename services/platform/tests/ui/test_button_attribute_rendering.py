@@ -54,3 +54,43 @@ class ButtonAttributeRenderingTests(SimpleTestCase):
         parsed = AttributeParser()
         parsed.feed(html)
         self.assertEqual(parsed.buttons[0].get("hx-include"), "#audit-filters")
+
+
+class AttributeMappingTests(SimpleTestCase):
+    """A view-built `attrs` mapping is checked where it enters, not left to whichever copy the browser keeps (#821).
+
+    The string form keeps its rule (an owned name is dropped and the argument wins), which templates rely on. A mapping
+    comes from Python, so a clash there is a bug in the view: it is refused instead of half-rendered.
+    """
+
+    def render_mapping(self, attrs: dict[str, str], arguments: str = "") -> AttributeParser:
+        html = Template('{% load ui_components %}{% button "Apply" attrs=attrs ' + arguments + " %}").render(
+            Context({"attrs": attrs})
+        )
+        parsed = AttributeParser()
+        parsed.feed(html)
+        self.assertEqual(len(parsed.buttons), 1)
+        return parsed
+
+    def test_names_are_written_in_lower_case(self) -> None:
+        parsed = self.render_mapping({"Data-Code": "AB12"})
+        self.assertEqual(parsed.buttons[0]["data-code"], "AB12")
+
+    def test_two_spellings_of_one_name_are_refused(self) -> None:
+        with self.assertRaises(ValueError):
+            self.render_mapping({"data-Code": "a", "data-code": "b"})
+
+    def test_a_name_the_component_writes_is_refused(self) -> None:
+        for attrs, arguments in (
+            ({"data-action": "invoke"}, ""),
+            ({"Data-Action": "invoke"}, 'data_action="copy"'),
+            ({"data-copy": "theirs"}, 'data_copy="mine"'),
+            ({"aria-label": "theirs"}, 'icon="copy" icon_only=True aria_label="Mine"'),
+        ):
+            with self.subTest(attrs=attrs), self.assertRaises(ValueError):
+                self.render_mapping(attrs, arguments)
+
+    def test_values_stay_escaped(self) -> None:
+        parsed = self.render_mapping({"data-note": '"><script>evil()</script>'})
+        self.assertEqual(parsed.buttons[0]["data-note"], '"><script>evil()</script>')
+        self.assertNotIn("script", parsed.tags)

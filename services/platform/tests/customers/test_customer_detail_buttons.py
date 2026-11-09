@@ -146,5 +146,5 @@ class CustomerPageButtonTests(TestCase):
         source = TEMPLATE.read_text()
         exemptions = re.findall(r"tmpl-allow TMPL002: (.*?)#\}", source)
         self.assertEqual([e for e in exemptions if "attrs takes one literal string" in e], [])
-        # The rest are a drop-down's menu entries, its Alpine toggle and an icon-only copy control.
-        self.assertEqual(len(exemptions), 6)
+        # The rest are a drop-down's menu entries and its trigger; the icon-only copy control is an icon_button (#821).
+        self.assertEqual(len(exemptions), 5)

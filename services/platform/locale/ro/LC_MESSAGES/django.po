@@ -11893,6 +11893,14 @@ msgstr "❌ Nu aveți permisiunea de a edita acest serviciu."
 msgid "❌ You do not have permission to move services to this customer."
 msgstr "❌ Nu aveți permisiunea de a muta servicii pentru acest client."
 
+#: templates/settings/partials/history_drawer.html:6
+msgid "Close"
+msgstr "Închideți"
+
+#: templates/base.html:205
+msgid "Close notification"
+msgstr "Închide notificarea"
+
 #~ msgid ""
 #~ "The service's owner changed. Review the current details before submitting "
 #~ "again."
@@ -28179,8 +28187,6 @@ msgstr "DNS"
 #~ msgid "Breadcrumb"
 #~ msgstr "Cale de navigare"
 
-#~ msgid "Close"
-#~ msgstr "Închideți"
 
 #, python-format
 #~ msgid ""

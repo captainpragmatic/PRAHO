@@ -255,6 +255,40 @@
     }, 0);
   });
 
+  // A control that replaces itself (toggle_badge, data-keep-focus) is disabled while its request runs, which takes
+  // focus off it before htmx can hand focus to the new copy. Note who had focus when each request began, keyed by
+  // that request's xhr, and give it to the element with the same id once that request's swap settles, unless focus
+  // has gone somewhere else meanwhile. Another request's settle never consumes it.
+  var keepFocus = typeof WeakMap === "function" ? new WeakMap() : null;
+  document.addEventListener("htmx:beforeRequest", function (event) {
+    var detail = event.detail || {};
+    var elt = detail.elt;
+    if (keepFocus && detail.xhr && elt && elt.id && elt.hasAttribute("data-keep-focus") && document.activeElement === elt) {
+      keepFocus.set(detail.xhr, elt.id);
+    }
+  });
+  function restoreKeptFocus(xhr) {
+    if (!keepFocus || !xhr || !keepFocus.has(xhr)) {
+      return;
+    }
+    var target = document.getElementById(keepFocus.get(xhr));
+    keepFocus.delete(xhr);
+    if (target && (document.activeElement === document.body || !document.activeElement)) {
+      target.focus();
+    }
+  }
+  document.addEventListener("htmx:afterSettle", function (event) {
+    restoreKeptFocus(event.detail && event.detail.xhr);
+  });
+  // A failed request (an error status, a network error, an abort or a timeout) swaps nothing, so no settle follows.
+  // htmx has already re-enabled the same element when afterRequest fires; give focus back to it.
+  document.addEventListener("htmx:afterRequest", function (event) {
+    var detail = event.detail || {};
+    if (!detail.successful) {
+      restoreKeptFocus(detail.xhr);
+    }
+  });
+
   // Back/forward can restore the page from the cache with the spinner still showing.
   window.addEventListener("pageshow", function () {
     document.querySelectorAll(".ui-btn.is-loading[data-loading]").forEach(function (button) {

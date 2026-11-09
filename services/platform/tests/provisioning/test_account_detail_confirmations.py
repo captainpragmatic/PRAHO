@@ -6,6 +6,7 @@ import uuid
 from collections.abc import Callable
 from inspect import unwrap
 from pathlib import Path
+from types import SimpleNamespace
 from typing import ClassVar, cast
 from unittest.mock import patch
 
@@ -21,7 +22,7 @@ from django.utils.html import escape
 
 from apps.common.localisation import DisplayLocalisation
 from apps.provisioning.virtualmin_models import VirtualminAccount
-from apps.provisioning.virtualmin_views import virtualmin_account_toggle_protection
+from apps.provisioning.virtualmin_views import account_action_attrs, virtualmin_account_toggle_protection
 from tests.ui.node_harness import Markup, dataset, run_node
 
 ROOT = Path(__file__).resolve().parents[4]
@@ -123,20 +124,28 @@ class AccountDetailConfirmationTests(SimpleTestCase):
         )
         policy = DisplayLocalisation("ro", "RO", "Europe/Bucharest", "d.m.Y")
         with patch("apps.ui.templatetags.localisation_tags.get_request_localisation", return_value=policy):
+            account = {
+                "id": ACCOUNT_ID,
+                "pk": ACCOUNT_ID,
+                "domain": domain,
+                "protected_from_deletion": protected,
+                "can_be_deleted": not protected,
+                "is_active": True,
+            }
             return engine.get_template("provisioning/virtualmin/account_detail.html").render(
                 Context(
                     {
-                        "account": {
-                            "id": ACCOUNT_ID,
-                            "pk": ACCOUNT_ID,
-                            "domain": domain,
-                            "protected_from_deletion": protected,
-                            "can_be_deleted": not protected,
-                            "is_active": True,
-                        },
+                        "account": account,
                         "toggle_protection_url": "/protection/",
                         "delete_url": "/delete/",
                         "csrf_token": "test-token",
+                        # What the view builds for the protection and delete buttons (#821).
+                        "account_actions": account_action_attrs(
+                            cast(VirtualminAccount, SimpleNamespace(**account)),
+                            protection_url="/protection/",
+                            delete_url="/delete/",
+                            csrf_token="test-token",
+                        ),
                     }
                 )
             )

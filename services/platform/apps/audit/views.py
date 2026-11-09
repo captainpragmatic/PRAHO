@@ -572,6 +572,11 @@ def audit_log(request: HttpRequest) -> HttpResponse:
     return render(request, "audit/logs.html", context)
 
 
+def _detail_toggle(url: str, detail_id: str, attrs: dict[str, str]) -> dict[str, object]:
+    """A row's expand button: what it loads, where into, its spinner, and the row id audit-fragments.js reads."""
+    return {"url": url, "target": f"#{detail_id}", "indicator": f"#{detail_id}-loading", "attrs": attrs}
+
+
 @staff_required_strict
 def logs_list(request: HttpRequest) -> HttpResponse:
     """Enhanced HTMX endpoint for filtered audit logs with advanced search."""
@@ -615,6 +620,12 @@ def logs_list(request: HttpRequest) -> HttpResponse:
     page_size = min(int(request.GET.get("page_size", 50)), 200)  # Max 200 per page
     paginator = Paginator(queryset, page_size)
     audit_events = paginator.get_page(page)
+    records = list(audit_events.object_list)
+    for event in records:
+        event.__dict__["detail_toggle"] = _detail_toggle(
+            reverse("audit:event_detail", args=[event.id]), f"event-detail-{event.id}", {"data-event-id": str(event.id)}
+        )
+    audit_events.object_list = records
 
     context = {
         "audit_events": audit_events,
@@ -879,6 +890,14 @@ def gdpr_export_requests_list(request: HttpRequest) -> HttpResponse:
     # Pagination
     paginator = Paginator(queryset, 25)
     export_requests = paginator.get_page(page)
+    records = list(export_requests.object_list)
+    for export_request in records:
+        export_request.__dict__["detail_toggle"] = _detail_toggle(
+            reverse("audit:gdpr_export_detail", args=[export_request.id]),
+            f"export-detail-{export_request.id}",
+            {"data-request-id": str(export_request.id)},
+        )
+    export_requests.object_list = records
 
     context = {
         "export_requests": export_requests,

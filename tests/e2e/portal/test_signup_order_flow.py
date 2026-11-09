@@ -522,7 +522,8 @@ def test_customer_mini_cart_partial(monitored_customer_page: Page) -> None:
     assert response.status == 200
     assert "E2E Hosting" in response.text()
     # Read the remove button's payload the way HTMX does: decode the attribute, then parse the JSON
-    payloads = re.findall(r"hx-vals='([^']*)'", response.text())
+    # (either quote style: the remove control is the button component since #821, which writes double quotes)
+    payloads = [value for _quote, value in re.findall(r"hx-vals=([\"'])(.*?)\1", response.text())]
     assert [json.loads(html.unescape(payload)) for payload in payloads] == [
         {"product_slug": "e2e-hosting", "billing_period": "monthly"}
     ]
