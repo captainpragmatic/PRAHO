@@ -63,3 +63,31 @@ class IconButtonTests(SimpleTestCase):
         for arguments in ('"copy" name icon_only=False', '"copy" name icon="x"'):
             with self.subTest(arguments=arguments), self.assertRaises(TemplateSyntaxError):
                 render(arguments)
+
+
+class ScreenReaderLabelContainmentTests(SimpleTestCase):
+    """The sr-only label is position:absolute, so it must stay inside its own control (#821).
+
+    Without a positioned ancestor it is placed relative to the page: in a table wider than the screen, inside an
+    overflow-x wrapper that is itself static, the wrapper doesn't clip it and the whole page gains a scrollbar.
+    """
+
+    def classes(self, arguments: str) -> list[str]:
+        _html, parsed = render(arguments)
+        return (dict(control(parsed)).get("class") or "").split()
+
+    def test_an_icon_only_control_is_the_label_s_positioned_ancestor(self) -> None:
+        for arguments in (
+            '"copy" name',
+            '"copy" name variant="bare"',
+            '"copy" name variant="ghost"',
+            '"copy" name href="/x/"',
+        ):
+            with self.subTest(arguments=arguments):
+                self.assertIn("relative", self.classes(arguments))
+
+    def test_a_button_with_a_visible_label_is_not_given_one(self) -> None:
+        html = Template('{% load ui_components %}{% button "Save" icon="copy" %}').render(Context())
+        parsed = Parser()
+        parsed.feed(html)
+        self.assertNotIn("relative", (dict(control(parsed)).get("class") or "").split())
