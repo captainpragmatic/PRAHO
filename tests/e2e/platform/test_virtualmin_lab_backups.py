@@ -82,7 +82,7 @@ def test_a_full_backup_runs_to_completion_from_the_backup_form(
 
     # The account page lists it, with a Restore button.
     page.goto(account_url(account.pk))
-    page.get_by_role("button", name="Backups").click()
+    page.get_by_role("tab", name="Backups").click()
     expect(page.get_by_role("link", name="Restore").first).to_be_visible()
 
 

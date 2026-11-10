@@ -23,6 +23,7 @@ class Command(BaseCommand):
                 "service_request",
                 "order_edit",
                 "staff_mfa",
+                "virtualmin",
                 "domain_checkout",
             ),
             default="baseline",

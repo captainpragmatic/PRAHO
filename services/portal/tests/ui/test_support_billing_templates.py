@@ -325,7 +325,7 @@ class Wp16SupportBillingTests(SimpleTestCase):
         # #689: the "Control Panel" button linked to "#"; there is no control panel page to open.
         dead = [attrs for tag, attrs in elements.elements if tag == "a" and attrs.get("href") == "#"]
         self.assertEqual(dead, [])
-        elements.find("div", **{"x-data": "tabGroup"})
+        elements.find("div", **{"x-data": "tabs"})
         self.assertIn("width: 25%", source)
         self.assertIn("Basic", source)
 

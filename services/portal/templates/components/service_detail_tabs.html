@@ -1,31 +1,11 @@
-{% load i18n %}
-<nav class="-mb-px flex min-w-max sm:min-w-0">
-  <button type="button"
-          @click="activeTab = 'overview'"
-          :class="tabClass('overview')"
-          class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
-    {% trans "Overview" %}
-  </button>
+{% load i18n ui_components %}
+{% trans "Service Details" as service_tabs_label %}{% tablist label=service_tabs_label group="service" class="-mb-px flex min-w-max sm:min-w-0" %}
+  {% trans "Overview" as overview_label %}{% tab "overview" overview_label selected=True active_class="border-blue-500 text-blue-400" inactive_class="border-transparent text-slate-400 hover:text-slate-300" class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors" %}
   {% if service_status == 'active' %}
-  <button type="button"
-          @click="activeTab = 'usage'"
-          :class="tabClass('usage')"
-          class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
-    {% trans "Usage & Performance" %}
-  </button>
+  {% trans "Usage & Performance" as usage_label %}{% tab "usage" usage_label active_class="border-blue-500 text-blue-400" inactive_class="border-transparent text-slate-400 hover:text-slate-300" class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors" %}
   {% endif %}
-  <button type="button"
-          @click="activeTab = 'billing'"
-          :class="tabClass('billing')"
-          class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
-    {% trans "Billing" %}
-  </button>
+  {% trans "Billing" as billing_label %}{% tab "billing" billing_label active_class="border-blue-500 text-blue-400" inactive_class="border-transparent text-slate-400 hover:text-slate-300" class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors" %}
   {% if show_domains %}
-  <button type="button"
-          @click="activeTab = 'domains'"
-          :class="tabClass('domains')"
-          class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors">
-    {% trans "Domains" %}
-  </button>
+  {% trans "Domains" as domains_label %}{% tab "domains" domains_label active_class="border-blue-500 text-blue-400" inactive_class="border-transparent text-slate-400 hover:text-slate-300" class="whitespace-nowrap border-b-2 py-3 px-6 text-sm font-medium transition-colors" %}
   {% endif %}
-</nav>
+{% end_tablist %}

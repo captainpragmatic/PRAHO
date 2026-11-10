@@ -26,9 +26,9 @@ def _detail(page: Page, baseline: dict) -> dict:
 def test_customer_service_detail_view(monitored_customer_page: Page, e2e_baseline) -> None:
     page = monitored_customer_page
     own = _detail(page, e2e_baseline)
-    expect(page.get_by_role("button", name="Overview", exact=True)).to_be_visible()
-    expect(page.get_by_role("button", name="Usage & Performance", exact=True)).to_be_visible()
-    expect(page.get_by_role("button", name="Billing", exact=True)).to_be_visible()
+    expect(page.get_by_role("tab", name="Overview", exact=True)).to_be_visible()
+    expect(page.get_by_role("tab", name="Usage & Performance", exact=True)).to_be_visible()
+    expect(page.get_by_role("tab", name="Billing", exact=True)).to_be_visible()
     expect(page.locator("#main-content")).to_contain_text("hosting-1-01.example")
     expect(page.locator(f'a[href="/services/{own["service_id"]}/request-action/"]').first).to_be_visible()
     page.get_by_role("link", name="Back to Services").click()
@@ -67,8 +67,8 @@ def test_customer_service_usage_chart(monitored_customer_page: Page, e2e_baselin
     """Current measured usage is visible; history charts are an explicit empty state."""
     page = monitored_customer_page
     _detail(page, e2e_baseline)
-    page.get_by_role("button", name="Usage & Performance", exact=True).click()
-    usage = page.locator("[x-show=\"isTab('usage')\"]")
+    page.get_by_role("tab", name="Usage & Performance", exact=True).click()
+    usage = page.locator("#service-panel-usage")
     expect(usage).to_be_visible()
     disk = usage.locator('[data-usage-resource="disk"]')
     bandwidth = usage.locator('[data-usage-resource="bandwidth"]')
@@ -79,7 +79,7 @@ def test_customer_service_usage_chart(monitored_customer_page: Page, e2e_baselin
     expect(bandwidth).to_contain_text("of 100 GB used")
     expect(usage).to_contain_text("No disk usage history is available yet.")
     expect(usage.locator("polyline")).to_have_count(0)
-    page.get_by_role("button", name="Overview", exact=True).click()
+    page.get_by_role("tab", name="Overview", exact=True).click()
     expect(usage).to_be_hidden()
     expect(page.get_by_role("heading", name="Service Health")).to_be_visible()
 
@@ -165,8 +165,8 @@ def test_service_detail_shows_actual_dates_not_calculating(monitored_customer_pa
     expected_date = date(year, month, day).strftime("%b %d, %Y")
     expect(page.locator("#main-content")).to_contain_text(expected_date)
     expect(page.locator("#main-content")).not_to_contain_text("Calculating")
-    page.get_by_role("button", name="Billing", exact=True).click()
-    expect(page.locator("[x-show=\"isTab('billing')\"]")).to_contain_text(expected_date)
+    page.get_by_role("tab", name="Billing", exact=True).click()
+    expect(page.locator("#service-panel-billing")).to_contain_text(expected_date)
 
 
 def test_service_detail_domain_section_no_server_error(monitored_customer_page: Page, e2e_baseline) -> None:

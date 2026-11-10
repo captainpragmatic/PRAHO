@@ -138,41 +138,21 @@
     <!-- =============================================================================== -->
     <!-- TABBED INTERFACE -->
     <!-- =============================================================================== -->
-    <div x-data="{ activeTab: 'overview' }" class="bg-slate-800 rounded-lg border border-slate-700">
+    <div x-data="tabs" class="bg-slate-800 rounded-lg border border-slate-700">
         <!-- Tab Navigation -->
         <div class="border-b border-slate-700">
-            <nav class="flex space-x-8 px-6" aria-label="Tabs">
-                {# tmpl-allow TMPL002: @click and :class bindings drive the Alpine tab state; components accept no executable attributes (apps/ui/attributes.py) #}
-                <button @click="activeTab = 'overview'"
-                        :class="{ 'border-blue-500 text-blue-400': activeTab === 'overview', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'overview' }"
-                        class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
-                    {% trans "Overview" %}
-                </button>
-                {# tmpl-allow TMPL002: @click and :class bindings drive the Alpine tab state; components accept no executable attributes (apps/ui/attributes.py) #}
-                <button @click="activeTab = 'backups'"
-                        :class="{ 'border-blue-500 text-blue-400': activeTab === 'backups', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'backups' }"
-                        class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
-                    {% trans "Backups" %}
-                </button>
-                {# tmpl-allow TMPL002: @click and :class bindings drive the Alpine tab state; components accept no executable attributes (apps/ui/attributes.py) #}
-                <button @click="activeTab = 'logs'"
-                        :class="{ 'border-blue-500 text-blue-400': activeTab === 'logs', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'logs' }"
-                        class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
-                    {% icon "settings" %} {% trans "Jobs" %}
-                </button>
-                {# tmpl-allow TMPL002: @click and :class bindings drive the Alpine tab state; components accept no executable attributes (apps/ui/attributes.py) #}
-                <button @click="activeTab = 'settings'"
-                        :class="{ 'border-blue-500 text-blue-400': activeTab === 'settings', 'border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300': activeTab !== 'settings' }"
-                        class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
-                    {% trans "Settings" %}
-                </button>
-            </nav>
+            {% trans "Account Details" as account_tabs_label %}{% tablist label=account_tabs_label group="account" class="flex space-x-8 px-6" %}
+                {% trans "Overview" as overview_label %}{% tab "overview" overview_label selected=True active_class="border-blue-500 text-blue-400" inactive_class="border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors" %}
+                {% trans "Backups" as backups_label %}{% tab "backups" backups_label active_class="border-blue-500 text-blue-400" inactive_class="border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors" %}
+                {% trans "Jobs" as jobs_label %}{% tab "logs" jobs_label icon="settings" active_class="border-blue-500 text-blue-400" inactive_class="border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors" %}
+                {% trans "Settings" as settings_label %}{% tab "settings" settings_label active_class="border-blue-500 text-blue-400" inactive_class="border-transparent text-slate-400 hover:text-slate-300 hover:border-slate-300" class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors" %}
+            {% end_tablist %}
         </div>
 
         <!-- Tab Content -->
         <div class="p-6">
             <!-- Overview Tab -->
-            <div x-show="activeTab === 'overview'" x-transition>
+            <div {% tab_panel_attrs "overview" group="account" selected=True %} x-transition>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
                     <!-- Account Details -->
                     <div>
@@ -239,7 +219,7 @@
             </div>
 
             <!-- Backups Tab -->
-            <div x-show="activeTab === 'backups'" x-transition>
+            <div {% tab_panel_attrs "backups" group="account" %} x-transition>
                 <div class="space-y-4">
                     <div class="flex items-center justify-between">
                         <h3 class="text-lg font-semibold text-slate-100">{% trans "Backup History" %}</h3>
@@ -289,7 +269,7 @@
             </div>
 
             <!-- Logs Tab -->
-            <div x-show="activeTab === 'logs'" x-transition>
+            <div {% tab_panel_attrs "logs" group="account" %} x-transition>
                 <div class="space-y-4">
                     <div class="flex items-center justify-between">
                         <h3 class="text-lg font-semibold text-slate-100">{% trans "Provisioning Jobs" %}</h3>
@@ -398,7 +378,7 @@
             </div>
 
             <!-- Settings Tab -->
-            <div x-show="activeTab === 'settings'" x-transition>
+            <div {% tab_panel_attrs "settings" group="account" %} x-transition>
                 <div class="space-y-6">
                     <h3 class="text-lg font-semibold text-slate-100">{% trans "Account Settings" %}</h3>
                     {# Read-only: what Platform stores for this account. Editing is a separate feature (plan quotas: #776). #}

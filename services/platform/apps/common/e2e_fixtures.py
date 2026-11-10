@@ -8,10 +8,12 @@ their key; tests receive exact identifiers instead of borrowing the first live r
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
 from typing import TYPE_CHECKING, Any
+from uuid import UUID
 
 from django.conf import settings
 from django.core.management import call_command
@@ -438,7 +440,7 @@ def _order_edit_scenario(key: str) -> dict[str, Any]:
     }
 
 
-def _domain_checkout_scenario(key: str) -> dict[str, str | int]:
+def _domain_checkout_scenario(key: str) -> dict[str, Any]:
     """An owned consumer with no fiscal identifier; the browser places the order itself."""
     from apps.customers.models import CustomerTaxProfile  # noqa: PLC0415
     from apps.products.models import Product  # noqa: PLC0415
@@ -472,6 +474,41 @@ def _domain_checkout_scenario(key: str) -> dict[str, str | int]:
 
 
 @transaction.atomic
+def _virtualmin_scenario(key: str) -> dict[str, Any]:
+    """A tracked account on a server in maintenance, so its pages read PRAHO's own records and never call a node."""
+    from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415 -- cross-domain fixture orchestration
+    from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer  # noqa: PLC0415
+
+    customer = _customer(f"virtualmin-{key}", name=f"E2E Virtualmin {key}")
+    service = Service.objects.create(
+        customer=customer,
+        service_plan=ServicePlan.objects.get(name="E2E Hosting"),
+        currency_id="RON",
+        service_name=f"E2E Virtualmin hosting {key}",
+        username=f"e2e-vm-{key}",
+        domain=f"vm-{key}.example",
+        price=Decimal("100.00"),
+        status="active",
+    )
+    server = VirtualminServer.objects.create(
+        legacy_security_admission=True,
+        name=f"e2e-vm-{key}",
+        hostname=f"vm-{key}.e2e.example",
+        api_username="e2e-api",
+        status="maintenance",
+    )
+    account = VirtualminAccount.objects.create(
+        server=server,
+        service=service,
+        domain=service.domain,
+        virtualmin_username=f"e2evm{key}"[:20],
+        status="active",
+        praho_customer_id=customer.pk,
+        praho_service_id=UUID(int=service.pk),
+    )
+    return {"server_id": str(server.pk), "account_id": str(account.pk), "domain": account.domain}
+
+
 def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
     from apps.customers.models import CustomerAddress  # noqa: PLC0415 -- cross-domain fixture orchestration
     from apps.products.models import Product  # noqa: PLC0415 -- cross-domain fixture orchestration
@@ -487,12 +524,14 @@ def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
             meta={"fixture_owner": OWNER, "fixture_name": key},
         )
         return {"product_id": str(product.pk), "product_slug": product.slug, "name": product.name}
-    if scenario == "domain_checkout":
-        return _domain_checkout_scenario(key)
-    if scenario == "order_edit":
-        return _order_edit_scenario(key)
-    if scenario == "staff_mfa":
-        return _staff_mfa_scenario(key)
+    builders: dict[str, Callable[[str], dict[str, Any]]] = {
+        "domain_checkout": _domain_checkout_scenario,
+        "order_edit": _order_edit_scenario,
+        "staff_mfa": _staff_mfa_scenario,
+        "virtualmin": _virtualmin_scenario,
+    }
+    if scenario in builders:
+        return builders[scenario](key)
     customer = _customer(f"scenario-{key}", name=f"E2E billing {key}")
     if scenario in {"account", "service_request"}:
         user = _user(f"account-{key}@e2e.test")
