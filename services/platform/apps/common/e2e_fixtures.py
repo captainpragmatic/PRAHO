@@ -473,7 +473,6 @@ def _domain_checkout_scenario(key: str) -> dict[str, Any]:
     }
 
 
-@transaction.atomic
 def _virtualmin_scenario(key: str) -> dict[str, Any]:
     """A tracked account on a server in maintenance, so its pages read PRAHO's own records and never call a node."""
     from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415 -- cross-domain fixture orchestration
@@ -509,6 +508,7 @@ def _virtualmin_scenario(key: str) -> dict[str, Any]:
     return {"server_id": str(server.pk), "account_id": str(account.pk), "domain": account.domain}
 
 
+@transaction.atomic
 def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
     from apps.customers.models import CustomerAddress  # noqa: PLC0415 -- cross-domain fixture orchestration
     from apps.products.models import Product  # noqa: PLC0415 -- cross-domain fixture orchestration
