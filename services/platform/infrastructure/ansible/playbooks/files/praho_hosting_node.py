@@ -19,6 +19,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from threading import Event
 from time import monotonic
@@ -221,6 +222,29 @@ def _write(path: Path, contents: str) -> None:
             os.close(parent)
     finally:
         Path(temporary).unlink(missing_ok=True)
+
+
+def quota_probe_domains(
+    root: Path, fqdn: str, read_fields: Callable[[Path], dict[str, str]]
+) -> list[tuple[str, dict[str, str]]]:
+    """Native domains whose quota is qualified: not aliases, and not Virtualmin's own default hostname domain.
+
+    Virtualmin creates that domain for the node's hostname, with the hidden home /home/._hostname; it is no tenant
+    and the quota probe, which requires /home/<user>, cannot qualify it."""
+    domains = []
+    for path in root.iterdir():
+        if not path.name.isdigit():
+            continue
+        domain = read_fields(path)
+        if domain.get("alias") or (
+            domain.get("defaulthostdomain") == "1"
+            and domain.get("user") == "_hostname"
+            and domain.get("home") == "/home/._hostname"
+            and domain.get("dom") == fqdn
+        ):
+            continue
+        domains.append((path.name, domain))
+    return domains
 
 
 TUNNEL_ACCOUNT = "praho-webmin-tunnel"
@@ -597,7 +621,7 @@ def bootstrap(deployment: str) -> dict[str, object]:
     return {"prepared": True, "preserved_format": "classic", "requires_native_acceptance": True}
 
 
-def inspect(identity: str) -> dict[str, object]:  # noqa: C901 -- Keep fresh kernel, runtime, table and provenance checks in one fail-closed read boundary.
+def inspect(identity: str) -> dict[str, object]:
     installation = (
         _read(INSTALLATION).strip() if INSTALLATION.exists() else str(UUID(_read(Path("/etc/machine-id")).strip()))
     )
@@ -659,17 +683,14 @@ def inspect(identity: str) -> dict[str, object]:  # noqa: C901 -- Keep fresh ker
         if _run(["/usr/bin/php8.5", "-r", "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"]) != "8.5":
             raise ValueError("Unsupported managed PHP baseline")
         _database_writer_qualified()
-        for path in Path("/etc/webmin/virtual-server/domains").iterdir():
-            if not path.name.isdigit():
-                continue
-            domain = _fields(path)
-            if domain.get("alias"):
-                continue
+        for domain_id, domain in quota_probe_domains(
+            Path("/etc/webmin/virtual-server/domains"), _read(Path("/etc/hostname")).strip(), _fields
+        ):
             NativeQuotaBackend().probe(
                 {
                     "identity": {
                         "installation": installation,
-                        "domain_id": path.name,
+                        "domain_id": domain_id,
                         "domain": domain["dom"],
                         "uid": int(domain["uid"]),
                         "gid": int(domain["gid"]),

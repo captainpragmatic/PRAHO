@@ -63,6 +63,9 @@ def save(path: Path, value: dict[str, object]) -> None:
     os.replace(temporary, path)
 
 
+MIN_FREE_FOR_QUOTA_PROOF = 1024**3
+
+
 def fixture_domains(run_id: str) -> tuple[str, str]:
     stem = "q776" + UUID(run_id).hex[:8]
     return stem + ".example.invalid", stem + "n.example.invalid"
@@ -189,6 +192,10 @@ fclose($f); if(!$hit){fwrite(STDERR,'PHP did not encounter EDQUOT');exit(7);} ec
         result = run([*prefix, "/usr/bin/php8.5", "-r", program, str(target)])
         if result.stdout.strip() != str(account.pw_uid):
             raise AssertionError("PHP quota proof used the wrong runtime identity")
+        # PHP gives no errno here: plenty of free disk rules out ENOSPC as the reason for the short write.
+        space = os.statvfs(account.pw_dir)
+        if space.f_bavail * space.f_frsize < MIN_FREE_FOR_QUOTA_PROOF:
+            raise AssertionError("PHP's short write cannot prove a quota stop on a nearly full disk")
     else:
         program = """import errno,json,os,sys
 assert os.geteuid()==int(sys.argv[2]) and os.getegid()==int(sys.argv[3])

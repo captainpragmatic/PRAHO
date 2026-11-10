@@ -162,6 +162,25 @@ class HostingNodeNativeTests(SimpleTestCase):
                 with self.assertRaisesRegex(AssertionError, "not a directory"):
                     self._run_guard(root, None)
 
+    def test_requalification_probes_every_domain_except_virtualmin_s_own_hostname_domain(self):
+        fqdn = "node-001.native-acc.example.test"
+        hostname = {"dom": fqdn, "user": "_hostname", "home": "/home/._hostname", "defaulthostdomain": "1"}
+        with TemporaryDirectory() as root:
+            domains = Path(root)
+            rows = {
+                "100": hostname,
+                "200": {"dom": "tenant.example.test", "user": "tenant", "home": "/home/tenant"},
+                "300": {"dom": "alias.example.test", "user": "tenant", "alias": "200"},
+                "400": {**hostname, "dom": "other.example.test"},  # right markers, wrong name: still a tenant
+                "500": {**hostname, "defaulthostdomain": "0"},  # not marked by Virtualmin: still a tenant
+            }
+            for name, row in rows.items():
+                (domains / name).write_text("".join(f"{key}={value}\n" for key, value in row.items()))
+            (domains / "not-a-domain").write_text("ignored=1\n")
+            read = lambda path: dict(line.split("=", 1) for line in path.read_text().splitlines())  # noqa: E731
+            found = self.native.quota_probe_domains(domains, fqdn, read)
+        self.assertEqual(sorted(name for name, _fields in found), ["200", "400", "500"])
+
     def test_the_first_install_guard_refuses_a_tunnel_named_symlink(self):
         import os  # noqa: PLC0415
 
