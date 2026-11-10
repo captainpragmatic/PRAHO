@@ -10,6 +10,41 @@ document.addEventListener('alpine:init', function () {
     };
   });
 
+  // Real tabs: the one owner of which panel shows. Tabs and panels (tab.html, tab_panel_attrs) carry their names in
+  // data-*; the server marks the first selected tab, so the first paint and this state agree.
+  Alpine.data('tabs', function () {
+    return {
+      selected: '',
+      init: function () {
+        var tab = this.$root.querySelector('[role="tab"][aria-selected="true"]') || this.$root.querySelector('[role="tab"]');
+        this.selected = tab ? tab.dataset.tab : '';
+      },
+      isSelected: function (el) { return el.dataset.tab === this.selected; },
+      isPanel: function (el) { return el.dataset.tabPanel === this.selected; },
+      tabIndex: function (el) { return el.dataset.tab === this.selected ? 0 : -1; },
+      tabClass: function (el) { return el.dataset.tab === this.selected ? el.dataset.activeClass : el.dataset.inactiveClass; },
+      select: function (el) { this.selected = el.dataset.tab; },
+      // Arrow keys wrap; Home and End go to the ends. Focus moves with the selection.
+      onKeydown: function (event) {
+        var list = event.currentTarget.closest('[role="tablist"]');
+        var tabs = Array.prototype.slice.call(list.querySelectorAll('[role="tab"]'));
+        var index = tabs.indexOf(event.currentTarget);
+        var target = {
+          ArrowRight: (index + 1) % tabs.length,
+          ArrowLeft: (index - 1 + tabs.length) % tabs.length,
+          Home: 0,
+          End: tabs.length - 1,
+        }[event.key];
+        if (target === undefined) {
+          return;
+        }
+        event.preventDefault();
+        this.selected = tabs[target].dataset.tab;
+        tabs[target].focus();
+      },
+    };
+  });
+
   Alpine.data('collapsibleSection', function () {
     return {
       open: true,

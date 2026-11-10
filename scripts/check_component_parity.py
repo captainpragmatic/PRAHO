@@ -59,7 +59,9 @@ SHARED_COMPONENTS: list[str] = [
     "section_card.html",
     "stat_tile.html",
     "step_progress.html",
+    "tab.html",
     "table.html",
+    "tablist.html",
     "toast.html",
     "toggle_badge.html",
 ]
