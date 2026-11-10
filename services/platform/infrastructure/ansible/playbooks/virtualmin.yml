@@ -112,6 +112,8 @@
                 (root / 'home', 'Tenant or unknown homes exist'),
                 (root / 'etc/webmin/virtual-server/domains', 'Native domain inventory exists'),
                 (root / 'var/lib/mysql', 'Database storage exists'),
+                # MariaDB 11.8 on Ubuntu 26.04 keeps its data here.
+                (root / 'var/lib/mariadb', 'Database storage exists'),
             ):
                 found = present(path)
                 assert not found, refusal + ': ' + ', '.join(found)

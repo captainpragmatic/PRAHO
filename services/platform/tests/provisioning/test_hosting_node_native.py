@@ -162,6 +162,12 @@ class HostingNodeNativeTests(SimpleTestCase):
                 with self.assertRaisesRegex(AssertionError, "not a directory"):
                     self._run_guard(root, None)
 
+    def test_the_first_install_guard_checks_the_mariadb_datadir(self):
+        with TemporaryDirectory() as root:
+            (Path(root) / "var/lib/mariadb/tenantdb").mkdir(parents=True)
+            with self.assertRaisesRegex(AssertionError, "Database storage exists: tenantdb"):
+                self._run_guard(root, None)
+
     def test_requalification_probes_every_domain_except_virtualmin_s_own_hostname_domain(self):
         fqdn = "node-001.native-acc.example.test"
         hostname = {"dom": fqdn, "user": "_hostname", "home": "/home/._hostname", "defaulthostdomain": "1"}
