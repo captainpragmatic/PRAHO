@@ -157,7 +157,7 @@ class QuotaCoordinatorTests(SimpleTestCase):
         observed = {
             "uid_used_bytes": 8 * 1024**3,
             "gid_used_bytes": 8 * 1024**3,
-            "observation": {"total_bytes": 8 * 1024**3},
+            "observation": {"files_bytes": 8 * 1024**3, "database_bytes": 0, "total_bytes": 8 * 1024**3},
         }
         owner = SimpleNamespace(pw_uid=1001, pw_gid=1001)
         domain = {"id": identity["domain_id"], "dom": identity["domain"]}
@@ -178,6 +178,35 @@ class QuotaCoordinatorTests(SimpleTestCase):
                 backend._apply(request, lock_fd=3)
             kernel.assert_not_called()
             metadata.assert_not_called()
+
+    def test_databases_above_the_file_cap_do_not_refuse_it_on_the_node(self):
+        gib = 1024**3
+        identity = {
+            **self.identity,
+            "domain": "example.test",
+            "uid": 1001,
+            "gid": 1001,
+            "filesystem_uuid": str(uuid4()),
+            "boot_id": str(uuid4()),
+        }
+        request = {**self.request, "identity": identity, "disk_limit_kib": 5 * 1024**2}
+        observed = {
+            "uid_used_bytes": gib,
+            "gid_used_bytes": gib,
+            "observation": {"files_bytes": gib, "database_bytes": 6 * gib, "total_bytes": 7 * gib},
+        }
+        owner = SimpleNamespace(pw_uid=1001, pw_gid=1001)
+        domain = {"id": identity["domain_id"], "dom": identity["domain"]}
+        backend = self.native_backend()
+        with (
+            patch.object(backend, "probe", return_value=observed),
+            patch.object(backend, "_domain", return_value=(domain, owner)),
+            patch.object(backend, "_storage", return_value=("/dev/fixture", identity["filesystem_uuid"])),
+            patch.object(self.native, "_run"),
+            patch.object(self.native, "_set_kernel_quota") as kernel,
+        ):
+            backend._apply(request, lock_fd=3)
+        self.assertEqual(kernel.call_count, 2)
 
     def test_native_cleanup_rechecks_both_hard_caps_before_any_mutation(self):
         identity = {
@@ -207,7 +236,7 @@ class QuotaCoordinatorTests(SimpleTestCase):
             "gid_used_bytes": 8 * 1024**3,
             "uid_hard_kib": request["disk_limit_kib"],
             "gid_hard_kib": request["disk_limit_kib"],
-            "observation": {"total_bytes": 8 * 1024**3},
+            "observation": {"files_bytes": 8 * 1024**3, "database_bytes": 0, "total_bytes": 8 * 1024**3},
         }
         owner = SimpleNamespace(pw_uid=1001, pw_gid=1001)
         domain = {"id": identity["domain_id"], "dom": identity["domain"]}

@@ -2,7 +2,8 @@
 """Destructive quota acceptance ONLY inside the exact disposable provider VM.
 
 Uploaded by provider_vm.py after provider-label/host-key verification. Acceptance
-is published only after real UID/PHP/DB failures, neighbor commits, reboot and update.
+is published only after real UID/PHP denials, a database growing past a full file cap
+with the server and a neighbor unharmed, reboot and update.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ import re
 import subprocess
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
 from pathlib import Path
 from threading import Event
 from uuid import UUID, uuid4
@@ -26,6 +26,31 @@ MAX_INSERTS = 128
 STATE = Path("/root/praho-native-quota-state.json")
 OWNER = Path("/root/praho-native-lab-owner")
 VMIN = "/usr/sbin/virtualmin"
+BACKUP_ROOT = Path("/root/praho-native-backup")
+SMALL_DESTINATION = Path("/root/praho-native-backup-small")
+SMALL_DESTINATION_BYTES = 16 * 1024 * 1024
+# Random fill: gzip shrinks repeated bytes to almost nothing, so the destination-full case would not fill anything.
+FILL_VALUE = "SELECT GROUP_CONCAT(RANDOM_BYTES(1024) SEPARATOR '') FROM `{schema}`.seq_1_to_1024"
+PHP_WRITER = r"""$p=$argv[1]; $f=fopen($p,'wb'); $hit=false;
+for($i=0;$i<128;$i++) { $n=@fwrite($f,random_bytes(1048576));
+if($n!==1048576) {$hit=true;break;}
+if(!fflush($f)||!fsync($f)){break;}}
+fclose($f); if(!$hit){fwrite(STDERR,'PHP did not encounter EDQUOT');exit(7);} echo posix_geteuid();"""
+FILE_WRITER = """import errno,json,os,sys
+assert os.geteuid()==int(sys.argv[2]) and os.getegid()==int(sys.argv[3])
+status=open('/proc/self/status').read(); assert int(status.split('CapEff:')[1].split()[0],16)==0
+hit=False
+with open(sys.argv[1],'wb',buffering=0) as stream:
+ for i in range(128):
+  try: stream.write(os.urandom(1048576)); os.fsync(stream.fileno())
+  except OSError as error:
+   assert error.errno==errno.EDQUOT,error
+   hit=True; break
+assert hit,'unprivileged writer did not encounter EDQUOT'
+print('uid-edquot')
+"""
+# PRAHO's restore feature list (virtualmin_validators.WEB_ONLY_VIRTUALMIN_FEATURES); a test keeps them equal.
+RESTORE_FEATURES = ("unix", "dir", "web", "ssl", "logrotate", "mysql")
 
 
 def run(
@@ -162,10 +187,19 @@ def probe(domain: str) -> dict[str, object]:
     return evidence
 
 
-def unprivileged(domain: str, *, php: bool) -> None:
+def _fill_path(domain: str) -> Path:
+    return Path(pwd.getpwnam(domain_row(domain)["user"]).pw_dir) / "native-quota-denial.bin"
+
+
+def _remove_fill(domain: str) -> None:
+    _fill_path(domain).unlink()
+    os.sync()
+
+
+def unprivileged(domain: str, *, php: bool, keep: bool = False) -> None:
     row = domain_row(domain)
     account = pwd.getpwnam(row["user"])
-    target = Path(account.pw_dir) / "native-quota-denial.bin"
+    target = _fill_path(domain)
     if target.exists():
         target.unlink()
     prefix = [
@@ -184,12 +218,7 @@ def unprivileged(domain: str, *, php: bool) -> None:
         # (0) with no error_get_last() message (traced on Ubuntu 26.04). So any short write counts as the denial,
         # and the check below then requires usage at the verified hard cap, which tells a quota stop apart from
         # any other write failure.
-        program = r"""$p=$argv[1]; $f=fopen($p,'wb'); $hit=false;
-for($i=0;$i<128;$i++) { $n=@fwrite($f,str_repeat('x',1048576));
-if($n!==1048576) {$hit=true;break;}
-if(!fflush($f)||!fsync($f)){break;}}
-fclose($f); if(!$hit){fwrite(STDERR,'PHP did not encounter EDQUOT');exit(7);} echo posix_geteuid();"""
-        result = run([*prefix, "/usr/bin/php8.5", "-r", program, str(target)])
+        result = run([*prefix, "/usr/bin/php8.5", "-r", PHP_WRITER, str(target)])
         if result.stdout.strip() != str(account.pw_uid):
             raise AssertionError("PHP quota proof used the wrong runtime identity")
         # PHP gives no errno here: plenty of free disk rules out ENOSPC as the reason for the short write.
@@ -197,25 +226,12 @@ fclose($f); if(!$hit){fwrite(STDERR,'PHP did not encounter EDQUOT');exit(7);} ec
         if space.f_bavail * space.f_frsize < MIN_FREE_FOR_QUOTA_PROOF:
             raise AssertionError("PHP's short write cannot prove a quota stop on a nearly full disk")
     else:
-        program = """import errno,json,os,sys
-assert os.geteuid()==int(sys.argv[2]) and os.getegid()==int(sys.argv[3])
-status=open('/proc/self/status').read(); assert int(status.split('CapEff:')[1].split()[0],16)==0
-hit=False
-with open(sys.argv[1],'wb',buffering=0) as stream:
- for i in range(128):
-  try: stream.write(b'x'*1048576); os.fsync(stream.fileno())
-  except OSError as error:
-   assert error.errno==errno.EDQUOT,error
-   hit=True; break
-assert hit,'unprivileged writer did not encounter EDQUOT'
-print('uid-edquot')
-"""
-        run([*prefix, "/usr/bin/python3", "-c", program, str(target), str(account.pw_uid), str(account.pw_gid)])
+        run([*prefix, "/usr/bin/python3", "-c", FILE_WRITER, str(target), str(account.pw_uid), str(account.pw_gid)])
     current = probe(domain)
     if max(current["uid_used_bytes"], current["gid_used_bytes"]) < (LIMIT_KIB - 2048) * 1024:
         raise AssertionError("Write failure was not at the verified tenant hard cap")
-    target.unlink()
-    os.sync()
+    if not keep:
+        _remove_fill(domain)
 
 
 def _has_os_edquot(diagnostic: str) -> bool:
@@ -250,22 +266,126 @@ def _verify_neighbor_commit(schema: str, *, database_pid: str) -> None:
         raise AssertionError("The post-denial neighbor commit restarted MariaDB")
 
 
-def database(domain: str, neighbor: str) -> None:
-    from praho_quota_native import _database_writer_qualified, _run, _set_kernel_quota  # noqa: PLC0415
+def _disk_backed_work(schema: str) -> None:
+    """Rebuilds and disk-backed temporary tables at a full file cap; their bytes are node overhead, not the tenant's."""
+    settings = sql("SELECT @@tmpdir, @@innodb_tmpdir").stdout.rstrip("\n").split("\t")
+    if any(Path(part).is_relative_to("/home") for value in settings for part in value.split(":") if part):
+        raise AssertionError("MariaDB temporary files would land in a tenant home")
+    sql(f"ALTER TABLE `{schema}`.quota_fill FORCE")
+    report = sql(
+        f"SELECT COUNT(*) FROM (SELECT DISTINCT data FROM `{schema}`.quota_fill LIMIT 16) x; "  # noqa: S608 -- Exact generated schema validated by caller.
+        "SHOW SESSION STATUS LIKE 'Created_tmp_disk_tables'"
+    ).stdout.strip()
+    if int(report.rsplit("\t", 1)[1]) < 1:
+        raise AssertionError("The temporary table was not disk-backed, so the full-cap proof is empty")
+
+
+def _backup_staging_left(domain: str) -> bool:
+    return (Path(domain_row(domain)["home"]) / ".backup").exists()
+
+
+def _archive_member_bytes(archive: Path, suffix: str) -> int:
+    listing = run(["/usr/bin/tar", "--list", "--verbose", "--gzip", "--file", str(archive)], timeout=900).stdout
+    sizes = [
+        int(parts[2])
+        for line in listing.splitlines()
+        if len(parts := line.split()) >= 6 and parts[2].isdigit() and parts[-1].endswith(suffix)
+    ]
+    if len(sizes) != 1:
+        raise AssertionError("The backup archive does not hold exactly one dump of the fixture database")
+    return sizes[0]
+
+
+def _settled(domain: str, step: str, *, database_pid: str) -> None:
+    """After every backup or restore: no tenant-owned dump in the home, caps back at the limit, server unharmed."""
+    from praho_quota_native import _run  # noqa: PLC0415
+
+    if _backup_staging_left(domain):
+        raise AssertionError(f"The {step} left the tenant-owned dump in the home, over the file cap")
+    probe(domain)  # Also requires all four UID/GID soft and hard caps back at LIMIT_KIB.
+    if _run(["/usr/bin/systemctl", "show", "mariadb", "--property=MainPID", "--value"]) != database_pid:
+        raise AssertionError(f"The {step} restarted MariaDB")
+
+
+def backup_restore(domain: str, schema: str, *, database_pid: str) -> None:
+    """A database larger than the file cap backs up and restores; a backup that can't fit fails cleanly.
+
+    Virtualmin 8.3 sets the account's caps to unlimited while it writes the dump as the tenant into ~/.backup
+    (backups-lib.pl:902), and restores them from the domain's configured quota on success and failure (:1013).
+    Restore lifts and restores them the same way (:3255, :3342) and imports as root.
+    """
+    checksum = f"CHECKSUM TABLE `{schema}`.quota_fill EXTENDED"
+    original = sql(checksum).stdout.strip()
+    BACKUP_ROOT.mkdir(mode=0o700, exist_ok=True)
+    archive = BACKUP_ROOT / (domain + ".tar.gz")
+    try:
+        run([VMIN, "backup-domain", "--domain", domain, "--dest", str(archive), "--all-features"], timeout=1800)
+        if _archive_member_bytes(archive, "_mysql_" + schema) <= LIMIT_KIB * 1024:
+            raise AssertionError("The database dump did not exceed the file cap, so the backup proof is empty")
+        if archive.stat().st_size <= 2 * SMALL_DESTINATION_BYTES:
+            raise AssertionError("The compressed archive would fit the small destination, so its failure proof is empty")
+        _settled(domain, "backup", database_pid=database_pid)
+        # Change the data after the backup, so a restore that does nothing cannot pass.
+        sql(f"DELETE FROM `{schema}`.quota_fill WHERE id % 2 = 0")  # noqa: S608 -- Validated fixture schema.
+        if sql(checksum).stdout.strip() == original:
+            raise AssertionError("The fixture data did not change after the backup, so the restore proof is empty")
+        _backup_that_cannot_fit(domain, database_pid=database_pid)
+        features = [argument for feature in RESTORE_FEATURES for argument in ("--feature", feature)]
+        run([VMIN, "restore-domain", "--source", str(archive), "--domain", domain, *features, "--only-features"],
+            timeout=1800)
+        _settled(domain, "restore", database_pid=database_pid)
+        if sql(checksum).stdout.strip() != original:
+            raise AssertionError("The restore did not bring back the backed-up database contents")
+    finally:
+        run(["/usr/bin/rm", "-rf", "--one-file-system", str(BACKUP_ROOT)])
+
+
+def _backup_that_cannot_fit(domain: str, *, database_pid: str) -> None:
+    """The archive outgrows its destination: the backup must fail, clean up and give the caps back."""
+    SMALL_DESTINATION.mkdir(mode=0o700, exist_ok=True)
+    if run(["/usr/bin/findmnt", "--noheadings", str(SMALL_DESTINATION)], allow_error=True).returncode == 0:
+        raise AssertionError("The small backup destination is already mounted; refuse to reuse it")
+    run(["/usr/bin/mount", "-t", "tmpfs", "-o", f"size={SMALL_DESTINATION_BYTES},mode=0700", "praho-small-backup",
+         str(SMALL_DESTINATION)])
+    try:
+        attempted = run(
+            [VMIN, "backup-domain", "--domain", domain, "--dest", str(SMALL_DESTINATION / "small.tar.gz"),
+             "--all-features"],
+            timeout=1800,
+            allow_error=True,
+        )
+    finally:
+        run(["/usr/bin/umount", str(SMALL_DESTINATION)])
+    if attempted.returncode == 0:
+        raise AssertionError("A backup larger than its destination reported success")
+    _settled(domain, "failed backup", database_pid=database_pid)
+
+
+def database(domain: str, neighbor: str) -> None:  # noqa: PLR0915 -- One ordered proof on an owned fixture.
+    """The database path of ADR-0075: past a full file cap, values over 16 KiB commit and nothing else is harmed."""
+    from praho_quota_native import _database_writer_qualified, _kernel_quota, _run  # noqa: PLC0415
 
     row, neighbor_row = domain_row(domain), domain_row(neighbor)
     database_name, neighbor_name = row["user"] + "_quota", neighbor_row["user"] + "_quota"
     if any(re.fullmatch(r"q776[0-9a-f]{8}n?_quota", name) is None for name in (database_name, neighbor_name)):
         raise AssertionError("Refuse SQL outside the exact generated fixture schemas")
-    _database_writer_qualified()
+    writer = _database_writer_qualified()
     pid = _run(["/usr/bin/systemctl", "show", "mariadb", "--property=MainPID", "--value"])
+    mount = json.loads(_run(["/usr/bin/findmnt", "--json", "--target", row["home"], "--output", "SOURCE"]))[
+        "filesystems"
+    ][0]["source"]
+    if any(_kernel_quota(mount, identity, group=group).hard for identity, group in ((writer[0], False), (writer[1], True))):
+        raise AssertionError("MariaDB's own identity has a quota that could abort the server")
     sql(
         f"CREATE TABLE IF NOT EXISTS `{database_name}`.quota_fill (id BIGINT PRIMARY KEY AUTO_INCREMENT, data LONGBLOB) ENGINE=InnoDB ROW_FORMAT=DYNAMIC"
     )
     sql(
         f"CREATE TABLE IF NOT EXISTS `{neighbor_name}`.quota_neighbor (id BIGINT PRIMARY KEY AUTO_INCREMENT) ENGINE=InnoDB"
     )
-    probe(domain)  # Includes the actual existing physical per-table and setgid checks.
+    unprivileged(domain, php=False, keep=True)
+    before = probe(domain)  # Includes the actual physical MariaDB-ownership and per-table checks.
+    if before["gid_used_bytes"] < (LIMIT_KIB - 2048) * 1024:
+        raise AssertionError("The tenant's file cap was not full before the database writes")
     stop = Event()
     commits = []
 
@@ -275,43 +395,37 @@ def database(domain: str, neighbor: str) -> None:
             commits.append(True)
             stop.wait(0.02)
 
-    began = datetime.now(UTC).isoformat()
-    failure = None
     with ThreadPoolExecutor(max_workers=1) as pool:
         future = pool.submit(neighbor_writes)
         try:
             for _index in range(MAX_INSERTS):
                 attempted = sql(
-                    f"INSERT INTO `{database_name}`.quota_fill (data) VALUES (REPEAT('x',1048576))",  # noqa: S608 -- Exact bounded ASCII fixture schema validated above.
+                    "SET STATEMENT group_concat_max_len=2097152 FOR "
+                    f"INSERT INTO `{database_name}`.quota_fill (data) {FILL_VALUE.format(schema=database_name)}",
                     allow_error=True,
                 )
                 if attempted.returncode:
-                    failure = attempted
-                    break
-            # Force a table flush too: server acknowledgement alone is not physical enforcement proof.
+                    if _has_os_edquot(attempted.stderr):
+                        raise AssertionError("A database write hit EDQUOT: its files are still charged to the account")
+                    raise AssertionError("A database write past the file cap failed: " + attempted.stderr[-400:])
             sql(f"FLUSH TABLES `{database_name}`.quota_fill", allow_error=True)
+            _disk_backed_work(database_name)
         finally:
             stop.set()
             future.result(timeout=30)
     current = probe(domain)
-    logs = run(["/usr/bin/journalctl", "-u", "mariadb", "--since", began, "--no-pager", "--output=cat"]).stdout
-    if failure is None or not _has_os_edquot(failure.stderr + "\n" + logs):
-        raise AssertionError("The real MariaDB writer did not prove EDQUOT")
+    if current["observation"]["database_bytes"] <= LIMIT_KIB * 1024:
+        raise AssertionError("The database did not grow past the file cap, so the proof is empty")
+    if current["gid_used_bytes"] > before["gid_used_bytes"] + 1024 * 1024:
+        raise AssertionError("Database bytes were charged to the account's group quota")
     if len(commits) < 3 or _run(["/usr/bin/systemctl", "show", "mariadb", "--property=MainPID", "--value"]) != pid:
-        raise AssertionError("Quota exhaustion interrupted the neighboring tenant or restarted MariaDB")
+        raise AssertionError("Database growth interrupted the neighboring tenant or restarted MariaDB")
+    unprivileged(domain, php=False, keep=True)  # The cap still governs files after the database passed it.
     _verify_neighbor_commit(neighbor_name, database_pid=pid)
-    if current["gid_used_bytes"] < (LIMIT_KIB - 2048) * 1024:
-        raise AssertionError("Database failure was not at the tenant group cap")
-    # Only this owned lab fixture gets temporary cleanup headroom. Customer code never uses this bypass.
-    mount = json.loads(_run(["/usr/bin/findmnt", "--json", "--target", row["home"], "--output", "SOURCE"]))[
-        "filesystems"
-    ][0]["source"]
-    _set_kernel_quota(mount, int(row["gid"]), LIMIT_KIB * 2, group=True)
-    try:
-        sql(f"DROP TABLE `{database_name}`.quota_fill")
-        sql(f"TRUNCATE TABLE `{neighbor_name}`.quota_neighbor")
-    finally:
-        _set_kernel_quota(mount, int(row["gid"]), LIMIT_KIB, group=True)
+    backup_restore(domain, database_name, database_pid=pid)
+    _remove_fill(domain)
+    sql(f"DROP TABLE `{database_name}`.quota_fill")
+    sql(f"TRUNCATE TABLE `{neighbor_name}`.quota_neighbor")
     probe(domain)
 
 
@@ -415,11 +529,12 @@ def main() -> None:
             "mysql_cap_sys_resource": False,
             "mysql_bounding_cap_sys_resource": False,
             "physical_tables_verified": True,
+            "quota_contract": "database-files-outside-kernel-quota-v1",
             "acceptance": dict.fromkeys(
                 (
                     "unprivileged_uid_edquot",
                     "php_uid_edquot",
-                    "database_edquot",
+                    "database_outside_quota",
                     "database_neighbor_healthy",
                     "reboot_persistent",
                     "update_persistent",

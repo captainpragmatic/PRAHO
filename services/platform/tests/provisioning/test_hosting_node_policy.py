@@ -9,6 +9,8 @@ from django.test import SimpleTestCase
 from apps.provisioning.hosting_node_policy import (
     NATIVE_ACCEPTANCE_CHECKS,
     NOTIFICATION_EMITTERS,
+    POLICY_VERSION,
+    QUOTA_CONTRACT,
     verify_notification_evidence,
     verify_quota_evidence,
     verify_quota_inventory,
@@ -33,6 +35,7 @@ def quota_evidence():
         "mysql_cap_sys_resource": False,
         "mysql_bounding_cap_sys_resource": False,
         "physical_tables_verified": True,
+        "quota_contract": QUOTA_CONTRACT,
         "acceptance": dict.fromkeys(NATIVE_ACCEPTANCE_CHECKS, True),
         "acceptance_id": str(uuid4()),
         "bw_auto_disable": False,
@@ -62,6 +65,23 @@ class HostingNodeEvidenceTests(SimpleTestCase):
             changed["acceptance"][key] = False
             with self.subTest(key=key), self.assertRaises(ValidationError):
                 verify_quota_evidence(changed, "a" * 64)
+
+    def test_a_proof_of_the_old_database_denial_cannot_certify_the_opposite_policy(self):
+        evidence = quota_evidence()
+        without_contract = {key: value for key, value in evidence.items() if key != "quota_contract"}
+        old_acceptance = deepcopy(evidence)
+        old_acceptance["acceptance"]["database_edquot"] = old_acceptance["acceptance"].pop("database_outside_quota")
+        for name, changed in (
+            ("no contract", without_contract),
+            ("older contract", {**evidence, "quota_contract": "database-group-quota-v0"}),
+            ("old acceptance", old_acceptance),
+        ):
+            with self.subTest(name), self.assertRaises(ValidationError):
+                verify_quota_evidence(changed, "a" * 64)
+
+    def test_the_contract_does_not_retire_notification_evidence(self):
+        # Versioning POLICY_VERSION instead would have invalidated notification handover evidence too.
+        self.assertEqual(POLICY_VERSION, "hosting-node-v1")
 
     def test_unknown_old_or_retargeted_proof_is_not_managed_readiness(self):
         evidence = quota_evidence()

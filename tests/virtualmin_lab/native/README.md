@@ -49,8 +49,8 @@ database. Run these phases sequentially:
    durable enrollment; its original client private key stays unchanged.
 4. `make native-vm-register` verifies activation and prepares reviewed inspection
    helpers through the public node-policy operation.
-5. `make test-virtualmin-quotas` performs actual UID/PHP/database denial, neighbor
-   controls, provider-observed reboots, package update and isolated requalification.
+5. `make test-virtualmin-quotas` performs actual UID/PHP denial, a database growing
+   past a full file cap with neighbor controls, provider-observed reboots, package update and isolated requalification.
 6. `make test-virtualmin-native-fresh-deployment` rechecks the original database
    intent, creator credential, immutable create records, live provider identity,
    owned DNS, public SSH/port/API/TLS validation and current native quota evidence.
@@ -78,8 +78,8 @@ and database and follow this sequence:
    credential. The password reaches only the panel-install vars file and is never printed.
 5. `make native-vm-register` exercises public deployment registration-resume,
    activation and explicitly reviewed helper preparation.
-6. `make test-virtualmin-quotas` proves unprivileged UID/PHP/database denial,
-   neighbor isolation, reboot and managed-update persistence on the actual Ubuntu VM.
+6. `make test-virtualmin-quotas` proves unprivileged UID/PHP denial, a database
+   past a full file cap with MariaDB and a neighbor unharmed, reboot and managed-update persistence on the actual Ubuntu VM.
 7. `make native-s3-create` and `make native-s3-verify` prepare the separately owned
    pinned MinIO/KMS fixture. Load its private sibling `.env` into this task's environment;
    the exact `praho-native-<run UUID>` bucket and real SSE-S3 put/get are required.

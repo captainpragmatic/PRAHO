@@ -5,12 +5,14 @@ import json
 from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import ModuleType
 from unittest.mock import patch
 from uuid import uuid4
 
 from django.conf import settings
 from django.test import SimpleTestCase
 
+from apps.provisioning.hosting_node_policy import NATIVE_ACCEPTANCE_CHECKS, QUOTA_CONTRACT
 from tests.provisioning.test_hosting_node_policy import quota_evidence
 
 
@@ -60,7 +62,7 @@ class HostingNodeNativeTests(SimpleTestCase):
         )
         self.assertLess(
             playbook.index("Refuse occupied or ambiguous first-install nodes"),
-            playbook.index("Exclude the database writer quota bypass capability"),
+            playbook.index("Remove the database writer's resource-override capability"),
         )
 
     def test_first_install_guard_names_what_occupies_the_node(self):
@@ -241,6 +243,39 @@ class HostingNodeNativeTests(SimpleTestCase):
         self.assertEqual(transport.call_count, 1)
         self.assertEqual(transport.call_args.args[0][-1], "inspect")
 
+    def inspect_refused_by(self, error):
+        notifications = {
+            "evidence": {"emitters": {}, "operator_alerts_preserved": True, "tenant_mail_preserved": True},
+            "inventory_digest": "a" * 64,
+        }
+        sibling = ModuleType("praho_quota_native")
+        sibling.NativeQuotaBackend, sibling._database_writer_qualified, sibling._fields = object, object, object
+
+        def native_file(path, **_kwargs):
+            if path == Path("/etc/machine-id"):
+                return "f3dc92d50ac14de0b663f7daab29960a"
+            if path.name == "native-acceptance.json":
+                raise error
+            raise FileNotFoundError(path)
+
+        with (
+            TemporaryDirectory() as directory,
+            patch.object(self.native, "INSTALLATION", Path(directory) / "not-installed"),
+            patch.object(self.native, "_read", side_effect=native_file),
+            patch.object(self.native, "_run", return_value=json.dumps(notifications)),
+            patch.object(self.native, "os_quota_notification_inventory", return_value=(True, "b" * 64)),
+            patch.object(self.native, "notification_guard_inventory", return_value=(True, "c" * 64)),
+            patch.dict("sys.modules", {"praho_quota_native": sibling}),
+        ):
+            return self.native.inspect("a" * 64)["quota_refusal"]
+
+    def test_a_tenant_charged_database_is_named_in_the_node_refusal(self):
+        refusal = type("DatabaseStorageRefusalError", (ValueError,), {})("Database shop_db: wp_posts.ibd is tenant-charged")
+        self.assertIn("shop_db", self.inspect_refused_by(refusal))
+
+    def test_other_refusals_keep_their_detail_on_the_node(self):
+        self.assertNotIn("secret-detail", self.inspect_refused_by(ValueError("secret-detail")))
+
     def test_fstab_changes_only_exact_root_entry_and_preserves_other_mounts(self):
         original = "# root\nUUID=one / ext4 defaults,errors=remount-ro 0 1\nUUID=two /data ext4 defaults 0 2\n"
         result = self.native.classic_fstab(original)
@@ -325,6 +360,32 @@ class HostingNodeNativeTests(SimpleTestCase):
                     filesystem_uuid=original["filesystem_uuid"],
                     boot=current_boot,
                 )
+
+    def test_node_and_platform_share_the_database_outside_quota_contract(self):
+        self.assertEqual(self.native.QUOTA_CONTRACT, QUOTA_CONTRACT)
+        self.assertEqual(self.native.ACCEPTANCE_CHECKS, NATIVE_ACCEPTANCE_CHECKS)
+
+    def test_the_node_refuses_a_proof_of_the_old_database_denial(self):
+        current = quota_evidence()
+        current.pop("identity")
+        for key in ("bw_auto_disable", "bw_auto_enable", "requalification_required", "qualification_id"):
+            current.pop(key)
+        without_contract = {key: value for key, value in current.items() if key != "quota_contract"}
+        old_acceptance = deepcopy(current)
+        old_acceptance["acceptance"]["database_edquot"] = old_acceptance["acceptance"].pop("database_outside_quota")
+        location = {
+            "installation": current["installation"],
+            "filesystem_uuid": current["filesystem_uuid"],
+            "boot": current["boot_id"],
+        }
+        self.assertFalse(self.native.qualification_inventory(current, **location)["requalification_required"])
+        for name, changed in (
+            ("no contract", without_contract),
+            ("older contract", {**current, "quota_contract": "database-group-quota-v0"}),
+            ("old acceptance", old_acceptance),
+        ):
+            with self.subTest(name), self.assertRaises(ValueError):
+                self.native.qualification_inventory(changed, **location)
 
     def test_failed_or_changed_requalification_keeps_original_acceptance(self):
         # Native I/O/kernel boundary doubles exercise publication ordering only;

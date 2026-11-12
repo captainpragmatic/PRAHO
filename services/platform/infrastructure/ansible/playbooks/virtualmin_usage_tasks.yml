@@ -121,6 +121,48 @@
       [Install]
       WantedBy=timers.target
 
+# Database files have no kernel cap (ADR-0075), and a full disk aborts the shared MariaDB.
+- name: Install the node free-space alert
+  ansible.builtin.copy:
+    src: files/praho_disk_alert.py
+    dest: /usr/local/libexec/praho_disk_alert.py
+    owner: root
+    group: root
+    mode: '0700'
+
+- name: Install the node free-space alert service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/praho-disk-alert.service
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Warn operators when the node disk fills
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/python3 /usr/local/libexec/praho_disk_alert.py
+      UMask=0077
+      TimeoutStartSec=90
+
+- name: Install the node free-space alert timer
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/praho-disk-alert.timer
+    mode: '0644'
+    content: |
+      [Unit]
+      Description=Check node free space every five minutes
+      [Timer]
+      OnBootSec=2min
+      OnUnitActiveSec=5min
+      [Install]
+      WantedBy=timers.target
+
+- name: Enable the node free-space alert timer
+  ansible.builtin.systemd:
+    name: praho-disk-alert.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
 - name: Enable usage collection
   ansible.builtin.systemd:
     name: praho-usage.timer

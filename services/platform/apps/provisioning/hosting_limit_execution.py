@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
 from django.core.exceptions import ValidationError
@@ -34,6 +34,9 @@ from .hosting_limit_policy import BYTES_PER_MIB, OVERLAY_QUOTA_PROTOCOL, effecti
 from .service_models import Service
 from .virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from .virtualmin_security import connection_identity
+
+if TYPE_CHECKING:
+    from .virtualmin_usage_models import UsageReading
 
 logger = logging.getLogger(__name__)
 OPERATION = "apply_hosting_limits"
@@ -773,22 +776,39 @@ def _attention(execution_id: UUID, message: str) -> None:
 
 
 def _safety_used(account: VirtualminAccount, probe: dict[str, Any], *, owner_id: int) -> int:
-    """Canonical bytes remain observational; only this separate fit check takes max."""
+    """Only what the kernel cap governs has to fit: databases are measured but outside it (ADR-0075)."""
     return max(
         quantity(probe["uid_used_bytes"]),
         quantity(probe["gid_used_bytes"]),
-        canonical_safety_used_bytes(account, probe, owner_id=owner_id),
+        _canonical_files_bytes(account, probe, owner_id=owner_id),
     )
 
 
 def canonical_safety_used_bytes(account: VirtualminAccount, probe: dict[str, Any], *, owner_id: int) -> int:
     """Shared exact-owner canonical evidence; kernel accounting is never a fallback."""
-    from .virtualmin_usage_models import AccountUsageState, UsageReading  # noqa: PLC0415
-
     if "observation" in probe:
         # The closed probe verifier already bound its timestamp and complete
         # native identity to this current owner and canonical/held target.
         return canonical_observation(probe["observation"])
+    total = _fresh_disk_reading(account, probe, owner_id=owner_id).disk_total_bytes
+    if total is None:
+        raise ValidationError(_("Fresh canonical disk evidence for this exact owner and native scope is required."))
+    return total
+
+
+def _canonical_files_bytes(account: VirtualminAccount, probe: dict[str, Any], *, owner_id: int) -> int:
+    if "observation" in probe:
+        canonical_observation(probe["observation"])
+        return quantity(probe["observation"]["files_bytes"])
+    files = _fresh_disk_reading(account, probe, owner_id=owner_id).disk_files_bytes
+    if files is None:
+        raise ValidationError(_("Fresh canonical disk evidence for this exact owner and native scope is required."))
+    return files
+
+
+def _fresh_disk_reading(account: VirtualminAccount, probe: dict[str, Any], *, owner_id: int) -> UsageReading:
+    from .virtualmin_usage_models import AccountUsageState, UsageReading  # noqa: PLC0415
+
     state = AccountUsageState.objects.filter(account_id=account.pk).first()
     if (
         state is not None
@@ -810,8 +830,8 @@ def canonical_safety_used_bytes(account: VirtualminAccount, probe: dict[str, Any
             taken_at__lte=timezone.now() + timedelta(seconds=5),
             scan_started_at__gte=max(state.gauge_not_before, state.owner_started_at),
         ).first()
-        if reading is not None and reading.disk_total_bytes is not None:
-            return reading.disk_total_bytes
+        if reading is not None:
+            return reading
     raise ValidationError(_("Fresh canonical disk evidence for this exact owner and native scope is required."))
 
 
