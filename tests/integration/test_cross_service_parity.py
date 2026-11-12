@@ -127,7 +127,7 @@ class TestButtonTagParity(TestCase):
 
 # The tags #821 added. Each is compared as written: its parameters and their defaults, the extra arguments it
 # accepts, the checks it runs and what it hands its template (or the call it delegates to).
-NEW_TAGS = ("icon_button", "toggle_badge", "disclosure")
+NEW_TAGS = ("icon_button", "toggle_badge", "disclosure", "tab", "tab_panel_attrs", "do_tablist")
 
 
 def _tag_contract(service: str, tag: str) -> dict[str, object]:
@@ -141,6 +141,8 @@ def _tag_contract(service: str, tag: str) -> dict[str, object]:
                 ast.unparse(node.args),
                 [ast.unparse(statement) for statement in body],
             )
+        if isinstance(node, ast.ClassDef) and tag == "do_tablist" and node.name == "TablistNode":
+            contract[node.name] = ast.unparse(node)
         if (
             isinstance(node, ast.AnnAssign)
             and isinstance(node.target, ast.Name)
@@ -156,7 +158,7 @@ def _tag_contract(service: str, tag: str) -> dict[str, object]:
 
 
 class TestNewTagParity(TestCase):
-    """icon_button, toggle_badge and disclosure are the same code in both services (Contract 1 of #821)."""
+    """The tags #821 added are the same code in both services (Contract 1 of #821)."""
 
     def test_each_new_tag_is_the_same_in_both_services(self) -> None:
         for tag in NEW_TAGS:

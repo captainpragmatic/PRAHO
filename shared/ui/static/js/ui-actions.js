@@ -54,7 +54,6 @@
     showInvoiceRefundRequestModal: true,
     showOrderRefundRequestModal: true,
     showRefundModal: true,
-    showTabAction: true,
     toggleAddItemForm: true,
     toggleEventDetailAction: true,
     toggleExpandableEditAction: true,

@@ -1,0 +1,11 @@
+{% comment %}
+===============================================================================
+TAB COMPONENT
+===============================================================================
+One button of a {% tablist %}. A real tab is joined to its panel by id and its state is owned by the registered Alpine
+component `tabs`, which reads data-tab and the two class lists. A filter is an aria-pressed button whose state belongs
+to whatever holds the filter value: a delegated action (data_action, which swaps the two class lists) or the page's
+Alpine component (alpine_click, alpine_pressed, alpine_class). Every value is escaped here, once.
+{% endcomment %}
+{% load ui_components %}
+<button type="button"{% if kind == 'tab' %} id="{{ tab_id|force_escape }}" role="tab" aria-controls="{{ panel_id|force_escape }}" aria-selected="{{ selected|yesno:'true,false' }}" tabindex="{% if selected %}0{% else %}-1{% endif %}" data-tab="{{ name|force_escape }}" data-active-class="{{ active_class|force_escape }}" data-inactive-class="{{ inactive_class|force_escape }}" :aria-selected="isSelected($el)" :tabindex="tabIndex($el)" :class="tabClass($el)" @click="select($el)" @keydown="onKeydown($event)"{% else %} aria-pressed="{{ selected|yesno:'true,false' }}"{% if data_action %} data-action="{{ data_action|force_escape }}"{% if data_select_name %} data-select-name="{{ data_select_name|force_escape }}" data-select-value="{{ data_select_value|force_escape }}"{% endif %} data-active-class="{{ active_class|force_escape }}" data-inactive-class="{{ inactive_class|force_escape }}"{% endif %}{% if alpine_click %} @click="{{ alpine_click|force_escape }}"{% endif %}{% if alpine_pressed %} :aria-pressed="{{ alpine_pressed|force_escape }}"{% endif %}{% if alpine_class %} :class="{{ alpine_class|force_escape }}"{% endif %}{% endif %} class="ui-btn focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 {{ class|force_escape }}{% if kind == 'filter' and data_action %} {% if selected %}{{ active_class|force_escape }}{% else %}{{ inactive_class|force_escape }}{% endif %}{% endif %}">{% if icon %}{% icon icon %} {% endif %}{{ label|force_escape }}{% if show_count %} ({{ count|force_escape }}){% endif %}{% if badge %} {% badge badge variant=badge_variant size="xs" rounded="full" %}{% endif %}</button>

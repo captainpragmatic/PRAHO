@@ -1,8 +1,8 @@
 """Which hand-written buttons may remain, by identity, not by count (#821).
 
 A count lets one exemption be swapped for another without anyone noticing, so the expected markers are written out
-here by hand, file by file, with the reason each one gives. They come from the per-control decisions in
-docs/development/821-control-inventory.md; never regenerate this list from a scan of the tree. A marker that goes
+here by hand, file by file, with the reason each one gives. Each stays because its content or origin can't be
+carried by a component (the reason says which); never regenerate this list from a scan of the tree. A marker that goes
 away, appears, moves to another file or changes its reason fails the test, and the list is edited on purpose.
 
 TMPL002 skips each service's own templates/components/ directory, so a raw button moved there would escape the
@@ -18,17 +18,9 @@ MARKER = re.compile(r"\{#\s*tmpl-allow\s+TMPL002\s*:\s*((?:(?!#\}).)*?)\s*#\}")
 RAW_BUTTON = re.compile(r"<button\b", re.IGNORECASE)
 SKIPPED_DIRECTORIES = {"node_modules", "staticfiles", ".venv", ".venv-darwin", ".venv-linux"}
 
-_TAB = (
-    "@click and :class bindings drive the Alpine tab state; "
-    "components accept no executable attributes (apps/ui/attributes.py)"
-)
 _ROLE_CHOICE = (
     "holds structured inner markup (an icon, the role name and a subtitle span) plus a current-role highlight class; "
     "the button tag renders one text and one icon"
-)
-_SERVER_TAB = (
-    "tab button whose classes showTabAction swaps by selector, with a live count in its label; "
-    "the button tag's variant classes would break the tab styling"
 )
 _CART_TOGGLE = (
     "cart toggle whose #cart-count badge, which later swaps update, sits beside its label; "
@@ -48,18 +40,9 @@ EXPECTED: dict[str, list[str]] = {
         _ROLE_CHOICE,
         _ROLE_CHOICE,
     ],
-    "services/platform/templates/customers/list.html": [
-        "the active tab is marked by per-tab text and border colour classes chosen at render time; "
-        "the button tag renders every tab in one variant colour",
-    ],
     "services/platform/templates/provisioning/virtualmin/account_detail.html": [
-        _TAB,
-        _TAB,
-        _TAB,
-        _TAB,
         "holds a second (Protected) span beside its label; the button tag renders one text and one icon",
     ],
-    "services/platform/templates/provisioning/virtualmin/server_detail.html": [_SERVER_TAB, _SERVER_TAB, _SERVER_TAB],
     "services/platform/templates/tickets/detail.html": [
         "built client-side inside a JS template literal (fileItem.innerHTML) with a per-file data-index; "
         "icon-only remove button with inline SVG, which the server-rendered button tag cannot produce",
@@ -68,11 +51,7 @@ EXPECTED: dict[str, list[str]] = {
         "CSP positive control - a deliberately raw inline-handler button the e2e test expects CSP to block",
     ],
     "services/portal/templates/orders/partials/cart_updated.html": [_CART_TOGGLE],
-    "services/portal/templates/orders/product_catalog.html": [
-        _CART_TOGGLE,
-        "needs button alpine_class",
-        "needs button alpine_class",
-    ],
+    "services/portal/templates/orders/product_catalog.html": [_CART_TOGGLE],
 }
 
 # Raw buttons in service-local templates/components/ directories, per file.
@@ -84,7 +63,6 @@ LOCAL_COMPONENT_BUTTONS: dict[str, int] = {
     "services/portal/templates/components/mfa_disable_button.html": 1,
     "services/portal/templates/components/mobile_header.html": 2,
     "services/portal/templates/components/order_payment_button.html": 1,
-    "services/portal/templates/components/service_detail_tabs.html": 4,
 }
 
 

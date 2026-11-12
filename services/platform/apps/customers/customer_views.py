@@ -154,7 +154,7 @@ def customer_list(request: HttpRequest) -> HttpResponse:
     extra_params = pagination_query(request)
 
     # Status tabs for filter UI
-    status_tabs = [
+    status_tabs: list[dict[str, str | bool]] = [
         {"value": "", "label": str(_("All")), "border_class": "border-blue-500", "text_class": "text-blue-400"},
         {
             "value": "active",
@@ -181,6 +181,10 @@ def customer_list(request: HttpRequest) -> HttpResponse:
             "text_class": "text-amber-400",
         },
     ]
+
+    for tab in status_tabs:
+        tab["selected"] = tab["value"] == status_filter
+        tab["active_class"] = f"bg-slate-600 {tab['text_class']} border {tab['border_class']}"
 
     # Breadcrumbs
     breadcrumb_items = [

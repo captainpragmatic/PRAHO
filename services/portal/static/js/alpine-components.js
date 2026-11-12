@@ -263,5 +263,4 @@ document.addEventListener('alpine:init', function () {
 
   Alpine.data('justAddedHighlight', function () { return { init() { var self = this; setTimeout(function () { self.$el.classList.remove('bg-green-900/30'); }, 2000); } }; });
 
-  Alpine.data('tabGroup', function () { return { activeTab: 'overview', tabClass(name) { return this.activeTab === name ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-300'; }, isTab(name) { return this.activeTab === name; } }; });
 });

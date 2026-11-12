@@ -3,6 +3,7 @@
 import json
 import time
 from io import StringIO
+from unittest.mock import patch
 
 from django.core.management import call_command
 from django.core.management.base import CommandError
@@ -16,12 +17,14 @@ from apps.billing.models import Invoice
 from apps.common.e2e_fixtures import seed_baseline, seed_scenario, validate_baseline
 from apps.common.security_decorators import secure_user_registration
 from apps.common.types import Ok, Result
+from apps.customers.contact_models import CustomerAddress
 from apps.customers.models import Customer
 from apps.orders.models import Order
 from apps.products.models import Product
+from apps.provisioning.models import Service
 from apps.settings.models import SystemSetting
 from apps.users.mfa import BackupCodeService
-from apps.users.models import CustomerMembership
+from apps.users.models import CustomerMembership, User
 
 RESET_TASK = "apps.users.tasks.send_password_reset_email"
 
@@ -95,6 +98,23 @@ class E2EFixtureTests(TestCase):
         product = Product.objects.get(pk=pricing["product_id"])
         self.assertEqual(product.meta["fixture_name"], "pricing001")
         self.assertFalse(product.prices.exists())
+
+    def test_a_scenario_that_fails_late_leaves_nothing_behind_and_the_key_can_be_retried(self) -> None:
+        """The command that calls it has no transaction, so seed_scenario must be all-or-nothing itself."""
+        seed_baseline()
+        key = "rollback0001"
+        with (
+            patch.object(Service.objects, "create", side_effect=RuntimeError("late failure")),
+            self.assertRaisesRegex(RuntimeError, "late failure"),
+        ):
+            seed_scenario("service_request", key)
+        self.assertFalse(Customer.objects.filter(name__contains=key).exists())
+        self.assertFalse(User.objects.filter(email=f"account-{key}@e2e.test").exists())
+        self.assertFalse(CustomerMembership.objects.filter(user__email=f"account-{key}@e2e.test").exists())
+        self.assertFalse(CustomerAddress.objects.filter(label__contains=key).exists())
+
+        retried = seed_scenario("service_request", key)
+        self.assertTrue(Service.objects.filter(pk=int(retried["service_id"])).exists())
 
     def test_order_edit_scenario_is_an_editable_draft_with_two_priced_products(self) -> None:
         seed_baseline()

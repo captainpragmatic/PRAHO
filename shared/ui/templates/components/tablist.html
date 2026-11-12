@@ -1,0 +1,9 @@
+{% comment %}
+===============================================================================
+TABLIST COMPONENT
+===============================================================================
+Rendered by the {% tablist %} block tag around its {% tab %} tags: role="tablist" for real tabs, role="group" for a
+filter, named by aria-label. The page puts x-data="tabs" on an element around the tabs and their panels.
+Usage: {% tablist label=sections_label group="account" class="flex" %}{% tab "overview" overview_label selected=True %}{% end_tablist %}
+{% endcomment %}
+<div role="{{ tl_role }}" aria-label="{{ tl_label|force_escape }}"{% if tl_class %} class="{{ tl_class|force_escape }}"{% endif %}>{{ tl_content }}</div>

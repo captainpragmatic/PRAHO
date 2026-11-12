@@ -83,23 +83,10 @@
 
     <!-- Toggle pill -->
     <div class="flex justify-center mb-8">
-      <div class="inline-flex items-center bg-slate-800 border border-slate-700 rounded-full p-1 shadow-lg">
-        {# tmpl-allow TMPL002: needs button alpine_class #}
-        <button type="button"
-                @click="billingPeriod = 'monthly'"
-                :class="tabClass('monthly')"
-                class="px-5 py-2 rounded-full text-sm font-medium transition-all duration-200 focus:outline-none">
-          {% trans "Monthly" %}
-        </button>
-        {# tmpl-allow TMPL002: needs button alpine_class #}
-        <button type="button"
-                @click="billingPeriod = 'annual'"
-                :class="tabClass('annual')"
-                class="px-5 py-2 rounded-full text-sm font-medium transition-all duration-200 focus:outline-none flex items-center gap-2">
-          {% trans "Annual" %}
-          {% badge _("Save 20%") variant="success" size="xs" rounded="full" %}
-        </button>
-      </div>
+      {% trans "Billing period" as billing_period_label %}{% tablist label=billing_period_label kind="filter" class="inline-flex items-center bg-slate-800 border border-slate-700 rounded-full p-1 shadow-lg" %}
+        {% trans "Monthly" as monthly_label %}{% tab "monthly" monthly_label selected=True alpine_click="billingPeriod = 'monthly'" alpine_pressed="isPeriod('monthly')" alpine_class="tabClass('monthly')" class="px-5 py-2 rounded-full text-sm font-medium transition-all duration-200" %}
+        {% trans "Annual" as annual_label %}{% tab "annual" annual_label badge=_("Save 20%") alpine_click="billingPeriod = 'annual'" alpine_pressed="isPeriod('annual')" alpine_class="tabClass('annual')" class="px-5 py-2 rounded-full text-sm font-medium transition-all duration-200 flex items-center gap-2" %}
+      {% end_tablist %}
     </div>
 
     <!-- Products Grid -->

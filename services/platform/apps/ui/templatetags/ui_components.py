@@ -548,6 +548,143 @@ def disclosure(  # noqa: PLR0913
     }
 
 
+# ===============================================================================
+# TABS AND FILTER GROUPS
+# ===============================================================================
+
+_TAB_KINDS = ("tab", "filter")
+
+
+class TablistNode(template.Node):
+    """A named tablist or filter group around its {% tab %} tags, which read the group and the kind from it."""
+
+    child_nodelists = ("nodelist_content",)
+
+    def __init__(self, kwargs: dict[str, FilterExpression], nodelist_content: template.NodeList) -> None:
+        self.kwargs = kwargs
+        self.nodelist_content = nodelist_content
+
+    def render(self, context: template.Context) -> str:
+        resolved: dict[str, Any] = {key: value.resolve(context) for key, value in self.kwargs.items()}
+        kind = resolved.get("kind") or "tab"
+        group = str(resolved.get("group") or "")
+        label = resolved.get("label") or ""
+        if kind not in _TAB_KINDS or not str(label).strip() or (kind == "tab" and not _ELEMENT_ID.fullmatch(group)):
+            raise template.TemplateSyntaxError(
+                f"{{% tablist %}} needs a non-blank label, a kind of {_TAB_KINDS} and, for tabs, a plain group id; "
+                f"got kind={kind!r} group={group!r}"
+            )
+        with context.update({"tablist_group": group, "tablist_kind": kind}):
+            content_html = self.nodelist_content.render(context)
+        assert context.template is not None, "tablist tag requires a template context"
+        tablist_template = context.template.engine.get_template("components/tablist.html")
+        with context.update(
+            {
+                "tl_label": label,
+                "tl_role": "tablist" if kind == "tab" else "group",
+                "tl_class": resolved.get("class") or "",
+                "tl_content": content_html,  # NodeList.render() already returns SafeString
+            }
+        ):
+            return tablist_template.render(context)  # nosemgrep: direct-use-of-jinja2 — Django Template.render()
+
+
+@register.tag("tablist")
+def do_tablist(parser: template.base.Parser, token: template.base.Token) -> TablistNode:
+    """Block tag: {% tablist label=l group="account" class="flex" %}{% tab ... %}{% end_tablist %}."""
+    bits = token.split_contents()
+    remaining_bits = bits[1:]
+    kwargs = django_token_kwargs(remaining_bits, parser)
+    if remaining_bits:
+        raise template.TemplateSyntaxError(f"{bits[0]} received an invalid argument: {remaining_bits[0]}")
+    _reject_unknown("tablist", kwargs)
+    nodelist = parser.parse(("end_tablist",))
+    parser.delete_first_token()
+    return TablistNode(kwargs, nodelist)
+
+
+@register.inclusion_tag("components/tab.html", takes_context=True)
+def tab(  # noqa: PLR0913
+    context: template.Context,
+    name: str,
+    label: str,
+    *,
+    selected: bool = False,
+    icon: str = "",
+    count: int | str | None = None,
+    badge: str = "",
+    badge_variant: str = "success",
+    active_class: str = "",
+    inactive_class: str = "",
+    alpine_click: str = "",
+    alpine_pressed: str = "",
+    alpine_class: str = "",
+    data_action: str = "",
+    data_select_name: str = "",
+    data_select_value: str = "",
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """One button of the {% tablist %} around it.
+
+    kind="tab": the registered Alpine component `tabs` owns the selection; selected marks the first one, and the page
+    gives each panel {% tab_panel_attrs %}. kind="filter": an aria-pressed button whose state belongs to whatever holds
+    the filter value, either a delegated action (data_action, data_select_*) or the page's Alpine component
+    (alpine_click, alpine_pressed, alpine_class).
+    active_class/inactive_class are the two looks; count and badge join the label.
+    """
+    _reject_unknown("tab", kwargs)
+    kind = context.get("tablist_kind")
+    if kind not in _TAB_KINDS:
+        raise template.TemplateSyntaxError("{% tab %} goes inside {% tablist %}")
+    driven = bool(alpine_click or alpine_pressed or alpine_class or data_action)
+    if not str(label).strip() or (icon and icon not in _ICON_PATHS):
+        raise template.TemplateSyntaxError(f"{{% tab %}} needs a non-blank label and a catalog icon; got {icon!r}")
+    if kind == "tab" and (not _ELEMENT_ID.fullmatch(str(name)) or driven):
+        raise template.TemplateSyntaxError(f"{{% tab %}} of a tablist needs a plain name and no driver; got {name!r}")
+    if kind == "filter" and not driven:
+        raise template.TemplateSyntaxError("{% tab %} of a filter needs data_action or the alpine_* arguments")
+    group = context.get("tablist_group")
+    return {
+        "kind": kind,
+        "name": name,
+        "label": label,
+        "selected": bool(selected),
+        "tab_id": f"{group}-tab-{name}",
+        "panel_id": f"{group}-panel-{name}",
+        "icon": icon,
+        "count": count,
+        "show_count": count not in (None, ""),
+        "badge": badge,
+        "badge_variant": badge_variant,
+        "active_class": active_class,
+        "inactive_class": inactive_class,
+        "class": next((kwargs[key] for key in ("class", "class_", "css_class") if kwargs.get(key)), ""),
+        "alpine_click": alpine_click,
+        "alpine_pressed": alpine_pressed,
+        "alpine_class": alpine_class,
+        "data_action": data_action,
+        "data_select_name": data_select_name,
+        "data_select_value": data_select_value,
+    }
+
+
+@register.simple_tag
+def tab_panel_attrs(name: str, *, group: str, selected: bool = False) -> str:
+    """The attributes that make an element the tabpanel of {% tab name %}; the `tabs` component is its only owner."""
+    if not (_ELEMENT_ID.fullmatch(str(name)) and _ELEMENT_ID.fullmatch(str(group))):
+        raise template.TemplateSyntaxError(f"{{% tab_panel_attrs %}} needs plain ids; got {name!r}, group={group!r}")
+    attributes = format_html(
+        'id="{}-panel-{}" role="tabpanel" aria-labelledby="{}-tab-{}" tabindex="0" data-tab-panel="{}" '
+        'x-show="isPanel($el)"',
+        group,
+        name,
+        group,
+        name,
+        name,
+    )
+    return attributes if selected else format_html("{} x-cloak", attributes)
+
+
 @register.inclusion_tag("components/input.html")
 def input_field(
     name: str, *, config: InputConfig | None = None, htmx: HTMXAttributes | None = None, **kwargs: Any
@@ -1914,3 +2051,5 @@ _TAG_ARGUMENTS: dict[str, frozenset[str]] = {
 # icon_button writes these three itself.
 _TAG_ARGUMENTS["icon_button"] = _TAG_ARGUMENTS["button"] - frozenset({"icon", "icon_only", "aria_label"})
 _TAG_ARGUMENTS["disclosure"] = frozenset({"class", "class_", "css_class"})
+_TAG_ARGUMENTS["tablist"] = frozenset({"label", "group", "kind", "class"})
+_TAG_ARGUMENTS["tab"] = frozenset({"class", "class_", "css_class"})

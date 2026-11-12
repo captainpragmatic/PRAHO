@@ -10,6 +10,8 @@ Verifies:
 - Correct field names in detail template
 """
 
+import re
+
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -258,6 +260,16 @@ class CustomerListAnnotationTests(TestCase):
         breadcrumb = response.context["breadcrumb_items"]
         self.assertEqual(len(breadcrumb), 2)
         self.assertEqual(str(breadcrumb[1]["text"]), "Customers")
+
+    def test_the_status_filter_is_a_group_with_the_filtered_value_pressed(self):
+        html = self.client.get(reverse("customers:list"), {"status": "active"}).content.decode()
+        buttons = re.findall(r"<button[^>]*data-action=\"filter-tab\"[^>]*>", html)
+        self.assertEqual(len(buttons), 5)
+        pressed = [button for button in buttons if 'aria-pressed="true"' in button]
+        self.assertEqual(len(pressed), 1)
+        self.assertIn('data-select-value="active"', pressed[0])
+        self.assertIn("border-green-500", pressed[0])
+        self.assertNotIn('role="tablist"', html.split('name="status"')[0].rsplit("<form", 1)[-1])
 
     def test_status_tabs_in_context(self):
         """Status tabs are present for filter UI."""

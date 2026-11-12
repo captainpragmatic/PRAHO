@@ -133,6 +133,18 @@
           );
           if (filterSel) {
             filterSel.value = el.dataset.selectValue || "";
+            // A filter group's pressed state follows the select, the value that decides the results.
+            var filterGroup = el.closest('[role="group"]');
+            if (filterGroup) {
+              filterGroup.querySelectorAll('[data-action="filter-tab"]').forEach(function (button) {
+                var pressed = (button.dataset.selectValue || "") === filterSel.value;
+                button.setAttribute("aria-pressed", pressed ? "true" : "false");
+                var on = (button.dataset.activeClass || "").split(/\s+/).filter(Boolean);
+                var off = (button.dataset.inactiveClass || "").split(/\s+/).filter(Boolean);
+                button.classList.remove.apply(button.classList, pressed ? off : on);
+                button.classList.add.apply(button.classList, pressed ? on : off);
+              });
+            }
             filterSel.dispatchEvent(new Event("change", { bubbles: true }));
           }
         }
