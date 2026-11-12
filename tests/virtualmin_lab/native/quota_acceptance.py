@@ -28,7 +28,27 @@ OWNER = Path("/root/praho-native-lab-owner")
 VMIN = "/usr/sbin/virtualmin"
 BACKUP_ROOT = Path("/root/praho-native-backup")
 SMALL_DESTINATION = Path("/root/praho-native-backup-small")
-SMALL_DESTINATION_SIZE = "16m"
+SMALL_DESTINATION_BYTES = 16 * 1024 * 1024
+# Random fill: gzip shrinks repeated bytes to almost nothing, so the destination-full case would not fill anything.
+FILL_VALUE = "SELECT GROUP_CONCAT(RANDOM_BYTES(1024) SEPARATOR '') FROM `{schema}`.seq_1_to_1024"
+PHP_WRITER = r"""$p=$argv[1]; $f=fopen($p,'wb'); $hit=false;
+for($i=0;$i<128;$i++) { $n=@fwrite($f,random_bytes(1048576));
+if($n!==1048576) {$hit=true;break;}
+if(!fflush($f)||!fsync($f)){break;}}
+fclose($f); if(!$hit){fwrite(STDERR,'PHP did not encounter EDQUOT');exit(7);} echo posix_geteuid();"""
+FILE_WRITER = """import errno,json,os,sys
+assert os.geteuid()==int(sys.argv[2]) and os.getegid()==int(sys.argv[3])
+status=open('/proc/self/status').read(); assert int(status.split('CapEff:')[1].split()[0],16)==0
+hit=False
+with open(sys.argv[1],'wb',buffering=0) as stream:
+ for i in range(128):
+  try: stream.write(os.urandom(1048576)); os.fsync(stream.fileno())
+  except OSError as error:
+   assert error.errno==errno.EDQUOT,error
+   hit=True; break
+assert hit,'unprivileged writer did not encounter EDQUOT'
+print('uid-edquot')
+"""
 # PRAHO's restore feature list (virtualmin_validators.WEB_ONLY_VIRTUALMIN_FEATURES); a test keeps them equal.
 RESTORE_FEATURES = ("unix", "dir", "web", "ssl", "logrotate", "mysql")
 
@@ -198,12 +218,7 @@ def unprivileged(domain: str, *, php: bool, keep: bool = False) -> None:
         # (0) with no error_get_last() message (traced on Ubuntu 26.04). So any short write counts as the denial,
         # and the check below then requires usage at the verified hard cap, which tells a quota stop apart from
         # any other write failure.
-        program = r"""$p=$argv[1]; $f=fopen($p,'wb'); $hit=false;
-for($i=0;$i<128;$i++) { $n=@fwrite($f,str_repeat('x',1048576));
-if($n!==1048576) {$hit=true;break;}
-if(!fflush($f)||!fsync($f)){break;}}
-fclose($f); if(!$hit){fwrite(STDERR,'PHP did not encounter EDQUOT');exit(7);} echo posix_geteuid();"""
-        result = run([*prefix, "/usr/bin/php8.5", "-r", program, str(target)])
+        result = run([*prefix, "/usr/bin/php8.5", "-r", PHP_WRITER, str(target)])
         if result.stdout.strip() != str(account.pw_uid):
             raise AssertionError("PHP quota proof used the wrong runtime identity")
         # PHP gives no errno here: plenty of free disk rules out ENOSPC as the reason for the short write.
@@ -211,20 +226,7 @@ fclose($f); if(!$hit){fwrite(STDERR,'PHP did not encounter EDQUOT');exit(7);} ec
         if space.f_bavail * space.f_frsize < MIN_FREE_FOR_QUOTA_PROOF:
             raise AssertionError("PHP's short write cannot prove a quota stop on a nearly full disk")
     else:
-        program = """import errno,json,os,sys
-assert os.geteuid()==int(sys.argv[2]) and os.getegid()==int(sys.argv[3])
-status=open('/proc/self/status').read(); assert int(status.split('CapEff:')[1].split()[0],16)==0
-hit=False
-with open(sys.argv[1],'wb',buffering=0) as stream:
- for i in range(128):
-  try: stream.write(b'x'*1048576); os.fsync(stream.fileno())
-  except OSError as error:
-   assert error.errno==errno.EDQUOT,error
-   hit=True; break
-assert hit,'unprivileged writer did not encounter EDQUOT'
-print('uid-edquot')
-"""
-        run([*prefix, "/usr/bin/python3", "-c", program, str(target), str(account.pw_uid), str(account.pw_gid)])
+        run([*prefix, "/usr/bin/python3", "-c", FILE_WRITER, str(target), str(account.pw_uid), str(account.pw_gid)])
     current = probe(domain)
     if max(current["uid_used_bytes"], current["gid_used_bytes"]) < (LIMIT_KIB - 2048) * 1024:
         raise AssertionError("Write failure was not at the verified tenant hard cap")
@@ -312,21 +314,28 @@ def backup_restore(domain: str, schema: str, *, database_pid: str) -> None:
     (backups-lib.pl:902), and restores them from the domain's configured quota on success and failure (:1013).
     Restore lifts and restores them the same way (:3255, :3342) and imports as root.
     """
-    rows = sql(f"SELECT COUNT(*) FROM `{schema}`.quota_fill").stdout.strip()  # noqa: S608 -- Validated fixture schema.
+    checksum = f"CHECKSUM TABLE `{schema}`.quota_fill EXTENDED"
+    original = sql(checksum).stdout.strip()
     BACKUP_ROOT.mkdir(mode=0o700, exist_ok=True)
     archive = BACKUP_ROOT / (domain + ".tar.gz")
     try:
         run([VMIN, "backup-domain", "--domain", domain, "--dest", str(archive), "--all-features"], timeout=1800)
         if _archive_member_bytes(archive, "_mysql_" + schema) <= LIMIT_KIB * 1024:
             raise AssertionError("The database dump did not exceed the file cap, so the backup proof is empty")
+        if archive.stat().st_size <= 2 * SMALL_DESTINATION_BYTES:
+            raise AssertionError("The compressed archive would fit the small destination, so its failure proof is empty")
         _settled(domain, "backup", database_pid=database_pid)
+        # Change the data after the backup, so a restore that does nothing cannot pass.
+        sql(f"DELETE FROM `{schema}`.quota_fill WHERE id % 2 = 0")  # noqa: S608 -- Validated fixture schema.
+        if sql(checksum).stdout.strip() == original:
+            raise AssertionError("The fixture data did not change after the backup, so the restore proof is empty")
         _backup_that_cannot_fit(domain, database_pid=database_pid)
         features = [argument for feature in RESTORE_FEATURES for argument in ("--feature", feature)]
         run([VMIN, "restore-domain", "--source", str(archive), "--domain", domain, *features, "--only-features"],
             timeout=1800)
         _settled(domain, "restore", database_pid=database_pid)
-        if sql(f"SELECT COUNT(*) FROM `{schema}`.quota_fill").stdout.strip() != rows:  # noqa: S608 -- As above.
-            raise AssertionError("The restored database lost rows")
+        if sql(checksum).stdout.strip() != original:
+            raise AssertionError("The restore did not bring back the backed-up database contents")
     finally:
         run(["/usr/bin/rm", "-rf", "--one-file-system", str(BACKUP_ROOT)])
 
@@ -336,7 +345,7 @@ def _backup_that_cannot_fit(domain: str, *, database_pid: str) -> None:
     SMALL_DESTINATION.mkdir(mode=0o700, exist_ok=True)
     if run(["/usr/bin/findmnt", "--noheadings", str(SMALL_DESTINATION)], allow_error=True).returncode == 0:
         raise AssertionError("The small backup destination is already mounted; refuse to reuse it")
-    run(["/usr/bin/mount", "-t", "tmpfs", "-o", f"size={SMALL_DESTINATION_SIZE},mode=0700", "praho-small-backup",
+    run(["/usr/bin/mount", "-t", "tmpfs", "-o", f"size={SMALL_DESTINATION_BYTES},mode=0700", "praho-small-backup",
          str(SMALL_DESTINATION)])
     try:
         attempted = run(
@@ -391,7 +400,8 @@ def database(domain: str, neighbor: str) -> None:  # noqa: PLR0915 -- One ordere
         try:
             for _index in range(MAX_INSERTS):
                 attempted = sql(
-                    f"INSERT INTO `{database_name}`.quota_fill (data) VALUES (REPEAT('x',1048576))",  # noqa: S608 -- Exact bounded ASCII fixture schema validated above.
+                    "SET STATEMENT group_concat_max_len=2097152 FOR "
+                    f"INSERT INTO `{database_name}`.quota_fill (data) {FILL_VALUE.format(schema=database_name)}",
                     allow_error=True,
                 )
                 if attempted.returncode:

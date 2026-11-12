@@ -58,6 +58,10 @@ class DatabaseBoundary:
         self.leftover_after = set()
         self.caps_lifted_after = set()
         self.rows_after_restore = None
+        self.archive_bytes = 4 * module.SMALL_DESTINATION_BYTES
+        self.checksum = "1111"
+        self.restore_brings_back = True
+        self.fixture_change_sticks = True
         self.phase = None
 
     def read_native(self, arguments):
@@ -86,11 +90,15 @@ class DatabaseBoundary:
             destination = argv[argv.index("--dest") + 1]
             self.phase = "small" if "small" in destination else "full"
             returncode = self.backup_exits[self.phase]
+            if self.phase == "full":
+                with open(destination, "wb") as archive:  # Sparse: the harness reads only its size.
+                    archive.truncate(self.archive_bytes)
+                self.backed_up_checksum = self.checksum
         elif program == "virtualmin" and argv[1] == "restore-domain":
             self.phase = "restore"
             returncode = self.restore_exit
-            if self.rows_after_restore is not None:
-                self.fill_rows = self.rows_after_restore
+            if self.restore_brings_back:
+                self.checksum = self.backed_up_checksum
         elif program == "tar":
             name = ".backup/q77612345678.example.invalid_mysql_q77612345678_quota"
             stdout = f"-rw------- q776/q776 {self.dump_bytes} 2026-11-12 18:00 {name}\n"
@@ -121,7 +129,7 @@ class DatabaseBoundary:
 
     def sql(self, query, *, allow_error=False):  # noqa: C901, PLR0911, PLR0912 -- One closed fixture boundary.
         self.statements.append(query)
-        if query.startswith("INSERT INTO `q77612345678_quota`.quota_fill"):
+        if "INSERT INTO `q77612345678_quota`.quota_fill" in query:
             assert allow_error
             assert self.ready.wait(2), "Concurrent neighbor never committed its required baseline"
             if self.diagnostic is not None:
@@ -157,8 +165,11 @@ class DatabaseBoundary:
             elif query.startswith("TRUNCATE TABLE"):
                 self.neighbor_rows = 0
                 self.markers.clear()
-            elif query.startswith("SELECT COUNT(*) FROM `q77612345678_quota`.quota_fill"):
-                return self.result(query, stdout=f"{self.fill_rows}\n")
+            elif query.startswith("CHECKSUM TABLE `q77612345678_quota`.quota_fill"):
+                return self.result(query, stdout=f"q77612345678_quota.quota_fill\t{self.checksum}\n")
+            elif query.startswith("DELETE FROM `q77612345678_quota`.quota_fill"):
+                if self.fixture_change_sticks:
+                    self.checksum = "2222"
             elif query.startswith("SELECT @@tmpdir"):
                 return self.result(query, stdout=self.tmpdir + "\n")
             elif "Created_tmp_disk_tables" in query:
@@ -250,7 +261,7 @@ class NativeQuotaDatabaseProofTests(SimpleTestCase):
         boundary = DatabaseBoundary(self.acceptance)
         boundary.exercise()
         self.assertEqual(boundary.fill_rows, self.acceptance.MAX_INSERTS)
-        self.assertTrue(any("REPEAT('x',1048576)" in query for query in boundary.statements))  # past the 16 KiB trigger
+        self.assertTrue(any("RANDOM_BYTES(1024)" in query for query in boundary.statements))  # past the 16 KiB trigger
         self.assertEqual(len(boundary.transactions), 1)
         self.assertIn("COMMIT;", boundary.transactions[0])
         self.assertEqual(boundary.count_reads[-1], boundary.count_reads[0] + 1)
@@ -352,11 +363,38 @@ class NativeQuotaDatabaseProofTests(SimpleTestCase):
             boundary.exercise()
         self.assertTrue(any(argv[0].endswith("umount") for argv in boundary.commands))
 
-    def test_a_restore_that_loses_rows_is_refused(self):
+    def test_a_restore_that_does_nothing_is_refused(self):
         boundary = DatabaseBoundary(self.acceptance)
-        boundary.rows_after_restore = 3
-        with self.assertRaisesRegex(AssertionError, "rows"):
+        boundary.restore_brings_back = False
+        with self.assertRaisesRegex(AssertionError, "did not bring back"):
             boundary.exercise()
+
+    def test_a_fixture_change_that_did_not_take_proves_nothing(self):
+        boundary = DatabaseBoundary(self.acceptance)
+        boundary.fixture_change_sticks = False
+        with self.assertRaisesRegex(AssertionError, "did not change"):
+            boundary.exercise()
+
+    def test_an_archive_that_compressed_small_enough_to_fit_is_refused(self):
+        # gzip shrinks repeated bytes to almost nothing, so the destination-full case would silently succeed.
+        boundary = DatabaseBoundary(self.acceptance)
+        boundary.archive_bytes = self.acceptance.SMALL_DESTINATION_BYTES
+        with self.assertRaisesRegex(AssertionError, "would fit"):
+            boundary.exercise()
+        self.assertEqual([argv for argv in boundary.commands if argv[0].endswith("mount")], [])
+
+    def test_the_fixture_data_does_not_compress(self):
+        boundary = DatabaseBoundary(self.acceptance)
+        boundary.exercise()
+        fills = [query for query in boundary.statements if "quota_fill (data)" in query]
+        self.assertTrue(fills)
+        for query in fills:
+            self.assertIn("RANDOM_BYTES", query)
+            self.assertNotIn("REPEAT(", query)
+        self.assertIn("os.urandom", self.acceptance.FILE_WRITER)
+        self.assertNotIn("b'x'", self.acceptance.FILE_WRITER)
+        self.assertIn("random_bytes", self.acceptance.PHP_WRITER)
+        self.assertNotIn("str_repeat", self.acceptance.PHP_WRITER)
 
     def test_post_denial_transaction_refusal_cannot_certify_neighbor_health(self):
         boundary = DatabaseBoundary(self.acceptance, commit_error=True)

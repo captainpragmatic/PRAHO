@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import subprocess
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Event
@@ -174,3 +175,23 @@ def test_actual_principal_lookup_finds_every_grant_spelling_only(database):
             f"locked{suffix}": True,
         }
     sql("SET GLOBAL sql_mode=DEFAULT")
+
+
+def test_the_acceptance_fill_is_a_full_random_megabyte(database):
+    _prefix, sql = database
+    source = ROOT / "tests/virtualmin_lab/native/quota_acceptance.py"
+    spec = importlib.util.spec_from_file_location("quota_acceptance_fill", source)
+    acceptance = importlib.util.module_from_spec(spec)
+    with patch.object(sys, "path", list(sys.path)):
+        spec.loader.exec_module(acceptance)
+    schema = "fill_" + uuid4().hex[:12]
+    fill = acceptance.FILL_VALUE.format(schema=schema)
+    output = sql(
+        f"CREATE DATABASE {schema}; CREATE TABLE {schema}.quota_fill (id BIGINT PRIMARY KEY AUTO_INCREMENT, "  # noqa: S608 -- Generated fixture schema.
+        "data LONGBLOB) ENGINE=InnoDB; "
+        f"SET STATEMENT group_concat_max_len=2097152 FOR INSERT INTO {schema}.quota_fill (data) {fill}; "
+        f"SET STATEMENT group_concat_max_len=2097152 FOR INSERT INTO {schema}.quota_fill (data) {fill}; "
+        f"SELECT MIN(LENGTH(data)), COUNT(DISTINCT data), "
+        f"LENGTH(COMPRESS(MIN(data))) > 1000000 FROM {schema}.quota_fill"
+    )
+    assert output.split()[-3:] == ["1048576", "2", "1"]
