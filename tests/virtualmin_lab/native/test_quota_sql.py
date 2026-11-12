@@ -267,3 +267,28 @@ def test_actual_root_events_and_cross_schema_cascades_are_named(database):
     assert not any(f"{other}.parked" in item for item in found)
     assert f"foreign key {name}.orders.fk_cascade cascades from {other}.customers" in found
     assert not any("fk_restrict" in item or "fk_inside" in item for item in found)
+
+
+def test_actual_anonymous_accounts_are_never_left_out(database):
+    prefix, sql = database
+    name = "anon_" + uuid4().hex[:8]
+    sql(
+        f"CREATE DATABASE {name}; CREATE USER ''@'localhost'; "
+        f"GRANT INSERT ON {name}.* TO ''@'localhost'; GRANT INSERT ON *.* TO ''@'localhost'"
+    )
+    source = ROOT / "services/platform/infrastructure/ansible/playbooks/files/praho_hosting_node.py"
+    spec = importlib.util.spec_from_file_location("quota_sql_anonymous", source)
+    node = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(node)
+
+    def transport(arguments, **options):
+        assert arguments[0] == "/usr/bin/mariadb"
+        return command(prefix + arguments)
+
+    try:
+        with patch.object(node, "_run", side_effect=transport):
+            with pytest.raises(ValueError, match="unsupported name"):
+                node._database_principals([name])
+            assert "global privileges ''@'localhost'" in node._unsupported_access_paths([name], [])
+    finally:
+        sql("DROP USER ''@'localhost'")

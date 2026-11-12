@@ -145,7 +145,9 @@ class RepairOrchestrationTests(SimpleTestCase):
         self.identity = {"domain_id": "12345", "domain": "shop.test", "uid": TENANT[0], "gid": TENANT[1]}
         self.request = {"identity": "a" * 64, "token": str(uuid4()), "database_repair": self.identity}
         self.domain = {"id": "12345", "dom": "shop.test", "db_mysql": "shop_db"}
-        self.account = SimpleNamespace(pw_uid=TENANT[0], pw_gid=TENANT[1], pw_dir="/home/shop")
+        self.home = self.state / "home"
+        self.home.mkdir()
+        self.account = SimpleNamespace(pw_uid=TENANT[0], pw_gid=TENANT[1], pw_dir=str(self.home))
         self.statements = []
         self.principals = [["shop", "localhost", "false"], ["shop_ro", "%", "true"]]
         self.processlist = ["41"]
@@ -406,6 +408,41 @@ class RepairOrchestrationTests(SimpleTestCase):
         )
         self.repair()
         self.assertEqual(order, [("preflight", 0), ("repair", 1)])
+
+    def test_a_datadir_on_another_filesystem_than_the_home_is_refused_before_any_lock(self):
+        real_stat = Path.stat
+        home = self.home
+
+        def moved(path, *args, **kwargs):
+            result = real_stat(path, *args, **kwargs)
+            if path != home:
+                return result
+            fields = list(result)
+            fields[stat.ST_DEV] = result.st_dev + 1
+            return os.stat_result(fields)
+
+        with patch.object(Path, "stat", moved):
+            self.assert_refused_before_anything_stops("filesystem")
+        self.sibling.preflight_database_directory.assert_not_called()
+
+    def test_entries_are_checked_against_the_home_s_filesystem(self):
+        self.repair()
+        device = self.home.stat().st_dev
+        self.assertEqual(self.sibling.preflight_database_directory.call_args.kwargs["device"], device)
+        self.assertEqual(self.sibling.repair_database_directory.call_args.kwargs["device"], device)
+
+    def test_an_anonymous_account_with_a_grant_is_refused_before_any_lock(self):
+        self.principals.append(["", "localhost", "false"])
+        self.assert_refused_before_anything_stops("unsupported name")
+
+    def test_an_anonymous_global_writer_is_refused_by_name(self):
+        self.global_writers = [["", "localhost"]]
+        self.assert_refused_before_anything_stops("global privileges ''@'localhost'")
+
+    def test_no_lookup_leaves_anonymous_accounts_out(self):
+        self.repair()
+        for query in self.statements_with("FROM mysql."):
+            self.assertNotIn("User<>''", query)
 
     def test_a_journal_for_another_owner_is_refused(self):
         self.journal().write_text(json.dumps({"domain_id": "12345", "uid": 9, "gid": 9, "locked": []}))

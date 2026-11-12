@@ -629,8 +629,7 @@ def _database_principals(names: list[str]) -> list[tuple[str, str, bool]]:
         sources.append(f"SELECT User,Host FROM mysql.procs_priv WHERE Db={literal}")  # noqa: S608 -- Hex literal.
     rows = _sql(
         "SELECT JSON_ARRAY(g.User,g.Host,IF(JSON_VALUE(p.Priv,'$.account_locked') IN ('1','true'),'true','false')) "  # noqa: S608 -- Hex literals only.
-        f"FROM ({' UNION '.join(sources)}) g JOIN mysql.global_priv p ON p.User=g.User AND p.Host=g.Host "
-        "WHERE g.User<>''"
+        f"FROM ({' UNION '.join(sources)}) g JOIN mysql.global_priv p ON p.User=g.User AND p.Host=g.Host"
     )
     principals = []
     for row in rows.splitlines():
@@ -665,7 +664,7 @@ def _unsupported_access_paths(names: list[str], principals: list[tuple[str, str,
     """
     found = [f"role '{_label(user)}'" for user, host, _locked in principals if host == ""]
     columns = " OR ".join(f"{privilege}_priv='Y'" for privilege in GLOBAL_WRITE_PRIVILEGES)
-    for row in _sql(f"SELECT JSON_ARRAY(User,Host) FROM mysql.user WHERE User<>'' AND ({columns})").splitlines():  # noqa: S608 -- Fixed columns.
+    for row in _sql(f"SELECT JSON_ARRAY(User,Host) FROM mysql.user WHERE {columns}").splitlines():  # noqa: S608 -- Fixed columns.
         user, host = json.loads(row)
         if user not in SYSTEM_DATABASE_USERS:
             found.append(f"global privileges '{_label(user)}'@'{_label(host)}'")
@@ -767,7 +766,10 @@ def _repair_database_storage(request: dict[str, object]) -> None:  # noqa: C901,
         raise ValueError("Per-table database storage must be on before a repair can pass its rescan")
     datadir = Path(datadir_row[0].rstrip("/"))
     # Every other refusal the rescan can make comes first, so a repair that cannot finish never stops writes.
-    device = datadir.stat().st_dev if names else 0
+    # The rescan requires databases on the home's filesystem; refusing that here keeps a doomed repair from locking.
+    device = Path(account.pw_dir).stat().st_dev
+    if names and datadir.stat().st_dev != device:
+        raise ValueError("The database files are on another filesystem than the account's home")
     tenant = (account.pw_uid, account.pw_gid)
     for name in names:
         repairable_database_layout(datadir / name)
