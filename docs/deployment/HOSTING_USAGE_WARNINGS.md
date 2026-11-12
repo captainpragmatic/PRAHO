@@ -56,7 +56,11 @@ python3 /usr/local/lib/praho/praho_hosting_node.py repair_database_storage <<'JS
 JSON
 ```
 
-The operation locks the account's database users, disconnects them, moves each
+Before it stops anything, the operation checks every database directory and
+refuses, by name, write paths that locking logins can't stop: roles, logins with
+global write or `EXECUTE` privileges, events, and `SQL SECURITY DEFINER` routines,
+views or triggers elsewhere that run as the account. Remove or reassign what it
+names, then rerun. The operation then locks the account's database users, disconnects them, moves each
 database to MariaDB's UID and GID with setgid cleared, rescans, then unlocks only
 the users it locked. Any failure leaves the site's database writes stopped and
 `/var/lib/praho/hosting/database-repair-<id>.json` in place. Fix the named cause and

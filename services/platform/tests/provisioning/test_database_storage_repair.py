@@ -117,6 +117,15 @@ class RepairDirectoryTests(SimpleTestCase):
             self.repair()
         self.assertEqual(self.fs.owners["posts.ibd"], (MARIADB[0], TENANT[1]))
 
+    def test_the_preflight_refuses_what_the_repair_would_and_changes_nothing(self):
+        self.fs.set("users.ibd", (999, MARIADB[1]))
+        with self.fs, self.assertRaisesRegex(self.native.DatabaseStorageRefusalError, "users.ibd"):
+            self.native.preflight_database_directory(
+                self.schema, writer=MARIADB, tenant=TENANT, device=self.schema.stat().st_dev
+            )
+        self.assertEqual(self.fs.owners["posts.ibd"], (MARIADB[0], TENANT[1]))
+        self.assertEqual(self.fs.modes["shop_db"], 0o2750)
+
     def test_a_link_inside_a_database_is_refused(self):
         (self.schema / "evil.ibd").symlink_to("/etc/passwd")
         with self.fs, self.assertRaises(self.native.DatabaseStorageRefusalError):
@@ -147,11 +156,18 @@ class RepairOrchestrationTests(SimpleTestCase):
         self.sibling._database_writer_qualified = Mock(return_value=MARIADB)
         self.sibling.repair_database_directory = Mock()
         self.sibling.repairable_database_layout = Mock()
+        self.sibling.preflight_database_directory = Mock()
+        self.global_writers = []
+        self.definer_objects = []
 
     def sql(self, query):
         self.statements.append(query)
         if "FROM mysql.db" in query:
             return "\n".join(json.dumps(row) for row in self.principals)
+        if "FROM mysql.user" in query:
+            return "\n".join(json.dumps(row) for row in self.global_writers)
+        if "information_schema.ROUTINES" in query:
+            return "\n".join(json.dumps(row) for row in self.definer_objects)
         if "@@datadir" in query:
             return f"{self.state}/\t1"
         if "PROCESSLIST" in query:
@@ -300,6 +316,69 @@ class RepairOrchestrationTests(SimpleTestCase):
         with patch.object(self.node, "sleep"):
             self.repair()
         self.assertFalse(self.journal().exists())
+
+    def assert_refused_before_anything_stops(self, *names):
+        with self.assertRaises(ValueError) as refused:
+            self.repair()
+        for name in names:
+            self.assertIn(name, str(refused.exception))
+        self.assertEqual(self.statements_with("ALTER USER"), [])
+        self.assertEqual(self.statements_with("KILL"), [])
+        self.assertFalse(self.journal().exists())
+        self.sibling.repair_database_directory.assert_not_called()
+
+    def test_a_login_with_global_write_privileges_is_refused_by_name(self):
+        self.global_writers = [["reporting", "%"]]
+        self.assert_refused_before_anything_stops("global privileges", "'reporting'@'%'")
+
+    def test_a_definer_routine_elsewhere_that_runs_as_the_account_is_refused_by_name(self):
+        self.definer_objects = [["routine", "analytics", "sync_orders", "shop@localhost"]]
+        self.assert_refused_before_anything_stops("routine analytics.sync_orders", "shop@localhost")
+
+    def test_definer_objects_of_other_accounts_or_inside_the_account_are_supported(self):
+        self.definer_objects = [
+            ["routine", "analytics", "report", "other@localhost"],
+            ["routine", "shop_db", "cleanup", "shop@localhost"],
+            ["trigger", "shop_db", "audit", "shop@localhost"],
+            ["view", "sys", "version", "mariadb.sys@localhost"],
+        ]
+        self.repair()
+        self.assertFalse(self.journal().exists())
+
+    def test_an_event_that_writes_as_the_account_or_in_its_database_is_refused(self):
+        for event in (["event", "analytics", "nightly", "shop@localhost"], ["event", "shop_db", "purge", "x@localhost"]):
+            self.definer_objects = [event]
+            with self.subTest(event=event):
+                self.assert_refused_before_anything_stops(f"event {event[1]}.{event[2]}")
+
+    def test_a_role_granted_on_the_account_s_database_is_refused_by_name(self):
+        self.principals.append(["shop_writers", "", "false"])
+        self.assert_refused_before_anything_stops("role 'shop_writers'")
+
+    def test_routine_execute_grants_on_the_account_s_databases_are_looked_up_too(self):
+        self.repair()
+        (query,) = self.statements_with("FROM mysql.db")
+        self.assertIn("mysql.procs_priv", query)
+
+    def test_every_database_directory_is_preflighted_before_writes_stop(self):
+        self.domain["db_mysql"] = "shop_db shop_logs"
+        self.sibling.preflight_database_directory.side_effect = [
+            None,
+            ValueError("Database shop_logs: users.ibd has an unexpected owner or type"),
+        ]
+        self.assert_refused_before_anything_stops("shop_logs", "users.ibd")
+        self.assertEqual(self.sibling.preflight_database_directory.call_count, 2)
+
+    def test_the_directories_are_validated_again_after_writes_stop(self):
+        order = []
+        self.sibling.preflight_database_directory.side_effect = lambda *_a, **_k: order.append(
+            ("preflight", len(self.statements_with("ACCOUNT LOCK")))
+        )
+        self.sibling.repair_database_directory.side_effect = lambda *_a, **_k: order.append(
+            ("repair", len(self.statements_with("ACCOUNT LOCK")))
+        )
+        self.repair()
+        self.assertEqual(order, [("preflight", 0), ("repair", 1)])
 
     def test_a_journal_for_another_owner_is_refused(self):
         self.journal().write_text(json.dumps({"domain_id": "12345", "uid": 9, "gid": 9, "locked": []}))

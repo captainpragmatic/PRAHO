@@ -195,3 +195,41 @@ def test_the_acceptance_fill_is_a_full_random_megabyte(database):
         f"LENGTH(COMPRESS(MIN(data))) > 1000000 FROM {schema}.quota_fill"
     )
     assert output.split()[-3:] == ["1048576", "2", "1"]
+
+
+def test_actual_access_paths_a_login_lock_cannot_stop_are_named(database):
+    prefix, sql = database
+    suffix = uuid4().hex[:8]
+    name, other = f"shop_{suffix}", f"other_{suffix}"
+    sql(
+        f"CREATE DATABASE {name}; CREATE TABLE {name}.t (id INT); CREATE DATABASE {other}; "  # noqa: S608 -- Generated fixture names.
+        f"CREATE USER 'own{suffix}'@'localhost', 'exec{suffix}'@'localhost', 'glob{suffix}'@'%'; "
+        f"CREATE ROLE 'role{suffix}'; GRANT ALL ON {name}.* TO 'own{suffix}'@'localhost'; "
+        f"GRANT ALL ON {name}.* TO 'role{suffix}'; GRANT INSERT ON *.* TO 'glob{suffix}'@'%'; "
+        f"CREATE DEFINER='own{suffix}'@'localhost' PROCEDURE {other}.p() SQL SECURITY DEFINER "
+        f"INSERT INTO {name}.t VALUES (1); "
+        f"CREATE DEFINER='own{suffix}'@'localhost' PROCEDURE {name}.q() SQL SECURITY DEFINER "
+        f"INSERT INTO {name}.t VALUES (2); "
+        f"GRANT EXECUTE ON PROCEDURE {name}.q TO 'exec{suffix}'@'localhost'; "
+        f"CREATE DEFINER='own{suffix}'@'localhost' EVENT {name}.e ON SCHEDULE EVERY 1 DAY DISABLE "
+        f"DO INSERT INTO {name}.t VALUES (3)"
+    )
+    source = ROOT / "services/platform/infrastructure/ansible/playbooks/files/praho_hosting_node.py"
+    spec = importlib.util.spec_from_file_location("quota_sql_paths", source)
+    node = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(node)
+
+    def transport(arguments, **options):
+        assert arguments[0] == "/usr/bin/mariadb"
+        return command(prefix + arguments)
+
+    with patch.object(node, "_run", side_effect=transport):
+        principals = node._database_principals([name])
+        found = node._unsupported_access_paths([name], principals)
+    users = {user for user, _host, _locked in principals}
+    assert {f"own{suffix}", f"exec{suffix}", f"role{suffix}"} <= users
+    assert f"role 'role{suffix}'" in found
+    assert f"global privileges 'glob{suffix}'@'%'" in found
+    assert f"routine {other}.p runs as own{suffix}@localhost" in found
+    assert f"event {name}.e runs as own{suffix}@localhost" in found
+    assert not any(f"{name}.q" in item for item in found)

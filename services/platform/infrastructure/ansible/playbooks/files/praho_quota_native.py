@@ -274,10 +274,10 @@ def qualify_database_directory(
             raise DatabaseStorageRefusalError(f"Database {name}: {_entry_label(path.name)} is not a MariaDB-owned file")
 
 
-def repair_database_directory(
+def preflight_database_directory(
     directory: Path, *, writer: tuple[int, int], tenant: tuple[int, int], device: int
-) -> None:
-    """Move one quiesced database to MariaDB. Refuses before changing anything unless every entry is expected."""
+) -> tuple[int, list[Path]]:
+    """Everything a repair would refuse, without changing anything: run it before stopping anyone's writes."""
     name = directory.name
     if writer[0] == tenant[0] or writer[1] == tenant[1]:
         raise DatabaseStorageRefusalError(f"Database {name}: the account shares MariaDB's identity")
@@ -308,8 +308,16 @@ def repair_database_directory(
                 f"Database {name}: {_entry_label(path.name)} has an unexpected owner or type"
             )
         entries.append(path)
+    return stat.S_IMODE(info.st_mode), entries
+
+
+def repair_database_directory(
+    directory: Path, *, writer: tuple[int, int], tenant: tuple[int, int], device: int
+) -> None:
+    """Move one quiesced database to MariaDB, validating it again first: it may have changed since the preflight."""
+    mode, entries = preflight_database_directory(directory, writer=writer, tenant=tenant, device=device)
     # Clear setgid first so no new file can inherit the account's group while the rest is changed.
-    os.chmod(directory, stat.S_IMODE(info.st_mode) & ~stat.S_ISGID)
+    os.chmod(directory, mode & ~stat.S_ISGID)
     for path in entries:
         os.chown(path, *writer, follow_symlinks=False)
     os.chown(directory, *writer, follow_symlinks=False)

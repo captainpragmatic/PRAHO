@@ -626,6 +626,7 @@ def _database_principals(names: list[str]) -> list[tuple[str, str, bool]]:
         literal = "0x" + name.encode().hex()
         sources.append(f"SELECT User,Host FROM mysql.db WHERE {literal} LIKE Db ESCAPE CHAR(92)")  # noqa: S608 -- Hex literal.
         sources.append(f"SELECT User,Host FROM mysql.tables_priv WHERE Db={literal}")  # noqa: S608 -- Hex literal.
+        sources.append(f"SELECT User,Host FROM mysql.procs_priv WHERE Db={literal}")  # noqa: S608 -- Hex literal.
     rows = _sql(
         "SELECT JSON_ARRAY(g.User,g.Host,IF(JSON_VALUE(p.Priv,'$.account_locked') IN ('1','true'),'true','false')) "  # noqa: S608 -- Hex literals only.
         f"FROM ({' UNION '.join(sources)}) g JOIN mysql.global_priv p ON p.User=g.User AND p.Host=g.Host "
@@ -636,7 +637,7 @@ def _database_principals(names: list[str]) -> list[tuple[str, str, bool]]:
         user, host, locked = json.loads(row)
         if (
             re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", user) is None
-            or re.fullmatch(r"[A-Za-z0-9_.:%-]{1,255}", host) is None
+            or re.fullmatch(r"[A-Za-z0-9_.:%-]{0,255}", host) is None
             or locked not in {"true", "false"}
         ):
             raise ValueError("A database account has an unsupported name")
@@ -644,6 +645,45 @@ def _database_principals(names: list[str]) -> list[tuple[str, str, bool]]:
             raise ValueError("A system account holds a tenant database grant; review it before repair")
         principals.append((user, host, locked == "true"))
     return principals
+
+
+GLOBAL_WRITE_PRIVILEGES = ("Insert", "Update", "Delete", "Create", "Drop", "Alter", "Index", "Execute", "Super")
+MAX_DEFINER_OBJECTS = 10000
+
+
+def _label(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.%@:-]", "?", value)[:96]
+
+
+def _unsupported_access_paths(names: list[str], principals: list[tuple[str, str, bool]]) -> list[str]:
+    """Ways to write the account's databases that locking its logins does not stop. A repair refuses them by name.
+
+    Roles (stored with an empty host), logins with global write or EXECUTE privileges, events, and SQL SECURITY
+    DEFINER routines, views or triggers outside these databases that run as one of the account's logins.
+    """
+    found = [f"role '{_label(user)}'" for user, host, _locked in principals if host == ""]
+    columns = " OR ".join(f"{privilege}_priv='Y'" for privilege in GLOBAL_WRITE_PRIVILEGES)
+    for row in _sql(f"SELECT JSON_ARRAY(User,Host) FROM mysql.user WHERE User<>'' AND ({columns})").splitlines():  # noqa: S608 -- Fixed columns.
+        user, host = json.loads(row)
+        if user not in SYSTEM_DATABASE_USERS:
+            found.append(f"global privileges '{_label(user)}'@'{_label(host)}'")
+    rows = _sql(
+        "SELECT JSON_ARRAY('routine',ROUTINE_SCHEMA,ROUTINE_NAME,DEFINER) FROM information_schema.ROUTINES "  # noqa: S608 -- Fixed text and limit.
+        "WHERE SECURITY_TYPE='DEFINER' UNION ALL "
+        "SELECT JSON_ARRAY('event',EVENT_SCHEMA,EVENT_NAME,DEFINER) FROM information_schema.EVENTS UNION ALL "
+        "SELECT JSON_ARRAY('trigger',TRIGGER_SCHEMA,TRIGGER_NAME,DEFINER) FROM information_schema.TRIGGERS UNION ALL "
+        "SELECT JSON_ARRAY('view',TABLE_SCHEMA,TABLE_NAME,DEFINER) FROM information_schema.VIEWS "
+        f"WHERE SECURITY_TYPE='DEFINER' LIMIT {MAX_DEFINER_OBJECTS + 1}"
+    ).splitlines()
+    if len(rows) > MAX_DEFINER_OBJECTS:
+        raise ValueError("The node has too many stored programs to review before a repair")
+    logins = {f"{user}@{host}" for user, host, _locked in principals if host}
+    for row in rows:
+        kind, schema, name, definer = json.loads(row)
+        runs_as_account = definer in logins
+        if (kind == "event" and (runs_as_account or schema in names)) or (runs_as_account and schema not in names):
+            found.append(f"{kind} {_label(schema)}.{_label(name)} runs as {_label(definer)}")
+    return found
 
 
 def _disconnect_sessions(users: list[str]) -> None:
@@ -662,7 +702,7 @@ def _disconnect_sessions(users: list[str]) -> None:
     raise ValueError("A database session is still connected; writes stay stopped until a rerun")
 
 
-def _repair_database_storage(request: dict[str, object]) -> None:  # noqa: C901 -- Ordered, journalled phases.
+def _repair_database_storage(request: dict[str, object]) -> None:  # noqa: C901, PLR0912 -- Ordered, journalled phases.
     """Stop the account's writes, move its database files to MariaDB, rescan, then restore writes.
 
     A failure at any point leaves writes stopped and the journal in place; rerunning the same repair finishes it. The
@@ -671,6 +711,7 @@ def _repair_database_storage(request: dict[str, object]) -> None:  # noqa: C901 
     from praho_quota_native import (  # noqa: PLC0415 -- Root-owned sibling.
         NativeQuotaBackend,
         _database_writer_qualified,
+        preflight_database_directory,
         repair_database_directory,
         repairable_database_layout,
     )
@@ -709,9 +750,14 @@ def _repair_database_storage(request: dict[str, object]) -> None:  # noqa: C901 
         raise ValueError("Per-table database storage must be on before a repair can pass its rescan")
     datadir = Path(datadir_row[0].rstrip("/"))
     # Every other refusal the rescan can make comes first, so a repair that cannot finish never stops writes.
+    device = datadir.stat().st_dev if names else 0
+    tenant = (account.pw_uid, account.pw_gid)
     for name in names:
         repairable_database_layout(datadir / name)
+        preflight_database_directory(datadir / name, writer=writer, tenant=tenant, device=device)
     principals = _database_principals(names) if names else []
+    if unsupported := _unsupported_access_paths(names, principals):
+        raise ValueError("Unsupported database access paths; review them before repair: " + "; ".join(unsupported[:20]))
     held = {(user, host) for user, host in journal["locked"]}
     held |= {(user, host) for user, host, locked in principals if not locked}
     ours = sorted(held)
@@ -720,9 +766,8 @@ def _repair_database_storage(request: dict[str, object]) -> None:  # noqa: C901 
         _sql(f"ALTER USER '{user}'@'{host}' ACCOUNT LOCK")
     if principals:
         _disconnect_sessions(sorted({user for user, _host, _locked in principals}))
-    device = datadir.stat().st_dev if names else 0
     for name in names:
-        repair_database_directory(datadir / name, writer=writer, tenant=(account.pw_uid, account.pw_gid), device=device)
+        repair_database_directory(datadir / name, writer=writer, tenant=tenant, device=device)
     backend._storage(domain, account)
     for user, host in ours:
         _sql(f"ALTER USER '{user}'@'{host}' ACCOUNT UNLOCK")
