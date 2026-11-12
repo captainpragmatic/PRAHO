@@ -658,8 +658,10 @@ def _label(value: str) -> str:
 def _unsupported_access_paths(names: list[str], principals: list[tuple[str, str, bool]]) -> list[str]:
     """Ways to write the account's databases that locking its logins does not stop. A repair refuses them by name.
 
-    Roles (stored with an empty host), logins with global write or EXECUTE privileges, events, and SQL SECURITY
-    DEFINER routines, views or triggers outside these databases that run as one of the account's logins.
+    Roles (stored with an empty host), logins with global write or EXECUTE privileges, any enabled event (its body
+    is not parsed, so any definer and schema counts) and the account's other events, SQL SECURITY DEFINER routines,
+    views or triggers outside these databases that run as one of the account's logins, and foreign keys from these
+    databases to a parent elsewhere whose updates or deletes cascade into them.
     """
     found = [f"role '{_label(user)}'" for user, host, _locked in principals if host == ""]
     columns = " OR ".join(f"{privilege}_priv='Y'" for privilege in GLOBAL_WRITE_PRIVILEGES)
@@ -668,21 +670,36 @@ def _unsupported_access_paths(names: list[str], principals: list[tuple[str, str,
         if user not in SYSTEM_DATABASE_USERS:
             found.append(f"global privileges '{_label(user)}'@'{_label(host)}'")
     rows = _sql(
-        "SELECT JSON_ARRAY('routine',ROUTINE_SCHEMA,ROUTINE_NAME,DEFINER) FROM information_schema.ROUTINES "  # noqa: S608 -- Fixed text and limit.
+        "SELECT JSON_ARRAY('routine',ROUTINE_SCHEMA,ROUTINE_NAME,DEFINER,'') FROM information_schema.ROUTINES "  # noqa: S608 -- Fixed text and limit.
         "WHERE SECURITY_TYPE='DEFINER' UNION ALL "
-        "SELECT JSON_ARRAY('event',EVENT_SCHEMA,EVENT_NAME,DEFINER) FROM information_schema.EVENTS UNION ALL "
-        "SELECT JSON_ARRAY('trigger',TRIGGER_SCHEMA,TRIGGER_NAME,DEFINER) FROM information_schema.TRIGGERS UNION ALL "
-        "SELECT JSON_ARRAY('view',TABLE_SCHEMA,TABLE_NAME,DEFINER) FROM information_schema.VIEWS "
+        "SELECT JSON_ARRAY('event',EVENT_SCHEMA,EVENT_NAME,DEFINER,STATUS) FROM information_schema.EVENTS UNION ALL "
+        "SELECT JSON_ARRAY('trigger',TRIGGER_SCHEMA,TRIGGER_NAME,DEFINER,'') FROM information_schema.TRIGGERS "
+        "UNION ALL SELECT JSON_ARRAY('view',TABLE_SCHEMA,TABLE_NAME,DEFINER,'') FROM information_schema.VIEWS "
         f"WHERE SECURITY_TYPE='DEFINER' LIMIT {MAX_DEFINER_OBJECTS + 1}"
     ).splitlines()
     if len(rows) > MAX_DEFINER_OBJECTS:
         raise ValueError("The node has too many stored programs to review before a repair")
     logins = {f"{user}@{host}" for user, host, _locked in principals if host}
     for row in rows:
-        kind, schema, name, definer = json.loads(row)
+        kind, schema, name, definer, status = json.loads(row)
         runs_as_account = definer in logins
-        if (kind == "event" and (runs_as_account or schema in names)) or (runs_as_account and schema not in names):
+        event = kind == "event" and (status == "ENABLED" or runs_as_account or schema in names)
+        if event or (runs_as_account and schema not in names):
             found.append(f"{kind} {_label(schema)}.{_label(name)} runs as {_label(definer)}")
+    if not names:
+        return found
+    listed = ",".join("0x" + name.encode().hex() for name in names)
+    for row in _sql(
+        "SELECT JSON_ARRAY(CONSTRAINT_SCHEMA,TABLE_NAME,CONSTRAINT_NAME,UNIQUE_CONSTRAINT_SCHEMA,"  # noqa: S608 -- Hex literals.
+        f"REFERENCED_TABLE_NAME,UPDATE_RULE,DELETE_RULE) FROM information_schema.REFERENTIAL_CONSTRAINTS "
+        f"WHERE CONSTRAINT_SCHEMA IN ({listed})"
+    ).splitlines():
+        schema, table, constraint, parent_schema, parent, on_update, on_delete = json.loads(row)
+        if parent_schema not in names and {on_update, on_delete} & {"CASCADE", "SET NULL", "SET DEFAULT"}:
+            found.append(
+                f"foreign key {_label(schema)}.{_label(table)}.{_label(constraint)} "
+                f"cascades from {_label(parent_schema)}.{_label(parent)}"
+            )
     return found
 
 

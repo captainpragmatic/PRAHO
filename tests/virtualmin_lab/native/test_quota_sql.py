@@ -233,3 +233,37 @@ def test_actual_access_paths_a_login_lock_cannot_stop_are_named(database):
     assert f"routine {other}.p runs as own{suffix}@localhost" in found
     assert f"event {name}.e runs as own{suffix}@localhost" in found
     assert not any(f"{name}.q" in item for item in found)
+
+
+def test_actual_root_events_and_cross_schema_cascades_are_named(database):
+    prefix, sql = database
+    suffix = uuid4().hex[:8]
+    name, other = f"shop_{suffix}", f"crm_{suffix}"
+    sql(
+        f"CREATE DATABASE {name}; CREATE DATABASE {other}; "  # noqa: S608 -- Generated fixture names.
+        f"CREATE TABLE {other}.customers (id INT PRIMARY KEY) ENGINE=InnoDB; "
+        f"CREATE TABLE {name}.orders (id INT PRIMARY KEY, customer INT, CONSTRAINT fk_cascade FOREIGN KEY (customer) "
+        f"REFERENCES {other}.customers (id) ON DELETE CASCADE) ENGINE=InnoDB; "
+        f"CREATE TABLE {name}.notes (id INT PRIMARY KEY, customer INT, CONSTRAINT fk_restrict FOREIGN KEY (customer) "
+        f"REFERENCES {other}.customers (id)) ENGINE=InnoDB; "
+        f"CREATE TABLE {name}.lines (id INT PRIMARY KEY, ord INT, CONSTRAINT fk_inside FOREIGN KEY (ord) "
+        f"REFERENCES {name}.orders (id) ON DELETE CASCADE) ENGINE=InnoDB; "
+        f"CREATE DEFINER='root'@'localhost' EVENT {other}.nightly ON SCHEDULE EVERY 1 DAY ENABLE "
+        f"DO DELETE FROM {name}.orders; "
+        f"CREATE DEFINER='root'@'localhost' EVENT {other}.parked ON SCHEDULE EVERY 1 DAY DISABLE DO DO 1"
+    )
+    source = ROOT / "services/platform/infrastructure/ansible/playbooks/files/praho_hosting_node.py"
+    spec = importlib.util.spec_from_file_location("quota_sql_cascades", source)
+    node = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(node)
+
+    def transport(arguments, **options):
+        assert arguments[0] == "/usr/bin/mariadb"
+        return command(prefix + arguments)
+
+    with patch.object(node, "_run", side_effect=transport):
+        found = node._unsupported_access_paths([name], [])
+    assert f"event {other}.nightly runs as root@localhost" in found
+    assert not any(f"{other}.parked" in item for item in found)
+    assert f"foreign key {name}.orders.fk_cascade cascades from {other}.customers" in found
+    assert not any("fk_restrict" in item or "fk_inside" in item for item in found)

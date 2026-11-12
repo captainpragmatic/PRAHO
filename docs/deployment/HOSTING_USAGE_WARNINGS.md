@@ -58,8 +58,11 @@ JSON
 
 Before it stops anything, the operation checks every database directory and
 refuses, by name, write paths that locking logins can't stop: roles, logins with
-global write or `EXECUTE` privileges, events, and `SQL SECURITY DEFINER` routines,
-views or triggers elsewhere that run as the account. Remove or reassign what it
+global write or `EXECUTE` privileges, any enabled event on the node and the
+account's other events, `SQL SECURITY DEFINER` routines, views or triggers
+elsewhere that run as the account, and foreign keys whose parent in another
+schema cascades updates or deletes into the account's tables. Disable an event
+for the repair window if it must stay. Remove or reassign what it
 names, then rerun. The operation then locks the account's database users, disconnects them, moves each
 database to MariaDB's UID and GID with setgid cleared, rescans, then unlocks only
 the users it locked. Any failure leaves the site's database writes stopped and

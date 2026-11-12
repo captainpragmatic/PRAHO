@@ -159,15 +159,19 @@ class RepairOrchestrationTests(SimpleTestCase):
         self.sibling.preflight_database_directory = Mock()
         self.global_writers = []
         self.definer_objects = []
+        self.foreign_keys = []
 
     def sql(self, query):
         self.statements.append(query)
-        if "FROM mysql.db" in query:
-            return "\n".join(json.dumps(row) for row in self.principals)
-        if "FROM mysql.user" in query:
-            return "\n".join(json.dumps(row) for row in self.global_writers)
-        if "information_schema.ROUTINES" in query:
-            return "\n".join(json.dumps(row) for row in self.definer_objects)
+        tables = {
+            "FROM mysql.db": self.principals,
+            "FROM mysql.user": self.global_writers,
+            "REFERENTIAL_CONSTRAINTS": self.foreign_keys,
+            "information_schema.ROUTINES": self.definer_objects,
+        }
+        for marker, rows in tables.items():
+            if marker in query:
+                return "\n".join(json.dumps(row) for row in rows)
         if "@@datadir" in query:
             return f"{self.state}/\t1"
         if "PROCESSLIST" in query:
@@ -332,24 +336,47 @@ class RepairOrchestrationTests(SimpleTestCase):
         self.assert_refused_before_anything_stops("global privileges", "'reporting'@'%'")
 
     def test_a_definer_routine_elsewhere_that_runs_as_the_account_is_refused_by_name(self):
-        self.definer_objects = [["routine", "analytics", "sync_orders", "shop@localhost"]]
+        self.definer_objects = [["routine", "analytics", "sync_orders", "shop@localhost", ""]]
         self.assert_refused_before_anything_stops("routine analytics.sync_orders", "shop@localhost")
 
     def test_definer_objects_of_other_accounts_or_inside_the_account_are_supported(self):
         self.definer_objects = [
-            ["routine", "analytics", "report", "other@localhost"],
-            ["routine", "shop_db", "cleanup", "shop@localhost"],
-            ["trigger", "shop_db", "audit", "shop@localhost"],
-            ["view", "sys", "version", "mariadb.sys@localhost"],
+            ["routine", "analytics", "report", "other@localhost", ""],
+            ["routine", "shop_db", "cleanup", "shop@localhost", ""],
+            ["trigger", "shop_db", "audit", "shop@localhost", ""],
+            ["view", "sys", "version", "mariadb.sys@localhost", ""],
+            ["event", "analytics", "rollup", "root@localhost", "DISABLED"],
         ]
         self.repair()
         self.assertFalse(self.journal().exists())
 
     def test_an_event_that_writes_as_the_account_or_in_its_database_is_refused(self):
-        for event in (["event", "analytics", "nightly", "shop@localhost"], ["event", "shop_db", "purge", "x@localhost"]):
+        for event in (
+            ["event", "analytics", "nightly", "shop@localhost", "DISABLED"],
+            ["event", "shop_db", "purge", "x@localhost", "DISABLED"],
+        ):
             self.definer_objects = [event]
             with self.subTest(event=event):
                 self.assert_refused_before_anything_stops(f"event {event[1]}.{event[2]}")
+
+    def test_any_enabled_event_on_the_node_is_refused_whoever_defined_it(self):
+        # A root event elsewhere can write the account's databases; its body is not parsed, so every enabled one counts.
+        self.definer_objects = [["event", "analytics", "nightly", "root@localhost", "ENABLED"]]
+        self.assert_refused_before_anything_stops("event analytics.nightly", "root@localhost")
+
+    def test_a_cascading_foreign_key_from_another_schema_is_refused_by_name(self):
+        for rule in (("CASCADE", "RESTRICT"), ("RESTRICT", "SET NULL"), ("SET DEFAULT", "NO ACTION")):
+            self.foreign_keys = [["shop_db", "orders", "fk_customer", "crm", "customers", *rule]]
+            with self.subTest(rule=rule):
+                self.assert_refused_before_anything_stops("foreign key shop_db.orders.fk_customer", "crm.customers")
+
+    def test_non_cascading_or_account_internal_foreign_keys_are_supported(self):
+        self.foreign_keys = [
+            ["shop_db", "orders", "fk_customer", "crm", "customers", "RESTRICT", "NO ACTION"],
+            ["shop_db", "lines", "fk_order", "shop_db", "orders", "CASCADE", "CASCADE"],
+        ]
+        self.repair()
+        self.assertFalse(self.journal().exists())
 
     def test_a_role_granted_on_the_account_s_database_is_refused_by_name(self):
         self.principals.append(["shop_writers", "", "false"])
