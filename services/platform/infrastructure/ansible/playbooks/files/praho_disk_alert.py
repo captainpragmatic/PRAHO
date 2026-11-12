@@ -60,11 +60,11 @@ def _read_state() -> dict[str, object]:
     return json.loads(STATE.read_text()) if STATE.exists() else {}
 
 
-def _write_state(level: int | None, sent_at: datetime) -> None:
+def _write_state(level: int | None, sent_at: datetime | None) -> None:
     temporary = STATE.with_suffix(".tmp")
     descriptor = os.open(temporary, os.O_CREAT | os.O_TRUNC | os.O_WRONLY | os.O_NOFOLLOW, 0o600)
     with os.fdopen(descriptor, "w") as stream:
-        json.dump({"level": level, "sent_at": sent_at.isoformat()}, stream)
+        json.dump({"level": level, "sent_at": sent_at.isoformat() if sent_at else None}, stream)
     temporary.replace(STATE)
 
 
@@ -76,9 +76,13 @@ def check(*, now: datetime | None = None) -> None:
     previous = prior.get("level")
     last_sent = datetime.fromisoformat(str(prior["sent_at"])) if prior.get("sent_at") else None
     worsened = level is not None and (previous is None or level < previous)
-    due = level is not None and level == previous and last_sent is not None and moment - last_sent >= REPEAT
+    # Any low disk is repeated daily, including one that improved between thresholds without recovering.
+    due = level is not None and last_sent is not None and moment - last_sent >= REPEAT
     recovered = level is None and previous is not None
     if not (worsened or due or recovered):
+        if level != previous:
+            # Record an improvement between thresholds, so falling back below the lower one alerts again.
+            _write_state(level, last_sent)
         return
     host = socket.gethostname()
     if recovered:

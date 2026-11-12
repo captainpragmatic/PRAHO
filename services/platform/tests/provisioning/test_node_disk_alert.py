@@ -74,6 +74,21 @@ class NodeDiskAlertTests(SimpleTestCase):
         self.run_alert(8, now=NOW + timedelta(hours=25))
         self.assertEqual(len(self.sent), 2)
 
+    def test_a_disk_that_improves_but_stays_low_is_still_reminded_daily(self):
+        self.run_alert(4)
+        self.run_alert(8, now=NOW + timedelta(hours=1))
+        self.assertEqual(len(self.sent), 1)
+        self.run_alert(8, now=NOW + timedelta(hours=25))
+        self.assertEqual(len(self.sent), 2)
+        self.assertIn("below 10%", self.subjects()[1])
+
+    def test_falling_back_below_5_after_an_improvement_alerts_at_once(self):
+        self.run_alert(4)
+        self.run_alert(8, now=NOW + timedelta(hours=1))
+        self.run_alert(4, now=NOW + timedelta(hours=2))
+        self.assertEqual(len(self.sent), 2)
+        self.assertIn("below 5%", self.subjects()[1])
+
     def test_recovery_is_reported_once(self):
         self.run_alert(4)
         self.run_alert(40)
