@@ -8858,3 +8858,12 @@ msgstr "Contactați asistența"
 #, python-format
 msgid "Successfully synced %(count)s invoices."
 msgstr "S-au sincronizat cu succes %(count)s facturi."
+
+#: templates/services/partials/usage_resources.html
+msgid ""
+"The hard limit applies to your files. Databases are measured hourly, count "
+"toward your allowance and can go over it between readings."
+msgstr ""
+"Limita strictă se aplică fișierelor dumneavoastră. Bazele de date sunt "
+"măsurate din oră în oră, se contorizează în spațiul alocat și îl pot depăși "
+"între două citiri."

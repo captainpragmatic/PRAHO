@@ -22,7 +22,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
-from time import monotonic
+from time import monotonic, sleep
 from uuid import UUID
 
 LIMIT = 65536
@@ -37,10 +37,16 @@ REQUALIFICATION_UID_MIN = 2147000000
 REQUALIFICATION_UID_COUNT = 32
 REQUALIFICATION_LIMIT_KIB = 64
 REQUALIFICATION_ROOT = Path("/var/lib/praho-quota-requalification")
+REQUALIFICATION_CAP_SLACK_KIB = 16
+REQUALIFICATION_MIN_FREE_BYTES = 64 * 1024 * 1024
+DISCONNECT_ATTEMPTS = 50
+DATABASE_REPAIR = "repair_database_storage"
+SYSTEM_DATABASE_USERS = frozenset({"root", "mysql", "mariadb.sys", "debian-sys-maint"})
+QUOTA_CONTRACT = "database-files-outside-kernel-quota-v1"
 ACCEPTANCE_CHECKS = (
     "unprivileged_uid_edquot",
     "php_uid_edquot",
-    "database_edquot",
+    "database_outside_quota",
     "database_neighbor_healthy",
     "reboot_persistent",
     "update_persistent",
@@ -61,6 +67,7 @@ QUALIFICATION_FIELDS = (
     "mysql_cap_sys_resource",
     "mysql_bounding_cap_sys_resource",
     "physical_tables_verified",
+    "quota_contract",
     "acceptance",
     "acceptance_id",
 )
@@ -383,6 +390,7 @@ def qualification_inventory(
         or proof.get("php") != "8.5"
         or proof.get("filesystem") != "ext4"
         or proof.get("quota_format") not in {"native", "classic"}
+        or proof.get("quota_contract") != QUOTA_CONTRACT
         or any(
             proof.get(key) is not True
             for key in ("root_filesystem", "uid_enforced", "gid_enforced", "physical_tables_verified")
@@ -537,8 +545,7 @@ except OSError as error:
 raise RuntimeError('The isolated writer did not encounter EDQUOT')
 """
     php = r"""$f=fopen($argv[1],'wb');$hit=false;for($i=0;$i<32;$i++){
-$n=@fwrite($f,str_repeat('x',65536));if($n!==65536){$e=error_get_last();
-$hit=(bool)preg_match('/(quota exceeded|errno=122)/i',$e['message']??'');break;}fflush($f);fsync($f);}
+$n=@fwrite($f,str_repeat('x',65536));if($n!==65536){$hit=true;break;}fflush($f);fsync($f);}
 fclose($f);if(!$hit){fwrite(STDERR,'Isolated PHP writer did not encounter EDQUOT');exit(7);}echo posix_geteuid();"""
     try:
         base.mkdir(mode=0o711)
@@ -557,6 +564,16 @@ fclose($f);if(!$hit){fwrite(STDERR,'Isolated PHP writer did not encounter EDQUOT
             argv = ["/usr/bin/python3", "-c", python] if runtime == "python" else ["/usr/bin/php8.5", "-r", php]
             if _run([*prefix, *argv, str(root / "write.bin")], pass_fds=(descriptor,)) != str(identifier):
                 raise ValueError("The isolated denial proof used a different native identity")
+            if runtime == "php":
+                # PHP 8.5 reports EDQUOT as a short count with no error message, so any short write is the denial.
+                # Usage at the cap and a roomy disk are what tell it from another write failure.
+                space = os.statvfs(root)
+                if (
+                    _kernel_quota(fs["source"], identifier, group=False).space
+                    < (REQUALIFICATION_LIMIT_KIB - REQUALIFICATION_CAP_SLACK_KIB) * 1024
+                    or space.f_bavail * space.f_frsize < REQUALIFICATION_MIN_FREE_BYTES
+                ):
+                    raise ValueError("PHP's short write was not a quota stop")
             (root / "write.bin").unlink(missing_ok=True)
     finally:
         _probe_cleanup(journal, fs)
@@ -593,6 +610,123 @@ def _requalify_quota(identity: str, descriptor: int) -> None:
         original_digest=hashlib.sha256(initial.encode()).hexdigest(),
     )
     _write(STATE / "native-acceptance.json", json.dumps(proof, sort_keys=True))
+
+
+def _sql(query: str) -> str:
+    return _run(
+        ["/usr/bin/mariadb", "--protocol=socket", "--batch", "--raw", "--skip-column-names", "--execute", query]
+    )
+
+
+def _database_principals(names: list[str]) -> list[tuple[str, str, bool]]:
+    """Accounts granted on these databases, with whether each is already locked. Names are validated identifiers."""
+    # Hex literals and CHAR(92) keep the lookup independent of NO_BACKSLASH_ESCAPES.
+    sources = []
+    for name in names:
+        literal = "0x" + name.encode().hex()
+        sources.append(f"SELECT User,Host FROM mysql.db WHERE {literal} LIKE Db ESCAPE CHAR(92)")  # noqa: S608 -- Hex literal.
+        sources.append(f"SELECT User,Host FROM mysql.tables_priv WHERE Db={literal}")  # noqa: S608 -- Hex literal.
+    rows = _sql(
+        "SELECT JSON_ARRAY(g.User,g.Host,IF(JSON_VALUE(p.Priv,'$.account_locked') IN ('1','true'),'true','false')) "  # noqa: S608 -- Hex literals only.
+        f"FROM ({' UNION '.join(sources)}) g JOIN mysql.global_priv p ON p.User=g.User AND p.Host=g.Host "
+        "WHERE g.User<>''"
+    )
+    principals = []
+    for row in rows.splitlines():
+        user, host, locked = json.loads(row)
+        if (
+            re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", user) is None
+            or re.fullmatch(r"[A-Za-z0-9_.:%-]{1,255}", host) is None
+            or locked not in {"true", "false"}
+        ):
+            raise ValueError("A database account has an unsupported name")
+        if user in SYSTEM_DATABASE_USERS:
+            raise ValueError("A system account holds a tenant database grant; review it before repair")
+        principals.append((user, host, locked == "true"))
+    return principals
+
+
+def _disconnect_sessions(users: list[str]) -> None:
+    listed = ",".join(f"'{user}'" for user in sorted(users))
+    query = f"SELECT ID FROM information_schema.PROCESSLIST WHERE USER IN ({listed})"  # noqa: S608 -- Validated above.
+    for _attempt in range(DISCONNECT_ATTEMPTS):
+        sessions = _sql(query).split()
+        if not sessions:
+            return
+        for session in sessions:
+            try:
+                _sql(f"KILL CONNECTION {int(session)}")
+            except ValueError:
+                continue  # A session can end between the list and the kill; the next listing decides.
+        sleep(0.1)
+    raise ValueError("A database session is still connected; writes stay stopped until a rerun")
+
+
+def _repair_database_storage(request: dict[str, object]) -> None:  # noqa: C901 -- Ordered, journalled phases.
+    """Stop the account's writes, move its database files to MariaDB, rescan, then restore writes.
+
+    A failure at any point leaves writes stopped and the journal in place; rerunning the same repair finishes it. The
+    journal, not the current locked flag, records which locks are ours, since a rerun finds its own locks already set.
+    """
+    from praho_quota_native import (  # noqa: PLC0415 -- Root-owned sibling.
+        NativeQuotaBackend,
+        _database_writer_qualified,
+        repair_database_directory,
+        repairable_database_layout,
+    )
+
+    expected = request.get("database_repair")
+    if not isinstance(expected, dict) or set(expected) != {"domain_id", "domain", "uid", "gid"}:
+        raise ValueError("An exact native account identity is required for repair")
+    backend = NativeQuotaBackend()
+    domain, account = backend._domain({"identity": {"domain_id": expected["domain_id"]}})
+    if (domain["dom"], account.pw_uid, account.pw_gid) != (expected["domain"], expected["uid"], expected["gid"]):
+        raise ValueError("The native account identity changed before repair")
+    backend.require_database_policy()
+    writer = _database_writer_qualified()
+    names = domain.get("db_mysql", "").split()
+    if any(re.fullmatch(r"[A-Za-z0-9_]{1,64}", name) is None for name in names):
+        raise ValueError("The database storage name is unsupported")
+    journal_path = STATE / f"database-repair-{expected['domain_id']}.json"
+    journal = {
+        "domain_id": expected["domain_id"],
+        "uid": expected["uid"],
+        "gid": expected["gid"],
+        "databases": names,
+        "locked": [],
+    }
+    if journal_path.exists():
+        prior = json.loads(_read(journal_path))
+        if {key: prior.get(key) for key in ("domain_id", "uid", "gid")} != {
+            key: journal[key] for key in ("domain_id", "uid", "gid")
+        }:
+            raise ValueError("A repair journal for another owner exists; review it first")
+        if set(prior.get("databases", [])) - set(names):
+            raise ValueError("The database list shrank since the repair started; review it first")
+        journal["locked"] = prior["locked"]
+    datadir_row = _sql("SELECT @@datadir, @@innodb_file_per_table").split("\t")
+    if datadir_row[1:] != ["1"]:
+        raise ValueError("Per-table database storage must be on before a repair can pass its rescan")
+    datadir = Path(datadir_row[0].rstrip("/"))
+    # Every other refusal the rescan can make comes first, so a repair that cannot finish never stops writes.
+    for name in names:
+        repairable_database_layout(datadir / name)
+    principals = _database_principals(names) if names else []
+    held = {(user, host) for user, host in journal["locked"]}
+    held |= {(user, host) for user, host, locked in principals if not locked}
+    ours = sorted(held)
+    _write(journal_path, json.dumps({**journal, "locked": ours}))
+    for user, host in ours:
+        _sql(f"ALTER USER '{user}'@'{host}' ACCOUNT LOCK")
+    if principals:
+        _disconnect_sessions(sorted({user for user, _host, _locked in principals}))
+    device = datadir.stat().st_dev if names else 0
+    for name in names:
+        repair_database_directory(datadir / name, writer=writer, tenant=(account.pw_uid, account.pw_gid), device=device)
+    backend._storage(domain, account)
+    for user, host in ours:
+        _sql(f"ALTER USER '{user}'@'{host}' ACCOUNT UNLOCK")
+    journal_path.unlink()
 
 
 def bootstrap(deployment: str) -> dict[str, object]:
@@ -695,10 +829,12 @@ def inspect(identity: str) -> dict[str, object]:
         if _run(["/usr/bin/php8.5", "-r", "echo PHP_MAJOR_VERSION.'.'.PHP_MINOR_VERSION;"]) != "8.5":
             raise ValueError("Unsupported managed PHP baseline")
         _database_writer_qualified()
+        backend = NativeQuotaBackend()
+        backend.require_database_policy()
         for domain_id, domain in quota_probe_domains(
             Path("/etc/webmin/virtual-server/domains"), _read(Path("/etc/hostname")).strip(), _fields
         ):
-            NativeQuotaBackend().probe(
+            backend.probe(
                 {
                     "identity": {
                         "installation": installation,
@@ -718,8 +854,10 @@ def inspect(identity: str) -> dict[str, object]:
             "bw_auto_disable": notifications["bandwidth_policy"]["auto_disable"],
             "bw_auto_enable": notifications["bandwidth_policy"]["auto_enable"],
         }
-    except (ImportError, OSError, ValueError, KeyError):
-        result["quota_refusal"] = "Native quota acceptance is missing, changed or unsupported"
+    except (ImportError, OSError, ValueError, KeyError) as error:
+        # Only the storage refusal is written for staff; other diagnostics stay on the node.
+        named = type(error).__name__ == "DatabaseStorageRefusalError"
+        result["quota_refusal"] = str(error) if named else "Native quota acceptance is missing, changed or unsupported"
     return result
 
 
@@ -793,7 +931,8 @@ def perform(action: str, request: dict[str, object]) -> dict[str, object]:  # no
     if action != "reconcile" and (
         not isinstance(token, str)
         or str(UUID(token)) != token
-        or action not in {"handover", "fence", "quota_policy", "quota_fence", "requalify", "requalify_fence"}
+        or action
+        not in {"handover", "fence", "quota_policy", "quota_fence", "requalify", "requalify_fence", DATABASE_REPAIR}
     ):
         raise ValueError("A fixed admitted native handover token is required")
     STATE.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -811,7 +950,7 @@ def perform(action: str, request: dict[str, object]) -> dict[str, object]:  # no
         if action in {"fence", "quota_fence", "requalify_fence"}:
             # A stopped, permanently fenced old token cannot reapply after this exact repair.
             _write(cancelled, token)
-        if action in {"handover", "quota_policy", "requalify"}:
+        if action in {"handover", "quota_policy", "requalify", DATABASE_REPAIR}:
             if cancelled.exists():
                 raise ValueError("This handover token was permanently fenced")
             _write(
@@ -827,6 +966,8 @@ def perform(action: str, request: dict[str, object]) -> dict[str, object]:  # no
             _run(["/usr/bin/systemctl", "restart", "webmin"], pass_fds=(lock,))
             _emitters_idle()
             _write(STATE / "resource-policy", "no-native-bandwidth-actions-v1\n")
+        elif action == DATABASE_REPAIR:
+            _repair_database_storage(request)
         elif action in {"requalify", "requalify_fence"}:
             # Existing parent holds remain authoritative. This path never edits
             # tenant/domain/BW state or restarts panel/MTA services.

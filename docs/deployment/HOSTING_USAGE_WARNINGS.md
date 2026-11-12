@@ -6,6 +6,63 @@ acceptance has run. Follow [ADR-0068](../ADRs/ADR-0068-observational-hosting-usa
 [paid-change recovery](PLATFORM_RESTORE.md#hosting-plan-change-recovery) and the
 [owned native gates](../../tests/virtualmin_lab/native/README.md).
 
+## What the limits cover
+
+The hard disk limit applies to files in the account's home. Database files are
+outside the kernel quota ([ADR-0075](../ADRs/ADR-0075-database-files-outside-the-kernel-quota.md)):
+databases are measured hourly, count toward the allowance and these warnings, and
+can overshoot it between readings. A full node disk aborts the shared MariaDB, so
+`praho-disk-alert.timer` mails operators at 10% and 5% free, measured on `f_bavail`,
+daily while low and once on recovery. Check `systemctl status praho-disk-alert` after
+rollout: a missing `sendmail` or operator recipient fails the unit rather than
+going silent.
+
+Backups of a database larger than the file cap succeed: Virtualmin lifts the
+account's caps while it writes the dump into `~/.backup` and restores them when
+the backup process exits. A backup or restore that was killed rather than failed
+(OOM, reboot, a stopped Webmin) leaves both caps unlimited and may leave the dump
+behind ([ADR-0075](../ADRs/ADR-0075-database-files-outside-the-kernel-quota.md)).
+After any such event on a managed node, check each affected account, as root:
+
+```bash
+grep -E '^(quota|uquota)=' /etc/webmin/virtual-server/domains/<domain-id>   # configured caps, KiB
+quota -u <account> ; quota -g <account>    # kernel hard caps; "none" or 0 means lifted
+ls -ld /home/<account>/.backup             # must not exist outside a running backup
+```
+
+The account needs repair when its kernel hard caps differ from the configured
+`quota`/`uquota`, or when `~/.backup` exists with no backup running for it. To repair:
+
+1. Confirm no backup or restore job is running for the account in Platform, then
+   remove the leftover dump: `rm -rf --one-file-system /home/<account>/.backup`.
+   Otherwise its bytes count against the files the cap must fit, and the next
+   step is refused.
+2. Re-apply the managed limits from Platform: on the service page, open
+   **Resource-only exception**, choose the service's current plan, link the
+   support ticket for the incident, and leave native adoption unchanged. The
+   application sets both kernel caps again and verifies them in its receipt.
+3. Refresh the account's quota evidence and confirm the caps now match.
+
+## Repairing tenant-charged databases
+
+A node installed before ADR-0075 can hold databases charged to the account. Probes
+refuse them and name the database, and repair must precede any quota on that node.
+On the node, as root, for one account at a time:
+
+```bash
+python3 /usr/local/lib/praho/praho_hosting_node.py repair_database_storage <<'JSON'
+{"identity": "<64-hex connection identity>", "token": "<new uuid>",
+ "database_repair": {"domain_id": "<id>", "domain": "<domain>", "uid": <uid>, "gid": <gid>}}
+JSON
+```
+
+The operation locks the account's database users, disconnects them, moves each
+database to MariaDB's UID and GID with setgid cleared, rescans, then unlocks only
+the users it locked. Any failure leaves the site's database writes stopped and
+`/var/lib/praho/hosting/database-repair-<id>.json` in place. Fix the named cause and
+rerun with a **new token**; it resumes from the journal. Roll forward only: the
+previous probe refuses a repaired account.
+
 ## Before enablement
 
 Deploy additive Platform schema and current workers before Portal. Install the

@@ -464,6 +464,43 @@ class HostingLimitWorkerTests(HostingLimitWorkerFixture, VirtualminTaskTestBase)
             self.assertEqual(apply_hosting_limits(self.application.pk), "completed")
         self.assertEqual(ServiceHostingLimits.objects.get(service=self.service).applied_revision, 2)
 
+    def apply_with_probe(self, probe):
+        def native(server, action, request):
+            return self.receipt(cap=request["disk_limit_kib"] // 1024, request=request)
+
+        with (
+            patch("apps.provisioning.hosting_limit_transport.probe_account_quota", return_value=probe),
+            patch("apps.provisioning.hosting_limit_transport.run_quota_operation", side_effect=native),
+        ):
+            return apply_hosting_limits(self.application.pk)
+
+    def test_databases_above_the_file_cap_do_not_block_the_cap(self) -> None:
+        # Databases are outside the kernel cap (ADR-0075), so only what the cap governs has to fit under it.
+        gib = 1024**3
+        probe = self.receipt()
+        probe["observation"] = {"files_bytes": gib, "database_bytes": 60 * gib, "total_bytes": 61 * gib}
+        self.assertEqual(self.apply_with_probe(probe), "completed")
+
+    def test_files_above_the_cap_still_block_it(self) -> None:
+        gib = 1024**3
+        probe = self.receipt()
+        probe["observation"] = {"files_bytes": 60 * gib, "database_bytes": gib, "total_bytes": 61 * gib}
+        self.assertEqual(self.apply_with_probe(probe), "pending")
+
+    def test_kernel_usage_above_the_cap_still_blocks_it_whatever_the_observation_says(self) -> None:
+        probe = self.receipt()
+        probe["uid_used_bytes"] = 60 * 1024**3
+        self.assertEqual(self.apply_with_probe(probe), "pending")
+
+    def test_an_accepted_reading_compares_files_rather_than_total_with_the_cap(self) -> None:
+        self.accepted_reading(owner_id=self.customer.pk, age_hours=0)
+        UsageReading.objects.filter(account=self.account).update(
+            disk_files_bytes=4096, disk_db_bytes=60 * 1024**3, disk_total_bytes=4096 + 60 * 1024**3
+        )
+        probe = self.receipt()
+        probe.pop("observation")
+        self.assertEqual(self.apply_with_probe(probe), "completed")
+
     def test_stale_or_wrong_owner_canonical_reading_cannot_authorize_fit(self) -> None:
         now = timezone.now()
         state = AccountUsageState.objects.create(

@@ -18,11 +18,13 @@ if TYPE_CHECKING:
     from .virtualmin_models import VirtualminServer
 
 POLICY_VERSION = "hosting-node-v1"
+# Versions only what a quota proof certifies. POLICY_VERSION also stamps notification evidence, which this doesn't change.
+QUOTA_CONTRACT = "database-files-outside-kernel-quota-v1"
 MAX_EVIDENCE_BYTES = 64 * 1024
 NATIVE_ACCEPTANCE_CHECKS = (
     "unprivileged_uid_edquot",
     "php_uid_edquot",
-    "database_edquot",
+    "database_outside_quota",
     "database_neighbor_healthy",
     "reboot_persistent",
     "update_persistent",
@@ -107,6 +109,7 @@ def verify_quota_inventory(evidence: dict[str, Any], identity: str) -> dict[str,
             "mysql_cap_sys_resource",
             "mysql_bounding_cap_sys_resource",
             "physical_tables_verified",
+            "quota_contract",
             "acceptance",
             "acceptance_id",
             "bw_auto_disable",
@@ -120,6 +123,7 @@ def verify_quota_inventory(evidence: dict[str, Any], identity: str) -> dict[str,
         or evidence["php"] != "8.5"
         or evidence["filesystem"] != "ext4"
         or evidence["quota_format"] not in {"native", "classic"}
+        or evidence["quota_contract"] != QUOTA_CONTRACT
         or any(
             evidence[key] is not True
             for key in ("root_filesystem", "uid_enforced", "gid_enforced", "physical_tables_verified")

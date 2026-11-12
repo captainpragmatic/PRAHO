@@ -283,14 +283,47 @@ sub praho_apply_notification_policy {
     }
 }
 
+# Virtualmin reads the account's resolved template when it creates a database, so the global value alone proves nothing.
+# Effective values only: a template that inherits is safe once the default is (ADR-0075).
+sub praho_database_policy_overrides {
+    local *ensure_template = sub { };
+    return [map { $_->{'id'} } grep { &get_template($_->{'id'})->{'mysql_chgrp'} } &list_templates()];
+}
+
+sub praho_database_policy {
+    return { overrides => &praho_database_policy_overrides() };
+}
+
+sub praho_repair_database_policy {
+    local *ensure_template = sub { };
+    &save_module_config_keys({mysql_chgrp=>0});
+    $config{'mysql_chgrp'} = 0;
+    undef(@list_templates_cache);
+    my @repaired;
+    for my $t (&list_templates()) {
+        next if !&get_template($t->{'id'})->{'mysql_chgrp'};
+        $t->{'mysql_chgrp'} = 0;
+        &save_template($t);
+        push @repaired, $t->{'id'};
+    }
+    undef(@list_templates_cache);
+    my $remaining = &praho_database_policy_overrides();
+    die 'A Virtualmin template still charges databases to their account: '.join(', ', @$remaining)."\n" if @$remaining;
+    return { overrides => $remaining, repaired => \@repaired };
+}
+
 unless (caller) {
-    die "Root notification policy operation required" if $> != 0 || @ARGV != 1 || $ARGV[0] !~ /\A(?:inspect|apply|resource|reserve_probe)\z/;
+    die "Root notification policy operation required" if $> != 0 || @ARGV != 1 || $ARGV[0] !~ /\A(?:inspect|apply|resource|reserve_probe|database_policy|database_policy_repair)\z/;
     $main::no_acl_check = 1;
     $ENV{'WEBMIN_CONFIG'} = '/etc/webmin';
     $ENV{'WEBMIN_VAR'} = '/var/webmin';
     $0 = '/usr/share/webmin/virtual-server/praho-notification-policy.pl';
     chdir('/usr/share/webmin/virtual-server') or die "Missing native Virtualmin";
     require './virtual-server-lib.pl';
+    if ($ARGV[0] =~ /\Adatabase_policy/) {
+        print JSON::PP->new->canonical->encode($ARGV[0] eq 'database_policy' ? &praho_database_policy() : &praho_repair_database_policy());
+        exit(0);
+    }
     if ($ARGV[0] eq 'reserve_probe') {
         print JSON::PP->new->canonical->encode(&praho_reserve_probe_identity());
         exit(0);

@@ -192,7 +192,16 @@ def _set_kernel_quota(device: str, identity: int, limit_kib: int, *, group: bool
         raise ValueError("The kernel quota update did not complete")
 
 
-def _database_writer_qualified() -> None:
+class DatabaseStorageRefusalError(ValueError):
+    """A database still charged to its account. Carries only validated names, so staff can be told which one."""
+
+
+def _database_writer_qualified() -> tuple[int, int]:
+    """Return the running server's effective UID and GID, which must own every tenant database file.
+
+    Database files are outside the kernel quota (ADR-0075), so CAP_SYS_RESOURCE no longer matters to enforcement.
+    It stays refused as least privilege: a shared server has no reason to override resource limits.
+    """
     pid = _integer(_run(["/usr/bin/systemctl", "show", "mariadb", "--property=MainPID", "--value"]))
     if pid <= 1:
         raise ValueError("The local database writer is not running")
@@ -205,22 +214,113 @@ def _database_writer_qualified() -> None:
         raise ValueError("The database writer status exceeds its bound")
     capabilities = re.findall(r"^CapEff:\s*([0-9a-fA-F]+)$", status, re.MULTILINE)
     identities = re.findall(r"^Uid:\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$", status, re.MULTILINE)
+    groups = re.findall(r"^Gid:\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)$", status, re.MULTILINE)
     bounding = _run(["/usr/bin/systemctl", "show", "mariadb", "--property=CapabilityBoundingSet", "--value"])
     if (
         len(capabilities) != 1
         or int(capabilities[0], 16) & (1 << CAP_SYS_RESOURCE)
         or len(identities) != 1
-        or any(int(value) == 0 for value in identities[0])
+        or len(groups) != 1
+        or any(int(value) == 0 for value in (*identities[0], *groups[0]))
         or "cap_sys_resource" in bounding.lower().split()
     ):
-        raise ValueError("The database writer may bypass quota enforcement")
+        raise ValueError("The database writer exceeds its least privilege: it is root or may override resource limits")
+    return int(identities[0][1]), int(groups[0][1])
 
 
-def qualify_table_storage(directory: Path, rows: list[dict[str, object]], *, gid: int, device: int) -> None:
+def _database_policy_qualified() -> None:
+    """A template that still enables mysql_chgrp would recharge the next database to its account's group."""
+    adapter = str(Path(__file__).with_name("praho-notification-policy.pl"))
+    answer = json.loads(_run(["/usr/bin/perl", adapter, "database_policy"]))
+    overrides = answer.get("overrides") if isinstance(answer, dict) else None
+    if not isinstance(overrides, list) or any(type(item) is not int for item in overrides):
+        raise ValueError("The effective Virtualmin database policy could not be read")
+    if overrides:
+        listed = ", ".join(str(item) for item in overrides[:32])
+        raise DatabaseStorageRefusalError(f"Virtualmin templates would charge databases to their account: {listed}")
+
+
+def _entry_label(name: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.@-]", "?", name)[:96]
+
+
+def qualify_database_directory(
+    directory: Path, *, writer: tuple[int, int], tenant: tuple[int, int], device: int
+) -> None:
+    """A tenant UID or GID on a database file would put it back under the kernel cap that can abort MariaDB."""
+    name = directory.name
+    if writer[0] == tenant[0] or writer[1] == tenant[1]:
+        raise DatabaseStorageRefusalError(f"Database {name}: the account shares MariaDB's identity")
+    info = directory.lstat()
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or directory.resolve() != directory
+        or info.st_dev != device
+        or (info.st_uid, info.st_gid) != writer
+        or info.st_mode & (stat.S_ISGID | stat.S_IWOTH)
+    ):
+        raise DatabaseStorageRefusalError(f"Database {name}: its directory is not MariaDB-owned without setgid")
+    for number, path in enumerate(directory.iterdir()):
+        deadline = _PROBE_DEADLINE.get()
+        if number >= MAX_DATABASE_FILES or (deadline is not None and time.monotonic() >= deadline):
+            raise ValueError("The native database files exceed the bounded qualification budget")
+        item = path.lstat()
+        if (
+            not stat.S_ISREG(item.st_mode)
+            or (item.st_uid, item.st_gid) != writer
+            or item.st_dev != info.st_dev
+            or item.st_mode & stat.S_IWOTH
+        ):
+            raise DatabaseStorageRefusalError(f"Database {name}: {_entry_label(path.name)} is not a MariaDB-owned file")
+
+
+def repair_database_directory(
+    directory: Path, *, writer: tuple[int, int], tenant: tuple[int, int], device: int
+) -> None:
+    """Move one quiesced database to MariaDB. Refuses before changing anything unless every entry is expected."""
+    name = directory.name
+    if writer[0] == tenant[0] or writer[1] == tenant[1]:
+        raise DatabaseStorageRefusalError(f"Database {name}: the account shares MariaDB's identity")
+    uids, gids = {writer[0], tenant[0]}, {writer[1], tenant[1]}
+    info = directory.lstat()
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or directory.resolve() != directory
+        or info.st_dev != device
+        or info.st_uid not in uids
+        or info.st_gid not in gids
+        or info.st_mode & stat.S_IWOTH
+    ):
+        raise DatabaseStorageRefusalError(f"Database {name}: its directory has an unexpected owner or layout")
+    entries = []
+    for number, path in enumerate(directory.iterdir()):
+        if number >= MAX_DATABASE_FILES:
+            raise ValueError("The native database files exceed the bounded qualification budget")
+        item = path.lstat()
+        if (
+            not stat.S_ISREG(item.st_mode)
+            or item.st_uid not in uids
+            or item.st_gid not in gids
+            or item.st_dev != device
+            or item.st_mode & stat.S_IWOTH
+        ):
+            raise DatabaseStorageRefusalError(
+                f"Database {name}: {_entry_label(path.name)} has an unexpected owner or type"
+            )
+        entries.append(path)
+    # Clear setgid first so no new file can inherit the account's group while the rest is changed.
+    os.chmod(directory, stat.S_IMODE(info.st_mode) & ~stat.S_ISGID)
+    for path in entries:
+        os.chown(path, *writer, follow_symlinks=False)
+    os.chown(directory, *writer, follow_symlinks=False)
+
+
+def qualify_table_layout(directory: Path, rows: list[dict[str, object]]) -> list[tuple[str, Path]]:
     """Check existing tables, not merely the setting used for future CREATE TABLE."""
     if len(rows) > MAX_DATABASE_TABLES:
         raise ValueError("The tenant database exceeds its qualification budget")
     seen = set()
+    tables = []
     for row in rows:
         name = row.get("table")
         space = row.get("space")
@@ -244,12 +344,26 @@ def qualify_table_storage(directory: Path, rows: list[dict[str, object]], *, gid
         expected = directory / (name + ".ibd")
         if candidate != expected or candidate.resolve() != expected:
             raise ValueError("A tenant table uses external or redirected database storage")
+        tables.append((name, candidate))
+    return tables
+
+
+def qualify_table_storage(directory: Path, rows: list[dict[str, object]], *, uid: int, gid: int, device: int) -> None:
+    for name, candidate in qualify_table_layout(directory, rows):
         try:
             info = candidate.lstat()
         except OSError as error:
             raise ValueError("A tenant table's physical datafile is unavailable") from error
-        if not stat.S_ISREG(info.st_mode) or info.st_gid != gid or info.st_dev != device:
-            raise ValueError("A tenant table's physical datafile is outside the group quota")
+        if not stat.S_ISREG(info.st_mode) or (info.st_uid, info.st_gid) != (uid, gid) or info.st_dev != device:
+            raise DatabaseStorageRefusalError(f"Database {directory.name}: {name}.ibd is not a MariaDB-owned file")
+
+
+def repairable_database_layout(directory: Path) -> None:
+    """Refuse what an ownership repair can't fix, before the repair stops anyone's writes."""
+    try:
+        qualify_table_layout(directory, _table_inventory(directory.name))
+    except ValueError as error:
+        raise DatabaseStorageRefusalError(f"Database {directory.name}: {error}") from error
 
 
 def _table_inventory(schema: str) -> list[dict[str, object]]:
@@ -288,6 +402,13 @@ class NativeQuotaBackend:
     def __init__(self) -> None:
         if os.geteuid() != 0:
             raise ValueError("Native quota qualification requires root")
+        self._database_policy_verified = False
+
+    def require_database_policy(self) -> None:
+        # Once per backend: an inspection probes every domain, and the adapter loads all of Virtualmin.
+        if not self._database_policy_verified:
+            _database_policy_qualified()
+            self._database_policy_verified = True
 
     def _domain(self, request: dict[str, object]) -> tuple[dict[str, str], pwd.struct_passwd]:
         expected = request["identity"]
@@ -329,7 +450,7 @@ class NativeQuotaBackend:
                 raise ValueError("One quota-bearing service must own the complete native UID/GID scope")
         return domain, account
 
-    def _storage(  # noqa: C901, PLR0912 -- Every filesystem, writer, tablespace and bounded-inventory proof must hold.
+    def _storage(
         self,
         domain: dict[str, str],
         account: pwd.struct_passwd,
@@ -356,9 +477,9 @@ class NativeQuotaBackend:
         configuration = _fields(Path("/etc/webmin/virtual-server/config"))
         if configuration.get("hard_quotas") != "1":
             raise ValueError("Virtualmin must preserve hard quota mode")
-        # Inspect the real writer and the unit that will restart it. A group-owned
-        # data directory alone is insufficient when mysqld can bypass EDQUOT.
-        _database_writer_qualified()
+        self.require_database_policy()
+        # The real writer's identity, not an assumed account name, must own every database file below.
+        writer = _database_writer_qualified()
         database = _run(
             [
                 "/usr/bin/mariadb",
@@ -381,23 +502,11 @@ class NativeQuotaBackend:
             if re.fullmatch(r"[A-Za-z0-9_]{1,64}", name) is None:
                 raise ValueError("The database storage name is unsupported")
             directory = datadir / name
-            info = directory.lstat()
-            if (
-                not stat.S_ISDIR(info.st_mode)
-                or directory.resolve() != directory
-                or info.st_dev != home.stat().st_dev
-                or info.st_gid != account.pw_gid
-                or not info.st_mode & stat.S_ISGID
-            ):
-                raise ValueError("Database group ownership/setgid is not qualified")
-            for number, path in enumerate(directory.iterdir()):
-                deadline = _PROBE_DEADLINE.get()
-                if number >= MAX_DATABASE_FILES or (deadline is not None and time.monotonic() >= deadline):
-                    raise ValueError("The native database files exceed the bounded qualification budget")
-                item = path.lstat()
-                if not stat.S_ISREG(item.st_mode) or item.st_gid != account.pw_gid or item.st_dev != info.st_dev:
-                    raise ValueError("Tenant database files are outside the group quota")
-            qualify_table_storage(directory, _table_inventory(name), gid=account.pw_gid, device=home.stat().st_dev)
+            device_id = home.stat().st_dev
+            qualify_database_directory(
+                directory, writer=writer, tenant=(account.pw_uid, account.pw_gid), device=device_id
+            )
+            qualify_table_storage(directory, _table_inventory(name), uid=writer[0], gid=writer[1], device=device_id)
         self._qualified_databases = tuple(datadir / name for name in names)
         return source, filesystem_uuid
 
@@ -498,7 +607,7 @@ class NativeQuotaBackend:
         if (
             limit
             and not expiry_reduction
-            and max(before["uid_used_bytes"], before["gid_used_bytes"], before["observation"]["total_bytes"])
+            and max(before["uid_used_bytes"], before["gid_used_bytes"], before["observation"]["files_bytes"])
             > limit * 1024
         ):
             raise ValueError("Current native usage exceeds the requested cap")

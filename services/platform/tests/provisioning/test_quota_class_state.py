@@ -1,12 +1,17 @@
 """quotaon -p exits 1 when the quota class is on (quota-tools 4.09 on Ubuntu 26.04); the printed state decides.
 
 Both native helpers read it. Treating exit 1 as a failed operation refused every node whose quotas were enabled.
+PHP 8.5 reports EDQUOT as a silent short write, so the requalification probe proves the stop independently.
 """
 
 import importlib.util
+import json
 import subprocess
+import sys
 from pathlib import Path
-from unittest.mock import patch
+from tempfile import TemporaryDirectory
+from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock, patch
 
 from django.conf import settings
 from django.test import SimpleTestCase
@@ -49,3 +54,56 @@ class QuotaClassStateTests(SimpleTestCase):
                 self.assertRaises(ValueError),
             ):
                 helper._quota_class_on("user", "-u")
+
+
+class PhpRequalificationProbeTests(SimpleTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.node = _load("praho_hosting_node")
+
+    IDENTIFIER = 2147000001
+
+    def probe(self, *, used_kib, free_bytes):
+        php_writes = []
+
+        def native(argv, **_kwargs):
+            if argv[0] == "/usr/bin/perl":
+                return json.dumps({"uid": self.IDENTIFIER, "gid": self.IDENTIFIER})
+            if "/usr/bin/php8.5" in argv:
+                php_writes.append(argv)
+            return str(self.IDENTIFIER)
+
+        quota = ModuleType("praho_quota_native")
+        empty = SimpleNamespace(hard=0, soft=0, space=0, inodes=0, inode_hard=0, inode_soft=0)
+        used = SimpleNamespace(hard=64, soft=64, space=used_kib * 1024, inodes=1, inode_hard=0, inode_soft=0)
+        quota._kernel_quota = Mock(side_effect=lambda *_a, **_k: used if php_writes else empty)
+        quota._set_kernel_quota = Mock()
+        with (
+            TemporaryDirectory() as directory,
+            patch.dict(sys.modules, {"praho_quota_native": quota}),
+            patch.object(self.node, "REQUALIFICATION_ROOT", Path(directory).resolve() / "probe"),
+            patch.object(self.node, "STATE", Path(directory).resolve()),
+            patch.object(self.node, "_run", side_effect=native),
+            patch.object(self.node, "_read", return_value="{}"),
+            patch.object(self.node, "_write"),
+            patch.object(self.node, "_reserved_probe_id", return_value=self.IDENTIFIER),
+            patch.object(self.node, "_probe_cleanup"),
+            patch.object(self.node.os, "chown"),
+            patch.object(self.node.os, "statvfs", return_value=SimpleNamespace(f_bavail=free_bytes, f_frsize=1)),
+        ):
+            self.node._isolated_requalification_probe({"source": "/dev/fixture", "uuid": "u"}, 3)
+        return php_writes[0]
+
+    def test_a_silent_short_write_at_the_cap_on_a_roomy_disk_is_the_denial(self):
+        program = self.probe(used_kib=64, free_bytes=10 * 1024**3)[-2]
+        self.assertIn("$n!==65536", program)
+        self.assertNotIn("quota exceeded", program)  # PHP 8.5 reports no message; requiring one refused every node
+
+    def test_a_short_write_well_below_the_cap_is_not_a_quota_stop(self):
+        with self.assertRaisesRegex(ValueError, "quota stop"):
+            self.probe(used_kib=4, free_bytes=10 * 1024**3)
+
+    def test_a_short_write_on_a_nearly_full_disk_proves_nothing(self):
+        with self.assertRaisesRegex(ValueError, "quota stop"):
+            self.probe(used_kib=64, free_bytes=1024)

@@ -210,7 +210,7 @@
     - name: Install protected hosting policy adapters
       ansible.builtin.import_tasks: virtualmin_hosting_tasks.yml
 
-    - name: Create database quota capability override directory
+    - name: Create the database writer's capability override directory
       ansible.builtin.file:
         path: /etc/systemd/system/mariadb.service.d
         state: directory
@@ -219,7 +219,7 @@
         mode: '0755'
       when: not virtualmin_installed.stat.exists
 
-    - name: Exclude the database writer quota bypass capability
+    - name: Remove the database writer's resource-override capability
       ansible.builtin.copy:
         content: "[Service]\nCapabilityBoundingSet=~CAP_SYS_RESOURCE\n"
         dest: /etc/systemd/system/mariadb.service.d/praho-quotas.conf
@@ -228,7 +228,7 @@
         mode: '0644'
       when: not virtualmin_installed.stat.exists
 
-    - name: Apply database quota capability restrictions on the empty new node
+    - name: Apply the database writer's capability restriction on the empty new node
       ansible.builtin.systemd:
         name: mariadb
         daemon_reload: true
@@ -254,14 +254,13 @@
     # Native warning ownership is preserved here. Explicit Platform handover
     # happens after registration and only when the real notifier is available.
 
-    - name: Preserve hard UID and group quotas and tenant database group ownership
+    - name: Preserve hard UID and group quotas
       ansible.builtin.lineinfile:
         path: /etc/webmin/virtual-server/config
         regexp: "^{{ item.key }}="
         line: "{{ item.key }}={{ item.value }}"
       loop:
         - {key: hard_quotas, value: '1'}
-        - {key: mysql_chgrp, value: '1'}
         - {key: bw_disable, value: '0'}
         - {key: bw_enable, value: '0'}
       when: not virtualmin_installed.stat.exists
@@ -274,6 +273,38 @@
           STDOUT_TAIL:: {{ (job_result.stdout | default(''))[-1800:] }}
           STDERR_TAIL:: {{ (job_result.stderr | default(''))[-1000:] }}
       when: not vmin_installed_check.stat.exists
+
+    # A tenant quota on database files lets one ordinary INSERT abort the shared MariaDB (MDEV-23901, ADR-0075), so
+    # database files stay mysql:mysql and Platform measures them. These run on every play, so an installed node gets
+    # the policy too, and in this order: correcting mysql_data while mysql_chgrp is effective would switch charging on.
+    - name: Keep tenant database files out of the account group quota
+      ansible.builtin.lineinfile:
+        path: /etc/webmin/virtual-server/config
+        regexp: '^mysql_chgrp='
+        line: mysql_chgrp=0
+      notify: Restart webmin
+
+    - name: Repair every Virtualmin template that would charge databases to their account
+      ansible.builtin.command:
+        argv: [/usr/bin/perl, /usr/local/lib/praho/praho-notification-policy.pl, database_policy_repair]
+      register: database_policy_repair
+      changed_when: (database_policy_repair.stdout | from_json).repaired | length > 0
+
+    # MariaDB 11.8 on Ubuntu 26.04 keeps data in /var/lib/mariadb, and its config names that only in a comment.
+    # Virtualmin's own database-size reporting builds each path from Webmin's mysql_data.
+    - name: Read MariaDB's actual data directory
+      ansible.builtin.command:
+        argv: [/usr/bin/mariadb, --protocol=socket, --batch, --skip-column-names, --execute, "SELECT @@datadir"]
+      register: mariadb_datadir
+      changed_when: false
+      failed_when: mariadb_datadir.rc != 0 or not (mariadb_datadir.stdout | trim) is match('^/[A-Za-z0-9_./-]+$')
+
+    - name: Point Webmin's MySQL module at MariaDB's actual data directory
+      ansible.builtin.lineinfile:
+        path: /etc/webmin/mysql/config
+        regexp: '^mysql_data='
+        line: "mysql_data={{ mariadb_datadir.stdout | trim | regex_replace('/+$', '') }}"
+      notify: Restart webmin
 
     - name: Remove install script
       ansible.builtin.file:

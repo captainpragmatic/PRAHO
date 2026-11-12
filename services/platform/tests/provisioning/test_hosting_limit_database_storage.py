@@ -1,6 +1,8 @@
-"""Existing shared tablespaces stay unsupported even after enabling file-per-table."""
+"""Database storage stays out of the kernel quota: MariaDB owns every file; shared tablespaces stay unsupported."""
 
 import importlib.util
+import os
+import stat
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
@@ -77,6 +79,7 @@ class QuotaDatabaseStorageTests(SimpleTestCase):
         return self.native.qualify_table_storage(
             self.schema,
             rows,
+            uid=self.schema.stat().st_uid,
             gid=self.schema.stat().st_gid,
             device=self.schema.stat().st_dev,
         )
@@ -96,6 +99,15 @@ class QuotaDatabaseStorageTests(SimpleTestCase):
             with self.subTest(field=field, value=value), self.assertRaises(ValueError):
                 self.qualify([{**self.row, field: value}])
 
+    def test_a_layout_a_repair_cannot_fix_is_refused_and_named(self):
+        for field, value in (("engine", "MyISAM"), ("space_type", "System")):
+            with (
+                self.subTest(field=field),
+                patch.object(self.native, "_table_inventory", return_value=[{**self.row, field: value}]),
+                self.assertRaisesRegex(self.native.DatabaseStorageRefusalError, "Database tenant"),
+            ):
+                self.native.repairable_database_layout(self.schema)
+
     def test_external_symlink_and_missing_datafiles_are_not_qualified(self):
         self.data.unlink()
         with self.assertRaises(ValueError):
@@ -106,8 +118,95 @@ class QuotaDatabaseStorageTests(SimpleTestCase):
         with self.assertRaises(ValueError):
             self.qualify([self.row])
 
-    def test_foreign_group_and_filesystem_are_not_qualified(self):
+    def test_foreign_owner_group_and_filesystem_are_not_qualified(self):
         info = self.schema.stat()
-        for gid, device in ((info.st_gid + 1, info.st_dev), (info.st_gid, info.st_dev + 1)):
-            with self.subTest(gid=gid, device=device), self.assertRaises(ValueError):
-                self.native.qualify_table_storage(self.schema, [self.row], gid=gid, device=device)
+        for uid, gid, device in (
+            (info.st_uid + 1, info.st_gid, info.st_dev),
+            (info.st_uid, info.st_gid + 1, info.st_dev),
+            (info.st_uid, info.st_gid, info.st_dev + 1),
+        ):
+            with self.subTest(uid=uid, gid=gid, device=device), self.assertRaises(ValueError):
+                self.native.qualify_table_storage(self.schema, [self.row], uid=uid, gid=gid, device=device)
+
+    # Stat results are doubled so ownership cases don't depend on the runner's groups or on running as root.
+    MARIADB = (110, 113)
+    TENANT = (1001, 1001)
+
+    def qualify_directory(self, **attributes):
+        """attributes: {path: {"uid": .., "gid": .., "mode": ..}}, applied over a clean mysql:mysql tree."""
+        real_lstat = os.lstat
+        offsets = {"mode": stat.ST_MODE, "uid": stat.ST_UID, "gid": stat.ST_GID}
+
+        def doubled(path):
+            fields = list(real_lstat(path))
+            fields[stat.ST_UID], fields[stat.ST_GID] = self.MARIADB
+            fields[stat.ST_MODE] &= ~stat.S_ISGID
+            for key, value in attributes.get(Path(path).name, {}).items():
+                fields[offsets[key]] = value
+            return os.stat_result(fields)
+
+        with patch.object(Path, "lstat", lambda path: doubled(path)):  # noqa: PLW0108 -- Binds as a Path method.
+            self.native.qualify_database_directory(
+                self.schema, writer=self.MARIADB, tenant=self.TENANT, device=real_lstat(self.schema).st_dev
+            )
+
+    def test_mariadb_owned_directory_and_files_are_qualified(self):
+        self.qualify_directory()
+
+    def test_a_tenant_charged_directory_is_refused_and_named(self):
+        for name, attributes in (
+            ("group", {"gid": self.TENANT[1]}),
+            ("owner", {"uid": self.TENANT[0]}),
+            ("setgid", {"mode": stat.S_IFDIR | stat.S_ISGID | 0o750}),
+            ("world-writable", {"mode": stat.S_IFDIR | 0o777}),
+        ):
+            with (
+                self.subTest(name),
+                self.assertRaisesRegex(self.native.DatabaseStorageRefusalError, "Database tenant.*directory"),
+            ):
+                self.qualify_directory(tenant=attributes)
+
+    def test_one_tenant_charged_file_under_a_correct_directory_is_refused_and_named(self):
+        for name, attributes in (("group", {"gid": self.TENANT[1]}), ("owner", {"uid": self.TENANT[0]})):
+            with (
+                self.subTest(name),
+                self.assertRaisesRegex(self.native.DatabaseStorageRefusalError, "Database tenant.*wp_posts.ibd"),
+            ):
+                self.qualify_directory(**{"wp_posts.ibd": attributes})
+
+    def test_a_non_regular_entry_is_refused(self):
+        (self.schema / "linked.ibd").symlink_to(self.data)
+        with self.assertRaises(self.native.DatabaseStorageRefusalError):
+            self.qualify_directory()
+
+    def test_a_tenant_sharing_mariadbs_identity_is_refused(self):
+        for tenant in ((self.MARIADB[0], 1001), (1001, self.MARIADB[1])):
+            with self.subTest(tenant=tenant), self.assertRaises(self.native.DatabaseStorageRefusalError):
+                self.native.qualify_database_directory(
+                    self.schema, writer=self.MARIADB, tenant=tenant, device=self.schema.stat().st_dev
+                )
+
+    def writer_status(self, capabilities="0", uids="110\t110\t110\t110", gids="113\t113\t113\t113", bounding=""):
+        status = self.root / "status"
+        status.write_text(f"Uid:\t{uids}\nGid:\t{gids}\nCapEff:\t{capabilities}\n")
+        real_open = os.open
+        answers = iter(["4242", bounding])
+        with (
+            patch.object(self.native, "_run", side_effect=lambda *_args, **_kwargs: next(answers)),
+            patch.object(self.native.os, "open", lambda _path, flags: real_open(status, flags)),
+        ):
+            return self.native._database_writer_qualified()
+
+    def test_the_writer_identity_comes_from_the_running_server(self):
+        self.assertEqual(self.writer_status(), (110, 113))
+
+    def test_a_writer_with_resource_override_is_still_refused_as_least_privilege(self):
+        capable = f"{1 << self.native.CAP_SYS_RESOURCE:x}"
+        for arguments in ({"capabilities": capable}, {"bounding": "cap_chown cap_sys_resource"}):
+            with self.subTest(arguments), self.assertRaisesRegex(ValueError, "least privilege"):
+                self.writer_status(**arguments)
+
+    def test_a_root_writer_is_refused(self):
+        for arguments in ({"uids": "0\t0\t0\t0"}, {"gids": "0\t0\t0\t0"}):
+            with self.subTest(arguments), self.assertRaises(ValueError):
+                self.writer_status(**arguments)

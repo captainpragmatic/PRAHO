@@ -17,6 +17,7 @@
           {% if current.disk_db_gb is not None %}<span>{% trans "Databases:" %} {{ current.disk_db_gb|floatformat:2 }} GB</span>{% endif %}
         </p>
       {% endif %}
+      {% if disk_limit %}<p class="mt-2 text-xs text-slate-400" data-usage-disk-scope>{% trans "The hard limit applies to your files. Databases are measured hourly, count toward your allowance and can go over it between readings." %}</p>{% endif %}
     {% else %}
       <p class="text-sm text-slate-400">{% trans "Not available" %}</p>
     {% endif %}

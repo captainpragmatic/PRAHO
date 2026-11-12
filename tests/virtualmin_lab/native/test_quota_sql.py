@@ -130,5 +130,47 @@ def test_actual_inventory_refuses_historical_shared_tablespaces(database):
         target.mkdir()
         with pytest.raises(ValueError, match="isolated per-table"):
             native.qualify_table_storage(
-                target, [rows["old_table"]], gid=target.stat().st_gid, device=target.stat().st_dev
+                target,
+                [rows["old_table"]],
+                uid=target.stat().st_uid,
+                gid=target.stat().st_gid,
+                device=target.stat().st_dev,
             )
+
+
+def test_actual_principal_lookup_finds_every_grant_spelling_only(database):
+    prefix, sql = database
+    suffix = uuid4().hex[:8]
+    name = f"shop_{suffix}"
+    other = f"other_{suffix}"
+    escaped = name.replace("_", "\\_")
+    sql(
+        f"CREATE DATABASE {name}; CREATE TABLE {name}.t (id INT); CREATE DATABASE {other}; "
+        f"CREATE USER 'plain{suffix}'@'localhost', 'wild{suffix}'@'%', 'tbl{suffix}'@'localhost', "
+        f"'foreign{suffix}'@'localhost'; CREATE USER 'locked{suffix}'@'localhost' ACCOUNT LOCK; "
+        f"GRANT ALL ON `{escaped}`.* TO 'plain{suffix}'@'localhost'; "
+        f"GRANT SELECT ON `shop\\_%`.* TO 'wild{suffix}'@'%'; "
+        f"GRANT INSERT ON {name}.t TO 'tbl{suffix}'@'localhost'; "
+        f"GRANT ALL ON `{escaped}`.* TO 'locked{suffix}'@'localhost'; "
+        f"GRANT ALL ON `{other}`.* TO 'foreign{suffix}'@'localhost'"
+    )
+    source = ROOT / "services/platform/infrastructure/ansible/playbooks/files/praho_hosting_node.py"
+    spec = importlib.util.spec_from_file_location("quota_sql_node", source)
+    node = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(node)
+
+    def transport(arguments, **options):
+        assert arguments[0] == "/usr/bin/mariadb"
+        return command(prefix + arguments)
+
+    for mode in ("", "NO_BACKSLASH_ESCAPES"):
+        sql(f"SET GLOBAL sql_mode='{mode}'")
+        with patch.object(node, "_run", side_effect=transport):
+            found = {user: locked for user, _host, locked in node._database_principals([name])}
+        assert found == {
+            f"plain{suffix}": False,
+            f"wild{suffix}": False,
+            f"tbl{suffix}": False,
+            f"locked{suffix}": True,
+        }
+    sql("SET GLOBAL sql_mode=DEFAULT")
