@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from apps.common.types import Ok
-from apps.infrastructure.ansible_service import AnsibleResult, AnsibleService
+from apps.infrastructure.ansible_service import AnsibleResult, AnsibleService, failure_detail
 from tests.infrastructure.test_deployment_service_pipeline import _create_deployment
 from tests.infrastructure.test_security_hardening import enrolled_node
 
@@ -144,3 +144,131 @@ class AnsibleControlPathTests(TestCase):
 
                 self.assertTrue(result.is_err())
                 self.assertEqual(result.unwrap_err(), f"{prefix}: {detail}" if detail else prefix)
+
+
+class FailureDetailTests(TestCase):
+    def test_the_fatal_task_wins_over_leading_stderr_warnings(self) -> None:
+        warnings = "[DEPRECATION WARNING]: INJECT_FACTS_AS_VARS default to `True` is deprecated."
+        fatal = 'fatal: [1.2.3.4]: FAILED! => {"msg": "the real reason"}'
+        self.assertEqual(failure_detail(f"TASK [x]\n{fatal}\n", warnings), fatal)
+        # Without a recognisable failure line the stderr text is kept, as before.
+        self.assertEqual(failure_detail("PLAY RECAP\n", "  controller died\n"), "controller died")
+        self.assertEqual(failure_detail("", ""), "")
+
+    def test_a_2_19_task_error_keeps_its_origin_and_the_fatal_result(self) -> None:
+        # ansible-core 2.19 prints a generic [ERROR] first; the task and the command's stderr follow it.
+        stdout = (
+            "TASK [Install Virtualmin] ******\n"
+            "[ERROR]: Task failed: Module failed: non-zero return code\n"
+            "Origin: /x/playbooks/virtualmin.yml:120:7\n"
+            "\n"
+            "120     - name: Install Virtualmin\n"
+            "         ^ column 7\n"
+            "\n"
+            'fatal: [1.2.3.4]: FAILED! => {"changed": true, "rc": 1, "stderr": "E: Unable to locate package x"}\n'
+            "PLAY RECAP\n"
+        )
+        detail = failure_detail(stdout, "[DEPRECATION WARNING]: noise")
+        self.assertIn("[ERROR]: Task failed: Module failed: non-zero return code", detail)
+        self.assertIn("Origin: /x/playbooks/virtualmin.yml:120:7", detail)
+        self.assertIn("E: Unable to locate package x", detail)
+        self.assertNotIn("noise", detail)
+        self.assertLessEqual(len(failure_detail(stdout.replace("package x", "x" * 5000), "")), 1500)
+
+    def test_a_yaml_fatal_result_keeps_its_indented_stderr(self) -> None:
+        stdout = (
+            "[ERROR]: Task failed: Module failed: non-zero return code\n"
+            "Origin: /x/playbooks/virtualmin.yml:63:7\n"
+            "fatal: [node]: FAILED! =>\n"
+            "    changed: false\n"
+            "    rc: 1\n"
+            "    stderr: |-\n"
+            "        AssertionError: Tenant or unknown homes exist\n"
+            "PLAY RECAP\n"
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("AssertionError: Tenant or unknown homes exist", detail)
+        self.assertNotIn("PLAY RECAP", detail)
+
+    def test_a_long_echoed_command_does_not_crowd_out_the_stderr(self) -> None:
+        script = "\n".join(f"            line {n} of the inline script" for n in range(200))
+        stdout = (
+            "[ERROR]: Task failed: Module failed: non-zero return code\n"
+            "fatal: [node]: FAILED! =>\n"
+            "    changed: false\n"
+            "    cmd:\n"
+            "    - /usr/bin/python3\n"
+            "    - -c\n"
+            "    - |-\n"
+            f"{script}\n"
+            "    msg: non-zero return code\n"
+            "    rc: 1\n"
+            "    stderr: |-\n"
+            "        Traceback (most recent call last):\n"
+            "        AssertionError: Tenant or unknown homes exist: lost+found\n"
+            "    stderr_lines: []\n"
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("AssertionError: Tenant or unknown homes exist: lost+found", detail)
+        self.assertNotIn("inline script", detail)
+
+    def test_the_end_of_a_long_stderr_is_kept(self) -> None:
+        noise = "    W: a repository warning that repeats\n" * 14
+        stdout = (
+            "fatal: [node]: FAILED! =>\n"
+            "    msg: non-zero return code\n"
+            "    rc: 100\n"
+            "    stderr: |-\n"
+            + noise.replace("    W:", "        W:")
+            + "        E: Unable to locate package php8.5-fpm\n"
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("E: Unable to locate package php8.5-fpm", detail)
+        self.assertIn("rc: 100", detail)
+
+    def test_several_long_fields_each_keep_their_end(self) -> None:
+        def field(name: str, end: str) -> str:
+            return f"    {name}: |-\n" + "        filler text that is not the reason\n" * 30 + f"        {end}\n"
+
+        stdout = (
+            "[ERROR]: Task failed: Module failed: non-zero return code\n"
+            "Origin: /x/playbooks/virtualmin.yml:63:7\n"
+            "fatal: [node]: FAILED! =>\n"
+            + field("msg", "MSG-END")
+            + "    rc: 1\n"
+            + field("stderr", "STDERR-END")
+            + field("stdout", "STDOUT-END")
+        )
+        detail = failure_detail(stdout, "")
+        for end in ("MSG-END", "STDERR-END", "STDOUT-END", "rc: 1", "virtualmin.yml:63:7"):
+            self.assertIn(end, detail)
+        self.assertLessEqual(len(detail), 1500)
+
+    def test_a_reason_after_character_200_survives_deduplication(self) -> None:
+        reason = "Permission denied"
+        padding = "x" * 190
+        for stdout in (
+            f"fatal: [node]: FAILED! =>\n    changed: false\n    msg: {padding} {reason}\n",
+            f'fatal: [node]: FAILED! => {{"changed": false, "msg": "{padding} {reason}"}}\n',
+        ):
+            with self.subTest(form="yaml" if "=>\n" in stdout else "json"):
+                self.assertIn(reason, failure_detail(stdout, ""))
+
+    def test_a_reason_given_only_on_stdout_is_kept(self) -> None:
+        stdout = (
+            "fatal: [node]: FAILED! =>\n"
+            "    cmd: [/usr/bin/check]\n"
+            "    msg: non-zero return code\n"
+            "    rc: 3\n"
+            "    stderr: ''\n"
+            "    stdout: the disk layout is unsupported\n"
+            "    stdout_lines: [the disk layout is unsupported]\n"
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("the disk layout is unsupported", detail)
+        self.assertNotIn("/usr/bin/check", detail)
+        # A huge stdout is bounded and does not push out msg or rc.
+        flood = stdout.replace("the disk layout is unsupported", "x" * 5000)
+        bounded = failure_detail(flood, "")
+        self.assertIn("rc: 3", bounded)
+        self.assertLessEqual(len(bounded), 1500)

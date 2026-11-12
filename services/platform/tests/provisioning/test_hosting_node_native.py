@@ -63,6 +63,153 @@ class HostingNodeNativeTests(SimpleTestCase):
             playbook.index("Exclude the database writer quota bypass capability"),
         )
 
+    def test_first_install_guard_names_what_occupies_the_node(self):
+        import subprocess  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+
+        import yaml  # noqa: PLC0415
+
+        playbook = yaml.safe_load(
+            (Path(settings.BASE_DIR) / "infrastructure/ansible/playbooks/virtualmin.yml").read_text()
+        )
+        (task,) = [
+            t for t in playbook[0]["tasks"] if t.get("name") == "Refuse occupied or ambiguous first-install nodes"
+        ]
+        script = task["ansible.builtin.command"]["argv"][2]
+        # The playbook's own guard script, run on a temporary root.
+        with TemporaryDirectory() as root:
+            clean = subprocess.run([sys.executable, "-c", script, root], capture_output=True, text=True, check=False)  # noqa: S603
+            self.assertEqual(clean.returncode, 0, clean.stderr)
+            (Path(root) / "home" / "zed").mkdir(parents=True)
+            (Path(root) / "home" / "alpha").mkdir()
+            occupied = subprocess.run([sys.executable, "-c", script, root], capture_output=True, text=True, check=False)  # noqa: S603
+        self.assertNotEqual(occupied.returncode, 0)
+        self.assertIn("Tenant or unknown homes exist: alpha, zed", occupied.stderr)
+
+    def _guard_script(self) -> str:
+        import yaml  # noqa: PLC0415
+
+        playbook = yaml.safe_load(
+            (Path(settings.BASE_DIR) / "infrastructure/ansible/playbooks/virtualmin.yml").read_text()
+        )
+        (task,) = [
+            t for t in playbook[0]["tasks"] if t.get("name") == "Refuse occupied or ambiguous first-install nodes"
+        ]
+        return task["ansible.builtin.command"]["argv"][2]
+
+    def _run_guard(self, root: str, account: object) -> None:
+        import pwd  # noqa: PLC0415
+        import sys  # noqa: PLC0415
+
+        lookup = (lambda name: account) if account is not None else pwd.getpwnam
+        with patch.object(sys, "argv", ["-c", root]), patch("pwd.getpwnam", side_effect=lookup):
+            exec(compile(self._guard_script(), "guard", "exec"), {"__name__": "__main__"})  # noqa: S102
+
+    @staticmethod
+    def _tunnel_account(
+        uid: int, home: str = "/home/praho-webmin-tunnel", login_shell: str = "/usr/sbin/nologin"
+    ) -> object:
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        return SimpleNamespace(pw_name="praho-webmin-tunnel", pw_uid=uid, pw_dir=home, pw_shell=login_shell)
+
+    def test_the_first_install_guard_accepts_only_praho_s_own_tunnel_home(self):
+        import os  # noqa: PLC0415
+
+        with TemporaryDirectory() as root:
+            (Path(root) / "home" / "praho-webmin-tunnel" / ".ssh").mkdir(parents=True)
+            self.assertTrue((Path(root) / "home" / "praho-webmin-tunnel").is_dir())
+            self._run_guard(root, self._tunnel_account(os.getuid()))  # does not raise
+            self._run_guard(root, self._tunnel_account(os.getuid(), login_shell="/sbin/nologin"))  # as the policy
+            for account, why in (
+                (self._tunnel_account(os.getuid() + 1), "owner"),
+                (self._tunnel_account(os.getuid(), home="/home/other"), "home"),
+                (self._tunnel_account(os.getuid(), login_shell="/bin/bash"), "shell"),
+            ):
+                with self.subTest(why=why), self.assertRaisesRegex(AssertionError, rf"praho-webmin-tunnel \({why}"):
+                    self._run_guard(root, account)
+            (Path(root) / "home" / "tenant").mkdir()
+            with self.assertRaisesRegex(AssertionError, r"Tenant or unknown homes exist: tenant$"):
+                self._run_guard(root, self._tunnel_account(os.getuid()))
+
+    def test_the_first_install_guard_refuses_a_tunnel_home_holding_anything_else(self):
+        import os  # noqa: PLC0415
+
+        with TemporaryDirectory() as root:
+            tunnel = Path(root) / "home" / "praho-webmin-tunnel"
+            (tunnel / ".ssh").mkdir(parents=True)
+            (tunnel / ".ssh" / "authorized_keys").write_text("key\n")
+            # As on an Ubuntu 26.04 cloud image: the skeleton files plus the cloud locale-test marker.
+            for name in (".bashrc", ".profile", ".bash_logout", ".cloud-locale-test.skip"):
+                (tunnel / name).write_text("")
+            self._run_guard(root, self._tunnel_account(os.getuid()))  # a fresh tunnel home passes
+            for extra in ("public_html", ".ssh/id_rsa"):
+                with self.subTest(extra=extra):
+                    (tunnel / extra).write_text("legacy")
+                    with self.assertRaisesRegex(AssertionError, "praho-webmin-tunnel"):
+                        self._run_guard(root, self._tunnel_account(os.getuid()))
+                    (tunnel / extra).unlink()
+            with patch.object(self.native.pwd, "getpwnam", return_value=self._tunnel_account(os.getuid())):
+                self.assertEqual(self.native.tenant_homes(Path(root) / "home"), [])
+                (tunnel / "public_html").write_text("legacy")
+                self.assertEqual(self.native.tenant_homes(Path(root) / "home"), ["praho-webmin-tunnel"])
+
+    def test_the_first_install_guard_refuses_a_checked_path_that_is_not_a_directory(self):
+        for checked in ("home", "var/lib/mysql", "etc/webmin/virtual-server/domains"):
+            with self.subTest(checked=checked), TemporaryDirectory() as root:
+                (Path(root) / checked).parent.mkdir(parents=True, exist_ok=True)
+                (Path(root) / checked).write_text("not a directory")
+                with self.assertRaisesRegex(AssertionError, "not a directory"):
+                    self._run_guard(root, None)
+
+    def test_the_first_install_guard_checks_the_mariadb_datadir(self):
+        with TemporaryDirectory() as root:
+            (Path(root) / "var/lib/mariadb/tenantdb").mkdir(parents=True)
+            with self.assertRaisesRegex(AssertionError, "Database storage exists: tenantdb"):
+                self._run_guard(root, None)
+
+    def test_requalification_probes_every_domain_except_virtualmin_s_own_hostname_domain(self):
+        fqdn = "node-001.native-acc.example.test"
+        hostname = {"dom": fqdn, "user": "_hostname", "home": "/home/._hostname", "defaulthostdomain": "1"}
+        with TemporaryDirectory() as root:
+            domains = Path(root)
+            rows = {
+                "100": hostname,
+                "200": {"dom": "tenant.example.test", "user": "tenant", "home": "/home/tenant"},
+                "300": {"dom": "alias.example.test", "user": "tenant", "alias": "200"},
+                "400": {**hostname, "dom": "other.example.test"},  # right markers, wrong name: still a tenant
+                "500": {**hostname, "defaulthostdomain": "0"},  # not marked by Virtualmin: still a tenant
+            }
+            for name, row in rows.items():
+                (domains / name).write_text("".join(f"{key}={value}\n" for key, value in row.items()))
+            (domains / "not-a-domain").write_text("ignored=1\n")
+            read = lambda path: dict(line.split("=", 1) for line in path.read_text().splitlines())  # noqa: E731
+            found = self.native.quota_probe_domains(domains, fqdn, read)
+        self.assertEqual(sorted(name for name, _fields in found), ["200", "400", "500"])
+
+    def test_the_first_install_guard_refuses_a_tunnel_named_symlink(self):
+        import os  # noqa: PLC0415
+
+        with TemporaryDirectory() as root, TemporaryDirectory() as elsewhere:
+            (Path(root) / "home").mkdir()
+            (Path(root) / "home" / "praho-webmin-tunnel").symlink_to(elsewhere)
+            with self.assertRaisesRegex(AssertionError, "praho-webmin-tunnel"):
+                self._run_guard(root, self._tunnel_account(os.getuid()))
+
+    def test_tenant_homes_excludes_only_praho_s_own_tunnel_home(self):
+        import os  # noqa: PLC0415
+
+        with TemporaryDirectory() as root:
+            home = Path(root) / "home"
+            (home / "praho-webmin-tunnel").mkdir(parents=True)
+            self.assertTrue((home / "praho-webmin-tunnel").is_dir())
+            with patch.object(self.native.pwd, "getpwnam", return_value=self._tunnel_account(os.getuid())):
+                self.assertEqual(self.native.tenant_homes(home), [])
+                (home / "tenant").mkdir()
+                self.assertEqual(self.native.tenant_homes(home), ["tenant"])
+            with patch.object(self.native.pwd, "getpwnam", side_effect=KeyError("praho-webmin-tunnel")):
+                self.assertEqual(self.native.tenant_homes(home), ["praho-webmin-tunnel", "tenant"])
+
     def test_source_only_mail_inventory_survives_an_unavailable_quota_runtime(self):
         notifications = {
             "evidence": {

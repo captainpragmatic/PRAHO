@@ -63,6 +63,9 @@ def save(path: Path, value: dict[str, object]) -> None:
     os.replace(temporary, path)
 
 
+MIN_FREE_FOR_QUOTA_PROOF = 1024**3
+
+
 def fixture_domains(run_id: str) -> tuple[str, str]:
     stem = "q776" + UUID(run_id).hex[:8]
     return stem + ".example.invalid", stem + "n.example.invalid"
@@ -78,13 +81,31 @@ def domain_row(domain: str) -> dict[str, str]:
     return rows[0]
 
 
+def unexpected_domains(rows: list[dict[str, str]], fixtures: tuple[str, str], fqdn: str) -> list[str]:
+    """Domains other than this run's fixtures and Virtualmin's own default hostname domain.
+
+    Virtualmin creates that domain for the node's hostname (it backs the hostname certificate): it is marked
+    defaulthostdomain=1 and owned by _hostname with the hidden /home/._hostname."""
+    return [
+        row.get("dom", "")
+        for row in rows
+        if row.get("dom") not in fixtures
+        and not (
+            row.get("defaulthostdomain") == "1"
+            and row.get("user") == "_hostname"
+            and row.get("home") == "/home/._hostname"
+            and row.get("dom") == fqdn
+        )
+    ]
+
+
 def prepare(run_id: str) -> None:
     from praho_quota_native import _fields  # noqa: PLC0415 -- Exact native inventory.
 
     domains = fixture_domains(run_id)
     existing = [_fields(path) for path in Path("/etc/webmin/virtual-server/domains").iterdir() if path.name.isdigit()]
-    if any(row.get("dom") not in domains for row in existing):
-        raise AssertionError("This is no longer an empty owned native test node")
+    if unexpected := unexpected_domains(existing, domains, Path("/etc/hostname").read_text().strip()):
+        raise AssertionError("This is no longer an empty owned native test node: " + ", ".join(unexpected[:5]))
     for index, domain in enumerate(domains):
         if any(row.get("dom") == domain for row in existing):
             continue
@@ -159,14 +180,22 @@ def unprivileged(domain: str, *, php: bool) -> None:
         "--bounding-set=-all",
     ]
     if php:
+        # At the cap the kernel returns EDQUOT to PHP's write(), but PHP 8.5's fwrite reports it as a short count
+        # (0) with no error_get_last() message (traced on Ubuntu 26.04). So any short write counts as the denial,
+        # and the check below then requires usage at the verified hard cap, which tells a quota stop apart from
+        # any other write failure.
         program = r"""$p=$argv[1]; $f=fopen($p,'wb'); $hit=false;
 for($i=0;$i<128;$i++) { $n=@fwrite($f,str_repeat('x',1048576));
-if($n!==1048576) {$e=error_get_last();$hit=(bool)preg_match('/(quota exceeded|errno=122)/i',$e['message']??'');break;}
+if($n!==1048576) {$hit=true;break;}
 if(!fflush($f)||!fsync($f)){break;}}
 fclose($f); if(!$hit){fwrite(STDERR,'PHP did not encounter EDQUOT');exit(7);} echo posix_geteuid();"""
         result = run([*prefix, "/usr/bin/php8.5", "-r", program, str(target)])
         if result.stdout.strip() != str(account.pw_uid):
             raise AssertionError("PHP quota proof used the wrong runtime identity")
+        # PHP gives no errno here: plenty of free disk rules out ENOSPC as the reason for the short write.
+        space = os.statvfs(account.pw_dir)
+        if space.f_bavail * space.f_frsize < MIN_FREE_FOR_QUOTA_PROOF:
+            raise AssertionError("PHP's short write cannot prove a quota stop on a nearly full disk")
     else:
         program = """import errno,json,os,sys
 assert os.geteuid()==int(sys.argv[2]) and os.getegid()==int(sys.argv[3])

@@ -58,6 +58,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fresh hosting nodes on Ubuntu 26.04 deploy again: the first-install checks accept the node's own tunnel account, and a failed deployment records the failing task and its error instead of leading warnings. The acceptance DNS check now reads published records, so it works from hosts without IPv6.
 - **New Ubuntu 26.04 nodes are no longer left disabled after a successful deploy.** Ubuntu 25.10+ ships chrony, which listens on loopback UDP 323; node policy verification rejected it, and the node registered disabled with only "Effective inbound firewall policy is incomplete or admits unreviewed traffic." Loopback-only UDP 323 is now allowed, as loopback UDP 53 already was; a wildcard or public address on that port is still refused. The evidence checks now name what they rejected (listeners, services, Webmin principals, versions, firewall facts and admin grants), for example "unreviewed listener: 'udp … 0.0.0.0:323'", quoting and bounding text from the node; a malformed row is refused by name instead of crashing the check.
 
 - Native quota acceptance requires an OS quota-exceeded diagnostic and a neighboring tenant's verified write and commit after denial. Similar SQL error numbers cannot qualify the node (#776).

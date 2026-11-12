@@ -81,6 +81,56 @@ def _first_failure_line(stdout: str, stderr: str) -> str:
     return next((line.strip()[:300] for line in stderr.splitlines() if line.strip()), "")
 
 
+def _bounded_field(text: str, budget: int = 240) -> str:
+    """Keep a field's start and, where it is long, its end: the final error usually follows warnings or a traceback."""
+    if len(text) <= budget:
+        return text
+    head = budget // 4
+    return f"{text[:head]} … {text[-(budget - head - 3) :]}"
+
+
+def failure_detail(stdout: str, stderr: str) -> str:
+    """Why a playbook failed: its first error or fatal task, else the start of stderr.
+
+    Ansible prints the failing task to stdout; stderr often carries only deprecation warnings. Since
+    ansible-core 2.19 the first error is generic ("Module failed: non-zero return code"), so the task's
+    Origin line and its fatal result (which holds the command's stderr) are kept with it."""
+    first = _first_failure_line(stdout, stderr) or stderr.strip()[:500]
+    lines = [line.strip() for line in stdout.splitlines()]
+    origin = next((line for line in lines if line.startswith("Origin:")), "")
+    raw = stdout.splitlines()
+    at = next((index for index, line in enumerate(raw) if re.match(r"fatal: \[.*\]: FAILED! =>", line.strip())), None)
+    fatal = ""
+    if at is not None:
+        # The YAML callback writes the result on the following indented lines. Keep the fields that say why
+        # (msg, rc, stderr, stdout), each within its own budget, so a long one cannot crowd out the others;
+        # drop the echoed cmd.
+        fields: dict[str, list[str]] = {}
+        key_indent: int | None = None
+        current = ""
+        for line in raw[at + 1 :]:
+            if line and not line.startswith((" ", "\t")):
+                break
+            if not line.strip():
+                continue
+            indent = len(line) - len(line.lstrip())
+            key_indent = indent if key_indent is None else key_indent
+            if indent == key_indent:
+                key = line.strip().split(":", 1)[0]
+                current = key if key in {"msg", "rc", "stderr", "stdout"} else ""
+            if current:
+                fields.setdefault(current, []).append(line.strip())
+        # An inline (JSON) result is all on the fatal line; a YAML one puts its fields on the lines below.
+        header = raw[at].strip()[:60] if fields else _bounded_field(raw[at].strip(), 1000)
+        fatal = " ".join([header] + [_bounded_field(" ".join(lines)) for lines in fields.values()])
+    # Budgets that fit the 1500 total together, so no later cut removes a field's preserved end:
+    # first 300 + origin 150 + fatal (60 + four fields of 240) + separators. A later part is dropped only when the
+    # emitted first part already holds all of it.
+    first = first[:300]
+    parts = [first] + [part for part in (origin[:150], fatal) if part and part not in first]
+    return " | ".join(part for part in parts if part)[:1500]
+
+
 def node_admin_allowed_cidrs() -> list[str]:
     """The node admin allowlist as explicit networks, for Webmin and UFW (ADR-0060).
 
@@ -292,7 +342,9 @@ class AnsibleService:
 
             if not playbook_result.success:
                 logger.error(f"📜 [Ansible] Playbook {playbook} failed, stopping execution")
-                return Err(f"Playbook {playbook} failed: {playbook_result.stderr[:500]}")
+                return Err(
+                    f"Playbook {playbook} failed: {failure_detail(playbook_result.stdout, playbook_result.stderr)}"
+                )
 
         logger.info(f"📜 [Ansible] All {len(results)} playbooks completed successfully")
         return Ok(results)

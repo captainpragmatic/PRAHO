@@ -24,8 +24,9 @@ def accepted_change(**changes):
         "currency": "RON",
         "quote_fingerprint": "a" * 64,
         "quote_revision": 2,
-        "expires_at": "2026-11-10T12:15:00Z",
-        "authority_expires_at": "2026-11-10T12:30:00Z",
+        # Far in the future: the page compares the authority with the current time.
+        "expires_at": "2099-11-10T12:15:00Z",
+        "authority_expires_at": "2099-11-10T12:30:00Z",
         "effective_at": "2026-11-10T12:00:00Z",
         "next_recurring_net_cents": 20000,
         "next_recurring_total_cents": 24200,

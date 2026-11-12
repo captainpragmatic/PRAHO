@@ -12,11 +12,12 @@ import ipaddress
 import json
 import os
 import secrets
-import socket
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
+import dns.exception
+import dns.resolver
 from django.db import connection, transaction
 
 from apps.common.credential_vault import CredentialData, get_credential_vault
@@ -252,16 +253,25 @@ def _bound_deployment(authority: NativeAuthority) -> NodeDeployment:
 
 
 def require_fixture_dns(deployment: NodeDeployment, ipv4: str) -> None:
-    """Use real DNS, with no hosts/resolver override and no DNS publication."""
+    """Use real DNS, with no hosts/resolver override and no DNS publication.
+
+    Reads the published A and AAAA records through the system's configured resolver. getaddrinfo is not used: on a
+    host without global IPv6 (macOS) it leaves AAAA answers out, so a correctly published node looked wrong."""
+    resolver = dns.resolver.Resolver()
+    addresses: set[str] = set()
     try:
-        addresses = {
-            str(ipaddress.ip_address(value[4][0]))
-            for value in socket.getaddrinfo(deployment.fqdn, 10000, type=socket.SOCK_STREAM)
-        }
-    except socket.gaierror as error:
+        for rdtype in ("A", "AAAA"):
+            try:
+                answer = resolver.resolve(deployment.fqdn, rdtype, lifetime=10)
+            except dns.resolver.NoAnswer:
+                continue
+            addresses.update(str(ipaddress.ip_address(record.address)) for record in answer)
+    except (dns.resolver.NXDOMAIN, dns.resolver.NoNameservers, dns.exception.Timeout) as error:
         raise ValueError(
             "The approved native test FQDN is unresolved; inspect the private platform_fixture binding"
         ) from error
+    if not addresses:
+        raise ValueError("The approved native test FQDN is unresolved; inspect the private platform_fixture binding")
     expected = {str(ipaddress.ip_address(ipv4))}
     if deployment.ipv6_address:
         expected.add(str(ipaddress.ip_address(deployment.ipv6_address)))

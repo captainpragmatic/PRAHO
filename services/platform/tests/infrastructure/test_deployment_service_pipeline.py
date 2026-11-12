@@ -23,7 +23,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 
 from apps.common.types import Err, Ok, Retriability
-from apps.infrastructure.ansible_service import AnsibleService
+from apps.infrastructure.ansible_service import AnsibleResult, AnsibleService
 from apps.infrastructure.audit_service import InfrastructureAuditContext
 from apps.infrastructure.cloud_gateway import STANDARD_FIREWALL_RULES, ServerCreateResult, SSHKeyResult
 from apps.infrastructure.deployment_lifecycle import provider_token_fingerprint
@@ -372,6 +372,39 @@ class TestDeployNodeReachesCompletedThroughFSM(TestCase):
         self.assertEqual(gateway.create_server.call_args.args[0].firewall_ids, [])
         self.assertEqual(set(CloudResourceOwnership.objects.filter(deployment=deployment).values_list("kind", "resource_id")),
                          {("server", "srv-1"), ("ssh_key", "key-1"), ("primary_ip", "ip-1")})
+
+    def test_a_failed_playbook_records_its_fatal_task_not_the_leading_warnings(self) -> None:
+        # Ansible prints the failing task to stdout; stderr often holds only deprecation warnings.
+        deployment = _create_deployment("pending")
+        service = _make_service()
+        service._ssh_manager.generate_deployment_key.return_value = Ok(MagicMock(public_key="ssh-rsa AAAA"))
+        service._ansible.get_playbook_order.return_value = ["base.yml", "panel.yml"]
+        warnings = "[DEPRECATION WARNING]: INJECT_FACTS_AS_VARS default to `True` is deprecated. " * 12
+        fatal = 'fatal: [1.2.3.4]: FAILED! => {"msg": "the real reason"}'
+        outcomes = {
+            "base.yml": AnsibleResult(True, "base.yml", "ok", "", 0),
+            "panel.yml": AnsibleResult(False, "panel.yml", f"TASK [Install]\n{fatal}\nPLAY RECAP\n", warnings, 2),
+        }
+        service._ansible.run_playbook.side_effect = lambda **kwargs: Ok(outcomes[kwargs["playbook"]])
+        gateway = MagicMock()
+        gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
+        gateway.create_server.return_value = Ok(
+            ServerCreateResult(server_id="srv-1", ipv4_address="1.2.3.4", ipv6_address="", created_resources=())
+        )
+
+        with (
+            patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
+            patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
+        ):
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test-token"})
+
+        self.assertTrue(result.is_err())
+        self.assertIn("the real reason", result.unwrap_err())
+        deployment.refresh_from_db()
+        self.assertEqual(deployment.status, "failed")
+        logged = NodeDeploymentLog.objects.filter(deployment=deployment, level="ERROR").values_list("message", flat=True)
+        self.assertTrue(any("the real reason" in message for message in logged), list(logged))
 
     def test_uncovered_egress_logs_a_warning_and_deployment_still_completes(self) -> None:
         deployment = _create_deployment("pending")
