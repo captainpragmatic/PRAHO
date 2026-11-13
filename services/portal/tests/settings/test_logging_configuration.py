@@ -216,6 +216,8 @@ SENSITIVE_VALUES = (
     "beta-secret",
     "byte-secret",
     "object-secret",
+    "byte-key-secret",
+    "spaced-bearer-secret",
 )
 
 
@@ -261,6 +263,7 @@ def _records() -> dict[str, logging.LogRecord]:
     extras.session_note = "visible-note"
     extras.payload = b"password=byte-secret"
     extras.label = _Labelled()
+    extras.headers = {b"password": "byte-key-secret"}
     return {
         "key=value": record("login failed password=Hunter2-pw vat_number=RO76543210 cui=76543217"),
         "list value": record("{'password': ['first-secret', 'second-secret']}"),
@@ -272,6 +275,7 @@ def _records() -> dict[str, logging.LogRecord]:
         "database detail": record("Key (vat_number)=(RO76543210) already exists."),
         "authorization scheme": record("upstream refused Authorization=Bearer bearer-secret retry=1"),
         "apostrophe": record("password=can'tkeepsecret"),
+        "authorization spacing": record("Authorization=Bearer \t  spaced-bearer-secret next=1"),
         "colon list": record("password: alpha,beta-secret"),
         "extras": extras,
         "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
@@ -336,7 +340,19 @@ class TestSensitiveDataRedaction:
     def test_keys_redacted_alike_keep_both_entries(self) -> None:
         from apps.common.logging import redact_sensitive_data  # noqa: PLC0415
 
-        redacted = redact_sensitive_data({"password=one": {"result": "success"}, "password=two": {"result": "failure"}})
-        assert sorted(item["result"] for item in redacted.values()) == ["failure", "success"]
-        assert "one" not in "".join(redacted)
-        assert "two" not in "".join(redacted)
+        for pair in (
+            {"password=one": {"result": "success"}, "password=two": {"result": "failure"}},
+            {"password=one": {"result": "success"}, "password=[REDACTED]": {"result": "failure"}},
+            {"password=[REDACTED]": {"result": "success"}, "password=one": {"result": "failure"}},
+            {
+                "password=[REDACTED] (2)": {"result": "success"},
+                "password=a": {"result": "x"},
+                "password=b": {"result": "failure"},
+            },
+        ):
+            redacted = redact_sensitive_data(pair)
+            # Every entry survives; a key naming a password is itself sensitive, so its value is redacted too.
+            assert len(redacted) == len(pair), redacted
+            assert list(redacted.values()) == ["[REDACTED]"] * len(pair)
+            for secret in ("one", "two", "=a", "=b"):
+                assert secret not in "".join(redacted)
