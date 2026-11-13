@@ -6,6 +6,7 @@ PHP 8.5 reports EDQUOT as a silent short write, so the requalification probe pro
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -97,8 +98,17 @@ class PhpRequalificationProbeTests(SimpleTestCase):
 
     def test_a_silent_short_write_at_the_cap_on_a_roomy_disk_is_the_denial(self):
         program = self.probe(used_kib=64, free_bytes=10 * 1024**3)[-2]
-        self.assertIn("$n!==65536", program)
+        chunk = int(re.search(r"str_repeat\('x',(\d+)\)", program).group(1))
+        self.assertIn(f"$n!=={chunk}", program)
         self.assertNotIn("quota exceeded", program)  # PHP 8.5 reports no message; requiring one refused every node
+
+    def test_the_php_writer_steps_close_enough_to_the_cap_to_prove_it(self):
+        # A chunk the size of the cap is refused whole, leaving usage at 0, so the probe called every node unqualified.
+        program = self.probe(used_kib=64, free_bytes=10 * 1024**3)[-2]
+        chunk = int(re.search(r"str_repeat\('x',(\d+)\)", program).group(1))
+        rounds = int(re.search(r"\$i<(\d+)", program).group(1))
+        self.assertLessEqual(chunk, self.node.REQUALIFICATION_CAP_SLACK_KIB * 1024)
+        self.assertGreater(chunk * rounds, self.node.REQUALIFICATION_LIMIT_KIB * 1024)
 
     def test_a_short_write_well_below_the_cap_is_not_a_quota_stop(self):
         with self.assertRaisesRegex(ValueError, "quota stop"):

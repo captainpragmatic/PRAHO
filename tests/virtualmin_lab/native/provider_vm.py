@@ -494,7 +494,7 @@ def reboot_and_wait(path: Path, previous_boot: str) -> None:
         try:
             if remote(path, "/usr/bin/cat /proc/sys/kernel/random/boot_id", timeout=10) != previous_boot:
                 return
-        except (OSError, AssertionError, paramiko.SSHException):
+        except (OSError, EOFError, AssertionError, paramiko.SSHException):
             pass
         if monotonic() >= deadline:
             raise AssertionError("Owned native VM did not complete its observed reboot")

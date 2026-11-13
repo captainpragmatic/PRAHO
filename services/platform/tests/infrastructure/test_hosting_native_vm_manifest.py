@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from django.conf import settings
@@ -20,6 +20,24 @@ class NativeVMManifestTests(SimpleTestCase):
         spec = importlib.util.spec_from_file_location("hosting_native_vm", path)
         cls.vm = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.vm)
+
+    def test_reboot_wait_retries_a_connection_the_rebooting_host_drops(self):
+        # paramiko raises a bare EOFError when sshd goes away mid-handshake; that is the reboot, not a failure.
+        answers = iter([EOFError(), "old-boot", "new-boot"])
+
+        def remote(*_args, **_kwargs):
+            answer = next(answers)
+            if isinstance(answer, BaseException):
+                raise answer
+            return answer
+
+        with (
+            patch.object(self.vm, "owned_server", return_value=({}, Mock())),
+            patch.object(self.vm, "remote", side_effect=remote),
+            patch.object(self.vm.Event, "wait"),
+        ):
+            self.vm.reboot_and_wait(Path("vm.json"), "old-boot")
+        self.assertEqual(next(answers, "drained"), "drained")
 
     def test_private_manifest_pins_provider_ownership_and_expiry(self):
         with TemporaryDirectory() as directory:

@@ -544,8 +544,9 @@ except OSError as error:
  print(os.geteuid());sys.exit(0)
 raise RuntimeError('The isolated writer did not encounter EDQUOT')
 """
-    php = r"""$f=fopen($argv[1],'wb');$hit=false;for($i=0;$i<32;$i++){
-$n=@fwrite($f,str_repeat('x',65536));if($n!==65536){$hit=true;break;}fflush($f);fsync($f);}
+    # Small steps: the kernel refuses a write that would cross the cap whole, so a cap-sized chunk leaves usage at 0.
+    php = r"""$f=fopen($argv[1],'wb');$hit=false;for($i=0;$i<64;$i++){
+$n=@fwrite($f,str_repeat('x',4096));if($n!==4096){$hit=true;break;}fflush($f);fsync($f);}
 fclose($f);if(!$hit){fwrite(STDERR,'Isolated PHP writer did not encounter EDQUOT');exit(7);}echo posix_geteuid();"""
     try:
         base.mkdir(mode=0o711)
