@@ -224,6 +224,8 @@ SENSITIVE_VALUES = (
     "cached-exc-secret",
     "cli-secret",
     "suffix-secret",
+    "bracket-tail",
+    "submitted-secret",
 )
 
 
@@ -289,6 +291,11 @@ def _records() -> dict[str, logging.LogRecord]:
         "leading delimiter": record("password=;whole-secret"),
         "spaced equals": record("password=correct horse battery"),
         "nested json": record(json.dumps({"error": json.dumps({"password": "nested-json-secret"})})),
+        "closing brackets": record("password=abc)bracket-tail token=x]bracket-tail cui=7}bracket-tail"),
+        "reset link beside a mapping": record(
+            "link=%(url)s submitted=%(password)s",
+            ({"url": "/auth/password-reset-confirm/uid/reset-token/", "password": "submitted-secret"},),
+        ),
         "command line": record("ran tool --password=cli-secret --verbose; also {'--token': 'cli-secret'}"),
         "nested json inner quote": record(json.dumps({"error": json.dumps({"password": 'prefix"suffix-secret'})})),
         "stack and cached exception": stack,
@@ -403,3 +410,15 @@ class TestSensitiveDataRedaction:
             assert "kept-inner" in redacted
             assert "kept-outer" in redacted
             json.loads(json.loads(redacted)["error"])  # still valid JSON at both levels
+
+    def test_colliding_keys_are_redacted_in_linear_time(self) -> None:
+        """Request data can reach a log's extras, so whoever sends the request picks how many keys collide."""
+        import time  # noqa: PLC0415
+
+        from apps.common.logging import redact_sensitive_data  # noqa: PLC0415
+
+        keys = {f"password={index}": index for index in range(4000)}
+        started = time.perf_counter()
+        redacted = redact_sensitive_data(keys)
+        assert time.perf_counter() - started < 1.0
+        assert len(redacted) == len(keys)

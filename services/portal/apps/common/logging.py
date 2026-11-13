@@ -64,9 +64,9 @@ _KEY_CANDIDATE = re.compile(
     r"""(?<![\w.\-])(\\{0,3}["'(]?-{0,2})([A-Za-z_][\w.\-]*)(\\{0,3}["')]?)[ \t]*([=:])[ \t]*"""
 )
 _CLOSING = {"[": "]", "{": "}", "(": ")"}
-# An unquoted value is redacted conservatively: it runs to a line break or a closing bracket, past spaces, commas,
-# semicolons and "&", unless what follows them is another key, and ends at a quote only when no letter follows it
-# ("can't" stays one value). "password=correct horse battery" and "Authorization=Bearer  x" are redacted whole.
+# An unquoted value is redacted conservatively: it runs to a line break, and past whitespace, commas, semicolons and
+# "&" unless what follows them is another key. Brackets and quotes inside it are part of it ("abc)tail", "can't"), so
+# "password=correct horse battery" and "Authorization=Bearer  x" are redacted whole.
 _DELIMITERS = frozenset(" \t,;&")
 _MAX_QUOTE_ESCAPES = 3  # Backslashes before a quote: JSON nested up to three deep
 _NEXT_KEY = re.compile(r"""["']?[A-Za-z_][\w.\-]*["']?[ \t]*[=:]""")
@@ -114,7 +114,7 @@ def _unquoted_end(text: str, start: int) -> int:
     index = start
     while index < len(text):
         char = text[index]
-        if char in "\r\n)]}":
+        if char in "\r\n":
             break
         if char in _DELIMITERS:
             after = index
@@ -124,8 +124,6 @@ def _unquoted_end(text: str, start: int) -> int:
                 break
             index = after
             continue
-        if char in "\"'" and not (index + 1 < len(text) and text[index + 1].isalnum()):
-            break
         index += 1
     return start + len(text[start:index].rstrip())
 
@@ -201,12 +199,14 @@ def redact_sensitive_data(value: Any, _path: frozenset[int] = frozenset(), _dept
     path = _path | {id(value)}
     if isinstance(value, dict):
         redacted: dict[Any, Any] = {}
+        next_suffix: dict[Any, int] = {}  # Per redacted key, so many colliding keys stay linear
         for key, item in value.items():
             new_key = redact_sensitive_data(key, path, _depth + 1)
             if new_key in redacted:  # Keys that read alike once redacted: keep every entry
-                count = 2
+                count = next_suffix.get(new_key, 2)
                 while f"{new_key} ({count})" in redacted:
                     count += 1
+                next_suffix[new_key] = count + 1
                 new_key = f"{new_key} ({count})"
             redacted[new_key] = (
                 REDACTION_TEXT if _is_sensitive_key(key) else redact_sensitive_data(item, path, _depth + 1)
@@ -269,9 +269,15 @@ class SensitiveDataFilter(logging.Filter):
 
 
 def with_sensitive_data_redaction(config: dict[str, Any]) -> dict[str, Any]:
-    """A LOGGING dict whose every handler runs SensitiveDataFilter, last: the secret-URL filter rebuilds exc_text."""
+    """A LOGGING dict whose every handler runs SensitiveDataFilter first and last.
+
+    First, so structured arguments are redacted by key before any other filter renders them into text (the
+    secret-URL filter does when a link is in the message); last, because the secret-URL filter rebuilds exc_text.
+    """
     result = copy.deepcopy(config)
     result.setdefault("filters", {})["sensitive_data"] = {"()": "apps.common.logging.SensitiveDataFilter"}
     for handler in result.get("handlers", {}).values():
-        handler.setdefault("filters", []).append("sensitive_data")
+        filters = handler.setdefault("filters", [])
+        filters.insert(0, "sensitive_data")
+        filters.append("sensitive_data")
     return result
