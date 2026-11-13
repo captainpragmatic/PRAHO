@@ -258,7 +258,7 @@ Both services load one freshly generated private authority file after developmen
 
 | Run | When | What |
 |---|---|---|
-| pull request / merge queue | relevant paths are classified on the PR; execution is deferred to the merge queue | `make test-virtualmin-lab` on the pinned version; a deferred PR check is not execution proof |
+| pull request / merge queue | never: the required `pull-request` check reports success without running the lab | nothing; dispatch this workflow with `containers` to run the lab on a branch before merging |
 | nightly containers | 03:30 UTC, skipped without activity in the last 24 hours; manual `containers` dispatch also supported | `make test-virtualmin-lab-containers`; container coverage only |
 | explicit native full (optional) | manual `full` dispatch with a configured isolated runner and original owned native authority | native-inclusive `make test-virtualmin-lab-full`, actual fresh capability verification and Maintenance Portal; not required for a release |
 | nightly drift | 05:30 UTC, always, on amd64 and arm64 | `make test-virtualmin-drift`: the image is built from the latest packages and the contract suite runs without recording; the tested versions go to the job summary |

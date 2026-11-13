@@ -1,11 +1,13 @@
 # ===============================================================================
-# BROWSER CI — Playwright suite and strict-CSP gates on every pull request
+# BROWSER CI — Playwright suite and strict-CSP gates in the merge queue
 # ===============================================================================
 # Both services run live against each other (real HMAC, seeded fixtures, their own SQLite files),
 # and Playwright drives them. UI behaviour changes through auth, middleware, settings and services,
-# not only through templates, so this runs on every PR rather than on a path filter.
+# not only through templates, so this runs on every merge rather than on a path filter.
 #
-# browser-e2e and browser-csp are required checks on master (.github/rulesets/master.json). The
+# browser-e2e and browser-csp are required checks on master (.github/rulesets/master.json). They are in
+# the queue tier (ADR-0036): a pull request skips them (a skipped job reports success) and the merge
+# queue runs them. browser-e2e keeps always() so that it judges a failed checkout run instead of skipping. The
 # strict-CSP gates get a stack of their own: they assert the enforced phase2 profile, which the
 # default stack does not serve.
 
@@ -36,7 +38,7 @@ concurrency:
 jobs:
   browser-e2e:
     needs: [browser-hosting-checkout]
-    if: always()
+    if: always() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04  # Playwright 1.58 does not support Ubuntu 26.04.
     timeout-minutes: 60
 
@@ -104,6 +106,7 @@ jobs:
         retention-days: 14
 
   browser-hosting-checkout:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -152,6 +155,7 @@ jobs:
         retention-days: 14
 
   browser-csp:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04  # Playwright 1.58 does not support Ubuntu 26.04.
     timeout-minutes: 30
 

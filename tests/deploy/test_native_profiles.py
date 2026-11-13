@@ -20,8 +20,9 @@ COUNTS = {"all": 29, "split-prod": 17, "combined-staging": 6, "combined-prod": 6
 
 
 def ci_matrix_profiles() -> list[str]:
-    workflow = yaml.safe_load((ROOT / ".github/workflows/integration.yml").read_text(encoding="utf-8"))
-    return list(workflow["jobs"]["native-deploy"]["strategy"]["matrix"]["profile"])
+    # The release candidate runs the shards when no nightly proved native deploy on its commit.
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release-candidate.yml").read_text(encoding="utf-8"))
+    return list(workflow["jobs"]["rc-native"]["strategy"]["matrix"]["profile"])
 
 
 def collect(profile: str) -> subprocess.CompletedProcess[str]:
@@ -87,10 +88,8 @@ def test_the_ci_matrix_runs_every_real_case_exactly_once(selections: dict[str, s
 
 
 def test_native_infrastructure_checks_run_once_not_per_profile() -> None:
-    workflow = yaml.safe_load((ROOT / ".github/workflows/integration.yml").read_text(encoding="utf-8"))
-    (infra,) = [
-        step for step in workflow["jobs"]["native-deploy"]["steps"] if step.get("run") == "make test-native-infra"
-    ]
+    workflow = yaml.safe_load((ROOT / ".github/workflows/release-candidate.yml").read_text(encoding="utf-8"))
+    (infra,) = [step for step in workflow["jobs"]["rc-native"]["steps"] if step.get("run") == "make test-native-infra"]
     assert infra.get("if") == "matrix.profile == 'combined-prod'"
     assert "combined-prod" in ci_matrix_profiles()
 

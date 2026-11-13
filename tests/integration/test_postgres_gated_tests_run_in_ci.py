@@ -12,7 +12,10 @@ PostgreSQL service runs what the scan finds under ``config.settings.ci``.
 from __future__ import annotations
 
 import importlib.util
+import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -201,8 +204,16 @@ class TestPostgresGatedTestsRunInCi:
     def test_the_make_target_runs_the_scan_output_and_stops_on_a_failed_or_empty_scan(self) -> None:
         recipe = _make_recipe(GATED_TARGET)
 
-        assert f"{SCRIPT}) || exit 1" in recipe, "a failing scan must stop the target, not run everything"
-        assert '[ -z "$$modules" ]' in recipe and "exit 1" in recipe, "an empty scan must fail, not pass"
+        assert f'{SCRIPT} --affected "$(PG_GATED_AFFECTED)") || exit 1' in recipe, (
+            "a failing scan must stop the target, not run everything"
+        )
+        # Only a filtered run may find nothing; the unfiltered scan finding nothing is a broken scan.
+        assert (
+            'if [ -z "$$modules" ]; then if [ "$(PG_GATED_AFFECTED)" = FULL ]; then echo' in recipe
+            and "exit 1; fi;" in recipe
+        ), "an empty unfiltered scan must fail, not pass"
+        makefile = (PROJECT_ROOT / "Makefile").read_text(encoding="utf-8")
+        assert re.search(r"^PG_GATED_AFFECTED \?= FULL$", makefile, re.MULTILINE), "by default it runs them all"
         invocation = re.search(r"manage\.py test(.*?)--settings=config\.settings\.ci", recipe, flags=re.DOTALL)
         assert invocation, "the target must run the platform tests under config.settings.ci"
         assert invocation.group(1).split() == ["$$modules", "\\"], "no hand-named labels"
@@ -225,3 +236,121 @@ def test_bootstrap_must_precede_gated_steps_and_must_be_required() -> None:
     assert _postgres_ci_runs({"steps": [bootstrap, test]}) == [test["run"]]
     assert _postgres_ci_runs({"steps": [test, bootstrap]}) == []
     assert _postgres_ci_runs({"steps": [{**bootstrap, "continue-on-error": True}, test]}) == []
+
+
+@pytest.mark.integration
+class TestAffectedGatedModules:
+    """A pull request runs the gated tests of the modules it affects; the merge queue runs them all."""
+
+    def test_full_runs_every_gated_module(self) -> None:
+        scanner = _scanner()
+        assert scanner.select(scanner.gated_modules(), "FULL") == scanner.gated_modules()
+
+    def test_an_affected_module_selects_the_gated_tests_under_it_and_nothing_else(self) -> None:
+        select = _scanner().select
+        gated = ["tests.billing.test_a", "tests.billings.test_b", "tests.users.test_c", "tests.users"]
+        assert select(gated, "tests.billing tests.users") == [
+            "tests.billing.test_a",
+            "tests.users.test_c",
+            "tests.users",
+        ]
+        assert select(gated, "tests.domains") == []
+        assert select(gated, "") == []
+        assert select(gated, "  ") == []
+
+    def _run(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 -- the repository's own scan
+            [sys.executable, str(PROJECT_ROOT / SCRIPT), *args], capture_output=True, text=True, check=False
+        )
+
+    def test_the_command_line_filters_and_still_fails_a_broken_scan(self, tmp_path: Path) -> None:
+        everything = self._run("--affected", "FULL")
+        assert everything.returncode == 0 and len(everything.stdout.split()) >= MINIMUM_GATED_MODULES
+        assert self._run().stdout == everything.stdout
+        users = self._run("--affected", "tests.users")
+        assert users.returncode == 0
+        assert users.stdout.split() and all(label.startswith("tests.users.") for label in users.stdout.split())
+        assert self._run("--affected", "").stdout == ""
+
+        # A scan of a tree with no gated test is broken whatever the filter.
+        module = _scanner()
+        assert module.main(["--affected", "tests.users"], tests_dir=tmp_path) == 1
+        assert module.main(["--affected", "FULL"], tests_dir=tmp_path) == 1
+
+
+def _postgres_job() -> dict[str, Any]:
+    return yaml.safe_load((WORKFLOWS / "platform.yml").read_text())["jobs"]["platform-postgres"]
+
+
+def _git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()  # noqa: S603, S607
+
+
+def _detected(repo: Path, event: str, base: str) -> str:
+    """Run platform-postgres's own detection step in ``repo`` and return the modules it chose."""
+    (step,) = [step for step in _postgres_job()["steps"] if step.get("id") == "affected"]
+    output = repo / "github_output"
+    output.write_text("")
+    env = {
+        **os.environ,
+        "EVENT": event,
+        "PR_BASE_SHA": base,
+        "GITHUB_OUTPUT": str(output),
+        "UV_PROJECT_ENVIRONMENT": sys.prefix,
+    }
+    # GitHub runs a `run:` step with `bash -e {0}`.
+    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)  # noqa: S603, S607
+    (line,) = output.read_text().splitlines()
+    assert line.startswith("modules=")
+    return line.removeprefix("modules=")
+
+
+@pytest.mark.integration
+class TestPlatformPostgresTier:
+    def test_it_uses_the_platform_tests_own_detection(self) -> None:
+        jobs = yaml.safe_load((WORKFLOWS / "platform.yml").read_text())["jobs"]
+        (focused,) = [step for step in jobs["platform-test"]["steps"] if step.get("id") == "affected"]
+        (gated,) = [step for step in _postgres_job()["steps"] if step.get("id") == "affected"]
+        assert gated["run"].endswith(focused["run"]), "the same affected-module detection, after the event check"
+        assert "if" not in gated, "the step decides for every event: the queue must get FULL from it"
+        (checkout,) = [step for step in _postgres_job()["steps"] if "actions/checkout" in str(step.get("uses"))]
+        assert checkout["with"]["fetch-depth"] == 0, "the diff needs the base commit"
+
+    def test_the_gated_step_runs_what_the_detection_chose(self) -> None:
+        (step,) = [step for step in _postgres_job()["steps"] if f"make {GATED_TARGET}" in step.get("run", "")]
+        assert step["run"] == f'make {GATED_TARGET} PG_GATED_AFFECTED="$AFFECTED"'
+        assert step["env"] == {"AFFECTED": "${{ steps.affected.outputs.modules }}"}
+        assert "if" not in step
+
+    def test_the_queue_runs_every_gated_test_and_a_pull_request_the_affected_ones(self, tmp_path: Path) -> None:
+        _git(tmp_path, "init", "--quiet")
+        _git(tmp_path, "config", "user.email", "ci@example.com")
+        _git(tmp_path, "config", "user.name", "CI")
+        (tmp_path / "scripts").mkdir()
+        (tmp_path / "scripts" / "affected_test_modules.py").write_text(
+            (PROJECT_ROOT / "scripts" / "affected_test_modules.py").read_text()
+        )
+        _git(tmp_path, "add", ".")
+        _git(tmp_path, "commit", "--quiet", "-m", "base")
+        base = _git(tmp_path, "rev-parse", "HEAD")
+
+        # Nothing changed yet: the diff is empty, and an empty diff runs them all.
+        assert _detected(tmp_path, "pull_request", base) == "FULL"
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "docs" / "note.md").write_text("prose\n")
+        _git(tmp_path, "add", ".")
+        _git(tmp_path, "commit", "--quiet", "-m", "docs")
+        assert _detected(tmp_path, "pull_request", base) == ""
+
+        app = tmp_path / "services" / "platform" / "apps" / "domains"
+        app.mkdir(parents=True)
+        (app / "services.py").write_text("X = 1\n")
+        _git(tmp_path, "add", ".")
+        _git(tmp_path, "commit", "--quiet", "-m", "domains")
+        modules = _detected(tmp_path, "pull_request", base).split()
+        assert "tests.domains" in modules and "tests.common" in modules and "tests.billing" not in modules
+
+        # The merge queue, master and a dispatch run every gated test, whatever changed.
+        for event in ("merge_group", "push", "workflow_dispatch", "schedule"):
+            assert _detected(tmp_path, event, base) == "FULL", event
+            assert _detected(tmp_path, event, "") == "FULL", event

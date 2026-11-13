@@ -20,8 +20,6 @@ from typing import Any
 import pytest
 import yaml
 
-from scripts.ci_lab_needed import lab_needed
-
 pytestmark = pytest.mark.integration
 
 REPO = Path(__file__).resolve().parents[2]
@@ -250,7 +248,6 @@ def test_queue_lab_target_runs_components_serially_after_existing_suites(tmp_pat
         "recursive --no-print-directory test-virtualmin-components",
     ]
     assert recipe("test-virtualmin-components").splitlines()[0].strip() == "virtualmin-lab-component-source-up"
-    assert PR_WORKFLOW["jobs"]["pull-request"]["timeout-minutes"] == 120
 
 
 def test_native_sql_contract_transfers_all_database_export_import_dependencies(tmp_path: Path) -> None:
@@ -274,8 +271,8 @@ def test_native_sql_contract_transfers_all_database_export_import_dependencies(t
     assert callable(module.capacity.OutputBudget)
 
 
-def test_queue_and_full_lab_failure_diagnostics_include_imported_component_source() -> None:
-    for workflow, job in ((PR_WORKFLOW, "pull-request"), (WORKFLOW, "nightly-containers"), (WORKFLOW, "native-full")):
+def test_full_lab_failure_diagnostics_include_imported_component_source() -> None:
+    for workflow, job in ((WORKFLOW, "nightly-containers"), (WORKFLOW, "native-full")):
         diagnostics = next(
             step["run"] for step in workflow["jobs"][job]["steps"] if step.get("name") == "Lab diagnostics"
         )
@@ -332,31 +329,29 @@ def test_component_diagnostics_use_only_the_component_boundary_with_unconditiona
     assert "vmlab-component-source" in diagnostics["run"]
 
 
-def test_the_queue_runs_the_lab_when_a_change_can_break_it() -> None:
-    # `pull-request` is a required check: a workflow skipped by a paths filter never reports, so the
-    # selection lives in a job, and the job it gates reports success when skipped. It reports on every
-    # pull request and runs in the merge queue (ADR-0036).
+def test_the_lab_runs_nightly_and_never_per_pull_request() -> None:
+    # The lab no longer runs per pull request or in the merge queue (ADR-0036, amended). `pull-request` stays a
+    # required check until the ruleset drops it, so it must report on every pull request and merge group,
+    # unconditionally, and run nothing.
     pr_on = PR_WORKFLOW[True] if True in PR_WORKFLOW else PR_WORKFLOW["on"]
     assert list(pr_on) == ["pull_request", "merge_group"]
     assert all("paths" not in (pr_on[event] or {}) for event in pr_on)
     assert "pull_request" not in on_block(), "the nightly workflow must not also hold a job named pull-request"
-    jobs = PR_WORKFLOW["jobs"]
-    # The base branch's rules decide, renames count as both paths, and an unreadable diff runs the lab.
-    decide = str(jobs["changes"]["steps"])
-    assert 'git show "${BASE_SHA}:scripts/ci_lab_needed.py"' in decide and "--no-renames" in decide
-    assert jobs["pull-request"]["needs"] == "changes"
-    assert jobs["pull-request"]["if"] == "!cancelled() && needs.changes.outputs.lab != 'false'"
+    assert list(PR_WORKFLOW["jobs"]) == ["pull-request"]
+    job = PR_WORKFLOW["jobs"]["pull-request"]
+    assert "if" not in job and "needs" not in job and "continue-on-error" not in job
+    assert "make" not in str(job["steps"]) and "virtualmin-lab-setup" not in str(job["steps"])
 
-    for changed in (
-        "services/platform/apps/provisioning/virtualmin_service.py",
-        "services/platform/apps/infrastructure/ansible_service.py",
-        "services/platform/infrastructure/ansible/playbooks/node.yml",
-        "deploy/virtualmin-lab/virtualmin/Dockerfile",
-        "tests/virtualmin_lab/contract/test_bridge.py",
-        "Makefile",  # the targets the job runs live there
-        "uv.lock",
-    ):
-        assert lab_needed([changed]), changed
+    # What replaces it: the full container lab every night master changed, and the release gate on it.
+    from scripts.verify_release_candidate import RELEASE_SCOPES  # noqa: PLC0415
+
+    lab_workflow, lab_jobs, _step = RELEASE_SCOPES["lab"]
+    assert lab_workflow == "virtualmin-lab.yml"
+    assert "nightly-containers" in lab_jobs
+    nightly = WORKFLOW["jobs"]["nightly-containers"]
+    assert "make test-virtualmin-lab-containers" in str(nightly["steps"])
+    assert "30 3 * * *" in [entry["cron"] for entry in on_block()["schedule"]]
+    assert "containers" in on_block()["workflow_dispatch"]["inputs"]["suite"]["options"], "run it on a branch"
 
 
 def test_the_workflow_follows_the_nightly_conventions() -> None:
@@ -369,7 +364,6 @@ def test_the_workflow_follows_the_nightly_conventions() -> None:
     assert "make test-virtualmin-lab-containers" in str(jobs["nightly-containers"]["steps"])
     assert "make test-virtualmin-lab-full" not in str(jobs["nightly-containers"]["steps"])
     assert "make test-virtualmin-lab-full" in str(jobs["native-full"]["steps"])
-    assert "make test-virtualmin-lab" in str(PR_WORKFLOW["jobs"]["pull-request"]["steps"])
     # A release candidate's lab must test the candidate, not the master tip it was dispatched on.
     checkout = next(step for step in jobs["native-full"]["steps"] if "actions/checkout" in str(step.get("uses")))
     assert checkout["with"]["ref"] == "${{ github.sha }}"

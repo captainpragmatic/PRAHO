@@ -7,10 +7,15 @@ test run proves nothing about them. CI feeds this list to the platform runner un
 ``config.settings.ci`` so a new gated module is picked up without anyone editing a workflow.
 
 Prints one Django dotted label per line, sorted. Stdlib only.
+
+``--affected LABELS`` keeps only the modules under the given space-separated labels (a pull request's
+affected modules, from scripts/affected_test_modules.py): ``FULL``, the default, keeps them all, and an
+empty value keeps none. A scan that finds no gated module at all fails whatever the filter.
 """
 
 from __future__ import annotations
 
+import argparse
 import re
 import sys
 from pathlib import Path
@@ -41,12 +46,25 @@ def gated_modules(tests_dir: Path = TESTS) -> list[str]:
     ]
 
 
-def main() -> int:
-    labels = gated_modules()
+def select(labels: list[str], affected: str) -> list[str]:
+    """The labels under any of the affected labels, or all of them for ``FULL``."""
+    if affected.strip() == "FULL":
+        return labels
+    prefixes = affected.split()
+    return [label for label in labels if any(label == p or label.startswith(p + ".") for p in prefixes)]
+
+
+def main(argv: list[str] | None = None, tests_dir: Path = TESTS) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--affected", default="FULL", help="space-separated labels to keep, or FULL")
+    args = parser.parse_args(argv)
+    labels = gated_modules(tests_dir)
     if not labels:
         print("no PostgreSQL-gated test modules found: the scan is broken", file=sys.stderr)
         return 1
-    print("\n".join(labels))
+    selected = select(labels, args.affected)
+    if selected:
+        print("\n".join(selected))
     return 0
 
 

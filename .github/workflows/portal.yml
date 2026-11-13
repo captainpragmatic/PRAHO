@@ -5,7 +5,8 @@
 # Linting is consolidated in integration.yml (make lint).
 #
 # Both jobs are required checks on master (.github/rulesets/master.json), so pull_request has no
-# paths filter. Staging is never pushed to: it is promoted from master (make promote-staging).
+# paths filter. portal-server is in the queue tier (ADR-0036): a pull request skips it (a skipped job
+# reports success) and the merge queue runs it. Staging is never pushed to: it is promoted from master (make promote-staging).
 
 name: Portal Service CI/CD
 
@@ -92,6 +93,7 @@ jobs:
   # Real gunicorn with the shipped config against a stub Platform (ADR-0056): threaded workers keep
   # serving others while some requests wait on Platform. Deselected from portal-test, run here.
   portal-server:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:

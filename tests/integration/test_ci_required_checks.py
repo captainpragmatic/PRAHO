@@ -8,8 +8,9 @@ below is read from source:
   and that every merge group starts too: the merge queue waits for the same checks on its own commit;
 - the merge queue waits longer than the slowest required job may run;
 - no required job tolerates its own failure (`continue-on-error`), which would let a red job pass;
-- the one job allowed to skip itself, the Virtualmin lab, skips on a pull request and, in the queue,
-  fails open;
+- a required job skips only on a pull request, and only the queue-tier jobs do (ADR-0036's fast tier): a
+  skipped job reports success, so the merge queue must run every one of them, and a gate that waits on a
+  skippable job must still run and judge it;
 - the release-candidate workflow tests exactly the commit it vouches for, and only it may vouch.
 """
 
@@ -26,9 +27,6 @@ from typing import Any, ClassVar
 import pytest
 import yaml
 
-from scripts.ci_lab_needed import lab_needed
-from scripts.ci_native_needed import native_needed
-
 pytestmark = pytest.mark.integration
 
 REPO = Path(__file__).resolve().parents[2]
@@ -36,9 +34,19 @@ WORKFLOWS = REPO / ".github" / "workflows"
 RULESETS = REPO / ".github" / "rulesets"
 GITHUB_ACTIONS_APP_ID = 15368
 
-# Jobs allowed an `if:` because skipping them is the selection itself, and it fails open.
-SELECTIVE_JOBS = {"pull-request": "!cancelled() && needs.changes.outputs.lab != 'false'"}
-# A required job whose steps branch on the event: the PR runs a focused subset first, then everything.
+# The queue tier (ADR-0036): these jobs skip on a pull request, which runs the fast tier, and run in the merge
+# queue and on master. Exactly these jobs may skip, and only with exactly this condition.
+PR_SKIP = "github.event_name != 'pull_request'"
+SELECTIVE_JOBS: dict[str, str] = {
+    "coverage-gate": PR_SKIP,
+    "portal-server": PR_SKIP,
+    "browser-csp": PR_SKIP,
+    "browser-hosting-checkout": PR_SKIP,
+    # A gate over another job: always() lets it judge a failed or cancelled dependency instead of skipping.
+    "browser-e2e": f"always() && {PR_SKIP}",
+    "integration-suite": PR_SKIP,
+}
+# A required job whose steps branch on the event: the PR runs the affected modules only.
 STEP_CONDITIONS_ALLOWED = {"platform-test"}
 STEP_CONDITIONS_ALWAYS_OK = {"always()", "failure()"}
 
@@ -110,9 +118,7 @@ def test_every_required_check_runs_on_every_pull_request(context: str) -> None:
         assert "continue-on-error" not in step, f"{workflow}:{context} step {step.get('name')} may fail silently"
     assert "strategy" not in job, f"{workflow}:{context}: a matrix renames the check, which then never reports"
     if context in SELECTIVE_JOBS:
-        assert job["if"] == SELECTIVE_JOBS[context], f"{workflow}:{context} must skip only on an explicit 'false'"
-    elif context == "browser-e2e":
-        assert job["if"] == "always()", "The required browser result must report failed/cancelled upstream checks"
+        assert job.get("if") == SELECTIVE_JOBS[context], f"{workflow}:{context} must skip on a pull request only"
     else:
         # always() forces a dependency gate to run even when an upstream job fails or skips.
         assert job.get("if") in (None, "always()"), (
@@ -140,45 +146,97 @@ def test_every_required_workflow_runs_in_the_merge_queue(workflow: str) -> None:
     assert types is None or "checks_requested" in types, workflow
 
 
-def test_crowdsec_native_qualification_runs_once_before_the_aggregate() -> None:
+def _evaluate(condition: str, event: str) -> bool:
+    """Evaluate a job condition of the shapes used here (always(), event comparisons, &&) for one event."""
+    expression = condition.replace("always()", "True").replace("&&", " and ").replace("||", " or ")
+    expression = expression.replace("github.event_name", repr(event))
+    assert re.fullmatch(r"[\w\s'()!=]+", expression), f"unsupported condition: {condition}"
+    return bool(eval(expression, {"__builtins__": {}}, {"True": True}))  # noqa: S307 -- the fixed table above
+
+
+def pull_request_and_queue_jobs() -> dict[str, tuple[str, dict[str, Any]]]:
+    """Every job of the pull request workflows, required or not (a dependency can decide a required one)."""
+    jobs: dict[str, tuple[str, dict[str, Any]]] = {}
+    for workflow in sorted({workflow for workflow, _ in pull_request_jobs().values()}):
+        for job_id, job in load_workflow(WORKFLOWS / workflow)["jobs"].items():
+            jobs[job_id] = (workflow, job)
+    return jobs
+
+
+@pytest.mark.parametrize("name", sorted(SELECTIVE_JOBS))
+def test_a_queue_tier_job_skips_on_a_pull_request_and_runs_everywhere_else(name: str) -> None:
+    for event in ("merge_group", "push", "workflow_dispatch", "schedule"):
+        assert _evaluate(SELECTIVE_JOBS[name], event), f"{name} would skip on {event}: a skip reads as success"
+    assert not _evaluate(SELECTIVE_JOBS[name], "pull_request")
+
+
+def test_exactly_the_queue_tier_jobs_skip_on_a_pull_request() -> None:
+    jobs = pull_request_and_queue_jobs()
+    assert set(SELECTIVE_JOBS) <= set(jobs), set(SELECTIVE_JOBS) - set(jobs)
+    for name, (workflow, job) in jobs.items():
+        condition = str(job.get("if", ""))
+        if name in SELECTIVE_JOBS:
+            assert condition == SELECTIVE_JOBS[name], f"{workflow}:{name}"
+        else:
+            assert "event_name" not in condition, f"{workflow}:{name} branches on the event but is not listed"
+
+
+def test_a_job_that_waits_on_a_queue_tier_job_still_judges_it() -> None:
+    # Without always(), a job whose dependency failed in the queue is skipped, and a skipped job reads as success.
+    for name, (workflow, job) in pull_request_and_queue_jobs().items():
+        needs = job.get("needs", [])
+        needs = [needs] if isinstance(needs, str) else needs
+        if set(needs) & set(SELECTIVE_JOBS):
+            assert str(job.get("if", "")).startswith("always()"), f"{workflow}:{name}"
+
+
+def test_crowdsec_qualification_is_not_in_the_merge_queue() -> None:
+    # CrowdSec's Docker qualification runs nightly (make test-integration) and in a release candidate that
+    # cannot reuse the nightly's proof (rc-crowdsec); the queue runs neither it nor its suites by another name.
     workflow = load_workflow(WORKFLOWS / "integration.yml")
     job = workflow["jobs"]["integration-suite"]
-    gate = workflow["jobs"]["integration-test"]
-    assert "integration-suite" in gate["needs"] and gate["if"] == "always()"
     steps = job["steps"]
-    (native,) = [step for step in steps if step.get("run") == "make test-crowdsec-docker"]
-    (aggregate,) = [step for step in steps if step.get("run") == "make test-integration"]
-    assert steps.index(native) < steps.index(aggregate)
-    for required in (job, native, aggregate):
-        assert "if" not in required and "continue-on-error" not in required
+    for step in steps:
+        text = str(step).lower()
+        for forbidden in ("test-crowdsec-docker", "build-crowdsec", "crowdsec-patched", "crowdsec-bouncer"):
+            assert forbidden not in text, (step.get("name"), forbidden)
+    # CROWDSEC_DOCKER=0: no bouncer build, and the CrowdSec Docker suites are not collected
+    # (tests/integration/test_crowdsec_test_artifacts.py runs the real target both ways).
+    (aggregate,) = [step for step in steps if "make test-integration" in step.get("run", "")]
+    assert aggregate["run"] == "make test-integration CROWDSEC_DOCKER=0"
+    assert "if" not in aggregate and "continue-on-error" not in aggregate
+    for scope in (workflow, job, aggregate):
+        assert "PYTEST_ADDOPTS" not in scope.get("env", {})
 
-    # Derive the native files from the actual Make recipe so a stale CI exclusion cannot
-    # silently miss new suites or suppress unrelated Docker coverage.
+    # Derive the CrowdSec files from the actual Make recipe so a stale exclusion cannot silently miss new
+    # suites or suppress unrelated Docker coverage.
     makefile = (REPO / "Makefile").read_text(encoding="utf-8")
     recipe = re.search(r"^test-crowdsec-docker:[^\n]*\n((?:\t[^\n]*\n)+)", makefile, re.MULTILINE)
     assert recipe is not None
     (native_glob,) = re.findall(r"tests/deploy/[^\s]+_docker\.py", recipe.group(1))
     native_files = set(REPO.glob(native_glob))
-    assert native_files, "the required native target must collect real files"
+    assert native_files, "the CrowdSec target must collect real files"
 
-    options = shlex.split(aggregate.get("env", {}).get("PYTEST_ADDOPTS", ""))
-    assert options == [f"--ignore-glob={native_glob}"], (
-        "the aggregate must exclude exactly the already-required CrowdSec native suites"
-    )
+    switch = re.search(r"^ifeq \(\$\(CROWDSEC_DOCKER\),0\)\n(.*?)^else\n(.*?)^endif$", makefile, re.M | re.S)
+    assert switch is not None, "CROWDSEC_DOCKER must switch the integration target"
+    options = shlex.split(re.search(r"^INTEGRATION_PYTEST_IGNORE := (.*)$", switch.group(1), re.M).group(1))
+    assert options == [f"--ignore-glob={native_glob}"], "the aggregate must exclude exactly the CrowdSec suites"
     ignored_files = set(REPO.glob(options[0].split("=", 1)[1]))
     assert ignored_files == native_files
-    assert "PYTEST_ADDOPTS" not in workflow.get("env", {})
-    assert "PYTEST_ADDOPTS" not in job.get("env", {})
-    for step in steps:
-        if step is not aggregate:
-            assert "--ignore" not in step.get("env", {}).get("PYTEST_ADDOPTS", "")
 
     other_native_files = set(REPO.glob("tests/deploy/test_*_docker.py")) - native_files
-    assert other_native_files, "unrelated native suites must remain eligible"
+    assert other_native_files, "unrelated Docker suites must remain in the aggregate"
     for relative in ("tests/deploy/test_caddy_routing.py", "tests/deploy/test_ssh_hardening_docker.py"):
         path = REPO / relative
         assert path.is_file() and path not in ignored_files
     assert not other_native_files & ignored_files
+
+
+def test_native_deploy_is_not_in_the_merge_queue() -> None:
+    # Native deploy acceptance runs nightly and in a release candidate that cannot reuse it (rc-native).
+    for workflow in sorted({workflow for workflow, _ in pull_request_jobs().values()}):
+        assert "test-native-deploy" not in (WORKFLOWS / workflow).read_text(encoding="utf-8"), workflow
+    assert not (REPO / "scripts" / "ci_native_needed.py").exists()
 
 
 def test_the_merge_queue_squashes_and_outwaits_the_slowest_job() -> None:
@@ -197,54 +255,8 @@ def test_the_merge_queue_squashes_and_outwaits_the_slowest_job() -> None:
     assert queue["check_response_timeout_minutes"] > max(declared)
 
 
-def _lab_decision(repo: Path, event: str, base: str) -> str:
-    """Run the lab workflow's own decision step in ``repo`` and return what it wrote to its output."""
-    (step,) = [
-        step
-        for step in load_workflow(WORKFLOWS / "virtualmin-lab-pr.yml")["jobs"]["changes"]["steps"]
-        if step.get("id") == "decide"
-    ]
-    output = repo / "github_output"
-    output.write_text("")
-    env = {**os.environ, "EVENT": event, "BASE_SHA": base, "GITHUB_OUTPUT": str(output)}
-    # GitHub runs a `run:` step with `bash -e {0}`.
-    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)  # noqa: S603, S607
-    return output.read_text().strip()
-
-
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()  # noqa: S603, S607
-
-
-def test_the_lab_runs_in_the_queue_only_and_fails_open_there(tmp_path: Path) -> None:
-    _git(tmp_path, "init", "--quiet")
-    _git(tmp_path, "config", "user.email", "ci@example.com")
-    _git(tmp_path, "config", "user.name", "CI")
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "ci_lab_needed.py").write_text((REPO / "scripts" / "ci_lab_needed.py").read_text())
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "--quiet", "-m", "base")
-    base = _git(tmp_path, "rev-parse", "HEAD")
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "note.md").write_text("prose\n")
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "--quiet", "-m", "docs only")
-
-    # A push to a pull request never runs the lab, whatever it changes.
-    assert _lab_decision(tmp_path, "pull_request", "") == "lab=false"
-    # In the queue the base branch's rules decide: prose cannot reach the lab.
-    assert _lab_decision(tmp_path, "merge_group", base) == "lab=false"
-    # A base the step cannot read gives no diff, and no diff runs the lab, even when the checkout's own
-    # copy of the rules (what `git show :path` would read from the index) always says false.
-    (tmp_path / "scripts" / "ci_lab_needed.py").write_text("print('false')\n")
-    _git(tmp_path, "add", "scripts/ci_lab_needed.py")
-    assert _lab_decision(tmp_path, "merge_group", "") == "lab=true"
-    _git(tmp_path, "checkout", "--quiet", "HEAD", "--", "scripts/ci_lab_needed.py")
-    (tmp_path / "services" / "platform").mkdir(parents=True)
-    (tmp_path / "services" / "platform" / "x.py").write_text("x = 1\n")
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "--quiet", "-m", "platform code")
-    assert _lab_decision(tmp_path, "merge_group", base) == "lab=true"
 
 
 def _dco(repo: Path, event: str, base: str, head: str, body: str = "") -> int:
@@ -326,158 +338,24 @@ def test_no_workflow_runs_pull_request_code_on_a_comment() -> None:
         assert "pull_request_target" not in names, path.name
 
 
-@pytest.mark.parametrize(
-    ("changed", "expected"),
-    [
-        ([], True),  # the diff could not be computed: run
-        (["", "  "], True),
-        (["services/platform/apps/infrastructure/ansible_service.py"], True),
-        (["services/platform/apps/provisioning/services.py"], True),
-        (["services/platform/config/settings/base.py"], True),
-        # The lab bootstrap creates currencies, customers and staff users.
-        (["services/platform/apps/billing/models.py"], True),
-        (["services/platform/apps/customers/models.py"], True),
-        (["services/platform/apps/users/models.py"], True),
-        (["docs/ADRs/ADR-0036-tiered-ci-testing-strategy.md"], False),
-        (["services/portal/apps/billing/views.py", "README.md"], False),
-        (["README.md", "deploy/virtualmin-lab/compose.yml"], True),
-        # Imported by provisioning, and nobody had listed them: an allowlist of what reaches the lab goes stale.
-        (["services/platform/apps/orders/tasks.py", "services/platform/apps/tickets/models.py"], True),
-        (
-            [
-                "services/platform/tests/billing/test_x.py",
-                "tests/integration/test_y.py",
-                ".github/rulesets/master.json",
-            ],
-            False,
-        ),
-    ],
-)
-def test_the_lab_selection_fails_open(changed: list[str], expected: bool) -> None:
-    assert lab_needed(changed) is expected
-
-
-@pytest.mark.parametrize(
-    ("changed", "expected"),
-    [
-        ([], True),  # the diff could not be computed: run
-        (["", "  "], True),
-        (["deploy/ansible/roles/praho-native/tasks/main.yml"], True),
-        (["services/platform/config/settings/prod.py"], True),
-        (["services/portal/config/settings/base.py"], True),
-        (["Makefile"], True),
-        (["uv.lock"], True),
-        (["tests/deploy/test_native_acceptance.py"], True),
-        ([".github/workflows/integration.yml"], True),
-        (["scripts/run_native_acceptance.py"], True),
-        (["services/platform/manage.py"], True),
-        # A path nobody listed runs it: the rules list what cannot reach native deploy.
-        (["services/platform/requirements-extra.txt"], True),
-        (["docs/deployment/DEPLOYMENT.md", "CHANGELOG.md"], False),
-        # The native deploy migrates, collects static files and runs management commands, and its cases
-        # assert views, templates and messages: application code reaches it.
-        (["services/platform/apps/common/migrations/0007_x.py"], True),
-        (["services/platform/apps/common/management/commands/setup_initial_data.py"], True),
-        (["services/portal/templates/x.html"], True),
-        (["services/platform/static/css/x.css"], True),
-        (["services/platform/locale/ro/LC_MESSAGES/django.po"], True),
-        (["shared/ui/components/button.html"], True),
-        # Top-level test helpers are imported by the native cases; other layers' test directories are not.
-        (["tests/native_role_helpers.py"], True),
-        (["tests/conftest.py"], True),
-        (["services/platform/tests/billing/test_x.py", "tests/integration/test_y.py"], False),
-        ([".github/workflows/virtualmin-lab.yml", ".github/rulesets/master.json"], False),
-        # CI-only scripts: the release gate (#866) and the selectors cannot change a deploy.
-        (["scripts/verify_release_candidate.py", "scripts/ci_lab_needed.py", "scripts/ci_native_needed.py"], False),
-        (["docs/x.md", "deploy/scripts/native_env.py"], True),
-    ],
-)
-def test_the_native_deploy_selection_fails_open(changed: list[str], expected: bool) -> None:
-    assert native_needed(changed) is expected
-
-
-def _native_decision(repo: Path, event: str, base: str) -> str:
-    """Run integration.yml's own native selection step in ``repo`` and return what it wrote."""
-    (step,) = [
-        step
-        for step in load_workflow(WORKFLOWS / "integration.yml")["jobs"]["native-changes"]["steps"]
-        if step.get("id") == "decide"
-    ]
-    output = repo / "github_output"
-    output.write_text("")
-    env = {**os.environ, "EVENT": event, "BASE_SHA": base, "GITHUB_OUTPUT": str(output)}
-    # GitHub runs a `run:` step with `bash -e {0}`.
-    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)  # noqa: S603, S607
-    return output.read_text().strip()
-
-
-def test_native_deploy_selection_uses_the_base_rules_and_fails_open(tmp_path: Path) -> None:
-    _git(tmp_path, "init", "--quiet")
-    _git(tmp_path, "config", "user.email", "ci@example.com")
-    _git(tmp_path, "config", "user.name", "CI")
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "ci_native_needed.py").write_text((REPO / "scripts" / "ci_native_needed.py").read_text())
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "--quiet", "-m", "base")
-    base = _git(tmp_path, "rev-parse", "HEAD")
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "note.md").write_text("prose\n")
-    # A pull request cannot talk itself out of the check by rewriting the rules it is judged by.
-    (tmp_path / "scripts" / "ci_native_needed.py").write_text("print('false')\n")
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "--quiet", "-m", "docs, and rules that always say false")
-
-    # Master (push) and a dispatch always run native deploy.
-    assert _native_decision(tmp_path, "push", base) == "native=true"
-    assert _native_decision(tmp_path, "workflow_dispatch", "") == "native=true"
-    # A pull request and a merge group are judged by the base branch's rules on their diff.
-    assert _native_decision(tmp_path, "pull_request", base) == "native=false"
-    assert _native_decision(tmp_path, "merge_group", base) == "native=false"
-    # A base the step cannot read gives no diff, and no diff runs native deploy.
-    assert _native_decision(tmp_path, "merge_group", "") == "native=true"
-    (tmp_path / "deploy").mkdir()
-    (tmp_path / "deploy" / "site.yml").write_text("- hosts: all\n")
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "--quiet", "-m", "deploy change")
-    assert _native_decision(tmp_path, "merge_group", base) == "native=true"
-    assert _native_decision(tmp_path, "pull_request", base) == "native=true"
-
-
-def test_native_deploy_runs_unless_the_selection_answered_false() -> None:
-    jobs = load_workflow(WORKFLOWS / "integration.yml")["jobs"]
-    assert jobs["native-deploy"]["needs"] == "native-changes"
-    assert jobs["native-deploy"]["if"] == "!cancelled() && needs.native-changes.outputs.native != 'false'"
-    assert "native-changes" in jobs["integration-test"]["needs"]
-
-
-@pytest.mark.parametrize(
-    ("general", "native", "selection", "selected", "passes"),
-    [
-        ("success", "success", "success", "true", True),
-        ("success", "skipped", "success", "false", True),  # selection answered false: a deliberate skip
-        ("success", "skipped", "success", "true", False),  # skipped although selected
-        ("success", "skipped", "failure", "", False),  # no recorded answer: a skip is not a pass
-        ("success", "failure", "success", "true", False),
-        ("success", "cancelled", "success", "true", False),
-        ("failure", "skipped", "success", "false", False),
-    ],
-)
-def test_the_aggregate_accepts_a_native_skip_only_when_selection_said_false(
-    general: str, native: str, selection: str, selected: str, passes: bool
-) -> None:
+def _integration_gate(event: str, general: str) -> int:
     job = load_workflow(WORKFLOWS / "integration.yml")["jobs"]["integration-test"]
-    (step,) = job["steps"]
-    env = {
-        **os.environ,
-        "GENERAL_RESULT": general,
-        "NATIVE_RESULT": native,
-        "SELECTION_RESULT": selection,
-        "NATIVE_SELECTED": selected,
+    assert job["needs"] == ["integration-suite"] and job["if"] == "always()"
+    assert job["env"] == {
+        "EVENT": "${{ github.event_name }}",
+        "GENERAL_RESULT": "${{ needs.integration-suite.result }}",
     }
-    # GitHub runs a `run:` step with `bash -eo pipefail {0}`: the first failed test ends it.
-    result = subprocess.run(["bash", "-eo", "pipefail", "-c", step["run"]], env=env, capture_output=True, check=False)  # noqa: S603, S607
-    assert (result.returncode == 0) is passes, result.stdout + result.stderr
-    assert set(job["env"]) >= {"GENERAL_RESULT", "NATIVE_RESULT", "SELECTION_RESULT", "NATIVE_SELECTED"}
+    (step,) = job["steps"]
+    env = {**os.environ, "EVENT": event, "GENERAL_RESULT": general}
+    # GitHub runs a `run:` step with `bash -e {0}`.
+    return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, check=False).returncode  # noqa: S603, S607
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push", "workflow_dispatch"])
+@pytest.mark.parametrize("general", ["success", "skipped", "failure", "cancelled", ""])
+def test_the_integration_gate_accepts_a_skipped_suite_only_on_a_pull_request(event: str, general: str) -> None:
+    passes = general == "success" or (general == "skipped" and event == "pull_request")
+    assert (_integration_gate(event, general) == 0) is passes
 
 
 class TestReleaseCandidate:
@@ -631,7 +509,7 @@ def test_full_hosting_checkout_is_a_required_browser_dependency() -> None:
     assert all(step.get("continue-on-error") is not True for step in full["steps"])
     required = jobs["browser-e2e"]
     assert required["needs"] == ["browser-hosting-checkout"]
-    assert required["if"] == "always()"
+    assert required["if"] == "always() && github.event_name != 'pull_request'"
     guard = required["steps"][0]
     assert guard["env"]["HOSTING_CHECKOUT_RESULT"] == "${{ needs.browser-hosting-checkout.result }}"
     assert "if" not in guard
@@ -661,3 +539,36 @@ def test_required_browser_guard_rejects_every_unsuccessful_full_checkout(upstrea
         text=True,
     )
     assert (completed.returncode == 0) is (upstream == "success"), completed.stderr
+
+
+def _evaluate_step(condition: str, event: str, modules: str) -> bool:
+    """Evaluate platform-test's step conditions for one event and one detection answer."""
+    expression = condition.replace("&&", " and ").replace("||", " or ")
+    expression = expression.replace("github.event_name", repr(event))
+    expression = expression.replace("steps.affected.outputs.modules", repr(modules))
+    assert re.fullmatch(r"[\w\s'.()!=]+", expression), f"unsupported condition: {condition}"
+    return bool(eval(expression, {"__builtins__": {}}, {}))  # noqa: S307 -- the workflow's own fixed conditions
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push", "workflow_dispatch"])
+@pytest.mark.parametrize("modules", ["FULL", "", "tests.common tests.domains"])
+def test_platform_test_runs_the_whole_suite_on_a_pull_request_only_when_detection_says_full(
+    event: str, modules: str
+) -> None:
+    # On a pull request: the affected modules, the whole suite without coverage when the detection says FULL
+    # (billing, users, Makefile, uv.lock, shared/), nothing when no platform module changed. Elsewhere the
+    # detection does not run and coverage-gate is the only full run.
+    steps = load_workflow(WORKFLOWS / "platform.yml")["jobs"]["platform-test"]["steps"]
+    (detect,) = [step for step in steps if step.get("id") == "affected"]
+    detected = modules if _evaluate_step(detect["if"], event, modules) else ""
+    focused, full = (
+        [step for step in steps if step.get("name") == name]
+        for name in ("Run focused platform tests", "Run the whole platform suite (detection says FULL)")
+    )
+    assert len(focused) == len(full) == 1
+    assert _evaluate_step(focused[0]["if"], event, detected) is (
+        event == "pull_request" and detected not in ("FULL", "")
+    )
+    assert _evaluate_step(full[0]["if"], event, detected) is (event == "pull_request" and detected == "FULL")
+    run = full[0]["run"]
+    assert "manage.py test tests --verbosity=2 --failfast --parallel" in run and "coverage" not in run

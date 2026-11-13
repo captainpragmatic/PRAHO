@@ -612,7 +612,19 @@ test-native-infra:
 	@terraform -chdir=deploy/terraform test
 	@$(PYTHON_SHARED) scripts/check_native_destroy_protection.py
 
-test-integration: prepare-crowdsec-test-artifacts
+# CROWDSEC_DOCKER=0 (the merge queue, integration.yml) neither builds the patched CrowdSec bouncer nor
+# collects its Docker suites; they run nightly and in a release candidate (ADR-0036). Anything else,
+# the default included, keeps them, as a local run and the nightly expect.
+CROWDSEC_DOCKER ?= 1
+ifeq ($(CROWDSEC_DOCKER),0)
+INTEGRATION_PREREQUISITES :=
+INTEGRATION_PYTEST_IGNORE := '--ignore-glob=tests/deploy/test_crowdsec*_docker.py'
+else
+INTEGRATION_PREREQUISITES := prepare-crowdsec-test-artifacts
+INTEGRATION_PYTEST_IGNORE :=
+endif
+
+test-integration: $(INTEGRATION_PREREQUISITES)
 	@echo "🔄 [Integration] Testing services communication and cache functionality..."
 	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 	@echo "🧪 Running counter store tests on the configured database..."
@@ -625,7 +637,7 @@ test-integration: prepare-crowdsec-test-artifacts
 	# DID break here, silently. The Makefile auto-merged with no conflict, so git gave no warning and
 	# only running the suite on the merged tree found the target pointing at a deleted file.
 	@PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python -m pytest \
-		tests/integration/ tests/deploy/ --ignore=tests/deploy/test_native_acceptance.py -v
+		tests/integration/ tests/deploy/ --ignore=tests/deploy/test_native_acceptance.py $(INTEGRATION_PYTEST_IGNORE) -v
 	@echo "✅ Integration tests completed!"
 
 test-cache:
@@ -754,12 +766,16 @@ test-platform-pytest-only:
 
 # Every platform test module that only means something on PostgreSQL, found by scanning the
 # tests. Needs a running PostgreSQL (`make ci-postgres-start`, or DB_* pointing at one).
+# PG_GATED_AFFECTED keeps only the modules under those labels (a pull request's affected modules,
+# from scripts/affected_test_modules.py); FULL runs them all, and empty runs none.
 # POSIX sh on purpose: the Makefile sets no SHELL, and /bin/sh is dash on Ubuntu runners.
+PG_GATED_AFFECTED ?= FULL
 .PHONY: test-platform-postgres-gated
 test-platform-postgres-gated:
 	@echo "🐘 [Platform] PostgreSQL-gated tests (derived from the tests themselves)..."
-	@modules=$$($(PWD)/$(VENV_DIR)/bin/python scripts/pg_gated_test_modules.py) || exit 1; \
-	if [ -z "$$modules" ]; then echo "🔥 [Platform] The PostgreSQL-gated scan found no modules" >&2; exit 1; fi; \
+	@modules=$$($(PWD)/$(VENV_DIR)/bin/python scripts/pg_gated_test_modules.py --affected "$(PG_GATED_AFFECTED)") || exit 1; \
+	if [ -z "$$modules" ]; then if [ "$(PG_GATED_AFFECTED)" = FULL ]; then echo "🔥 [Platform] The PostgreSQL-gated scan found no modules" >&2; \
+		exit 1; fi; echo "✅ [Platform] No PostgreSQL-gated module under the affected modules: $(PG_GATED_AFFECTED)"; exit 0; fi; \
 	cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python manage.py test $$modules \
 		--settings=config.settings.ci --verbosity=2 --noinput $(POSTGRES_TEST_FLAGS)
 
