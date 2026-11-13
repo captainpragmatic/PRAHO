@@ -8,6 +8,7 @@ reached. Each check now reaches its page by name and asserts what it protects, n
 
 from __future__ import annotations
 
+import logging
 import re
 
 from django.contrib.auth import get_user_model
@@ -16,6 +17,11 @@ from django.urls import reverse
 
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.users.models import CustomerMembership
+from tests.settings.test_logging_configuration import (
+    SENSITIVE_VALUES,
+    _deployed_handler_output,
+    _get_logging,
+)
 
 User = get_user_model()
 
@@ -237,6 +243,7 @@ class TestAccessControl(TestCase):
 
     def test_horizontal_access_prevented(self) -> None:
         """A customer's own member reaches nothing of another customer's on the staff pages."""
+        # Staff deliberately see every customer (User.get_accessible_customers), so there is nothing staff-to-staff.
         CustomerMembership.objects.create(user=self.regular_user, customer=self.customer, role="owner")
         other_customer = _customer("SC Other Company SRL", created_by=self.admin)
         self.client.force_login(self.regular_user)
@@ -311,7 +318,27 @@ class TestRomanianDataCompliance(TestCase):
         self.assertIs(customer.data_processing_consent, True)
 
     def test_sensitive_data_not_logged(self) -> None:
-        # Placeholder carried over unchanged: no redaction of these values is wired into logging yet (reported).
-        sensitive_fields = ["password", "vat_number", "cui", "card_number"]
-        for field in sensitive_fields:
-            self.assertIsNotNone(field)
+        """Production's console handler, as configured, writes none of these values (every handler and environment:
+        tests/settings/test_logging_configuration.py)."""
+        config = _get_logging("config.settings.prod")
+        record = logging.LogRecord(
+            "apps.customers",
+            logging.WARNING,
+            __file__,
+            1,
+            "update %s",
+            (
+                {
+                    "password": "Hunter2-pw",
+                    "vat_number": "RO76543210",
+                    "cui": "76543217",
+                    "card_number": "4111111111111111",
+                },
+            ),
+            None,
+        )
+        output = _deployed_handler_output(config, "console", record)
+        for field in ("password", "vat_number", "cui", "card_number"):
+            self.assertIn(field, output)
+        for value in SENSITIVE_VALUES:
+            self.assertNotIn(value, output)

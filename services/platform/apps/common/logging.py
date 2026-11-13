@@ -30,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import contextlib
+import copy
 import functools
 import gc
 import logging
@@ -238,40 +239,79 @@ class SecurityEventFilter(logging.Filter):
         return record.levelno >= logging.WARNING
 
 
+_SENSITIVE_KEYS = (
+    "password",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "credential",
+    "credit_card",
+    "card_number",
+    "cvv",
+    "ssn",
+    "cui",  # Romanian tax ID
+    "vat_number",
+)
+# A sensitive key written as key=value, key: value or a quoted dict/JSON key, and the value that follows it:
+# a quoted string, or everything up to a separator. The key and the separator stay; the value goes.
+_SENSITIVE_VALUE = re.compile(
+    r"(?P<key>[\"']?[\w-]*(?:" + "|".join(_SENSITIVE_KEYS) + r")[\w-]*[\"']?\s*[:=]\s*)"
+    r"(?P<value>\"[^\"]*\"|'[^']*'|[^\s,;&}\])]+)",
+    re.IGNORECASE,
+)
+REDACTION_TEXT = "[REDACTED]"
+
+
+def redact_sensitive_text(value: str) -> str:
+    """Replace the value of every sensitive key in a piece of log text, keeping the key so the line still reads."""
+
+    def replace(match: re.Match[str]) -> str:
+        found = match["value"]
+        quote = found[0] if found[:1] in ("'", '"') and found[-1:] == found[:1] else ""
+        return f"{match['key']}{quote}{REDACTION_TEXT}{quote}"
+
+    return _SENSITIVE_VALUE.sub(replace, value)
+
+
 class SensitiveDataFilter(logging.Filter):
+    """Redact the values of sensitive keys (passwords, tokens, card numbers, CUI and VAT numbers) from log records.
+
+    It covers the message rendered with its arguments and the exception text; formatters that render the
+    exception themselves read the redacted exc_text it leaves. A logging filter must never raise, so a record
+    it cannot redact is withheld instead of emitted.
     """
-    Filter to redact sensitive data from log records.
 
-    Prevents sensitive information like passwords, tokens,
-    and credit card numbers from appearing in logs.
-    """
-
-    SENSITIVE_PATTERNS: ClassVar[list[str]] = [
-        "password",
-        "secret",
-        "token",
-        "api_key",
-        "apikey",
-        "auth",
-        "credential",
-        "credit_card",
-        "card_number",
-        "cvv",
-        "ssn",
-        "cui",  # Romanian tax ID
-    ]
-
-    REDACTION_TEXT = "[REDACTED]"
+    SENSITIVE_KEYS: ClassVar[tuple[str, ...]] = _SENSITIVE_KEYS
+    REDACTION_TEXT = REDACTION_TEXT
 
     def filter(self, record: logging.LogRecord) -> bool:
-        """Redact sensitive data from log record"""
-        if hasattr(record, "msg") and isinstance(record.msg, str):
-            for pattern in self.SENSITIVE_PATTERNS:
-                if pattern in record.msg.lower():
-                    # Simple redaction - in production, use regex
-                    record.msg = record.msg.replace(pattern, self.REDACTION_TEXT)
-
+        try:
+            self._redact(record)
+        except Exception:  # A logging filter must never raise into the code that logs
+            record.msg = "[log record withheld: redaction failed]"
+            record.args = ()
+            record.exc_info = None
+            record.exc_text = None
         return True
+
+    def _redact(self, record: logging.LogRecord) -> None:
+        rendered = record.getMessage()
+        redacted = redact_sensitive_text(rendered)
+        if redacted != rendered:
+            record.msg, record.args = redacted, ()
+        if record.exc_info:
+            text = record.exc_text or logging.Formatter().formatException(record.exc_info)
+            record.exc_text = redact_sensitive_text(text)
+
+
+def with_sensitive_data_redaction(config: dict[str, Any]) -> dict[str, Any]:
+    """A LOGGING dict whose every handler runs SensitiveDataFilter, last: the secret-URL filter rebuilds exc_text."""
+    result = copy.deepcopy(config)
+    result.setdefault("filters", {})["sensitive_data"] = {"()": "apps.common.logging.SensitiveDataFilter"}
+    for handler in result.get("handlers", {}).values():
+        handler.setdefault("filters", []).append("sensitive_data")
+    return result
 
 
 class StructuredLogAdapter(logging.LoggerAdapter):  # type: ignore[type-arg]
@@ -1166,7 +1206,9 @@ __all__ = [
     "get_logger",
     "get_request_context",
     "get_request_id",
+    "redact_sensitive_text",
     "set_request_context",
     "set_request_id",
     "trace_execution",
+    "with_sensitive_data_redaction",
 ]

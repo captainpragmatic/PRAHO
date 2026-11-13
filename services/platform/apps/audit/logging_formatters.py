@@ -229,11 +229,14 @@ class SIEMJSONFormatter(logging.Formatter):
             return {}
 
         exc_type, exc_value, exc_tb = exc_info
+        from apps.common.logging import redact_sensitive_text  # noqa: PLC0415  # apps.common.logging imports audit
 
+        # A sensitive-data filter on the handler leaves the redacted traceback in exc_text; use it when it's there.
+        stack_trace = record.exc_text or ("".join(traceback.format_exception(*exc_info)) if exc_tb else "")
         return {
             "type": exc_type.__name__ if exc_type else "Unknown",
-            "message": str(exc_value) if exc_value else "",
-            "stack_trace": "".join(traceback.format_exception(*exc_info)) if exc_tb else "",
+            "message": redact_sensitive_text(str(exc_value)) if exc_value else "",
+            "stack_trace": stack_trace,
         }
 
     def _get_event_category(  # noqa: PLR0911  # Complexity: multi-step business logic

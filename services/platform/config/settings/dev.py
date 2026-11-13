@@ -53,6 +53,8 @@ if _env_path is not None:
             "⚠️ [Config] Ignored %d comment-polluted .env var(s) (#364): %s", len(_polluted), ", ".join(_polluted)
         )
 
+from apps.common.logging import with_sensitive_data_redaction  # noqa: E402  # Lazy Django proxies only
+
 from .base import *  # noqa: E402, F403  # After django.setup()
 
 # Own copies of the inherited lists: the in-place edits below must never reach base, which other
@@ -320,6 +322,7 @@ LOGGING = {
         },
     },
 }
+LOGGING = with_sensitive_data_redaction(LOGGING)
 
 # ===============================================================================
 # HTTPS SECURITY SETTINGS - DEVELOPMENT/LOCAL 🔒
