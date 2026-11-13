@@ -248,6 +248,10 @@ SENSITIVE_VALUES = (
     "object-secret",
     "byte-key-secret",
     "spaced-bearer-secret",
+    "whole-secret",
+    "nested-json-secret",
+    "stack-secret",
+    "cached-exc-secret",
 )
 
 
@@ -284,6 +288,9 @@ def _records() -> dict[str, logging.LogRecord]:
         raise ValueError("charge failed card_number=4111111111111111 password=Hunter2-pw")
     except ValueError:
         failure = sys.exc_info()
+    stack = record("lookup failed")
+    stack.stack_info = "Stack (most recent call last):\n  check(password=stack-secret)"
+    stack.exc_text = "Traceback: cached password=cached-exc-secret"
     extras = record("update")
     extras.password = "extra-secret"
     extras.query = {"card_number": ["4111111111111111"], "page": "2", "password=key-secret": 1}
@@ -304,6 +311,10 @@ def _records() -> dict[str, logging.LogRecord]:
         "apostrophe": record("password=can'tkeepsecret"),
         "authorization spacing": record("Authorization=Bearer \t  spaced-bearer-secret next=1"),
         "colon list": record("password: alpha,beta-secret"),
+        "leading delimiter": record("password=;whole-secret"),
+        "spaced equals": record("password=correct horse battery"),
+        "nested json": record(json.dumps({"error": json.dumps({"password": "nested-json-secret"})})),
+        "stack and cached exception": stack,
         "extras": extras,
         "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
         "record.args": record("profile %s", ({"vat_number": "RO76543210", "password": "Hunter2-pw"},)),
@@ -321,8 +332,16 @@ class SensitiveDataRedactionTests(SimpleTestCase):
                 for shape, record in _records().items():
                     with self.subTest(module=module, handler=handler_name, shape=shape):
                         output = _deployed_handler_output(config, handler_name, record)
+                        # The record itself is clean too, whatever this formatter happens to write (exc_info keeps the
+                        # original exception object for formatters that need it; its text lives in exc_text).
+                        attributes = repr({k: v for k, v in vars(record).items() if k != "exc_info"})
+                        self.assertEqual([value for value in SENSITIVE_VALUES if value in attributes], [])
                         # A formatter may write no exception, or no extras; where it writes them, they're redacted.
-                        written = {"exception text": "ValueError", "extras": "visible-note"}.get(shape)
+                        written = {
+                            "exception text": "ValueError",
+                            "extras": "visible-note",
+                            "stack and cached exception": "most recent call last",
+                        }.get(shape)
                         if written is None or written in output:
                             self.assertIn("[REDACTED]", output)
                         if output.startswith("{"):
@@ -376,6 +395,7 @@ class SensitiveDataRedactionTests(SimpleTestCase):
                     output = _deployed_handler_output(config, handler_name, probe)
                     self.assertIn("[log record withheld: redaction failed]", output)  # written, not dropped
                     self.assertNotIn("exploding-secret", output)
+                    self.assertEqual(probe.note, "[REDACTED]")  # withheld on the record, not just unwritten
 
     def test_keys_redacted_alike_keep_both_entries(self) -> None:
         from apps.common.logging import redact_sensitive_data  # noqa: PLC0415
@@ -423,3 +443,16 @@ class SensitiveDataRedactionTests(SimpleTestCase):
         payload = json.dumps(sent)
         for value in SENSITIVE_VALUES:
             self.assertNotIn(value, payload)
+
+    def test_long_text_is_redacted_in_linear_time(self) -> None:
+        """A long unbroken word (a base64 blob, a token) must not stall the worker that logs it."""
+        import time  # noqa: PLC0415
+
+        from apps.common.logging import redact_sensitive_text  # noqa: PLC0415
+
+        # Big enough that a scan retried at every character (seconds) fails, small enough that it fails quickly.
+        for text in ("a" * 20_000, "password=" + "x " * 10_000, "a=" * 10_000, ", " * 10_000, "a" + " " * 20_000):
+            with self.subTest(text=text[:12]):
+                started = time.perf_counter()
+                redact_sensitive_text(text)
+                self.assertLess(time.perf_counter() - started, 1.0)

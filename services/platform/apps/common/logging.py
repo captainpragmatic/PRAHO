@@ -257,15 +257,17 @@ _SENSITIVE_KEYS = (
 # A key is sensitive when one of the words above is a whole part of it ("new_password1", "csrf_token", "b'password'"),
 # not merely a substring ("circuit", "passwordless").
 _SENSITIVE_KEY_NAME = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(_SENSITIVE_KEYS) + r")(?![A-Za-z])", re.IGNORECASE)
-# Where a key=value or key: value may start in free text: an optional quote or parenthesis around a name, then = or :.
-_KEY_CANDIDATE = re.compile(r"""(["'(]?)([A-Za-z_][\w.\-]*)(["')]?)[ \t]*([=:])[ \t]*""")
+# Where a key=value or key: value may start in free text: an optional quote or parenthesis (perhaps escaped, as in
+# JSON nested in JSON) around a name, then = or :. A name starts only where no word character precedes it, so a long
+# word is scanned once, not once per character.
+_KEY_CANDIDATE = re.compile(r"""(\\{0,3}["'(]?)(?<![\w.\-])([A-Za-z_][\w.\-]*)(\\{0,3}["')]?)[ \t]*([=:])[ \t]*""")
 _CLOSING = {"[": "]", "{": "}", "(": ")"}
-# An unquoted value ends at a line break, ";" or a closing bracket; after "=" also at whitespace, unless the value so
-# far is an authorization scheme (Bearer, Basic...) whose credential follows. A comma or "&" ends it only before another
-# key, and a quote only when no letter follows it ("can't" stays one value). Ambiguous text is redacted, not kept.
-_VALUE_END = frozenset("\r\n;)]}")
-_NEXT_KEY = re.compile(r"""\s*["']?[A-Za-z_][\w.\-]*["']?\s*[=:]""")
-_AUTH_SCHEMES = frozenset({"basic", "bearer", "digest", "negotiate", "token"})
+# An unquoted value is redacted conservatively: it runs to a line break or a closing bracket, past spaces, commas,
+# semicolons and "&", unless what follows them is another key, and ends at a quote only when no letter follows it
+# ("can't" stays one value). "password=correct horse battery" and "Authorization=Bearer  x" are redacted whole.
+_DELIMITERS = frozenset(" \t,;&")
+_MAX_QUOTE_ESCAPES = 3  # Backslashes before a quote: JSON nested up to three deep
+_NEXT_KEY = re.compile(r"""["']?[A-Za-z_][\w.\-]*["']?[ \t]*[=:]""")
 REDACTION_TEXT = "[REDACTED]"
 # How deep structured redaction walks; deeper (or cyclic) values are replaced, never recursed into.
 _MAX_DEPTH = 32
@@ -306,37 +308,54 @@ def _bracketed_end(text: str, start: int) -> int:
     return index
 
 
-def _unquoted_end(text: str, start: int, separator: str) -> int:
+def _unquoted_end(text: str, start: int) -> int:
     index = start
     while index < len(text):
         char = text[index]
-        if char in _VALUE_END:
+        if char in "\r\n)]}":
             break
-        if char in " \t" and separator == "=" and text[start:index].strip().lower() not in _AUTH_SCHEMES:
-            break
-        if char in ",&" and _NEXT_KEY.match(text, index + 1):
-            break
+        if char in _DELIMITERS:
+            after = index
+            while after < len(text) and text[after] in _DELIMITERS:
+                after += 1
+            if _NEXT_KEY.match(text, after):
+                break
+            index = after
+            continue
         if char in "\"'" and not (index + 1 < len(text) and text[index + 1].isalnum()):
             break
         index += 1
     return start + len(text[start:index].rstrip())
 
 
-def _value_end(text: str, start: int, separator: str) -> int:
+def _opening_quote(text: str, start: int) -> str:
+    """The quote a value starts with, with any backslashes escaping it (JSON nested in JSON), or ""."""
+    index = start
+    while index < len(text) and index - start < _MAX_QUOTE_ESCAPES and text[index] == "\\":
+        index += 1
+    return text[start : index + 1] if index < len(text) and text[index] in "\"'" else ""
+
+
+def _value_end(text: str, start: int) -> int:
     if start >= len(text):
         return start
-    if text[start] in "\"'":
+    quote = _opening_quote(text, start)
+    if quote == text[start : start + 1]:
         return _quoted_end(text, start)
+    if quote:  # An escaped quote: the value ends at the same escaped quote
+        closing = text.find(quote, start + len(quote))
+        return len(text) if closing < 0 else closing + len(quote)
     if text[start] in _CLOSING:
         return _bracketed_end(text, start)
-    return _unquoted_end(text, start, separator)
+    return _unquoted_end(text, start)
 
 
 def redact_sensitive_text(value: str) -> str:
     """Replace the value after every sensitive key in a piece of log text, keeping the key so the line still reads.
 
-    The value is a quoted string (escapes honoured), a bracketed list, dict or tuple (to its matching bracket), or
-    an unquoted token. A non-sensitive key's value is read on, so a sensitive key inside it is found too.
+    The value is a quoted string (escapes honoured, escaped quotes included), a bracketed list, dict or tuple (to its
+    matching bracket), or an unquoted value read conservatively. A non-sensitive key's value is read on, so a
+    sensitive key inside it is found too. Linear in the length of the text.
     """
     parts: list[str] = []
     position = 0
@@ -345,9 +364,9 @@ def redact_sensitive_text(value: str) -> str:
             parts.append(value[position : match.end()])
             position = match.end()
             continue
-        end = _value_end(value, match.end(), match[4])
+        end = _value_end(value, match.end())
         found = value[match.end() : end]
-        quote = found[0] if found[:1] in ("'", '"') else ""
+        quote = _opening_quote(value, match.end()) if found else ""
         parts.append(value[position : match.end()] + (f"{quote}{REDACTION_TEXT}{quote}" if found else ""))
         position = end
     parts.append(value[position:])
@@ -410,6 +429,7 @@ class SensitiveDataFilter(logging.Filter):
             record.args = ()
             record.exc_info = None
             record.exc_text = None
+            record.stack_info = None
             for name in tuple(vars(record)):
                 if name not in _STANDARD_RECORD_ATTRIBUTES:
                     setattr(record, name, REDACTION_TEXT)
@@ -427,9 +447,13 @@ class SensitiveDataFilter(logging.Filter):
             if name in _STANDARD_RECORD_ATTRIBUTES:
                 continue
             setattr(record, name, REDACTION_TEXT if _is_sensitive_key(name) else redact_sensitive_data(value))
-        if record.exc_info:
-            text = record.exc_text or logging.Formatter().formatException(record.exc_info)
-            record.exc_text = redact_sensitive_text(text)
+        # Formatters write a cached exception text and the stack text as they are, with or without exc_info.
+        if record.exc_info and not record.exc_text:
+            record.exc_text = logging.Formatter().formatException(record.exc_info)
+        if record.exc_text:
+            record.exc_text = redact_sensitive_text(record.exc_text)
+        if record.stack_info:
+            record.stack_info = redact_sensitive_text(record.stack_info)
 
 
 def with_sensitive_data_redaction(config: dict[str, Any]) -> dict[str, Any]:
