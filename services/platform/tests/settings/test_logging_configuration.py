@@ -252,6 +252,8 @@ SENSITIVE_VALUES = (
     "nested-json-secret",
     "stack-secret",
     "cached-exc-secret",
+    "cli-secret",
+    "suffix-secret",
 )
 
 
@@ -314,6 +316,8 @@ def _records() -> dict[str, logging.LogRecord]:
         "leading delimiter": record("password=;whole-secret"),
         "spaced equals": record("password=correct horse battery"),
         "nested json": record(json.dumps({"error": json.dumps({"password": "nested-json-secret"})})),
+        "command line": record("ran tool --password=cli-secret --verbose; also {'--token': 'cli-secret'}"),
+        "nested json inner quote": record(json.dumps({"error": json.dumps({"password": 'prefix"suffix-secret'})})),
         "stack and cached exception": stack,
         "extras": extras,
         "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),

@@ -258,9 +258,11 @@ _SENSITIVE_KEYS = (
 # not merely a substring ("circuit", "passwordless").
 _SENSITIVE_KEY_NAME = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(_SENSITIVE_KEYS) + r")(?![A-Za-z])", re.IGNORECASE)
 # Where a key=value or key: value may start in free text: an optional quote or parenthesis (perhaps escaped, as in
-# JSON nested in JSON) around a name, then = or :. A name starts only where no word character precedes it, so a long
-# word is scanned once, not once per character.
-_KEY_CANDIDATE = re.compile(r"""(\\{0,3}["'(]?)(?<![\w.\-])([A-Za-z_][\w.\-]*)(\\{0,3}["')]?)[ \t]*([=:])[ \t]*""")
+# JSON nested in JSON) and up to two dashes (a command-line --password), a name, then = or :. A candidate starts only
+# where no word character, dot or dash precedes it, so a long word is scanned once, not once per character.
+_KEY_CANDIDATE = re.compile(
+    r"""(?<![\w.\-])(\\{0,3}["'(]?-{0,2})([A-Za-z_][\w.\-]*)(\\{0,3}["')]?)[ \t]*([=:])[ \t]*"""
+)
 _CLOSING = {"[": "]", "{": "}", "(": ")"}
 # An unquoted value is redacted conservatively: it runs to a line break or a closing bracket, past spaces, commas,
 # semicolons and "&", unless what follows them is another key, and ends at a quote only when no letter follows it
@@ -342,9 +344,17 @@ def _value_end(text: str, start: int) -> int:
     quote = _opening_quote(text, start)
     if quote == text[start : start + 1]:
         return _quoted_end(text, start)
-    if quote:  # An escaped quote: the value ends at the same escaped quote
-        closing = text.find(quote, start + len(quote))
-        return len(text) if closing < 0 else closing + len(quote)
+    if quote:  # An escaped quote: the value ends at a quote escaped exactly as the opening one was
+        escapes, mark = len(quote) - 1, quote[-1]
+        index = start + len(quote)
+        while (index := text.find(mark, index)) >= 0:
+            run = index
+            while run > start and text[run - 1] == "\\":
+                run -= 1
+            if index - run == escapes:
+                return index + 1
+            index += 1
+        return len(text)
     if text[start] in _CLOSING:
         return _bracketed_end(text, start)
     return _unquoted_end(text, start)
