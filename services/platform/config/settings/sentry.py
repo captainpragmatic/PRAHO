@@ -77,13 +77,33 @@ class SentryOptions(TypedDict):
     before_send_transaction: Callable[[Any, Any], Any]
 
 
-def scrub_event(event: Any, hint: Any) -> Any:
-    """Secret links and the values of sensitive keys, wherever they sit in the event (exception text included).
+def _render_redacted_log_entry(event: Any) -> None:
+    """Sentry renders a logged message from its raw parameters; render it again from redacted ones.
 
-    Sentry builds its exception from the record's exc_info, never from the log filter's redacted text.
+    "submitted=%(password)s" renders the password under a key no text scan can recognise, so the parameters are
+    redacted by key first. A message that doesn't format with them keeps no rendered text at all.
     """
     from apps.common.logging import redact_sensitive_data  # noqa: PLC0415  # Settings import before apps are ready
 
+    entry = event.get("logentry") if isinstance(event, dict) else None
+    if not isinstance(entry, dict) or not entry.get("params"):
+        return
+    entry["params"] = redact_sensitive_data(entry["params"])
+    try:
+        entry["formatted"] = str(entry.get("message", "")) % entry["params"]
+    except (TypeError, ValueError, KeyError):
+        entry["formatted"] = str(entry.get("message", ""))
+
+
+def scrub_event(event: Any, hint: Any) -> Any:
+    """Secret links and the values of sensitive keys, wherever they sit in the event (exception text included).
+
+    Sentry builds its exception from the record's exc_info, never from the log filter's redacted text, and its
+    logging integration reads records before any handler's filters run.
+    """
+    from apps.common.logging import redact_sensitive_data  # noqa: PLC0415  # Settings import before apps are ready
+
+    _render_redacted_log_entry(event)
     return redact_sensitive_data(scrub_sentry_event(event, hint))
 
 
