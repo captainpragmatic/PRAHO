@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import importlib
 import io
+import json
 import logging
 import logging.config
 import os
@@ -227,7 +228,20 @@ class SecretURLFilterWiringTests(SimpleTestCase):
                     self.assertIn("secret_urls", handler.get("filters", []), f"{module}: handler {name}")
 
 
-SENSITIVE_VALUES = ("Hunter2-pw", "RO76543210", "76543217", "4111111111111111")
+SENSITIVE_VALUES = (
+    "Hunter2-pw",
+    "RO76543210",
+    "76543217",
+    "4111111111111111",
+    "first-secret",
+    "second-secret",
+    "nested-secret",
+    "tuple-secret",
+    "quote-secret",
+    "horse battery",
+    "extra-secret",
+    "key-secret",
+)
 
 
 def _deployed_handler_output(config: dict[str, Any], handler_name: str, record: logging.LogRecord) -> str:
@@ -256,8 +270,20 @@ def _records() -> dict[str, logging.LogRecord]:
         raise ValueError("charge failed card_number=4111111111111111 password=Hunter2-pw")
     except ValueError:
         failure = sys.exc_info()
+    extras = record("update")
+    extras.password = "extra-secret"
+    extras.query = {"card_number": ["4111111111111111"], "page": "2", "password=key-secret": 1}
+    extras.session_note = "visible-note"
     return {
         "key=value": record("login failed password=Hunter2-pw vat_number=RO76543210 cui=76543217"),
+        "list value": record("{'password': ['first-secret', 'second-secret']}"),
+        "nested dict value": record("{'token': {'value': 'nested-secret'}}"),
+        "tuple value": record("{'password': ('tuple-secret-1', 'tuple-secret-2')}"),
+        "escaped quote": record('password="has\\"quote-secret"'),
+        "structured args": record("profile %s", ({"password": ["first-secret"], "token": {"value": "nested-secret"}},)),
+        "spaced value": record("password: correct horse battery"),
+        "database detail": record("Key (vat_number)=(RO76543210) already exists."),
+        "extras": extras,
         "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
         "record.args": record("profile %s", ({"vat_number": "RO76543210", "password": "Hunter2-pw"},)),
         "exception text": record("payment error", (), failure),
@@ -274,9 +300,12 @@ class SensitiveDataRedactionTests(SimpleTestCase):
                 for shape, record in _records().items():
                     with self.subTest(module=module, handler=handler_name, shape=shape):
                         output = _deployed_handler_output(config, handler_name, record)
-                        # The audit formatter writes no exception at all; where the text is written, it's redacted.
-                        if shape != "exception text" or "ValueError" in output:
+                        # A formatter may write no exception, or no extras; where it writes them, they're redacted.
+                        written = {"exception text": "ValueError", "extras": "visible-note"}.get(shape)
+                        if written is None or written in output:
                             self.assertIn("[REDACTED]", output)
+                        if output.startswith("{"):
+                            json.loads(output)  # still one valid JSON line
                         for value in SENSITIVE_VALUES:
                             self.assertNotIn(value, output)
 
@@ -286,3 +315,23 @@ class SensitiveDataRedactionTests(SimpleTestCase):
         output = _deployed_handler_output(config, "console", record)
         self.assertIn("Password changed for ana", output)
         self.assertNotIn("[REDACTED]", output)
+
+    def test_audit_middleware_query_parameters_are_redacted(self) -> None:
+        """AuditMiddleware logs a request's query as an extra (a dict of lists); production writes none of its secrets."""
+        from django.contrib.auth.models import AnonymousUser  # noqa: PLC0415
+        from django.http import HttpResponse  # noqa: PLC0415
+        from django.test import RequestFactory  # noqa: PLC0415
+
+        from apps.common.middleware import AuditMiddleware  # noqa: PLC0415
+
+        request = RequestFactory().get(
+            "/customers/", {"token": "tok-secret", "card_number": "4111111111111111", "q": "ana"}
+        )
+        request.user = AnonymousUser()
+        with self.assertLogs("apps.common.middleware", level="INFO") as captured:
+            AuditMiddleware(lambda _request: HttpResponse("ok"))(request)
+        record = next(record for record in captured.records if getattr(record, "event", "") == "request")
+        output = _deployed_handler_output(_get_logging("config.settings.prod"), "console", record)
+        self.assertNotIn("tok-secret", output)
+        self.assertNotIn("4111111111111111", output)
+        self.assertIn('"q": ["ana"]', output)
