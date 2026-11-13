@@ -15,8 +15,10 @@ from django.contrib.auth import get_user_model
 from django.test import Client, TestCase
 from django.urls import reverse
 
+from apps.customers.forms import CustomerTaxProfileForm
 from apps.customers.models import Customer, CustomerTaxProfile
 from apps.users.models import CustomerMembership
+from tests.factories.core_factories import OrderCreationRequest, create_order
 from tests.settings.test_logging_configuration import (
     SENSITIVE_VALUES,
     _deployed_handler_output,
@@ -117,15 +119,36 @@ class TestSQLInjection(TestCase):
         self.assertEqual(list(Customer.objects.values_list("company_name", flat=True)), [payload])
 
     def test_sql_injection_in_url_parameters(self) -> None:
-        payloads = [
-            (reverse("orders:order_list"), {"id": "1 OR 1=1"}),
-            (reverse("billing:invoice_list"), {"status": "paid' OR '1'='1"}),
-            (reverse("customers:list"), {"page": "1; DROP TABLE users"}),
-        ]
-        for url, params in payloads:
-            with self.subTest(url=url):
-                response = self.client.get(url, params)
-                self.assertIn(response.status_code, (200, 400))
+        """Each filter the list pages read takes an injected value as data: exactly the rows it names, never all."""
+        active = _customer("SC Alpha SRL")
+        inactive = _customer("SC Beta SRL")
+        Customer.objects.filter(pk=inactive.pk).update(status="inactive", customer_type="individual")
+        Customer.objects.filter(pk=active.pk).update(status="active", customer_type="company")
+        draft = create_order(OrderCreationRequest(customer=active, status="draft"))
+        completed = create_order(OrderCreationRequest(customer=inactive, status="completed"))
+
+        def customers(params: dict[str, str]) -> set[int]:
+            response = self.client.get(reverse("customers:list"), params)
+            self.assertEqual(response.status_code, 200)
+            return {customer.pk for customer in response.context["customers"]}
+
+        def orders(params: dict[str, str]) -> set[object]:
+            response = self.client.get(reverse("orders:order_list"), params)
+            self.assertEqual(response.status_code, 200)
+            return {order.pk for order in response.context["orders"]}
+
+        # The honest value selects its row, so the injected one is shown to select nothing.
+        self.assertEqual(customers({"status": "active"}), {active.pk})
+        self.assertEqual(customers({"status": "active' OR '1'='1"}), set())
+        self.assertEqual(customers({"type": "company"}), {active.pk})
+        self.assertEqual(customers({"type": "company' OR 'x'='x"}), set())
+        self.assertEqual(customers({"page": "1; DROP TABLE users"}), {active.pk, inactive.pk})
+        self.assertEqual(orders({"status": "draft"}), {draft.pk})
+        self.assertEqual(orders({"status": "draft' OR '1'='1"}), set())
+        self.assertEqual(orders({"search": draft.order_number}), {draft.pk})
+        # The order search refuses a query with quotes or SQL words outright and lists as if nothing was typed.
+        self.assertEqual(orders({"search": "' OR '1'='1"}), {draft.pk, completed.pk})
+        self.assertEqual(orders({"search": "x'; DROP TABLE orders; --"}), {draft.pk, completed.pk})
         self.assertTrue(User.objects.filter(pk=self.admin.pk).exists())
 
 
@@ -300,17 +323,25 @@ class TestRomanianDataCompliance(TestCase):
         self.admin = _admin("gdpr_test@test.ro")
 
     def test_cui_validation(self) -> None:
+        """The staff tax-profile form keeps a CUI's digits and refuses one whose check digit is wrong."""
         customer = _customer("SC GDPR Test SRL", created_by=self.admin)
-        for cui in ("RO12345678", "12345678"):
+        for cui in ("RO12345674", "12345674", " RO12345674 "):
             with self.subTest(cui=cui):
-                tax_profile = CustomerTaxProfile.objects.create(
-                    customer=customer,
-                    cui=cui,
-                    vat_number=cui if cui.startswith("RO") else f"RO{cui[-8:]}",
-                    is_vat_payer=True,
+                form = CustomerTaxProfileForm(
+                    data={"cui": cui, "is_vat_payer": "on"}, instance=CustomerTaxProfile(customer=customer)
                 )
-                self.assertIsNotNone(tax_profile.pk)
-                tax_profile.delete()
+                form.is_valid()
+                self.assertNotIn("cui", form.errors)
+                self.assertEqual(form.cleaned_data["cui"], "12345674")
+        # RO12345678 and 12345678 were this test's "valid" CUIs while it saved them with objects.create(), which runs
+        # no validators: their check digit is wrong.
+        for cui in ("RO12345678", "12345678", "RO12345675", "RO1", "12a45674", "RO123456789012"):
+            with self.subTest(cui=cui):
+                form = CustomerTaxProfileForm(
+                    data={"cui": cui, "is_vat_payer": "on"}, instance=CustomerTaxProfile(customer=customer)
+                )
+                self.assertFalse(form.is_valid())
+                self.assertIn("cui", form.errors)
 
     def test_data_processing_consent_tracked(self) -> None:
         customer = _customer("SC Consent Test SRL", created_by=self.admin)
