@@ -71,12 +71,38 @@ def current_application(service_id: int) -> HostingLimitApplication:
         )
 
 
+def _expire_proof_after_native_jobs() -> int:
+    """Virtualmin lifts both kernel caps for a backup or restore and restores them only on a clean exit (ADR-0075).
+
+    A managed account's backup or restore job that ended after its last verified receipt makes that receipt stale, so
+    the dispatch below applies and verifies the caps again. Jobs still running or held for staff are left alone.
+    """
+    from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415
+
+    finished = VirtualminProvisioningJob.objects.filter(
+        account__service_id=OuterRef("service_id"),
+        operation__in=("backup_domain", "restore_domain"),
+        status__in=("completed", "failed"),
+        updated_at__gt=OuterRef("verified_at"),
+    )
+    return (
+        ServiceHostingLimits.objects.filter(
+            verified_at__isnull=False,
+            service__virtualmin_account__quota_managed=True,
+            service__virtualmin_account__server__hosting_policy__quota_adopted=True,
+        )
+        .filter(Exists(finished))
+        .update(verified_at=None)
+    )
+
+
 def dispatch_hosting_limits() -> dict[str, int]:
     from .hosting_limit_execution import recover_quota_executions  # noqa: PLC0415 -- Task entrypoint.
     from .hosting_raise_service import expire_hosting_raises  # noqa: PLC0415
 
     expire_hosting_raises()
     recovered = recover_quota_executions()
+    _expire_proof_after_native_jobs()
     reviewed_adoption = HostingLimitApplication.objects.filter(
         service_id=OuterRef("service_id"),
         revision=OuterRef("revision"),

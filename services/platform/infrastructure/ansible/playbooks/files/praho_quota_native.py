@@ -240,6 +240,15 @@ def _database_policy_qualified() -> None:
         raise DatabaseStorageRefusalError(f"Virtualmin templates would charge databases to their account: {listed}")
 
 
+def _backup_staging_left(home: Path) -> bool:
+    """A killed Virtualmin backup leaves its tenant-owned dump in ~/.backup (ADR-0075). lstat: never follow it."""
+    try:
+        (home / ".backup").lstat()
+    except FileNotFoundError:
+        return False
+    return True
+
+
 def _entry_label(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.@-]", "?", name)[:96]
 
@@ -581,6 +590,7 @@ class NativeQuotaBackend:
             "configured_quota_kib": _configured_limit(domain, "quota"),
             "configured_uquota_kib": _configured_limit(domain, "uquota"),
             "configured_bandwidth_bytes": _configured_bandwidth(domain),
+            "backup_staging_left": _backup_staging_left(Path(account.pw_dir)),
             "bandwidth_actions_safe": _bandwidth_actions_safe(
                 domain, _fields(Path("/etc/webmin/virtual-server/config"))
             ),

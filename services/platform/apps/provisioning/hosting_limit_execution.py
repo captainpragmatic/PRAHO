@@ -1063,9 +1063,12 @@ def _complete(execution_id: UUID, receipt: dict[str, Any], *, publish_completed:
             account.__dict__.pop("_hosting_quota_old_managed", None)
         execution.receipt = receipt
         execution.save(update_fields=["receipt", "updated_at"])
-        _release(
-            execution, phase="completed", status="completed", message="Both kernel quotas and native metadata verified."
-        )
+        message = "Both kernel quotas and native metadata verified."
+        if receipt.get("backup_staging_left") is True:
+            # A killed Virtualmin backup leaves its tenant-owned dump behind (ADR-0075); it counts against the cap.
+            message += " A leftover ~/.backup remains in the account's home; remove it if no backup is running."
+            logger.warning("⚠️ [HostingLimits] Leftover ~/.backup in the home of account %s", execution.job.account_id)
+        _release(execution, phase="completed", status="completed", message=message)
     return True
 
 

@@ -42,6 +42,10 @@ RECEIPT_FIELDS = QUANTITY_FIELDS | {
 }
 
 
+# Older helpers omit these. backup_staging_left: a ~/.backup the home still holds (ADR-0075); absent means unknown.
+OPTIONAL_PROBE_FIELDS = frozenset({"observation", "bandwidth_actions_safe", "quota_protocol", "backup_staging_left"})
+
+
 @dataclass(frozen=True)
 class VerifiedQuota:
     disk_limit_mib: int
@@ -139,10 +143,7 @@ def verify_quota_receipt(  # noqa: PLR0913 -- All expected authority is mandator
     Calling this on an arbitrary probe is NOT recovery: the caller must first obtain
     the native terminal receipt or fence the original token under the native lock.
     """
-    if (
-        not isinstance(receipt, dict)
-        or set(receipt) - {"observation", "bandwidth_actions_safe", "quota_protocol"} != RECEIPT_FIELDS
-    ):
+    if not isinstance(receipt, dict) or set(receipt) - OPTIONAL_PROBE_FIELDS != RECEIPT_FIELDS:
         raise ValueError("The native quota receipt has an unsupported shape")
     probe = verify_quota_probe(
         {key: value for key, value in receipt.items() if key not in {"token", "generation"}},
@@ -191,16 +192,13 @@ def verify_quota_probe(
     Only the final token-bound receipt may certify the new exact matching caps.
     """
     fields = RECEIPT_FIELDS - {"token", "generation"}
-    if (
-        not isinstance(probe, dict)
-        or set(probe) - {"observation", "bandwidth_actions_safe", "quota_protocol"} != fields
-    ):
+    if not isinstance(probe, dict) or set(probe) - OPTIONAL_PROBE_FIELDS != fields:
         raise ValueError("The native quota probe has an unsupported shape")
     if "quota_protocol" in probe and (
         type(probe["quota_protocol"]) is not int or probe["quota_protocol"] not in {1, 2}
     ):
         raise ValueError("The native quota protocol is unsupported")
-    if "bandwidth_actions_safe" in probe and type(probe["bandwidth_actions_safe"]) is not bool:
+    if any(key in probe and type(probe[key]) is not bool for key in ("bandwidth_actions_safe", "backup_staging_left")):
         raise ValueError("Native bandwidth action safety must be explicit")
     if (
         type(probe["schema"]) is not int

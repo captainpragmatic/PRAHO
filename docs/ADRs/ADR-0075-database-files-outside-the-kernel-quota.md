@@ -75,11 +75,18 @@ Platform.
   Tenant files are therefore uncapped for every backup and restore window, as
   before this decision, and a backup needs free node disk for the dump plus the
   archive. Native acceptance proves the normal and the destination-full paths.
-- **Known gap:** a backup or restore process killed outright (OOM, reboot, a
-  stopped Webmin) never reaches its exit path. Both caps stay unlimited and a
-  tenant-owned dump can stay in `~/.backup`. PRAHO does not detect this yet,
-  because read probes tolerate caps that differ from the configured quota.
-  Verifying caps after every backup job is a follow-up change; until then the
-  runbook gives the manual check.
+- A backup or restore process killed outright (OOM, reboot, a stopped Webmin)
+  never reaches its exit path, so both caps stay unlimited and a tenant-owned
+  dump can stay in `~/.backup`. Platform closes this: when a managed account's
+  PRAHO backup or restore job ends, completed or failed, after the account's last
+  verified receipt, the hosting-limits dispatcher (every 5 minutes) marks that
+  receipt stale. The existing managed-limits path then probes the node, applies
+  both caps again and verifies all six cap values in a fresh receipt. Refusals are
+  retried by the same dispatcher and reach staff as an attention job after the
+  retry budget, as for any other limits application. Jobs still running or held
+  for staff are left to their own resolution. The probe also reports a leftover
+  `~/.backup` (read with `lstat`, never followed), and the completed application
+  names it in its status. Each finished backup therefore costs one more quota
+  application: a native write that sets unchanged caps when nothing was lifted.
 - PRAHO's restores are limited to web features and import no Virtualmin settings. A
   template changed by hand between deploys is refused at the next probe.
