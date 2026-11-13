@@ -2,8 +2,9 @@
 # PLATFORM SERVICE CI/CD
 # ===============================================================================
 # All events:  SQLite (fast, reliable — matches local dev + test.py settings)
-# PRs (fast tier, ADR-0036): the affected test modules (platform-test) and the PostgreSQL-gated
-#              tests under them (platform-postgres); coverage-gate skips.
+# PRs (fast tier, ADR-0036): the affected test modules, or the whole suite without coverage when the
+#              detection says FULL (platform-test), and the PostgreSQL-gated tests under them
+#              (platform-postgres); coverage-gate skips.
 # Merge queue and master: the full suite with coverage floors (coverage-gate, the only full run)
 #              and every PostgreSQL-gated test (platform-postgres), which skip themselves on SQLite.
 #
@@ -127,6 +128,14 @@ jobs:
         # unittest.discover() bug where __file__ is None for namespace packages.
         DIRS=$(echo "$MODULES" | tr ' ' '\n' | sed 's/\./\//g' | tr '\n' ' ')
         PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test $DIRS --verbosity=2 --failfast --parallel
+
+    # A pull request that touches billing, users, shared code, settings or dependencies gets the whole
+    # suite, without coverage; the merge queue's coverage-gate is the full run with coverage.
+    - name: Run the whole platform suite (detection says FULL)
+      if: github.event_name == 'pull_request' && steps.affected.outputs.modules == 'FULL'
+      run: |
+        cd services/platform
+        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test tests --verbosity=2 --failfast --parallel
 
     # The Django runner above only collects unittest.TestCase subclasses. Plain pytest-style
     # Test* classes run here, from a scan of the tests so a new one needs no workflow edit.

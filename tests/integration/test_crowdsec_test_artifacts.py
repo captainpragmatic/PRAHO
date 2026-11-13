@@ -44,7 +44,14 @@ elif any("test_crowdsec" in value for value in args):
 else:
     raise AssertionError(args)
 ready = all((output / name).is_file() for name in ("crowdsec-firewall-bouncer-amd64", "crowdsec-firewall-bouncer-arm64"))
-event(kind="pytest", scope=scope, artifacts_ready=ready)
+if scope == "aggregate":
+    # The queue's aggregate (CROWDSEC_DOCKER=0) collects no CrowdSec Docker suite, so it needs no artifacts.
+    ignored = "--ignore-glob=tests/deploy/test_crowdsec*_docker.py" in args
+    event(kind="pytest", scope=scope, artifacts_ready=ready, crowdsec_ignored=ignored)
+    if ignored:
+        raise SystemExit(0)
+else:
+    event(kind="pytest", scope=scope, artifacts_ready=ready)
 # Observe the existing Make override policy only. Real provenance/role tests
 # continue to require their locked outputs even in these override modes.
 override = bool(os.environ.get("CROWDSEC_BOUNCER_BINARY")) or os.environ.get("CROWDSEC_BOUNCER_REJECTED_PACKAGE") == "1"
@@ -104,6 +111,37 @@ def test_fresh_aggregate_prepares_artifacts_before_pytest(make_fixture):
     assert [event["kind"] for event in events] == ["build", "pytest", "pytest"]
     assert [event["scope"] for event in events if event["kind"] == "pytest"] == ["counter", "aggregate"]
     assert all(event["artifacts_ready"] for event in events if event["kind"] == "pytest")
+
+
+def test_the_default_aggregate_collects_the_crowdsec_docker_suites(make_fixture):
+    # Local `make test-integration` and the nightly: unchanged, CrowdSec's Docker suites included.
+    _, run = make_fixture
+    result, events = run("test-integration")
+    assert result.returncode == 0, (result.stderr, events)
+    (aggregate,) = [event for event in events if event.get("scope") == "aggregate"]
+    assert aggregate["crowdsec_ignored"] is False
+
+
+def test_without_crowdsec_docker_the_aggregate_neither_builds_nor_collects_them(make_fixture):
+    # The merge queue (integration.yml): no bouncer build, and the CrowdSec Docker suites are not collected.
+    root, run = make_fixture
+    result, events = run("test-integration", "CROWDSEC_DOCKER=0")
+    assert result.returncode == 0, (result.stderr, events)
+    assert not any(event["kind"] == "build" for event in events)
+    assert not (root / "build/crowdsec-patched").exists()
+    assert [event["scope"] for event in events if event["kind"] == "pytest"] == ["counter", "aggregate"]
+    (aggregate,) = [event for event in events if event.get("scope") == "aggregate"]
+    assert aggregate["crowdsec_ignored"] is True
+
+
+@pytest.mark.parametrize("value", ["1", "", "no", "false"])
+def test_only_an_explicit_zero_drops_the_crowdsec_docker_suites(make_fixture, value):
+    _, run = make_fixture
+    result, events = run("test-integration", f"CROWDSEC_DOCKER={value}")
+    assert result.returncode == 0, (result.stderr, events)
+    assert events[0] == {"kind": "build"}
+    (aggregate,) = [event for event in events if event.get("scope") == "aggregate"]
+    assert aggregate["crowdsec_ignored"] is False
 
 
 def test_fresh_native_target_keeps_existing_preparation(make_fixture):

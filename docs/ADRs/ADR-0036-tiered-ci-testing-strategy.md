@@ -52,7 +52,7 @@ a skipped job reports success) and run in the merge queue and on `master`:
 | Workflow | Required jobs | Pull request (fast tier) | Merge queue (the merge gate) |
 |---|---|---|---|
 | `platform.yml` | `coverage-gate` | skipped | the whole platform suite on SQLite with coverage floors, the only full run |
-| `platform.yml` | `platform-test` | the affected test modules (`scripts/affected_test_modules.py`), pytest-only classes, mypy | pytest-only classes, mypy |
+| `platform.yml` | `platform-test` | the affected test modules (`scripts/affected_test_modules.py`), or the whole suite without coverage when the detection says FULL; pytest-only classes, mypy | pytest-only classes, mypy |
 | `platform.yml` | `platform-postgres` | the PostgreSQL-gated tests under the affected modules (all of them when the detection says FULL, none when no platform module is affected) | every PostgreSQL-gated test |
 | `platform.yml` | `platform-security` | Bandit (blocking) | the same |
 | `portal.yml` | `portal-test` | portal unit tests and coverage floor, mypy | the same |
@@ -91,7 +91,7 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 
 ### Affected-Module Detection
 
-`scripts/affected_test_modules.py` maps changed platform paths to test modules; on a pull request `platform-test` runs those modules and `platform-postgres` runs the PostgreSQL-gated tests under them (`make test-platform-postgres-gated PG_GATED_AFFECTED=...`). It limits only the pull request's fast signal: the merge queue runs the whole suite (`coverage-gate`) and every gated test whatever it says.
+`scripts/affected_test_modules.py` maps changed platform paths to test modules; on a pull request `platform-test` runs those modules (the whole suite, without coverage, when it answers FULL; nothing when no platform module changed) and `platform-postgres` runs the PostgreSQL-gated tests under them (`make test-platform-postgres-gated PG_GATED_AFFECTED=...`). It limits only the pull request's fast signal: the merge queue runs the whole suite (`coverage-gate`) and every gated test whatever it says.
 
 ### Workflow Files
 
@@ -115,7 +115,7 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 - No test is permanently skipped — the full suite always runs somewhere
 
 ### Negative
-- A pull request no longer runs the full suite, the integration suite or the browser suites: a failure there surfaces only in the queue and ejects the pull request. A lab, native deploy or CrowdSec break surfaces only at the next nightly and blocks the release, not the merge. Dispatch `virtualmin-lab.yml` on the branch to learn about the lab earlier
+- A pull request runs the full suite only when the detection says FULL, and never the integration or browser suites: a failure there surfaces only in the queue and ejects the pull request. A lab, native deploy or CrowdSec break surfaces only at the next nightly and blocks the release, not the merge. Dispatch `virtualmin-lab.yml` on the branch to learn about the lab earlier
 - A flaky required check now also ejects a queued pull request and rebuilds the groups behind it
 - A required browser test that flakes blocks merges; flakes must be fixed, never retried away (ADR-0014)
 - A PostgreSQL-only bug outside the gated modules surfaces at the nightly or release-candidate run, not on the pull request

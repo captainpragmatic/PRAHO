@@ -196,9 +196,17 @@ def test_crowdsec_qualification_is_not_in_the_merge_queue() -> None:
     workflow = load_workflow(WORKFLOWS / "integration.yml")
     job = workflow["jobs"]["integration-suite"]
     steps = job["steps"]
-    assert not [step for step in steps if "crowdsec" in str(step).lower() and "PYTEST_ADDOPTS" not in str(step)]
-    (aggregate,) = [step for step in steps if step.get("run") == "make test-integration"]
+    for step in steps:
+        text = str(step).lower()
+        for forbidden in ("test-crowdsec-docker", "build-crowdsec", "crowdsec-patched", "crowdsec-bouncer"):
+            assert forbidden not in text, (step.get("name"), forbidden)
+    # CROWDSEC_DOCKER=0: no bouncer build, and the CrowdSec Docker suites are not collected
+    # (tests/integration/test_crowdsec_test_artifacts.py runs the real target both ways).
+    (aggregate,) = [step for step in steps if "make test-integration" in step.get("run", "")]
+    assert aggregate["run"] == "make test-integration CROWDSEC_DOCKER=0"
     assert "if" not in aggregate and "continue-on-error" not in aggregate
+    for scope in (workflow, job, aggregate):
+        assert "PYTEST_ADDOPTS" not in scope.get("env", {})
 
     # Derive the CrowdSec files from the actual Make recipe so a stale exclusion cannot silently miss new
     # suites or suppress unrelated Docker coverage.
@@ -209,12 +217,12 @@ def test_crowdsec_qualification_is_not_in_the_merge_queue() -> None:
     native_files = set(REPO.glob(native_glob))
     assert native_files, "the CrowdSec target must collect real files"
 
-    options = shlex.split(aggregate.get("env", {}).get("PYTEST_ADDOPTS", ""))
+    switch = re.search(r"^ifeq \(\$\(CROWDSEC_DOCKER\),0\)\n(.*?)^else\n(.*?)^endif$", makefile, re.M | re.S)
+    assert switch is not None, "CROWDSEC_DOCKER must switch the integration target"
+    options = shlex.split(re.search(r"^INTEGRATION_PYTEST_IGNORE := (.*)$", switch.group(1), re.M).group(1))
     assert options == [f"--ignore-glob={native_glob}"], "the aggregate must exclude exactly the CrowdSec suites"
     ignored_files = set(REPO.glob(options[0].split("=", 1)[1]))
     assert ignored_files == native_files
-    assert "PYTEST_ADDOPTS" not in workflow.get("env", {})
-    assert "PYTEST_ADDOPTS" not in job.get("env", {})
 
     other_native_files = set(REPO.glob("tests/deploy/test_*_docker.py")) - native_files
     assert other_native_files, "unrelated Docker suites must remain in the aggregate"
@@ -531,3 +539,36 @@ def test_required_browser_guard_rejects_every_unsuccessful_full_checkout(upstrea
         text=True,
     )
     assert (completed.returncode == 0) is (upstream == "success"), completed.stderr
+
+
+def _evaluate_step(condition: str, event: str, modules: str) -> bool:
+    """Evaluate platform-test's step conditions for one event and one detection answer."""
+    expression = condition.replace("&&", " and ").replace("||", " or ")
+    expression = expression.replace("github.event_name", repr(event))
+    expression = expression.replace("steps.affected.outputs.modules", repr(modules))
+    assert re.fullmatch(r"[\w\s'.()!=]+", expression), f"unsupported condition: {condition}"
+    return bool(eval(expression, {"__builtins__": {}}, {}))  # noqa: S307 -- the workflow's own fixed conditions
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push", "workflow_dispatch"])
+@pytest.mark.parametrize("modules", ["FULL", "", "tests.common tests.domains"])
+def test_platform_test_runs_the_whole_suite_on_a_pull_request_only_when_detection_says_full(
+    event: str, modules: str
+) -> None:
+    # On a pull request: the affected modules, the whole suite without coverage when the detection says FULL
+    # (billing, users, Makefile, uv.lock, shared/), nothing when no platform module changed. Elsewhere the
+    # detection does not run and coverage-gate is the only full run.
+    steps = load_workflow(WORKFLOWS / "platform.yml")["jobs"]["platform-test"]["steps"]
+    (detect,) = [step for step in steps if step.get("id") == "affected"]
+    detected = modules if _evaluate_step(detect["if"], event, modules) else ""
+    focused, full = (
+        [step for step in steps if step.get("name") == name]
+        for name in ("Run focused platform tests", "Run the whole platform suite (detection says FULL)")
+    )
+    assert len(focused) == len(full) == 1
+    assert _evaluate_step(focused[0]["if"], event, detected) is (
+        event == "pull_request" and detected not in ("FULL", "")
+    )
+    assert _evaluate_step(full[0]["if"], event, detected) is (event == "pull_request" and detected == "FULL")
+    run = full[0]["run"]
+    assert "manage.py test tests --verbosity=2 --failfast --parallel" in run and "coverage" not in run
