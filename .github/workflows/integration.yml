@@ -9,23 +9,11 @@
 # The integration suite is in the queue tier (ADR-0036): a pull request skips it, and `integration-test`
 # accepts that skip on a pull request only. Native deploy and CrowdSec qualification run nightly and in a
 # release candidate that cannot reuse the nightly's proof (release-candidate.yml).
+# Master gets no re-run on push: the queue tested exactly the commit it lands.
 
 name: Integration CI
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'deploy/**'
-      - '.env.example.*'
-      - 'services/**'
-      - 'shared/**'
-      - 'scripts/**'
-      - 'tests/**'
-      - 'Makefile'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/integration.yml'
   pull_request:
     branches: [master]
   # The merge queue tests each pull request on top of master and whatever is queued ahead of it.

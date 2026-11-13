@@ -345,9 +345,9 @@ def test_the_lab_runs_nightly_and_never_per_pull_request() -> None:
     # What replaces it: the full container lab every night master changed, and the release gate on it.
     from scripts.verify_release_candidate import RELEASE_SCOPES  # noqa: PLC0415
 
-    lab_workflow, lab_jobs, _step = RELEASE_SCOPES["lab"]
+    lab_workflow, lab_job_sets, _step = RELEASE_SCOPES["lab"]
     assert lab_workflow == "virtualmin-lab.yml"
-    assert "nightly-containers" in lab_jobs
+    assert frozenset({"nightly-containers"}) in lab_job_sets
     nightly = WORKFLOW["jobs"]["nightly-containers"]
     assert "make test-virtualmin-lab-containers" in str(nightly["steps"])
     assert "30 3 * * *" in [entry["cron"] for entry in on_block()["schedule"]]

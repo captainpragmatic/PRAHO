@@ -122,15 +122,27 @@ def verify(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> str:
     return f"The merge queue passed every required check on the candidate itself ({sha})"
 
 
-# A release scope -> (workflow, accepted job names, the step that proves it, or None for the whole job).
+# The native acceptance shards (scripts/run_native_acceptance.py): together they run every case once.
+NATIVE_PROFILES = ("split-prod-1", "split-prod-2", "split-prod-3", "split-prod-4", "combined-staging", "combined-prod")
+
+# A release scope -> (workflow, the job-name sets that can prove it, the step that proves it, or None for the
+# whole job). One run must hold every job of one set; a matrix names its jobs after the matrix value.
 # The nightly matrix names its job after the branch it tested; only master's counts.
-RELEASE_SCOPES: dict[str, tuple[str, tuple[str, ...], str | None]] = {
-    "postgres": ("nightly.yml", ("nightly (master)",), "Whole platform suite on PostgreSQL"),
+RELEASE_SCOPES: dict[str, tuple[str, tuple[frozenset[str], ...], str | None]] = {
+    "postgres": ("nightly.yml", (frozenset({"nightly (master)"}),), "Whole platform suite on PostgreSQL"),
     # make test-integration collects tests/deploy, CrowdSec's Docker qualification among them.
-    "crowdsec": ("nightly.yml", ("nightly (master)",), "Integration tests"),
-    "native": ("nightly.yml", ("nightly-native-deploy",), None),
+    "crowdsec": ("nightly.yml", (frozenset({"nightly (master)"}),), "Integration tests"),
+    # Every shard, or the single job of a nightly from before the shards.
+    "native": (
+        "nightly.yml",
+        (
+            frozenset(f"nightly-native-deploy ({profile})" for profile in NATIVE_PROFILES),
+            frozenset({"nightly-native-deploy"}),
+        ),
+        None,
+    ),
     # "nightly-full" is the container lab's name before node deploy moved to native acceptance.
-    "lab": ("virtualmin-lab.yml", ("nightly-containers", "nightly-full"), None),
+    "lab": ("virtualmin-lab.yml", (frozenset({"nightly-containers"}), frozenset({"nightly-full"})), None),
 }
 _EVIDENCE_RUNS = 100  # runs of one workflow on one commit; a full page is treated as truncated history
 # Step evidence from nightly.yml counts only when that commit's own nightly.yml checks out the run's exact
@@ -164,12 +176,26 @@ def _proof(job: JSONObject, step_name: str | None) -> bool:
     return len(steps) == 1 and steps[0].get("conclusion") == "success"
 
 
+def _covers(run: JSONObject, names: frozenset[str], step_name: str | None) -> bool:
+    """Whether one run proved every job of ``names``. For a matrix set, the run's jobs of that matrix must be
+    exactly the expected ones: a shard the verifier does not expect means the lists drifted apart."""
+    passed = {job["name"] for job in run["jobs"] if job["name"] in names and _proof(job, step_name)}
+    if not names <= passed:
+        return False
+    if len(names) > 1:
+        bases = {name.split(" (", 1)[0] for name in names}
+        family = {job["name"] for job in run["jobs"] if job["name"].split(" (", 1)[0] in bases}
+        return family == names
+    return True
+
+
 def release_evidence(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> dict[str, str]:
     """Per scope: ``reuse <run id>`` if a master run on exactly ``sha`` proved it, else ``run``."""
     answers: dict[str, str] = {}
     runs_by_workflow: dict[str, list[JSONObject]] = {}
     pinned: bool | None = None
-    for scope, (workflow, job_names, step_name) in RELEASE_SCOPES.items():
+    for scope, (workflow, job_sets, step_name) in RELEASE_SCOPES.items():
+        job_names = frozenset().union(*job_sets)
         if workflow == "nightly.yml" and step_name is not None:
             if pinned is None:
                 pinned = _nightly_pinned(sha, repo, gh)
@@ -199,15 +225,19 @@ def release_evidence(sha: str, repo: str, gh: Callable[[str], Any] = _gh) -> dic
             runs_by_workflow[workflow] = [] if truncated else runs
         # Monotone: reuse only if every execution of the scope on this commit passed. Any failure on the
         # commit, in any run or re-run, means `run`; no timestamp order decides. A run that skipped the job
-        # (or lacks the step) says nothing either way.
+        # (or lacks the step) says nothing either way. And one run must have proven a whole job set: shards
+        # from two runs, or a run that ran fewer shards, prove nothing.
         executed = [
             (run, job)
             for run in runs_by_workflow[workflow]
             for job in run["jobs"]
             if job["name"] in job_names and _ran(job, step_name)
         ]
-        proven = bool(executed) and all(_proof(job, step_name) for _run, job in executed)
-        answers[scope] = f"reuse {executed[0][0]['id']}" if proven else "run"
+        covering = [
+            run for run in runs_by_workflow[workflow] if any(_covers(run, names, step_name) for names in job_sets)
+        ]
+        proven = bool(executed) and all(_proof(job, step_name) for _run, job in executed) and bool(covering)
+        answers[scope] = f"reuse {covering[0]['id']}" if proven else "run"
     return answers
 
 

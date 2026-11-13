@@ -40,4 +40,4 @@ do not establish runtime compatibility or detection coverage.
 `CROWDSEC_BOUNCER_REJECTED_PACKAGE=1` explicitly reproduces the original package's
 two CIDR failures. Trial overrides require both `CROWDSEC_BOUNCER_BINARY` and its
 explicit `CROWDSEC_BOUNCER_SHA256`; the normal target accepts only locked hashes.
-Integration CI preserves binaries and provenance as downloadable artifacts.
+The release candidate's CrowdSec job runs this target when no nightly proved it on the candidate's commit.

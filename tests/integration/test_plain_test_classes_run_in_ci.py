@@ -159,7 +159,11 @@ class TestPlainTestClassesRunInCi:
         assert _scanner().plain_class_modules(), "the scan must find the plain classes it is meant to run"
 
     def test_the_platform_workflow_reruns_when_the_scan_changes(self) -> None:
+        # No paths filter on a pull request or a merge group, so a change to the scan alone runs it; master
+        # is not re-tested on push (the queue tested the exact commit it lands).
         document = yaml.safe_load((WORKFLOWS / "platform.yml").read_text())
         triggers = document.get("on", document.get(True))
 
-        assert SCRIPT in triggers["push"]["paths"]
+        for event in ("pull_request", "merge_group"):
+            assert "paths" not in (triggers[event] or {}) and "paths-ignore" not in (triggers[event] or {}), event
+        assert "push" not in triggers, f"a push paths filter would have to list {SCRIPT}"

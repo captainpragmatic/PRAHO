@@ -8,12 +8,16 @@ from __future__ import annotations
 
 import base64
 import json
+import re
+import shlex
 from pathlib import Path
 from typing import Any
 
 import pytest
+import yaml
 
 from scripts.verify_release_candidate import (
+    NATIVE_PROFILES,
     NIGHTLY_CHECKOUT_PIN,
     RELEASE_SCOPES,
     VerificationError,
@@ -127,8 +131,17 @@ def nightly_run(  # noqa: PLR0913  # One fixture field per fact a nightly run ca
     integration: str = "success",
     native: str = "success",
     full: str = "success",
+    shards: dict[str, str] | None = None,
 ) -> dict[str, Any]:
-    """A nightly.yml run: the matrix job "nightly (master)" and the native job."""
+    """A nightly.yml run: the matrix job "nightly (master)" and the native shard jobs.
+
+    ``shards`` maps a profile to its outcome, overriding ``native``; ``None`` as an outcome leaves it out."""
+    outcomes = dict.fromkeys(NATIVE_PROFILES, native) | (shards or {})
+    native_jobs = [
+        {"name": f"nightly-native-deploy ({profile})", "conclusion": outcome, "steps": []}
+        for profile, outcome in outcomes.items()
+        if outcome is not None
+    ]
     return {
         "id": run_id,
         "workflow": "nightly.yml",
@@ -142,7 +155,7 @@ def nightly_run(  # noqa: PLR0913  # One fixture field per fact a nightly run ca
                 "conclusion": full,
                 "steps": [step(POSTGRES_STEP, postgres), step(INTEGRATION_STEP, integration)],
             },
-            {"name": "nightly-native-deploy", "conclusion": native, "steps": []},
+            *native_jobs,
         ],
     }
 
@@ -393,3 +406,133 @@ def test_pick_runs_from_a_local_checkout_without_the_actions_environment(
     monkeypatch.setattr(module, "pick_candidate", lambda repo: seen.append(repo) or SHA)
     assert module.main(["verify_release_candidate.py", "--pick"]) == 0
     assert seen == ["{owner}/{repo}"] and capsys.readouterr().out.strip() == SHA
+
+
+def test_native_is_reused_only_when_every_shard_of_one_run_passed() -> None:
+    assert decisions([nightly_run(970), lab_run(971)])["native"] == "reuse"
+    for profile in NATIVE_PROFILES:
+        # One shard missing (a smaller matrix covers less) or failed: the native scope must run.
+        assert decisions([nightly_run(972, shards={profile: None}), lab_run(973)])["native"] == "run", profile
+        assert decisions([nightly_run(974, shards={profile: "failure"}), lab_run(975)])["native"] == "run", profile
+        assert decisions([nightly_run(976, shards={profile: "skipped"}), lab_run(977)])["native"] == "run", profile
+
+
+def test_native_shards_split_across_two_runs_prove_nothing() -> None:
+    first, second = NATIVE_PROFILES[:3], NATIVE_PROFILES[3:]
+    older = nightly_run(978, shards=dict.fromkeys(second))
+    newer = nightly_run(979, shards=dict.fromkeys(first))
+    assert decisions([newer, older, lab_run(980)])["native"] == "run"
+
+
+def test_the_unsharded_native_job_of_an_older_nightly_still_counts() -> None:
+    run = nightly_run(981, shards=dict.fromkeys(NATIVE_PROFILES))
+    run["jobs"].append({"name": "nightly-native-deploy", "conclusion": "success", "steps": []})
+    assert decisions([run, lab_run(982)])["native"] == "reuse"
+    run["jobs"][-1]["conclusion"] = "failure"
+    assert decisions([run, lab_run(983)])["native"] == "run"
+
+
+# --- The nightly still produces every scope a release candidate reuses ------------------------------------
+
+REPO = Path(__file__).resolve().parents[2]
+WORKFLOWS = REPO / ".github" / "workflows"
+
+
+def _workflow(name: str) -> dict[str, Any]:
+    # Quote GitHub's event key so YAML 1.1 does not read a bare `on` as True.
+    text = (WORKFLOWS / name).read_text(encoding="utf-8")
+    return yaml.safe_load(re.sub(r"^on:", '"on":', text, flags=re.MULTILINE))
+
+
+def _produced_job_names(workflow: dict[str, Any]) -> set[str]:
+    """The job names a scheduled run on master reports: `<id> (<value>)` for a one-key matrix."""
+    names: set[str] = set()
+    for job_id, job in workflow["jobs"].items():
+        assert "name" not in job, f"{job_id}: a name override would change what the verifier must match"
+        matrix = job.get("strategy", {}).get("matrix", {})
+        if not matrix:
+            names.add(job_id)
+            continue
+        ((key, values),) = matrix.items()
+        # The nightly's branch matrix comes from check-activity; master is the leg a release reuses.
+        values = ["master"] if key == "branch" else values
+        assert isinstance(values, list), f"{job_id}: the matrix must list its values for the verifier to match"
+        names.update(f"{job_id} ({value})" for value in values)
+    return names
+
+
+def _job(workflow: dict[str, Any], produced_name: str) -> dict[str, Any]:
+    return workflow["jobs"][produced_name.split(" (", maxsplit=1)[0]]
+
+
+@pytest.mark.parametrize("scope", sorted(RELEASE_SCOPES))
+def test_the_nightly_still_produces_every_scope_a_release_reuses(scope: str) -> None:
+    name, job_sets, step_name = RELEASE_SCOPES[scope]
+    workflow = _workflow(name)
+    assert "schedule" in workflow["on"], f"{name} must run on a schedule to leave evidence for the candidate"
+    # The first set is what today's workflow produces; the others match runs from before a rename.
+    current = job_sets[0]
+    produced = _produced_job_names(workflow)
+    assert current <= produced, f"{scope}: {sorted(current - produced)} no longer run in {name}"
+    if step_name is not None:
+        for job_name in current:
+            steps = [step for step in _job(workflow, job_name)["steps"] if step.get("name") == step_name]
+            assert len(steps) == 1, f"{scope}: {job_name} must run the step {step_name!r} exactly once"
+            assert "if" not in steps[0] and "continue-on-error" not in steps[0]
+
+
+def test_the_nightly_tests_exactly_the_commit_a_release_credits() -> None:
+    # A step scope is credited to the run's head_sha only when nightly.yml carries this pin.
+    assert NIGHTLY_CHECKOUT_PIN in (WORKFLOWS / "nightly.yml").read_text(encoding="utf-8")
+
+
+def test_the_proof_steps_run_what_their_scope_names() -> None:
+    nightly = _workflow("nightly.yml")["jobs"]["nightly"]
+    steps = {step.get("name"): step for step in nightly["steps"]}
+    postgres = steps[RELEASE_SCOPES["postgres"][2]]
+    assert "manage.py test tests" in postgres["run"] and "--settings=config.settings.ci" in postgres["run"]
+
+    # The crowdsec scope is proven by the integration step, so it must collect CrowdSec's Docker suites: the
+    # target's default (CROWDSEC_DOCKER=1), never the queue's CROWDSEC_DOCKER=0, on the line or through env
+    # (make's `?=` reads the environment). tests/integration/test_crowdsec_test_artifacts.py runs both.
+    integration = steps[RELEASE_SCOPES["crowdsec"][2]]
+    assert integration["run"] == "make test-integration"
+    workflow = _workflow("nightly.yml")
+    for scope in (workflow, nightly, integration):
+        environment = scope.get("env", {})
+        assert "PYTEST_ADDOPTS" not in environment and "CROWDSEC_DOCKER" not in environment
+    makefile = (REPO / "Makefile").read_text(encoding="utf-8")
+    assert re.search(r"^CROWDSEC_DOCKER \?= 1$", makefile, re.MULTILINE), "the default must keep CrowdSec"
+    recipe = re.search(r"^test-integration:[^\n]*\n((?:\t[^\n]*\n)+)", makefile, re.MULTILINE)
+    assert recipe is not None
+    collected = shlex.split(recipe.group(1).replace("\\\n", " "))
+    assert "tests/deploy/" in collected, "the integration target must collect tests/deploy"
+    assert not [arg for arg in collected if "crowdsec" in arg.lower() and arg.startswith("--ignore")]
+    assert list(REPO.glob("tests/deploy/test_crowdsec*_docker.py")), "CrowdSec's Docker suites must exist"
+
+
+def test_the_native_shards_are_one_list_for_the_verifier_the_nightly_and_the_candidate() -> None:
+    nightly = _workflow("nightly.yml")["jobs"]["nightly-native-deploy"]["strategy"]["matrix"]["profile"]
+    candidate = _workflow("release-candidate.yml")["jobs"]["rc-native"]["strategy"]["matrix"]["profile"]
+    assert tuple(nightly) == tuple(candidate) == NATIVE_PROFILES
+
+
+def test_five_of_six_shards_all_green_is_no_proof() -> None:
+    # Exactly the expected profiles, each present and green on the exact commit: anything less runs native.
+    run = nightly_run(984, shards={NATIVE_PROFILES[-1]: None})
+    assert len([job for job in run["jobs"] if job["name"].startswith("nightly-native-deploy")]) == 5
+    assert decisions([run, lab_run(985)])["native"] == "run"
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancelled", "skipped"])
+def test_a_shard_the_verifier_does_not_expect_is_no_proof(outcome: str) -> None:
+    # A matrix that grew or renamed a profile no longer matches the verifier's list: run, never reuse.
+    run = nightly_run(986)
+    run["jobs"].append({"name": "nightly-native-deploy (split-prod-5)", "conclusion": outcome, "steps": []})
+    assert decisions([run, lab_run(987)])["native"] == "run"
+
+
+@pytest.mark.parametrize("outcome", ["cancelled", "skipped", "failure", "timed_out"])
+def test_every_shard_outcome_but_success_means_run(outcome: str) -> None:
+    for profile in NATIVE_PROFILES:
+        assert decisions([nightly_run(988, shards={profile: outcome}), lab_run(989)])["native"] == "run", profile
