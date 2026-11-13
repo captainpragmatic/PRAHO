@@ -6,7 +6,7 @@ Provides hierarchical navigation with proper accessibility.
 {% load i18n %}
 
 <nav aria-label="{% trans 'Breadcrumb' %}" class="{% if css_class %}{{ css_class }}{% endif %}">
-  <ol class="flex items-center space-x-2 text-sm">
+  <ol class="flex flex-wrap items-center gap-y-1 space-x-2 text-sm">
     {% for item in items %}
     <li class="flex items-center">
       {% if not forloop.first %}

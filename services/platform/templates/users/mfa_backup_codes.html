@@ -89,7 +89,7 @@
             <div class="bg-slate-900 rounded-lg p-4 border border-slate-600 hover:border-green-500 transition-colors group">
               <div class="flex items-center justify-between">
                 <code class="text-lg font-mono text-green-400 select-all">{{ code }}</code>
-                {% trans "Copy" as copy_code_label %}{% icon_button "clipboard" copy_code_label variant="bare" icon_size="md" class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-green-400 transition-all ml-2" data_action="invoke" data_invoke="copyCodeAction" attrs=copy_attrs %}
+                {% trans "Copy" as copy_code_label %}{% icon_button "clipboard" copy_code_label variant="bare" icon_size="md" class="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 text-slate-400 hover:text-green-400 transition-all ml-2" data_action="invoke" data_invoke="copyCodeAction" attrs=copy_attrs %}
               </div>
             </div>
             {% endfor %}

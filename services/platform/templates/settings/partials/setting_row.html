@@ -14,7 +14,7 @@
       {% trans "Critical" as critical_lbl %}{% badge critical_lbl variant="danger" size="xs" %}
       {% endif %}
     </div>
-    <code class="inline-block mt-1 text-xs text-slate-500 font-mono bg-slate-900/50 px-1.5 py-0.5 rounded">{{ row.key }}</code>
+    <code class="inline-block mt-1 text-xs text-slate-500 font-mono bg-slate-900/50 px-1.5 py-0.5 rounded break-all">{{ row.key }}</code>
     {% if row.definition.deployment_fallback %}
     <p class="mt-1 text-xs text-slate-400">
       {% if row.inherited %}{% trans "Inherited from deployment" %}{% else %}{% trans "Explicit override" %}{% endif %}
