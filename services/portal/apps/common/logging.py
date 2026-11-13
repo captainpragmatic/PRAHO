@@ -36,7 +36,7 @@ class PortalJSONFormatter(logging.Formatter):
             log_entry["exception"] = record.exc_text or self.formatException(record.exc_info)
         # Redacted as data, then encoded: redacting the encoded text could swallow the backslash of an
         # escaped quote after a secret and break the JSON. Values json cannot encode are redacted as text.
-        return json.dumps(redact_urls(log_entry), default=lambda value: redact_text(str(value)))
+        return json.dumps(redact_urls(log_entry), default=lambda value: redact_sensitive_text(redact_text(str(value))))
 
 
 _SENSITIVE_KEYS = (
@@ -60,10 +60,12 @@ _SENSITIVE_KEY_NAME = re.compile(r"(?:^|[_.\-])(?:" + "|".join(_SENSITIVE_KEYS) 
 # Where a key=value or key: value may start in free text: an optional quote or parenthesis around a name, then = or :.
 _KEY_CANDIDATE = re.compile(r"""(["'(]?)([A-Za-z_][\w.\-]*)(["')]?)[ \t]*([=:])[ \t]*""")
 _CLOSING = {"[": "]", "{": "}", "(": ")"}
-# An unquoted value after "=" ends at whitespace (key=value pairs); after ":" it runs to the end of the clause, since
-# prose and YAML put spaces inside values ("password: correct horse battery").
-_EQUALS_VALUE_END = frozenset(" \t\r\n,;&)]}'\"")
-_COLON_VALUE_END = frozenset("\r\n,;&)]}")
+# An unquoted value ends at a line break, ";" or a closing bracket; after "=" also at whitespace, unless the value so
+# far is an authorization scheme (Bearer, Basic...) whose credential follows. A comma or "&" ends it only before another
+# key, and a quote only when no letter follows it ("can't" stays one value). Ambiguous text is redacted, not kept.
+_VALUE_END = frozenset("\r\n;)]}")
+_NEXT_KEY = re.compile(r"""\s*["']?[A-Za-z_][\w.\-]*["']?\s*[=:]""")
+_AUTH_SCHEMES = frozenset({"basic", "bearer", "digest", "negotiate", "token"})
 REDACTION_TEXT = "[REDACTED]"
 # How deep structured redaction walks; deeper (or cyclic) values are replaced, never recursed into.
 _MAX_DEPTH = 32
@@ -102,6 +104,22 @@ def _bracketed_end(text: str, start: int) -> int:
     return index
 
 
+def _unquoted_end(text: str, start: int, separator: str) -> int:
+    index = start
+    while index < len(text):
+        char = text[index]
+        if char in _VALUE_END:
+            break
+        if char in " \t" and separator == "=" and text[start:index].lower() not in _AUTH_SCHEMES:
+            break
+        if char in ",&" and _NEXT_KEY.match(text, index + 1):
+            break
+        if char in "\"'" and not (index + 1 < len(text) and text[index + 1].isalnum()):
+            break
+        index += 1
+    return start + len(text[start:index].rstrip())
+
+
 def _value_end(text: str, start: int, separator: str) -> int:
     if start >= len(text):
         return start
@@ -109,11 +127,7 @@ def _value_end(text: str, start: int, separator: str) -> int:
         return _quoted_end(text, start)
     if text[start] in _CLOSING:
         return _bracketed_end(text, start)
-    stops = _EQUALS_VALUE_END if separator == "=" else _COLON_VALUE_END
-    index = start
-    while index < len(text) and text[index] not in stops:
-        index += 1
-    return len(text[:index].rstrip()) if separator == ":" else index
+    return _unquoted_end(text, start, separator)
 
 
 def redact_sensitive_text(value: str) -> str:
@@ -145,18 +159,26 @@ def redact_sensitive_data(value: Any, _path: frozenset[int] = frozenset(), _dept
     """
     if isinstance(value, str):
         return redact_sensitive_text(value)
+    if isinstance(value, (bytes, bytearray)):  # A formatter would write it as text: redact that text now
+        return redact_sensitive_text(bytes(value).decode("utf-8", "replace"))
     if not isinstance(value, (dict, list, tuple)):
         return value
     if id(value) in _path or _depth >= _MAX_DEPTH:
         return REDACTION_TEXT
     path = _path | {id(value)}
     if isinstance(value, dict):
-        return {
-            redact_sensitive_data(key, path, _depth + 1): (
+        redacted: dict[Any, Any] = {}
+        for key, item in value.items():
+            new_key = redact_sensitive_data(key, path, _depth + 1)
+            if new_key != key and new_key in redacted:  # Two keys redacted alike: keep both entries
+                count = 2
+                while f"{new_key} ({count})" in redacted:
+                    count += 1
+                new_key = f"{new_key} ({count})"
+            redacted[new_key] = (
                 REDACTION_TEXT if _is_sensitive_key(key) else redact_sensitive_data(item, path, _depth + 1)
             )
-            for key, item in value.items()
-        }
+        return redacted
     items = [redact_sensitive_data(item, path, _depth + 1) for item in value]
     return items if isinstance(value, list) else tuple(items)
 
@@ -181,10 +203,14 @@ class SensitiveDataFilter(logging.Filter):
         try:
             self._redact(record)
         except Exception:  # A logging filter must never raise into the code that logs
+            # Redaction itself failed: withhold the record's text and every extra rather than emit what may hold a secret
             record.msg = "[log record withheld: redaction failed]"
             record.args = ()
             record.exc_info = None
             record.exc_text = None
+            for name in tuple(vars(record)):
+                if name not in _STANDARD_RECORD_ATTRIBUTES:
+                    setattr(record, name, REDACTION_TEXT)
         return True
 
     def _redact(self, record: logging.LogRecord) -> None:

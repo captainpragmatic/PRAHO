@@ -211,7 +211,21 @@ SENSITIVE_VALUES = (
     "horse battery",
     "extra-secret",
     "key-secret",
+    "bearer-secret",
+    "tkeepsecret",
+    "beta-secret",
+    "byte-secret",
+    "object-secret",
 )
+
+
+class _Labelled:
+    """An object a formatter can only write as text, which carries a secret when it does."""
+
+    def __str__(self) -> str:
+        return "password=object-secret"
+
+
 _REDACTION_MODULES = ("config.settings.dev", "config.settings.staging", "config.settings.prod")
 
 
@@ -245,6 +259,8 @@ def _records() -> dict[str, logging.LogRecord]:
     extras.password = "extra-secret"
     extras.query = {"card_number": ["4111111111111111"], "page": "2", "password=key-secret": 1}
     extras.session_note = "visible-note"
+    extras.payload = b"password=byte-secret"
+    extras.label = _Labelled()
     return {
         "key=value": record("login failed password=Hunter2-pw vat_number=RO76543210 cui=76543217"),
         "list value": record("{'password': ['first-secret', 'second-secret']}"),
@@ -254,6 +270,9 @@ def _records() -> dict[str, logging.LogRecord]:
         "structured args": record("profile %s", ({"password": ["first-secret"], "token": {"value": "nested-secret"}},)),
         "spaced value": record("password: correct horse battery"),
         "database detail": record("Key (vat_number)=(RO76543210) already exists."),
+        "authorization scheme": record("upstream refused Authorization=Bearer bearer-secret retry=1"),
+        "apostrophe": record("password=can'tkeepsecret"),
+        "colon list": record("password: alpha,beta-secret"),
         "extras": extras,
         "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
         "record.args": record("profile %s", ({"vat_number": "RO76543210", "password": "Hunter2-pw"},)),
@@ -297,3 +316,27 @@ class TestSensitiveDataRedaction:
         )
         record = logging.LogRecord("praho.crowdsec.auth", logging.INFO, __file__, 1, line, (), None)
         assert _deployed_handler_output(config, "crowdsec_auth", record) == line + "\n"
+
+    def test_a_failed_redaction_withholds_every_extra(self) -> None:
+        """When walking one extra fails, no later extra may reach a handler unredacted."""
+
+        class Exploding(dict):
+            def items(self) -> Any:
+                raise RuntimeError("changed during iteration")
+
+        for module in ("config.settings.staging", "config.settings.prod"):
+            config = _get_logging(module)
+            for handler_name in config["handlers"]:
+                record = logging.LogRecord("apps.users", logging.ERROR, __file__, 1, "update", (), None)
+                record.broken, record.note = Exploding(a=1), "token=exploding-secret"
+                output = _deployed_handler_output(config, handler_name, record)
+                assert "[log record withheld: redaction failed]" in output, (module, handler_name)
+                assert "exploding-secret" not in output, (module, handler_name)
+
+    def test_keys_redacted_alike_keep_both_entries(self) -> None:
+        from apps.common.logging import redact_sensitive_data  # noqa: PLC0415
+
+        redacted = redact_sensitive_data({"password=one": {"result": "success"}, "password=two": {"result": "failure"}})
+        assert sorted(item["result"] for item in redacted.values()) == ["failure", "success"]
+        assert "one" not in "".join(redacted)
+        assert "two" not in "".join(redacted)
