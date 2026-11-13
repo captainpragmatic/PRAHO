@@ -10,6 +10,7 @@ from typing import Any
 
 from django.utils.translation import gettext_lazy as _
 
+from apps.common.logging import with_sensitive_data_redaction
 from apps.common.secret_urls import secure_logging_config
 
 from .logging_config import add_crowdsec_auth_logging
@@ -485,6 +486,7 @@ LOGGING = add_crowdsec_auth_logging(LOGGING, CROWDSEC_AUTH_LOG_PATH)
 # Handler filters cover Django request and exception logging as well as app logs.
 
 LOGGING = secure_logging_config(LOGGING)
+LOGGING = with_sensitive_data_redaction(LOGGING)
 
 # Production and staging require an isolated credential for each Portal.
 PORTAL_HMAC_REQUIRE_ISOLATION = False

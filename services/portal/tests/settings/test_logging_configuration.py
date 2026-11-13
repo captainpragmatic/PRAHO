@@ -7,7 +7,11 @@ Validates that formatters, filters, handlers, and loggers are wired correctly.
 from __future__ import annotations
 
 import importlib
+import io
+import logging
+import logging.config
 import os
+import sys
 from typing import Any
 from unittest.mock import patch
 
@@ -191,3 +195,75 @@ class TestSecretURLFilterWiring:
         assert config["handlers"], "handlers are configured"
         for name, handler in config["handlers"].items():
             assert "secret_urls" in handler.get("filters", []), f"{module}: handler {name}"
+
+
+SENSITIVE_VALUES = ("Hunter2-pw", "RO76543210", "76543217", "4111111111111111")
+_REDACTION_MODULES = ("config.settings.dev", "config.settings.staging", "config.settings.prod")
+
+
+def _deployed_handler_output(config: dict[str, Any], handler_name: str, record: logging.LogRecord) -> str:
+    """What one configured handler writes for a record: its own filters and formatter, a stream instead of a file.
+
+    The filters and formatter are built the way dictConfig builds them, without dictConfig itself, which would
+    replace the test run's own logging.
+    """
+    spec = config["handlers"][handler_name]
+    configurator = logging.config.DictConfigurator(config)
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    for name in spec.get("filters", []):
+        handler.addFilter(configurator.configure_filter(dict(config["filters"][name])))
+    if "formatter" in spec:
+        handler.setFormatter(configurator.configure_formatter(dict(config["formatters"][spec["formatter"]])))
+    handler.handle(record)
+    return stream.getvalue()
+
+
+def _records() -> dict[str, logging.LogRecord]:
+    def record(message: str, args: tuple[object, ...] = (), exc_info: Any = None) -> logging.LogRecord:
+        return logging.LogRecord("apps.users", logging.ERROR, __file__, 1, message, args, exc_info)
+
+    try:
+        raise ValueError("charge failed card_number=4111111111111111 password=Hunter2-pw")
+    except ValueError:
+        failure = sys.exc_info()
+    return {
+        "key=value": record("login failed password=Hunter2-pw vat_number=RO76543210 cui=76543217"),
+        "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
+        "record.args": record("profile %s", ({"vat_number": "RO76543210", "password": "Hunter2-pw"},)),
+        "exception text": record("payment error", (), failure),
+    }
+
+
+class TestSensitiveDataRedaction:
+    """Every configured Portal handler, in every environment, writes a sensitive key's value as [REDACTED]."""
+
+    @pytest.mark.parametrize("module", _REDACTION_MODULES)
+    def test_every_handler_redacts_sensitive_values(self, module: str) -> None:
+        config = _get_logging(module)
+        failures = []
+        for handler_name in config["handlers"]:
+            for shape, record in _records().items():
+                output = _deployed_handler_output(config, handler_name, record)
+                leaked = [value for value in SENSITIVE_VALUES if value in output]
+                # A handler that writes no exception (the CrowdSec event sink writes only the message) can't leak one.
+                marked = "[REDACTED]" in output or (shape == "exception text" and "ValueError" not in output)
+                if leaked or not marked:
+                    failures.append((handler_name, shape, leaked, output[:160]))
+        assert failures == []
+
+    def test_ordinary_words_are_left_alone(self) -> None:
+        config = _get_logging("config.settings.prod")
+        record = logging.LogRecord("apps.users", logging.INFO, __file__, 1, "Password changed for %s", ("ana",), None)
+        output = _deployed_handler_output(config, "console", record)
+        assert "Password changed for ana" in output
+        assert "[REDACTED]" not in output
+
+    def test_a_crowdsec_event_line_passes_unchanged(self) -> None:
+        config = _get_logging("config.settings.prod")
+        line = (
+            '{"account":"acct_3f2a","event":"password_reset_failed","ip":"203.0.113.9",'
+            '"reason":"invalid_token","schema":1,"timestamp":"2026-11-13T05:00:00Z"}'
+        )
+        record = logging.LogRecord("praho.crowdsec.auth", logging.INFO, __file__, 1, line, (), None)
+        assert _deployed_handler_output(config, "crowdsec_auth", record) == line + "\n"
