@@ -24,6 +24,7 @@ class Command(BaseCommand):
                 "order_edit",
                 "staff_mfa",
                 "virtualmin",
+                "virtualmin_long_name",
                 "domain_checkout",
             ),
             default="baseline",

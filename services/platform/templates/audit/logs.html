@@ -47,8 +47,8 @@ Dark theme interface for staff/admin audit log monitoring
                             {% trans "Date Range" %}
                         </label>
                         <div class="flex gap-2">
-                            {% include 'components/input.html' with input_type='date' name='start_date' aria_label=_('Start date') placeholder='Start date' container_class='flex-1' %}
-                            {% include 'components/input.html' with input_type='date' name='end_date' aria_label=_('End date') placeholder='End date' container_class='flex-1' %}
+                            {% include 'components/input.html' with input_type='date' name='start_date' aria_label=_('Start date') placeholder='Start date' container_class='flex-1 min-w-0' %}
+                            {% include 'components/input.html' with input_type='date' name='end_date' aria_label=_('End date') placeholder='End date' container_class='flex-1 min-w-0' %}
                         </div>
                     </div>
 

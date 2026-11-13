@@ -157,9 +157,9 @@ Professional interface for staff to manage all user GDPR requests
                         </label>
                         <div class="flex gap-2">
                             {% trans 'Start date' as start_date_label %}
-                            {% input_field "start_date" input_type="date" aria_label=start_date_label container_class="flex-1" %}
+                            {% input_field "start_date" input_type="date" aria_label=start_date_label container_class="flex-1 min-w-0" %}
                             {% trans 'End date' as end_date_label %}
-                            {% input_field "end_date" input_type="date" aria_label=end_date_label container_class="flex-1" %}
+                            {% input_field "end_date" input_type="date" aria_label=end_date_label container_class="flex-1 min-w-0" %}
                         </div>
                     </div>
 
