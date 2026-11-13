@@ -8,8 +8,8 @@ below is read from source:
   and that every merge group starts too: the merge queue waits for the same checks on its own commit;
 - the merge queue waits longer than the slowest required job may run;
 - no required job tolerates its own failure (`continue-on-error`), which would let a red job pass;
-- the one job allowed to skip itself, the Virtualmin lab, skips on a pull request and, in the queue,
-  fails open;
+- no required job may skip itself: the Virtualmin lab check reports success unconditionally, because the
+  lab runs nightly and gates release candidates instead (ADR-0036);
 - the release-candidate workflow tests exactly the commit it vouches for, and only it may vouch.
 """
 
@@ -26,7 +26,6 @@ from typing import Any, ClassVar
 import pytest
 import yaml
 
-from scripts.ci_lab_needed import lab_needed
 from scripts.ci_native_needed import native_needed
 
 pytestmark = pytest.mark.integration
@@ -37,7 +36,7 @@ RULESETS = REPO / ".github" / "rulesets"
 GITHUB_ACTIONS_APP_ID = 15368
 
 # Jobs allowed an `if:` because skipping them is the selection itself, and it fails open.
-SELECTIVE_JOBS = {"pull-request": "!cancelled() && needs.changes.outputs.lab != 'false'"}
+SELECTIVE_JOBS: dict[str, str] = {}
 # A required job whose steps branch on the event: the PR runs a focused subset first, then everything.
 STEP_CONDITIONS_ALLOWED = {"platform-test"}
 STEP_CONDITIONS_ALWAYS_OK = {"always()", "failure()"}
@@ -197,54 +196,8 @@ def test_the_merge_queue_squashes_and_outwaits_the_slowest_job() -> None:
     assert queue["check_response_timeout_minutes"] > max(declared)
 
 
-def _lab_decision(repo: Path, event: str, base: str) -> str:
-    """Run the lab workflow's own decision step in ``repo`` and return what it wrote to its output."""
-    (step,) = [
-        step
-        for step in load_workflow(WORKFLOWS / "virtualmin-lab-pr.yml")["jobs"]["changes"]["steps"]
-        if step.get("id") == "decide"
-    ]
-    output = repo / "github_output"
-    output.write_text("")
-    env = {**os.environ, "EVENT": event, "BASE_SHA": base, "GITHUB_OUTPUT": str(output)}
-    # GitHub runs a `run:` step with `bash -e {0}`.
-    subprocess.run(["bash", "-e", "-c", step["run"]], cwd=repo, env=env, check=True, capture_output=True)  # noqa: S603, S607
-    return output.read_text().strip()
-
-
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True).stdout.strip()  # noqa: S603, S607
-
-
-def test_the_lab_runs_in_the_queue_only_and_fails_open_there(tmp_path: Path) -> None:
-    _git(tmp_path, "init", "--quiet")
-    _git(tmp_path, "config", "user.email", "ci@example.com")
-    _git(tmp_path, "config", "user.name", "CI")
-    (tmp_path / "scripts").mkdir()
-    (tmp_path / "scripts" / "ci_lab_needed.py").write_text((REPO / "scripts" / "ci_lab_needed.py").read_text())
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "--quiet", "-m", "base")
-    base = _git(tmp_path, "rev-parse", "HEAD")
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "docs" / "note.md").write_text("prose\n")
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "--quiet", "-m", "docs only")
-
-    # A push to a pull request never runs the lab, whatever it changes.
-    assert _lab_decision(tmp_path, "pull_request", "") == "lab=false"
-    # In the queue the base branch's rules decide: prose cannot reach the lab.
-    assert _lab_decision(tmp_path, "merge_group", base) == "lab=false"
-    # A base the step cannot read gives no diff, and no diff runs the lab, even when the checkout's own
-    # copy of the rules (what `git show :path` would read from the index) always says false.
-    (tmp_path / "scripts" / "ci_lab_needed.py").write_text("print('false')\n")
-    _git(tmp_path, "add", "scripts/ci_lab_needed.py")
-    assert _lab_decision(tmp_path, "merge_group", "") == "lab=true"
-    _git(tmp_path, "checkout", "--quiet", "HEAD", "--", "scripts/ci_lab_needed.py")
-    (tmp_path / "services" / "platform").mkdir(parents=True)
-    (tmp_path / "services" / "platform" / "x.py").write_text("x = 1\n")
-    _git(tmp_path, "add", ".")
-    _git(tmp_path, "commit", "--quiet", "-m", "platform code")
-    assert _lab_decision(tmp_path, "merge_group", base) == "lab=true"
 
 
 def _dco(repo: Path, event: str, base: str, head: str, body: str = "") -> int:
@@ -324,37 +277,6 @@ def test_no_workflow_runs_pull_request_code_on_a_comment() -> None:
         names = triggers if isinstance(triggers, list) else list(triggers or {})
         assert "issue_comment" not in names, path.name
         assert "pull_request_target" not in names, path.name
-
-
-@pytest.mark.parametrize(
-    ("changed", "expected"),
-    [
-        ([], True),  # the diff could not be computed: run
-        (["", "  "], True),
-        (["services/platform/apps/infrastructure/ansible_service.py"], True),
-        (["services/platform/apps/provisioning/services.py"], True),
-        (["services/platform/config/settings/base.py"], True),
-        # The lab bootstrap creates currencies, customers and staff users.
-        (["services/platform/apps/billing/models.py"], True),
-        (["services/platform/apps/customers/models.py"], True),
-        (["services/platform/apps/users/models.py"], True),
-        (["docs/ADRs/ADR-0036-tiered-ci-testing-strategy.md"], False),
-        (["services/portal/apps/billing/views.py", "README.md"], False),
-        (["README.md", "deploy/virtualmin-lab/compose.yml"], True),
-        # Imported by provisioning, and nobody had listed them: an allowlist of what reaches the lab goes stale.
-        (["services/platform/apps/orders/tasks.py", "services/platform/apps/tickets/models.py"], True),
-        (
-            [
-                "services/platform/tests/billing/test_x.py",
-                "tests/integration/test_y.py",
-                ".github/rulesets/master.json",
-            ],
-            False,
-        ),
-    ],
-)
-def test_the_lab_selection_fails_open(changed: list[str], expected: bool) -> None:
-    assert lab_needed(changed) is expected
 
 
 @pytest.mark.parametrize(

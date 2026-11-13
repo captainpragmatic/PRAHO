@@ -3,10 +3,8 @@
 # ===============================================================================
 # Container coverage and separate native acceptance (deploy/virtualmin-lab, see its README):
 #
-#   pull request   virtualmin-lab-pr.yml: the round trip, the contract suite, the workflow suite and the lab checks
-#                  (make test-virtualmin-lab) on the PINNED version, when the change can reach the lab. It is a
-#                  workflow of its own so that its required check never shares a name with a job this workflow
-#                  skips on a schedule or a dispatch.
+#   pull request   no lab: virtualmin-lab-pr.yml only reports its required check. Dispatch this workflow with
+#                  suite containers to run the lab on a branch before merging.
 #   release        release-candidate.yml reuses a nightly container lab on its exact commit, or calls this
 #                  workflow (suite containers) on the candidate (scripts/verify_release_candidate.py).
 #   containers     03:30 UTC, skipped when nothing changed in 24h: suites, fault injection, browsers and

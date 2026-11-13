@@ -4,7 +4,7 @@
 Reads changed file paths (one per line) from stdin and prints ``true`` or ``false``.
 
 The native jobs feed the required ``integration-test`` check, so a wrong ``false`` would let a change
-that breaks a native deploy merge untested. The rules therefore fail open, as ci_lab_needed.py does:
+that breaks a native deploy merge untested. The rules therefore fail open:
 
 - they list what cannot reach a native deploy, not what can; a path nobody listed runs it;
 - no input (the diff could not be computed, or it was empty) prints ``true``.

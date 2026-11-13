@@ -155,7 +155,6 @@ def test_standalone_components_validate_base_before_building_source_image() -> N
 @pytest.mark.parametrize(
     "workflow,job",
     [
-        ("virtualmin-lab-pr.yml", "pull-request"),
         ("virtualmin-lab.yml", "nightly-containers"),
         ("virtualmin-lab.yml", "native-full"),
     ],

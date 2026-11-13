@@ -43,7 +43,7 @@ Every pull request to `master` runs, with no paths filter on any required workfl
 | `portal.yml` | `portal-test`, `portal-server` | portal unit tests and coverage floor, mypy, prod-settings server acceptance |
 | `integration.yml` | `lint-and-quality`, `integration-test` | every `make lint` phase, migration checks with the base branch's validators, parity, Semgrep (new findings, blocking), cross-service, cache, isolation and deploy tests on PostgreSQL. `integration-test` also requires the native deployment acceptance (split cases in parallel shards, plus both combined profiles) unless every changed path is known not to reach a native deploy, which application code always does (`scripts/ci_native_needed.py`, the base branch's copy; it fails open, and master pushes always run it) |
 | `browser.yml` | `browser-e2e`, `browser-csp` | the Playwright suite against both live services, and the strict-CSP gates on their own stack |
-| `virtualmin-lab-pr.yml` | `pull-request` | in the merge queue only: the lab suites on the pinned Virtualmin unless every changed path is known not to reach them (`scripts/ci_lab_needed.py`, the base branch's copy; it fails open). On a pull request it reports success without running |
+| `virtualmin-lab-pr.yml` | `pull-request` | runs no lab: it reports success on every pull request and merge group, until the ruleset stops requiring it. The lab runs every night master changed (`virtualmin-lab.yml`), a failed night opens an issue, and a release candidate reuses the nightly lab on its exact commit or runs the lab on the candidate. Dispatch `virtualmin-lab.yml` with suite `containers` to run it on a branch first |
 | `dco-check.yml` | `dco` | sign-off on every commit of the pull request and on its description, which becomes the squash message; in the queue, on the queue's own squash commits |
 
 Every required workflow also runs on `merge_group`, and the queue lands a pull request only when the same checks pass on the queue's commit. `.github/rulesets/master.json` makes these checks required (only the GitHub Actions app can satisfy them), merges through the queue (squash, every entry's own group green, 150 minutes for checks to report), and allows squash merges only. A branch need not be up to date: the queue tests it on the current `master`. The owner may bypass on a pull request, never by a direct push. A workflow skipped by a paths filter never reports, so a required check on it would block forever: selection, where it exists, happens inside a job that reports success when it skips. No other workflow may have a job of a required check's name, because a skipped run of it would read as success. `tests/integration/test_ci_required_checks.py` enforces both.
@@ -81,7 +81,7 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 | File | Purpose |
 |------|---------|
 | `.github/workflows/platform.yml`, `portal.yml`, `integration.yml`, `browser.yml`, `dco-check.yml` | Tier 1 — every pull request, required |
-| `.github/workflows/virtualmin-lab-pr.yml` | Tier 1 when relevant, required |
+| `.github/workflows/virtualmin-lab-pr.yml` | required check only; the lab itself runs nightly (Tier 2) |
 | `.github/workflows/virtualmin-lab.yml` | Nightly container lab and drift runs; the release candidate reuses a nightly lab run on its exact commit or calls this workflow on the candidate |
 | `.github/workflows/nightly.yml` | Tier 2 — scheduled nightly |
 | `.github/workflows/release-candidate.yml` | Tier 2 — the release gate before staging |
