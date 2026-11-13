@@ -17,6 +17,7 @@ from apps.provisioning.virtualmin_security_policy import (
 )
 
 GENERIC_POLICY_FAILURE = "Effective inbound firewall policy is incomplete or admits unreviewed traffic."
+NAMED_POLICY_FAILURE = "Effective inbound firewall policy is incomplete or admits unreviewed traffic ({detail})."
 
 OPERATOR_KEY = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINdamAGCsQq31Uv+08lkBzoO4XLz2qYjJa8CGmj3B1Ea"
 OPERATOR_FINGERPRINT = "SHA256:bbXpuKG6zhzdmnxq256TlqzFBzRl2f6OOg722cYNbU8"
@@ -382,7 +383,7 @@ class NodePolicyProofTests(TestCase):
             evidence["listeners"].append(line)
             with self.subTest(line=line):
                 self.assertEqual(
-                    self.rejection(evidence), f"{GENERIC_POLICY_FAILURE[:-1]} (unreviewed listener: {line!r})."
+                    self.rejection(evidence), NAMED_POLICY_FAILURE.format(detail=f"unreviewed listener: {line!r}")
                 )
 
     def test_evidence_checks_name_what_they_rejected(self):
@@ -400,14 +401,14 @@ class NodePolicyProofTests(TestCase):
         firewall["firewall"].remove("PRAHO_NFT_INPUT_INSPECTED")
         for evidence, named in (
             (services, "usermin install ok installed 2.0"),
-            (principals, "Webmin principal root access: 'allow=0.0.0.0/0;deny=;modules=acl'"),
+            (principals, "Webmin principal 'root' access: 'allow=0.0.0.0/0;deny=;modules=acl'"),
             (firewall, "PRAHO_NFT_INPUT_INSPECTED"),
             (versions, "unreviewed versions: webmin '2.680', virtualmin '8.3.0'"),
             (grants, "missing admin grants: 10000 from 192.0.2.1/32"),
         ):
             with self.subTest(named=named):
                 message = self.rejection(evidence)
-                self.assertTrue(message.startswith(GENERIC_POLICY_FAILURE[:-1] + " ("), message)
+                self.assertTrue(message.startswith(NAMED_POLICY_FAILURE.partition("{detail}")[0]), message)
                 self.assertIn(named, message)
 
     def test_malformed_node_rows_are_refused_with_a_name_not_a_crash(self):

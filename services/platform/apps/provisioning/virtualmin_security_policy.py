@@ -71,7 +71,8 @@ MAX_FAILURE_DETAIL = 300
 def _fail(detail: str = "") -> NoReturn:
     """Refuse verification; evidence-level checks name what they rejected, parser internals stay generic.
 
-    Details quote node-supplied text with repr() and are bounded: the node may be compromised.
+    Each caller quotes the node-supplied text in its detail with repr(), since the node may be compromised;
+    names PRAHO itself expects, such as a missing fact, appear unquoted. Details are bounded here.
     """
     if detail:
         if len(detail) > MAX_FAILURE_DETAIL:
@@ -618,7 +619,7 @@ def _verify_principals(principals: list[dict[str, str]], username: str, cidrs: l
         actual = set(attributes.get("allow", "").split())
         wanted = set(cidrs) if principal["name"] == username else {"127.0.0.1/32"}
         if actual != wanted or attributes.get("deny") != "":
-            _fail(f"Webmin principal {principal['name']} access: {principal['access']!r}")
+            _fail(f"Webmin principal {principal['name']!r} access: {principal['access']!r}")
     if missing := {username, "root"} - found:
         _fail("missing Webmin principals: " + ", ".join(sorted(missing)))
 

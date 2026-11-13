@@ -175,6 +175,29 @@ class FailureDetailTests(TestCase):
         self.assertNotIn("noise", detail)
         self.assertLessEqual(len(failure_detail(stdout.replace("package x", "x" * 5000), "")), 1500)
 
+    def test_a_controller_error_on_stderr_keeps_its_origin(self) -> None:
+        # A missing role or a syntax error stops ansible-playbook before any task: both lines are on stderr.
+        for error in (
+            "[ERROR]: the role 'praho_missing' was not found in /x/playbooks/roles",
+            "[ERROR]: YAML parsing failed: Mapping values are not allowed in this context.",
+        ):
+            stderr = f"{error}\nOrigin: /x/playbooks/virtualmin.yml:4:7\n\n4   - role: praho_missing\n     ^ column 7\n"
+            with self.subTest(error=error):
+                detail = failure_detail("", stderr)
+                self.assertIn(error, detail)
+                self.assertIn("Origin: /x/playbooks/virtualmin.yml:4:7", detail)
+
+    def test_the_origin_kept_is_the_error_s_not_an_earlier_warning_s(self) -> None:
+        stderr = (
+            "[DEPRECATION WARNING]: a deprecated keyword\n"
+            "Origin: /x/playbooks/common.yml:1:1\n"
+            "[ERROR]: the role 'praho_missing' was not found\n"
+            "Origin: /x/playbooks/virtualmin.yml:9:3\n"
+        )
+        detail = failure_detail("PLAY [all]\n", stderr)
+        self.assertIn("Origin: /x/playbooks/virtualmin.yml:9:3", detail)
+        self.assertNotIn("common.yml", detail)
+
     def test_a_yaml_fatal_result_keeps_its_indented_stderr(self) -> None:
         stdout = (
             "[ERROR]: Task failed: Module failed: non-zero return code\n"
