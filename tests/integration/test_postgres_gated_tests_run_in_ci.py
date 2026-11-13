@@ -109,8 +109,17 @@ def _explicit_labels() -> set[str]:
     return labels
 
 
+def _derived(run: str) -> bool:
+    """A step that runs the scan's output: the script itself, or the make target that runs it."""
+    return SCRIPT in run or f"make {GATED_TARGET}" in run
+
+
 def _derived_step_runs_in_postgres_job() -> bool:
-    return any(any(SCRIPT in run for run in _postgres_ci_runs(job)) for _file, _name, job in _workflow_jobs())
+    """In a job the merge queue runs: the nightly no longer runs the gated tests on their own."""
+    return any(
+        "merge_group" in _triggers(file) and any(_derived(run) for run in _postgres_ci_runs(job))
+        for file, _name, job in _workflow_jobs()
+    )
 
 
 def _triggers(workflow_file: str) -> set[str]:
@@ -184,7 +193,8 @@ class TestPostgresGatedTestsRunInCi:
 
     def test_the_derived_step_runs_under_the_ci_settings_in_a_postgres_job(self) -> None:
         assert _derived_step_runs_in_postgres_job(), (
-            f"no workflow job with a PostgreSQL service runs {SCRIPT} under config.settings.ci"
+            f"no merge-queue job with a PostgreSQL bootstrap runs {SCRIPT} (or make {GATED_TARGET}) "
+            "under config.settings.ci"
         )
 
     def test_the_derived_step_runs_nothing_but_the_scan_output(self) -> None:
@@ -192,14 +202,17 @@ class TestPostgresGatedTestsRunInCi:
         seen = 0
         for _file, _name, job in _workflow_jobs():
             for run in _ci_runs(job):
-                if SCRIPT not in run:
+                if not _derived(run):
                     continue
                 seen += 1
-                assert "set -euo pipefail" in run, "a failing scan must stop the step, not run everything"
-                invocation = re.search(r"manage\.py test(.*?)--settings", run, flags=re.DOTALL)
-                assert invocation, "the step must run the platform tests"
-                assert not re.findall(r"\btests(?:\.\w+)+", invocation.group(1)), "no hand-named labels"
-        assert seen == 1
+                assert not re.findall(r"\btests(?:\.\w+)+", run), "no hand-named labels"
+                if SCRIPT in run:
+                    assert "set -euo pipefail" in run, "a failing scan must stop the step, not run everything"
+                    assert re.search(r"manage\.py test(.*?)--settings", run, flags=re.DOTALL), "it must run the tests"
+                else:
+                    # The make target's own recipe is checked below; the step passes the selection only.
+                    assert run.strip() == f'make {GATED_TARGET} PG_GATED_AFFECTED="$AFFECTED"', run
+        assert seen == 1, "one place runs the gated tests: the merge queue's platform-postgres"
 
     def test_the_make_target_runs_the_scan_output_and_stops_on_a_failed_or_empty_scan(self) -> None:
         recipe = _make_recipe(GATED_TARGET)

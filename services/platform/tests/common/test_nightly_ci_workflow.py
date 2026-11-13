@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+import sys
 import tempfile
-from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
@@ -16,9 +16,8 @@ from django.test import SimpleTestCase
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 _NIGHTLY_WORKFLOW = _REPOSITORY_ROOT / ".github" / "workflows" / "nightly.yml"
 _INTEGRATION_WORKFLOW = _REPOSITORY_ROOT / ".github" / "workflows" / "integration.yml"
-_CONCURRENCY_STEP_NAME = "Concurrency tests (PostgreSQL)"
 _API_TOKEN_STEP_NAME = "API token and registrar intent tests (PostgreSQL)"
-_PLATFORM_STEP_NAME = "Platform tests with coverage (no failfast — complete picture)"
+_WHOLE_SUITE_STEP_NAME = "Whole platform suite on PostgreSQL"
 _BILLING_CONCURRENCY_TEST_CLASS = (
     "tests.billing.test_payment_intent_security.DirectPaymentIntentPostgresConcurrencyTests"
 )
@@ -48,7 +47,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         cls.integration_job = integration_workflow["jobs"]["integration-suite"]
         cls.integration_gate = integration_workflow["jobs"]["integration-test"]
 
-    def test_concurrency_step_runs_on_postgresql_before_broad_suite(self) -> None:
+    def test_the_nightly_runs_the_whole_suite_on_postgresql_after_a_real_bootstrap(self) -> None:
         startup = next(
             step for step in self.nightly_job["steps"] if step.get("name") == "Start PostgreSQL (registry fallback)"
         )
@@ -56,36 +55,34 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         self.assertIn("github.workflow_sha", startup["run"])
         self.assertEqual(startup["env"], {"CI_POSTGRES_USER": "test", "POSTGRES_PASSWORD": "test"})
 
-        steps = self.nightly_job["steps"]
-        steps_by_name = {step.get("name"): step for step in steps}
-        self.assertIn(_CONCURRENCY_STEP_NAME, steps_by_name)
-        concurrency_step = steps_by_name[_CONCURRENCY_STEP_NAME]
-
-        step_names = [step.get("name") for step in steps]
+        step_names = [step.get("name") for step in self.nightly_job["steps"]]
         self.assertLess(
-            step_names.index(_CONCURRENCY_STEP_NAME),
-            step_names.index(_PLATFORM_STEP_NAME),
+            step_names.index("Start PostgreSQL (registry fallback)"), step_names.index(_WHOLE_SUITE_STEP_NAME)
         )
-        self.assertEqual(concurrency_step["timeout-minutes"], 15)
-        self.assertNotIn("continue-on-error", concurrency_step)
-        expected_environment = {
-            "DJANGO_SETTINGS_MODULE": "config.settings.ci",
-            "DB_NAME": "postgres",
-            "DB_USER": "test",
-            "DB_PASSWORD": "test",
-            "DB_HOST": "localhost",
-        }
-        for key, value in expected_environment.items():
-            self.assertEqual(concurrency_step["env"].get(key), value)
+        whole = next(step for step in self.nightly_job["steps"] if step.get("name") == _WHOLE_SUITE_STEP_NAME)
+        self.assertNotIn("continue-on-error", whole)
+        self.assertIn("manage.py test tests", whole["run"])
+        self.assertIn("--settings=config.settings.ci", whole["run"])
 
-        command = concurrency_step["run"]
-        self.assertIn(_BILLING_CONCURRENCY_TEST_CLASS, command)
-        self.assertIn(_PROMOTION_CONCURRENCY_TEST_CLASS, command)
-        self.assertIn(_RECURRING_COLLECTION_CONCURRENCY_TEST_CLASS, command)
-        self.assertIn(_API_TOKEN_CONCURRENCY_TEST_CLASS, command)
-        self.assertIn("--settings=config.settings.ci", command)
-        self.assertNotIn("config.settings.test", command)
-        self.assertNotIn("--parallel", command)
+    def test_the_money_safety_concurrency_classes_run_serially_in_the_merge_queue(self) -> None:
+        # The nightly no longer names them: the PostgreSQL-gated scan finds their modules, and the merge
+        # queue's platform-postgres runs every gated module serially (tests/integration/
+        # test_postgres_gated_tests_run_in_ci.py owns that wiring).
+        scan = subprocess.run(  # noqa: S603 -- the repository's own scan, by the running interpreter
+            [sys.executable, str(_REPOSITORY_ROOT / "scripts" / "pg_gated_test_modules.py")],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        )
+        modules = set(scan.stdout.split())
+        for test_class in (
+            _BILLING_CONCURRENCY_TEST_CLASS,
+            _PROMOTION_CONCURRENCY_TEST_CLASS,
+            _RECURRING_COLLECTION_CONCURRENCY_TEST_CLASS,
+            _API_TOKEN_CONCURRENCY_TEST_CLASS,
+        ):
+            self.assertIn(test_class.rsplit(".", 1)[0], modules)
 
     def test_api_token_concurrency_runs_on_postgresql_in_the_merge_queue(self) -> None:
         self.assertIn("integration-suite", self.integration_gate["needs"])
@@ -191,44 +188,26 @@ class CoverageGateWorkflowTests(SimpleTestCase):
         self.assertIn("make coverage-portal-unit", commands.splitlines())
         self.assertNotIn("coverage-portal-union", commands)
 
-    def test_shared_changes_trigger_integration_and_quality_jobs(self) -> None:
-        workflow = self._workflow("integration.yml")
-        jobs = _mapping(workflow["jobs"])
-        self.assertIn("integration-test", jobs)
-        self.assertIn("lint-and-quality", jobs)
-        triggers = _mapping(workflow["on"])
-        push = _mapping(triggers["push"])
-        paths = push["paths"]
-        self.assertIsInstance(paths, list)
-        patterns = cast(list[str], paths)
-        self.assertIn("shared/**", patterns)
-        for path in (
-            "shared/ui/templates/components/button.html",
-            "services/platform/apps/common/services.py",
-            "services/portal/apps/common/views.py",
-        ):
-            self.assertTrue(any(fnmatchcase(path, pattern) for pattern in patterns), path)
-        self.assertNotIn("paths-ignore", push)
-        # Both jobs are required checks: a pull request must start them whatever it changes.
-        pull_request = _mapping(triggers["pull_request"])
-        self.assertNotIn("paths", pull_request)
-        self.assertNotIn("paths-ignore", pull_request)
+    def test_every_change_starts_the_required_workflows_and_master_is_not_tested_again(self) -> None:
+        for name in ("platform.yml", "portal.yml", "integration.yml"):
+            with self.subTest(workflow=name):
+                triggers = _mapping(self._workflow(name)["on"])
+                # Required checks: a pull request and a merge group must start them whatever they change.
+                for event in ("pull_request", "merge_group"):
+                    trigger = _mapping(triggers[event])
+                    self.assertNotIn("paths", trigger)
+                    self.assertNotIn("paths-ignore", trigger)
+                # The queue tested exactly the commit it lands on master; a push re-run proves nothing new.
+                self.assertNotIn("push", triggers)
 
-    def test_nightly_global_floor_reads_the_makefile(self) -> None:
-        workflow = self._workflow("nightly.yml")
-        jobs = _mapping(workflow["jobs"])
-        job = _mapping(jobs["nightly"])
-        coverage_steps = [
-            step
-            for step in _steps(job)
-            if step.get("name") == "Platform tests with coverage (no failfast — complete picture)"
-        ]
-        self.assertEqual(len(coverage_steps), 1)
-        command = str(coverage_steps[0]["run"])
-        self.assertIn("floor=$(make -s print-PLATFORM_COVERAGE_FLOOR)", command)
-        self.assertIn('--fail-under="$floor"', command)
-        self.assertNotRegex(command, r"--fail-under[= ]\d+")
+    def test_the_nightly_keeps_only_the_portal_union_floor(self) -> None:
+        # SQLite coverage and its floors run in the merge queue (coverage-gate); the nightly keeps the portal
+        # union, which needs the browser suite's coverage.
+        jobs = _mapping(self._workflow("nightly.yml")["jobs"])
         self.assertIn("make coverage-portal-union", _commands(_mapping(jobs["nightly-e2e"])))
+        everything = "\n".join(_commands(_mapping(job)) for job in jobs.values())
+        for gone in ("coverage-platform", "PLATFORM_COVERAGE_FLOOR", "make lint", "check-types", "lint-security"):
+            self.assertNotIn(gone, everything)
 
     def test_platform_global_floor_is_78(self) -> None:
         self.assertEqual(self._make_variable("PLATFORM_COVERAGE_FLOOR"), "78")
@@ -335,7 +314,7 @@ class NightlyArtifactNamesTests(SimpleTestCase):
         return naming, upload
 
     def test_the_naming_step_replaces_slashes(self) -> None:
-        for job_name in ("nightly", "nightly-e2e"):
+        for job_name in ("nightly-e2e",):
             naming, _upload = self._naming_and_upload(job_name)
             self.assertEqual(naming["env"]["BRANCH"], "${{ matrix.branch }}")
             with tempfile.TemporaryDirectory() as directory, self.subTest(job=job_name):
@@ -350,7 +329,7 @@ class NightlyArtifactNamesTests(SimpleTestCase):
                 self.assertEqual(output.read_text().strip(), "suffix=fix-nightly-x")
 
     def test_uploads_are_named_from_that_step_with_distinct_prefixes(self) -> None:
-        expected = {"nightly": "nightly-reports-", "nightly-e2e": "nightly-e2e-"}
+        expected = {"nightly-e2e": "nightly-e2e-"}
         for job_name, prefix in expected.items():
             _naming, upload = self._naming_and_upload(job_name)
             self.assertEqual(upload["with"]["name"], prefix + "${{ steps.artifact.outputs.suffix }}")

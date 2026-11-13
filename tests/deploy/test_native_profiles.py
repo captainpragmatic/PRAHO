@@ -7,6 +7,7 @@ import subprocess
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -78,9 +79,16 @@ def test_split_shards_partition_the_split_profile_exactly(selections: dict[str, 
     assert set().union(*shards) == selections["split-prod"], "a split case is in no shard"
 
 
-def test_the_ci_matrix_runs_every_real_case_exactly_once(selections: dict[str, set[str]]) -> None:
-    # The matrix is what CI runs: it must cover every case once, whichever profiles it names.
-    profiles = ci_matrix_profiles()
+def nightly_matrix_profiles() -> list[str]:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/nightly.yml").read_text(encoding="utf-8"))
+    return list(workflow["jobs"]["nightly-native-deploy"]["strategy"]["matrix"]["profile"])
+
+
+@pytest.mark.parametrize("matrix", [ci_matrix_profiles, nightly_matrix_profiles])
+def test_the_ci_matrix_runs_every_real_case_exactly_once(selections: dict[str, set[str]], matrix: Any) -> None:
+    # The matrix is what CI runs (the nightly, and the release candidate when it cannot reuse the nightly):
+    # it must cover every case once, whichever profiles it names.
+    profiles = matrix()
     assert "all" not in profiles and "split-prod" not in profiles, "the matrix must run the shards, not the whole split"
     chosen = [selections[name] for name in profiles]
     assert sum(len(cases) for cases in chosen) == len(selections["all"]), "a case runs twice, or one is missing"

@@ -196,17 +196,17 @@ does not establish that every event was delivered or that its retention window i
 `make test-native-infra` formats, validates and runs mocked Terraform plans without cloud credentials.
 `make test-native-deploy` runs the dedicated Ubuntu 26.04/systemd lab with SSH, Ansible, PostgreSQL 16,
 Python 3.13, frozen dependencies, real Django/Gunicorn processes, DNS and a trusted fixture CA. It fails
-on unavailable prerequisites, empty collection, skips, failures and errors. Integration CI and nightly
-invoke it explicitly; generic integration collection excludes it. Container tests use host-managed
-swap and do not establish a production VPS's kernel, external routing or console behavior.
+on unavailable prerequisites, empty collection, skips, failures and errors. The nightly and the
+release candidate invoke it explicitly; generic integration collection excludes it. Container tests use
+host-managed swap and do not establish a production VPS's kernel, external routing or console behavior.
 
-The required `integration-test` check waits for both the general suite and native qualification.
-Integration CI qualifies `split-prod`, `combined-staging` and `combined-prod` in parallel so the
-independent topologies fit the merge queue deadline. All three profiles must pass; their 17, 6 and
-6 cases partition the complete 29-case gate without duplication. Failure, cancellation or skipping
-any profile fails the required check. Each runner rejects incomplete reports and unknown profiles.
+Native qualification is not in the merge queue (ADR-0036). The nightly runs it as six parallel shards
+(`split-prod-1` to `split-prod-4`, `combined-staging`, `combined-prod`) whose cases partition the
+complete 29-case gate without duplication. A release candidate reuses that proof only when every shard of
+one nightly run on its exact commit passed, and otherwise runs the same shards on the candidate. Each
+runner rejects incomplete reports and unknown profiles.
 
-The default `make test-native-deploy` and nightly still run all 29 cases. For targeted diagnosis,
-set `PRAHO_NATIVE_ACCEPTANCE_PROFILE` to one of the three profile names; a partial profile is not a
-complete qualification. Nightly uses the workflow revision alongside its branch suites, so an older
-staging checkout need not already contain the native qualification targets.
+The default `make test-native-deploy` runs all 29 cases. For targeted diagnosis, set
+`PRAHO_NATIVE_ACCEPTANCE_PROFILE` to one profile name; a partial profile is not a complete
+qualification. Nightly uses the workflow revision alongside its branch suites, so an older staging
+checkout need not already contain the native qualification targets.

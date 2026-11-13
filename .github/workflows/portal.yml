@@ -6,19 +6,12 @@
 #
 # Both jobs are required checks on master (.github/rulesets/master.json), so pull_request has no
 # paths filter. portal-server is in the queue tier (ADR-0036): a pull request skips it (a skipped job
-# reports success) and the merge queue runs it. Staging is never pushed to: it is promoted from master (make promote-staging).
+# reports success) and the merge queue runs it. Master gets no re-run on push: the queue tested exactly
+# the commit it lands. Staging is never pushed to: it is promoted from master (make promote-staging).
 
 name: Portal Service CI/CD
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'services/portal/**'
-      - 'shared/**'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/portal.yml'
   pull_request:
     branches: [master]
   # The merge queue tests each pull request on top of master and whatever is queued ahead of it.

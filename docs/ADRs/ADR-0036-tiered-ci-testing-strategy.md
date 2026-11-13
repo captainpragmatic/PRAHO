@@ -39,15 +39,35 @@ carried native deploy and CrowdSec qualification. Runner concurrency, not minute
 The pull request now runs a fast tier, the queue runs the merge gate, and native deploy, CrowdSec and the
 lab run nightly and in a release candidate that cannot reuse the nightly's proof for its exact commit.
 The accepted risk: a lab, native or CrowdSec break can sit on `master` until the next nightly, but it
-cannot ship, because the release candidate proves those scopes on the candidate.
+cannot ship, because the release candidate proves those scopes on the candidate. The nightly keeps only
+what no other tier runs, and `master` is not tested again on push: the queue tested exactly the commit it
+lands.
 
 ## Decision
+
+### One gating home per suite
+
+| Suite | Pull request (fast feedback) | Merge queue (may it enter `master`?) | Nightly (early warning) | Release candidate (may it ship?) |
+|---|---|---|---|---|
+| Lint, types, migrations, security scans | ✓ | ✓ again, on the merged tree | — | — |
+| Affected Platform tests, Portal tests | ✓ | Portal only (the full Platform run below covers the rest) | — | — |
+| Full Platform suite (SQLite) with coverage floors, Portal server | — | ✓ | — | — |
+| PostgreSQL-gated and concurrency tests | ✓ under the affected modules | ✓ all | — (inside the whole suite) | — |
+| Browser suites (e2e, strict CSP), core integration | — | ✓ | — | — |
+| Whole Platform suite on PostgreSQL | — | — | ✓ | ✓ reused, or run |
+| Virtualmin container lab | — | — | ✓ | ✓ reused, or run |
+| Native deploy (every shard), CrowdSec qualification | — | — | ✓ | ✓ reused, or run |
+| Virtualmin drift, browser coverage union | — | — | ✓ | — |
+
+"Reused, or run": the release candidate reuses a nightly's proof only for its exact commit, and runs the
+missing scopes on the candidate (Tier 2 below). `tests/integration/test_verify_release_candidate.py` fails
+when the nightly stops producing a scope the release candidate reuses.
 
 ### Tier 1 — the pull request runs the fast tier, the merge queue runs the merge gate
 
 Every pull request to `master` and every merge group start the same required workflows, with no paths
 filter on any of them. The queue-tier jobs skip on a pull request (`if: github.event_name != 'pull_request'`;
-a skipped job reports success) and run in the merge queue and on `master`:
+a skipped job reports success) and run in the merge queue. Nothing runs again on a push to `master`:
 
 | Workflow | Required jobs | Pull request (fast tier) | Merge queue (the merge gate) |
 |---|---|---|---|
@@ -73,9 +93,9 @@ Locally, contributors and agents run only what takes seconds on what they touche
 
 ### Tier 2 — nightly and release candidates (PostgreSQL, full)
 
-`nightly.yml` runs at 02:30 UTC when there was activity: the whole platform suite on PostgreSQL (`make test-platform-postgres-full`), the full suite with coverage, integration, cache and security suites on PostgreSQL, types, Semgrep against the staging release, and the browser suite with server-side coverage. `virtualmin-lab.yml` runs the full lab nightly and a drift run against the latest Virtualmin.
+`nightly.yml` runs at 02:30 UTC when there was activity, and only what no other tier runs (amended November 2026): the whole platform suite on PostgreSQL (`make test-platform-postgres-full`, spelled out for the staging leg), the integration suite on PostgreSQL with CrowdSec's Docker qualification (`make test-integration`), native deploy acceptance as six parallel shards (`scripts/run_native_acceptance.py`, the release candidate's matrix), and the browser suite with the portal's unit and browser coverage union. Lint, types, Semgrep, SQLite coverage and the portal tests run in the merge queue on every merge, so the nightly no longer repeats them. `virtualmin-lab.yml` runs the container lab nightly and a drift run against the latest Virtualmin.
 
-`release-candidate.yml` is dispatched by hand on a `master` commit (blank = the newest master commit the nightly runs proved in every release scope). `scripts/verify_release_candidate.py` confirms that the merge queue passed every required check on that exact commit (its `merge_group` runs; a commit merged around the queue is refused). Then, per release scope (the whole Platform suite on PostgreSQL, CrowdSec qualification, native deploy and the Virtualmin container lab), it answers `reuse` when a nightly run on master proved that scope on exactly this commit, or `run`; only the `run` scopes execute in the release candidate, on the candidate SHA (amended 2026-11-06). Evidence from any other commit never counts, so a release cut from a nightly-proven commit costs about a minute, and any other commit pays only for what it lacks. A step-proven scope reads its own step, so an unrelated failure in the same nightly job (lint runs last) does not void it. On success it posts the commit status `release-candidate` for people to read; promotion trusts the successful run itself, since anyone who can push could post a status.
+`release-candidate.yml` is dispatched by hand on a `master` commit (blank = the newest master commit the nightly runs proved in every release scope). `scripts/verify_release_candidate.py` confirms that the merge queue passed every required check on that exact commit (its `merge_group` runs; a commit merged around the queue is refused). Then, per release scope (the whole Platform suite on PostgreSQL, CrowdSec qualification, native deploy and the Virtualmin container lab), it answers `reuse` when a nightly run on master proved that scope on exactly this commit, or `run`; only the `run` scopes execute in the release candidate, on the candidate SHA (amended 2026-11-06). Evidence from any other commit never counts, so a release cut from a nightly-proven commit costs about a minute, and any other commit pays only for what it lacks. A step-proven scope reads its own step, so an unrelated failure in the same nightly job does not void it. The native scope needs every shard of one nightly run to have passed (or the single job of a nightly from before the shards). On success it posts the commit status `release-candidate` for people to read; promotion trusts the successful run itself, since anyone who can push could post a status.
 
 ### Promotion to staging
 
@@ -120,6 +140,7 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 - A required browser test that flakes blocks merges; flakes must be fixed, never retried away (ADR-0014)
 - A PostgreSQL-only bug outside the gated modules surfaces at the nightly or release-candidate run, not on the pull request
 - Semgrep blocks only new findings; the debt from before it ran in CI remains to be worked down
+- The nightly no longer lints, type-checks or Semgrep-scans the staging branch: staging is promoted from `master` commits the queue already checked
 
 ### Neutral
 - Portal tests are always SQLite (no change — Portal has no business database)

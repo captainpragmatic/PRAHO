@@ -1,8 +1,15 @@
 # ===============================================================================
-# NIGHTLY FULL SUITE — COMPREHENSIVE TESTING + COVERAGE
+# NIGHTLY — EARLY WARNING AND THE RELEASE CANDIDATE'S EVIDENCE
 # ===============================================================================
-# Runs the complete test suite WITHOUT failfast for a full picture.
-# Includes security lint and coverage reporting.
+# Runs only what the merge queue does not (ADR-0036): the whole platform suite on PostgreSQL, the
+# integration suite with CrowdSec's Docker qualification, native deploy acceptance in its shards, and the
+# browser suite with the portal's unit + browser coverage union. Lint, types, Semgrep, SQLite coverage and
+# the portal tests run in the merge queue on every merge. The Virtualmin lab and drift runs live in
+# virtualmin-lab.yml.
+#
+# A release candidate reuses this run's proof for its exact commit (scripts/verify_release_candidate.py,
+# RELEASE_SCOPES): the PostgreSQL and integration steps of "nightly (master)" and every native shard.
+# tests/integration/test_verify_release_candidate.py fails if one of them disappears from here.
 #
 # Schedule: 2:30 AM UTC daily (4:30 AM Bucharest time)
 # Skips automatically if no commits in the last 24h (saves runner minutes).
@@ -100,12 +107,19 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # Native qualification uses the workflow revision. An older staging checkout
-  # need not contain its Make targets; all three deployment topologies run here.
+  # need not contain its Make targets. The cases run as shards (scripts/run_native_acceptance.py),
+  # each on its own lab; together they run every case once, all three deployment topologies.
   # ---------------------------------------------------------------------------
   nightly-native-deploy:
     needs: check-activity
     if: needs.check-activity.outputs.branches != '[]'
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [split-prod-1, split-prod-2, split-prod-3, split-prod-4, combined-staging, combined-prod]
+    env:
+      PRAHO_NATIVE_ACCEPTANCE_PROFILE: ${{ matrix.profile }}
     steps:
     - uses: actions/checkout@v4
       with:
@@ -125,15 +139,20 @@ jobs:
     - name: Native deployment acceptance
       run: make test-native-deploy
 
+    # Not profile-specific: one matrix entry runs it.
     - uses: hashicorp/setup-terraform@v3
+      if: matrix.profile == 'combined-prod'
       with:
         terraform_version: 1.13.5
 
     - name: Native infrastructure adoption safety
+      if: matrix.profile == 'combined-prod'
       run: make test-native-infra
 
   # ---------------------------------------------------------------------------
-  # Full nightly suite (only if activity detected)
+  # The whole platform suite on PostgreSQL and the integration suite with CrowdSec (only if activity
+  # detected). The PostgreSQL-gated and concurrency tests run serially in the merge queue
+  # (platform.yml, platform-postgres); here they run inside the whole suite.
   # ---------------------------------------------------------------------------
   nightly:
     needs: check-activity
@@ -180,47 +199,8 @@ jobs:
       # A staging checkout may predate new Make targets or controller dependencies.
       run: uv tool run --from ansible-core==2.20.6 ansible-galaxy collection install ansible.posix:2.2.0
 
-    - name: Concurrency tests (PostgreSQL)
-      # This command also creates a fresh test database and applies the complete migration graph.
-      timeout-minutes: 15
-      env:
-        DJANGO_SETTINGS_MODULE: config.settings.ci
-        DB_NAME: postgres
-        DB_USER: test
-        DB_PASSWORD: test
-        DB_HOST: localhost
-      run: |
-        cd services/platform
-        PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test \
-          tests.billing.test_payment_intent_security.DirectPaymentIntentPostgresConcurrencyTests \
-          tests.promotions.test_order_discount_concurrency.PromotionOrderPostgresConcurrencyTests \
-          tests.billing.test_recurring_collection_concurrency.RecurringCollectionPostgresConcurrencyTests \
-          tests.api.test_api_token_concurrency.APITokenPostgresConcurrencyTests \
-          --settings=config.settings.ci --verbosity=2
-
-    # Every platform test that skips itself on SQLite, found by scanning the tests rather than
-    # by a list someone has to keep current. tests/integration/test_postgres_gated_tests_run_in_ci.py
-    # fails if this step goes missing or a gate idiom the scan cannot see appears.
-    - name: PostgreSQL-gated tests (derived from the tests themselves)
-      # Match the Platform workflow's budget for the same expanded serial suite.
-      # A 30-minute run timed out during steady progress near its final tests.
-      timeout-minutes: 45
-      env:
-        DJANGO_SETTINGS_MODULE: config.settings.ci
-        DB_NAME: postgres
-        DB_USER: test
-        DB_PASSWORD: test
-        DB_HOST: localhost
-      run: |
-        set -euo pipefail
-        modules=$("$UV_PROJECT_ENVIRONMENT/bin/python" scripts/pg_gated_test_modules.py)
-        cd services/platform
-        # shellcheck disable=SC2086  # one dotted label per line; word splitting is the intent
-        PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test $modules \
-          --settings=config.settings.ci --verbosity=2
-
-    # PRs run the whole suite on SQLite only; this is where a PostgreSQL-only difference anywhere in
-    # the suite shows up before a release candidate does.
+    # The merge queue runs the whole suite on SQLite only; this is where a PostgreSQL-only difference
+    # anywhere in the suite shows up before a release candidate does.
     - name: Whole platform suite on PostgreSQL
       timeout-minutes: 60
       env:
@@ -235,30 +215,6 @@ jobs:
         PYTHONPATH="$PWD" "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test tests \
           --settings=config.settings.ci --parallel --verbosity=1 --noinput
 
-    - name: Platform tests with coverage (no failfast — complete picture)
-      run: |
-        floor=$(make -s print-PLATFORM_COVERAGE_FLOOR)
-        cd services/platform
-        # Use the canonical app-only coverage configuration and floor from the Makefile.
-        export COVERAGE_RCFILE="$GITHUB_WORKSPACE/pyproject.toml"
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --settings=config.settings.test --verbosity=2
-        "$UV_PROJECT_ENVIRONMENT/bin/coverage" combine
-        "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-nightly.xml
-        "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing --fail-under="$floor"
-
-    - name: Per-package coverage floors (money and access paths)
-      run: |
-        # A healthy global average can hide a weak package, which is the whole reason this
-        # exists alongside the global floor. Reads the combined data from the step above.
-        make coverage-platform-packages
-
-    - name: Portal tests
-      env:
-        DJANGO_SETTINGS_MODULE: config.settings.dev
-      run: |
-        cd services/portal
-        PYTHONPATH='' PYTHONNOUSERSITE=1 "$UV_PROJECT_ENVIRONMENT/bin/python" -m pytest -v
-
     - name: Install the browser the page-monitor self-tests drive
       run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
 
@@ -271,60 +227,12 @@ jobs:
         DB_HOST: localhost
       run: make test-integration
 
-    - name: Cache and security tests
-      env:
-        DJANGO_SETTINGS_MODULE: config.settings.ci
-        DB_NAME: postgres
-        DB_USER: test
-        DB_PASSWORD: test
-        DB_HOST: localhost
-      run: |
-        make test-cache
-        make test-security
-
-    - name: Type checking (all services)
-      run: make check-types
-
-    - name: Install semgrep for security scanning
-      run: |
-        uv tool install "semgrep==${SEMGREP_VERSION}"
-        uv tool dir --bin >> "$GITHUB_PATH"
-      env:
-        SEMGREP_VERSION: '1.157.0'
-
-    # Blocking on findings introduced since the release staging runs. The code it already runs carries
-    # Semgrep debt from before the scanner worked in CI; a full-scan nightly would stay red on that
-    # forever and hide every new finding behind it.
-    - name: Security lint (new since the staging release)
-      env:
-        SEMGREP_STRICT: '1'
-      run: |
-        set -euo pipefail
-        git fetch origin staging
-        SEMGREP_BASELINE_REF="$(git merge-base HEAD origin/staging)" make lint-security
-
-    # Last, so a lint slip cannot skip the suites a release candidate reuses as evidence
-    # (scripts/verify_release_candidate.py reads their steps); it still fails the job.
-    - name: Full lint (every make lint phase)
-      run: make lint
-
-    # Artifact names may not contain `/`, which a dispatched `fix/...` branch would bring.
-    - name: Name the artifact after the branch
-      id: artifact
+    - name: Stop CI PostgreSQL
       if: always()
-      env:
-        BRANCH: ${{ matrix.branch }}
-      run: echo "suffix=${BRANCH//\//-}" >> "$GITHUB_OUTPUT"
-
-    - name: Upload nightly reports
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: nightly-reports-${{ steps.artifact.outputs.suffix }}
-        path: |
-          services/platform/coverage-nightly.xml
-        if-no-files-found: warn
-        retention-days: 30
+      run: |
+        if [ -f "$RUNNER_TEMP/praho-ci-postgres.sh" ]; then
+          bash "$RUNNER_TEMP/praho-ci-postgres.sh" --stop
+        fi
 
   # ---------------------------------------------------------------------------
   # Browser suite: both services live, real HMAC between them, server-side coverage.
@@ -343,14 +251,6 @@ jobs:
   #
   # No postgres service: the e2e settings use their own SQLite files.
   # ---------------------------------------------------------------------------
-
-    - name: Stop CI PostgreSQL
-      if: always()
-      run: |
-        if [ -f "$RUNNER_TEMP/praho-ci-postgres.sh" ]; then
-          bash "$RUNNER_TEMP/praho-ci-postgres.sh" --stop
-        fi
-
   nightly-e2e:
     needs: check-activity
     if: needs.check-activity.outputs.branches != '[]'

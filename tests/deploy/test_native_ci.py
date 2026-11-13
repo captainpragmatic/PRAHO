@@ -15,7 +15,7 @@ def native_nightly_jobs() -> tuple[dict, dict]:
         for name, job in jobs.items()
         if any("make test-native-deploy" in step.get("run", "") for step in job.get("steps", []))
     }
-    assert len(native) == 1, "Every active nightly run must qualify native deployment exactly once"
+    assert len(native) == 1, "Every active nightly run must qualify native deployment in one job's shards"
     return jobs, native
 
 
@@ -26,8 +26,23 @@ def test_native_nightly_uses_workflow_harness_when_staging_predates_the_make_tar
     assert checkout["with"]["ref"] == "${{ github.workflow_sha }}", (
         "Older app refs cannot supply the new native harness"
     )
-    assert "matrix" not in job.get("strategy", {}), "The native harness already qualifies all three topologies"
     assert job["if"] == jobs["nightly"]["if"], "Native qualification must run for every active nightly"
+
+
+def test_native_nightly_runs_the_shards_in_parallel_like_the_release_candidate() -> None:
+    # tests/integration/test_verify_release_candidate.py proves the shard list is the verifier's; the
+    # profiles together run every case once (tests/deploy/test_native_profiles.py).
+    _jobs, native = native_nightly_jobs()
+    job = next(iter(native.values()))
+    assert job["strategy"]["fail-fast"] is False, "one failed shard must not cancel the others' evidence"
+    assert job["env"]["PRAHO_NATIVE_ACCEPTANCE_PROFILE"] == "${{ matrix.profile }}"
+    assert "continue-on-error" not in job
+    for step in job["steps"]:
+        assert "continue-on-error" not in step
+        infrastructure = step.get("run") == "make test-native-infra" or step.get("uses", "").startswith(
+            "hashicorp/setup-terraform@"
+        )
+        assert step.get("if") == ("matrix.profile == 'combined-prod'" if infrastructure else None), step
 
 
 def test_the_master_nightly_tests_exactly_the_commit_its_run_names() -> None:

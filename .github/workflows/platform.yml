@@ -5,37 +5,20 @@
 # PRs (fast tier, ADR-0036): the affected test modules, or the whole suite without coverage when the
 #              detection says FULL (platform-test), and the PostgreSQL-gated tests under them
 #              (platform-postgres); coverage-gate skips.
-# Merge queue and master: the full suite with coverage floors (coverage-gate, the only full run)
+# Merge queue: the full suite with coverage floors (coverage-gate, the only full run)
 #              and every PostgreSQL-gated test (platform-postgres), which skip themselves on SQLite.
 #
 # The whole suite on PostgreSQL runs nightly (nightly.yml) and for every release candidate
 # (release-candidate.yml). Linting is consolidated in integration.yml (make lint).
 #
 # Every job is a required check on master (.github/rulesets/master.json), so pull_request has no
-# paths filter; a job skipped on a pull request reports success, and the merge queue runs it.
-# Staging is never pushed to: it is promoted from master (make promote-staging).
+# paths filter; a job skipped on a pull request reports success, and the merge queue runs it. Master
+# gets no re-run on push: the queue tested exactly the commit it lands. Staging is never pushed to: it is
+# promoted from master (make promote-staging).
 
 name: Platform Service CI/CD
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'services/platform/**'
-      - 'shared/**'
-      - 'scripts/affected_test_modules.py'
-      # What platform-postgres runs: its Makefile target, the scan, and the database bootstrap.
-      - 'Makefile'
-      - 'scripts/pg_gated_test_modules.py'
-      - 'scripts/plain_test_class_modules.py'
-      - 'scripts/start_ci_postgres.sh'
-      - 'pyproject.toml'
-      - 'uv.lock'
-      - '.github/workflows/**'
-      # Root files tests/common/test_ci_node_lockfile.py reads: a change to them alone must run it.
-      - 'package.json'
-      - 'package-lock.json'
-      - '.gitignore'
   pull_request:
     branches: [master]
   # The merge queue tests each pull request on top of master and whatever is queued ahead of it.

@@ -572,3 +572,17 @@ def test_platform_test_runs_the_whole_suite_on_a_pull_request_only_when_detectio
     assert _evaluate_step(full[0]["if"], event, detected) is (event == "pull_request" and detected == "FULL")
     run = full[0]["run"]
     assert "manage.py test tests --verbosity=2 --failfast --parallel" in run and "coverage" not in run
+
+
+def test_every_readme_badge_reports_a_workflow_that_runs_on_master() -> None:
+    # A badge shows the default branch's latest run. The required workflows no longer run on master (no push
+    # trigger), so their badges would freeze; a merge_group badge shows any queue entry's failure instead.
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    badges = re.findall(r"actions/workflows/([\w.-]+\.yml)/badge\.svg(\?[^)\s]*)?\)", readme)
+    assert badges, "the README has no workflow badge: this test would check nothing"
+    for workflow, query in badges:
+        assert not query, f"{workflow}: a filtered badge ({query}) may show a run that is not master's"
+        triggers = load_workflow(WORKFLOWS / workflow)["on"]
+        names = set(triggers if isinstance(triggers, (list, dict)) else [triggers])
+        # A schedule runs on master; a release candidate is dispatched on master only.
+        assert "schedule" in names or names == {"workflow_dispatch"}, workflow

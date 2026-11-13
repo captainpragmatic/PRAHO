@@ -10,9 +10,9 @@
 [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-4.1-blue.svg)](https://tailwindcss.com/)
 [![License: GPL v3+](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](LICENSE.md)
 
-[![Platform CI](https://github.com/captainpragmatic/PRAHO/actions/workflows/platform.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/platform.yml)
-[![Portal CI](https://github.com/captainpragmatic/PRAHO/actions/workflows/portal.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/portal.yml)
-[![Integration Tests](https://github.com/captainpragmatic/PRAHO/actions/workflows/integration.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/integration.yml)
+[![Nightly](https://github.com/captainpragmatic/PRAHO/actions/workflows/nightly.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/nightly.yml)
+[![Virtualmin Lab](https://github.com/captainpragmatic/PRAHO/actions/workflows/virtualmin-lab.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/virtualmin-lab.yml)
+[![Release candidate](https://github.com/captainpragmatic/PRAHO/actions/workflows/release-candidate.yml/badge.svg)](https://github.com/captainpragmatic/PRAHO/actions/workflows/release-candidate.yml)
 ![Tests](https://img.shields.io/badge/tests-11%2C000%2B-brightgreen.svg)
 
 [![mypy: strict](https://img.shields.io/badge/mypy-strict_%E2%9C%93-brightgreen.svg)](https://mypy-lang.org/)
