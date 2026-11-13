@@ -218,6 +218,12 @@ SENSITIVE_VALUES = (
     "object-secret",
     "byte-key-secret",
     "spaced-bearer-secret",
+    "whole-secret",
+    "nested-json-secret",
+    "stack-secret",
+    "cached-exc-secret",
+    "cli-secret",
+    "suffix-secret",
 )
 
 
@@ -257,6 +263,9 @@ def _records() -> dict[str, logging.LogRecord]:
         raise ValueError("charge failed card_number=4111111111111111 password=Hunter2-pw")
     except ValueError:
         failure = sys.exc_info()
+    stack = record("lookup failed")
+    stack.stack_info = "Stack (most recent call last):\n  check(password=stack-secret)"
+    stack.exc_text = "Traceback: cached password=cached-exc-secret"
     extras = record("update")
     extras.password = "extra-secret"
     extras.query = {"card_number": ["4111111111111111"], "page": "2", "password=key-secret": 1}
@@ -277,6 +286,12 @@ def _records() -> dict[str, logging.LogRecord]:
         "apostrophe": record("password=can'tkeepsecret"),
         "authorization spacing": record("Authorization=Bearer \t  spaced-bearer-secret next=1"),
         "colon list": record("password: alpha,beta-secret"),
+        "leading delimiter": record("password=;whole-secret"),
+        "spaced equals": record("password=correct horse battery"),
+        "nested json": record(json.dumps({"error": json.dumps({"password": "nested-json-secret"})})),
+        "command line": record("ran tool --password=cli-secret --verbose; also {'--token': 'cli-secret'}"),
+        "nested json inner quote": record(json.dumps({"error": json.dumps({"password": 'prefix"suffix-secret'})})),
+        "stack and cached exception": stack,
         "extras": extras,
         "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
         "record.args": record("profile %s", ({"vat_number": "RO76543210", "password": "Hunter2-pw"},)),
@@ -294,9 +309,16 @@ class TestSensitiveDataRedaction:
         for handler_name in config["handlers"]:
             for shape, record in _records().items():
                 output = _deployed_handler_output(config, handler_name, record)
-                leaked = [value for value in SENSITIVE_VALUES if value in output]
+                # The record itself is clean too, whatever this formatter happens to write (exc_info keeps the original
+                # exception object for formatters that need it; its text lives in exc_text).
+                attributes = repr({k: v for k, v in vars(record).items() if k != "exc_info"})
+                leaked = [value for value in SENSITIVE_VALUES if value in output or value in attributes]
                 # A formatter may write no exception, or no extras; where it writes them, they're redacted.
-                written = {"exception text": "ValueError", "extras": "visible-note"}.get(shape)
+                written = {
+                    "exception text": "ValueError",
+                    "extras": "visible-note",
+                    "stack and cached exception": "most recent call last",
+                }.get(shape)
                 marked = "[REDACTED]" in output or (written is not None and written not in output)
                 formatter = config["formatters"].get(config["handlers"][handler_name].get("formatter", ""), {})
                 if "JSONFormatter" in str(formatter.get("()", "")):
@@ -336,6 +358,7 @@ class TestSensitiveDataRedaction:
                 output = _deployed_handler_output(config, handler_name, record)
                 assert "[log record withheld: redaction failed]" in output, (module, handler_name)
                 assert "exploding-secret" not in output, (module, handler_name)
+                assert record.note == "[REDACTED]", (module, handler_name)  # withheld on the record, not just unwritten
 
     def test_keys_redacted_alike_keep_both_entries(self) -> None:
         from apps.common.logging import redact_sensitive_data  # noqa: PLC0415
@@ -356,3 +379,27 @@ class TestSensitiveDataRedaction:
             assert list(redacted.values()) == ["[REDACTED]"] * len(pair)
             for secret in ("one", "two", "=a", "=b"):
                 assert secret not in "".join(redacted)
+
+    def test_long_text_is_redacted_in_linear_time(self) -> None:
+        """A long unbroken word (a base64 blob, a token) must not stall the worker that logs it."""
+        import time  # noqa: PLC0415
+
+        from apps.common.logging import redact_sensitive_text  # noqa: PLC0415
+
+        # Big enough that a scan retried at every character (seconds) fails, small enough that it fails quickly.
+        for text in ("a" * 20_000, "password=" + "x " * 10_000, "a=" * 10_000, ", " * 10_000, "a" + " " * 20_000):
+            started = time.perf_counter()
+            redact_sensitive_text(text)
+            assert time.perf_counter() - started < 1.0, text[:12]
+
+    def test_a_value_ending_in_a_backslash_keeps_the_text_after_it(self) -> None:
+        """Inside JSON nested in JSON, the value's closing quote is found by escape depth, not swallowed with the rest."""
+        from apps.common.logging import redact_sensitive_text  # noqa: PLC0415
+
+        for secret in ("secret-bs\\", "secret-bs\\\\", 'secret-bs\\"'):
+            text = json.dumps({"error": json.dumps({"password": secret, "after": "kept-inner"}), "next": "kept-outer"})
+            redacted = redact_sensitive_text(text)
+            assert "secret-bs" not in redacted
+            assert "kept-inner" in redacted
+            assert "kept-outer" in redacted
+            json.loads(json.loads(redacted)["error"])  # still valid JSON at both levels
