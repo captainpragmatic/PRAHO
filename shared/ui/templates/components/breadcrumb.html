@@ -8,17 +8,17 @@ Provides hierarchical navigation with proper accessibility.
 <nav aria-label="{% trans 'Breadcrumb' %}" class="{% if css_class %}{{ css_class }}{% endif %}">
   <ol class="flex flex-wrap items-center gap-y-1 space-x-2 text-sm">
     {% for item in items %}
-    <li class="flex items-center">
+    <li class="flex items-center min-w-0">
       {% if not forloop.first %}
         <span class="text-slate-400 mx-2">{{ separator }}</span>
       {% endif %}
 
       {% if item.url and not forloop.last %}
-        <a href="{{ item.url }}" class="text-blue-400 hover:text-blue-300 font-medium transition-colors">
+        <a href="{{ item.url }}" class="min-w-0 break-words text-blue-400 hover:text-blue-300 font-medium transition-colors">
           {{ item.text }}
         </a>
       {% else %}
-        <span class="{% if forloop.last %}text-white font-semibold{% else %}text-slate-400{% endif %}">
+        <span class="min-w-0 break-words {% if forloop.last %}text-white font-semibold{% else %}text-slate-400{% endif %}">
           {{ item.text }}
         </span>
       {% endif %}

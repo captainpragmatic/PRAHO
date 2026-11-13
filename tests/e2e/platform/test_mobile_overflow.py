@@ -34,6 +34,14 @@ def test_the_server_form_breadcrumb_fits_a_phone(monitored_staff_page: Page) -> 
     _fits(monitored_staff_page, "/provisioning/virtualmin/servers/create/", 390)
 
 
+def test_a_long_unbroken_breadcrumb_item_fits_a_phone(
+    monitored_staff_page: Page, e2e_scenario: Callable[[str], Any]
+) -> None:
+    """Wrapping between items isn't enough: one 100-character server name must break inside itself."""
+    server = e2e_scenario("virtualmin_long_name")
+    _fits(monitored_staff_page, f"/provisioning/virtualmin/servers/{server['server_id']}/edit/", 390)
+
+
 def test_the_audit_and_gdpr_date_filters_fit_a_phone(monitored_staff_page: Page) -> None:
     _fits(monitored_staff_page, "/audit/logs/", 375)
     _fits(monitored_staff_page, "/audit/gdpr_management/", 375)

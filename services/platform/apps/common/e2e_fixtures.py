@@ -473,7 +473,7 @@ def _domain_checkout_scenario(key: str) -> dict[str, Any]:
     }
 
 
-def _virtualmin_scenario(key: str) -> dict[str, Any]:
+def _virtualmin_scenario(key: str, *, server_name: str = "") -> dict[str, Any]:
     """A tracked account on a server in maintenance, so its pages read PRAHO's own records and never call a node."""
     from apps.provisioning.models import Service, ServicePlan  # noqa: PLC0415 -- cross-domain fixture orchestration
     from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminServer  # noqa: PLC0415
@@ -491,7 +491,7 @@ def _virtualmin_scenario(key: str) -> dict[str, Any]:
     )
     server = VirtualminServer.objects.create(
         legacy_security_admission=True,
-        name=f"e2e-vm-{key}",
+        name=server_name or f"e2e-vm-{key}",
         hostname=f"vm-{key}.e2e.example",
         api_username="e2e-api",
         status="maintenance",
@@ -529,6 +529,8 @@ def seed_scenario(scenario: str, key: str) -> dict[str, Any]:
         "order_edit": _order_edit_scenario,
         "staff_mfa": _staff_mfa_scenario,
         "virtualmin": _virtualmin_scenario,
+        # The longest server name the model allows, with nothing a line could break at.
+        "virtualmin_long_name": lambda key: _virtualmin_scenario(key, server_name=f"e2evm{key}".ljust(100, "x")),
     }
     if scenario in builders:
         return builders[scenario](key)
