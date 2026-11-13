@@ -81,6 +81,15 @@ def _first_failure_line(stdout: str, stderr: str) -> str:
     return next((line.strip()[:300] for line in stderr.splitlines() if line.strip()), "")
 
 
+def _error_origin(text: str) -> str:
+    """The Origin line of the first [ERROR] in one stream; a warning's Origin above it is not the error's."""
+    lines = [line.strip() for line in text.splitlines()]
+    error = next((index for index, line in enumerate(lines) if line.startswith("[ERROR]:")), None)
+    if error is None:
+        return ""
+    return next((line for line in lines[error + 1 :] if line.startswith("Origin:")), "")
+
+
 def _bounded_field(text: str, budget: int = 240) -> str:
     """Keep a field's start and, where it is long, its end: the final error usually follows warnings or a traceback."""
     if len(text) <= budget:
@@ -94,10 +103,10 @@ def failure_detail(stdout: str, stderr: str) -> str:
 
     Ansible prints the failing task to stdout; stderr often carries only deprecation warnings. Since
     ansible-core 2.19 the first error is generic ("Module failed: non-zero return code"), so the task's
-    Origin line and its fatal result (which holds the command's stderr) are kept with it."""
+    Origin line and its fatal result (which holds the command's stderr) are kept with it. A controller error,
+    such as a missing role or a syntax error, prints its [ERROR] and Origin on stderr instead."""
     first = _first_failure_line(stdout, stderr) or stderr.strip()[:500]
-    lines = [line.strip() for line in stdout.splitlines()]
-    origin = next((line for line in lines if line.startswith("Origin:")), "")
+    origin = _error_origin(stdout) or _error_origin(stderr)
     raw = stdout.splitlines()
     at = next((index for index, line in enumerate(raw) if re.match(r"fatal: \[.*\]: FAILED! =>", line.strip())), None)
     fatal = ""
