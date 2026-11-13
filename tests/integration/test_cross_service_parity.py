@@ -170,9 +170,20 @@ class TestNewTagParity(TestCase):
 
 _REDACTION_NAMES = (
     "_SENSITIVE_KEYS",
-    "_SENSITIVE_VALUE",
+    "_SENSITIVE_KEY_NAME",
+    "_KEY_CANDIDATE",
+    "_CLOSING",
+    "_EQUALS_VALUE_END",
+    "_COLON_VALUE_END",
     "REDACTION_TEXT",
+    "_MAX_DEPTH",
+    "_is_sensitive_key",
+    "_quoted_end",
+    "_bracketed_end",
+    "_value_end",
     "redact_sensitive_text",
+    "redact_sensitive_data",
+    "_STANDARD_RECORD_ATTRIBUTES",
     "SensitiveDataFilter",
     "with_sensitive_data_redaction",
 )

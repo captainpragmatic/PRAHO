@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import io
+import json
 import logging
 import logging.config
 import os
@@ -197,7 +198,20 @@ class TestSecretURLFilterWiring:
             assert "secret_urls" in handler.get("filters", []), f"{module}: handler {name}"
 
 
-SENSITIVE_VALUES = ("Hunter2-pw", "RO76543210", "76543217", "4111111111111111")
+SENSITIVE_VALUES = (
+    "Hunter2-pw",
+    "RO76543210",
+    "76543217",
+    "4111111111111111",
+    "first-secret",
+    "second-secret",
+    "nested-secret",
+    "tuple-secret",
+    "quote-secret",
+    "horse battery",
+    "extra-secret",
+    "key-secret",
+)
 _REDACTION_MODULES = ("config.settings.dev", "config.settings.staging", "config.settings.prod")
 
 
@@ -227,8 +241,20 @@ def _records() -> dict[str, logging.LogRecord]:
         raise ValueError("charge failed card_number=4111111111111111 password=Hunter2-pw")
     except ValueError:
         failure = sys.exc_info()
+    extras = record("update")
+    extras.password = "extra-secret"
+    extras.query = {"card_number": ["4111111111111111"], "page": "2", "password=key-secret": 1}
+    extras.session_note = "visible-note"
     return {
         "key=value": record("login failed password=Hunter2-pw vat_number=RO76543210 cui=76543217"),
+        "list value": record("{'password': ['first-secret', 'second-secret']}"),
+        "nested dict value": record("{'token': {'value': 'nested-secret'}}"),
+        "tuple value": record("{'password': ('tuple-secret-1', 'tuple-secret-2')}"),
+        "escaped quote": record('password="has\\"quote-secret"'),
+        "structured args": record("profile %s", ({"password": ["first-secret"], "token": {"value": "nested-secret"}},)),
+        "spaced value": record("password: correct horse battery"),
+        "database detail": record("Key (vat_number)=(RO76543210) already exists."),
+        "extras": extras,
         "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
         "record.args": record("profile %s", ({"vat_number": "RO76543210", "password": "Hunter2-pw"},)),
         "exception text": record("payment error", (), failure),
@@ -246,8 +272,12 @@ class TestSensitiveDataRedaction:
             for shape, record in _records().items():
                 output = _deployed_handler_output(config, handler_name, record)
                 leaked = [value for value in SENSITIVE_VALUES if value in output]
-                # A handler that writes no exception (the CrowdSec event sink writes only the message) can't leak one.
-                marked = "[REDACTED]" in output or (shape == "exception text" and "ValueError" not in output)
+                # A formatter may write no exception, or no extras; where it writes them, they're redacted.
+                written = {"exception text": "ValueError", "extras": "visible-note"}.get(shape)
+                marked = "[REDACTED]" in output or (written is not None and written not in output)
+                formatter = config["formatters"].get(config["handlers"][handler_name].get("formatter", ""), {})
+                if "JSONFormatter" in str(formatter.get("()", "")):
+                    json.loads(output)  # still one valid JSON line
                 if leaked or not marked:
                     failures.append((handler_name, shape, leaked, output[:160]))
         assert failures == []
