@@ -141,8 +141,9 @@ verification. Keep signed changes small and record progress in the
 [implementation ledger](../security/crowdsec-implementation.md).
 
 Use Ubuntu 26.04 systemd/SSH/UFW fixtures and nftables namespaces. Explicit
-`make test-crowdsec-docker` belongs in required Integration CI for PRs and merge
-groups. Prove restricted SSH, bounded snapshots over 100 alerts, schema/replacement
+`make test-crowdsec-docker` runs nightly and in every release candidate that cannot
+reuse the nightly's proof for its commit (amended November 2026, ADR-0036; it left
+the merge queue). Prove restricted SSH, bounded snapshots over 100 alerts, schema/replacement
 refusal, real HTTPS drops after positive controls, protected access, both address
 families and CIDRs, UFW/reboot/restart/simulation ownership, real PostgreSQL races,
 Portal throttle/header/MFA/outage/erasure paths, RBAC/CSRF, and 390/820/1280 px UI.

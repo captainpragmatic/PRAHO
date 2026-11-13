@@ -2,16 +2,17 @@
 # PLATFORM SERVICE CI/CD
 # ===============================================================================
 # All events:  SQLite (fast, reliable — matches local dev + test.py settings)
-# PRs:         the full suite with coverage floors (coverage-gate), plus affected-module detection
-#              for a fast first signal (platform-test)
-# Master push: Full suite + coverage
+# PRs (fast tier, ADR-0036): the affected test modules (platform-test) and the PostgreSQL-gated
+#              tests under them (platform-postgres); coverage-gate skips.
+# Merge queue and master: the full suite with coverage floors (coverage-gate, the only full run)
+#              and every PostgreSQL-gated test (platform-postgres), which skip themselves on SQLite.
 #
-# PostgreSQL: every PR and push also runs the PostgreSQL-gated tests (platform-postgres), which
-# skip themselves on SQLite. The whole suite on PostgreSQL runs nightly (nightly.yml) and for every
-# release candidate (release-candidate.yml). Linting is consolidated in integration.yml (make lint).
+# The whole suite on PostgreSQL runs nightly (nightly.yml) and for every release candidate
+# (release-candidate.yml). Linting is consolidated in integration.yml (make lint).
 #
 # Every job is a required check on master (.github/rulesets/master.json), so pull_request has no
-# paths filter. Staging is never pushed to: it is promoted from master (make promote-staging).
+# paths filter; a job skipped on a pull request reports success, and the merge queue runs it.
+# Staging is never pushed to: it is promoted from master (make promote-staging).
 
 name: Platform Service CI/CD
 
@@ -55,6 +56,7 @@ concurrency:
 
 jobs:
   coverage-gate:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
 
     steps:
@@ -126,22 +128,6 @@ jobs:
         DIRS=$(echo "$MODULES" | tr ' ' '\n' | sed 's/\./\//g' | tr '\n' ' ')
         PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/python" manage.py test $DIRS --verbosity=2 --failfast --parallel
 
-    - name: Run full platform tests with coverage
-      if: github.event_name != 'pull_request' || steps.affected.outputs.modules == 'FULL' || steps.affected.outputs.modules == ''
-      run: |
-        cd services/platform
-        # Coverage does not walk up for its config, so run from here it previously found
-        # none: `source`, the omit of tests/migrations, and branch coverage were all
-        # inactive and test files counted as covered source. And `--parallel` forks workers
-        # whose data is discarded without `concurrency = multiprocessing`, leaving only the
-        # parent - which imports everything and runs almost nothing. That pair reported 28%.
-        export COVERAGE_RCFILE="$GITHUB_WORKSPACE/pyproject.toml"
-        PYTHONPATH=$(pwd) "$UV_PROJECT_ENVIRONMENT/bin/coverage" run manage.py test tests --verbosity=2 --parallel
-        # Required: with parallel data enabled, each process writes its own file.
-        "$UV_PROJECT_ENVIRONMENT/bin/coverage" combine
-        "$UV_PROJECT_ENVIRONMENT/bin/coverage" xml -o coverage-platform.xml
-        "$UV_PROJECT_ENVIRONMENT/bin/coverage" report --show-missing
-
     # The Django runner above only collects unittest.TestCase subclasses. Plain pytest-style
     # Test* classes run here, from a scan of the tests so a new one needs no workflow edit.
     - name: Plain Test* classes (pytest-only, derived from the tests themselves)
@@ -150,18 +136,10 @@ jobs:
     - name: Platform type checking
       run: make check-types-platform
 
-    - name: Upload platform artifacts
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: platform-reports
-        path: |
-          services/platform/htmlcov/
-          services/platform/coverage-platform.xml
-        if-no-files-found: warn
-
   # The tests that skip themselves on SQLite, found by scanning the tests. Without this job they
-  # first ran after merge, in the nightly, so a PR could break one and still merge green.
+  # first ran after merge, in the nightly, so a PR could break one and still merge green. A pull
+  # request runs those under its affected modules (platform-test's detection); every other event,
+  # the merge queue included, runs them all.
   platform-postgres:
     runs-on: ubuntu-latest
     # Include cold schema setup and database teardown in the serial suite's budget.
@@ -176,6 +154,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Start PostgreSQL (registry fallback)
       run: make ci-postgres-start CI_POSTGRES_IMAGE_TAG=16
@@ -194,8 +174,33 @@ jobs:
         uv python install
         uv sync --all-groups
 
+    # Not a step condition: the step answers for every event, and anything but a pull request is FULL.
+    - name: Detect affected test modules (a pull request runs the gated tests under them)
+      id: affected
+      env:
+        EVENT: ${{ github.event_name }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        if [ "$EVENT" != pull_request ]; then
+          echo "modules=FULL" >> "$GITHUB_OUTPUT"
+          echo "$EVENT runs every PostgreSQL-gated test"
+          exit 0
+        fi
+        git fetch origin "$PR_BASE_SHA" --depth=1 || true
+        CHANGED=$(git diff --name-only "$PR_BASE_SHA"...HEAD)
+        if [ -z "$CHANGED" ]; then
+          echo "modules=FULL" >> "$GITHUB_OUTPUT"
+          echo "No changed files detected — running full suite"
+          exit 0
+        fi
+        MODULES=$(echo "$CHANGED" | "$UV_PROJECT_ENVIRONMENT/bin/python" scripts/affected_test_modules.py --verbose)
+        echo "modules=$MODULES" >> "$GITHUB_OUTPUT"
+        echo "Affected modules: $MODULES"
+
     - name: PostgreSQL-gated tests (derived from the tests themselves)
-      run: make test-platform-postgres-gated
+      env:
+        AFFECTED: ${{ steps.affected.outputs.modules }}
+      run: make test-platform-postgres-gated PG_GATED_AFFECTED="$AFFECTED"
 
     - name: Quota inventory SQL against the managed MariaDB schema
       run: make test-virtualmin-quota-sql

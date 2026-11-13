@@ -87,7 +87,7 @@ class NightlyPostgresConcurrencyWorkflowTests(SimpleTestCase):
         self.assertNotIn("config.settings.test", command)
         self.assertNotIn("--parallel", command)
 
-    def test_api_token_concurrency_runs_on_postgresql_for_pull_requests(self) -> None:
+    def test_api_token_concurrency_runs_on_postgresql_in_the_merge_queue(self) -> None:
         self.assertIn("integration-suite", self.integration_gate["needs"])
         self.assertEqual(self.integration_gate["if"], "always()")
         startup = next(
@@ -165,12 +165,15 @@ class CoverageGateWorkflowTests(SimpleTestCase):
             self.fail(f"Missing Makefile variable {name}")
         return match.group(1).strip()
 
-    def test_platform_coverage_gate_runs_full_suite_and_package_floors_on_every_pr(self) -> None:
+    def test_platform_coverage_gate_runs_full_suite_and_package_floors_in_the_merge_queue(self) -> None:
         workflow = self._workflow("platform.yml")
         jobs = _mapping(workflow["jobs"])
         self.assertIn("coverage-gate", jobs)
         job = _mapping(jobs["coverage-gate"])
-        self._assert_unfiltered_pr(workflow, job)
+        # The queue tier (ADR-0036): a pull request skips it and runs the affected modules in platform-test;
+        # the merge queue and master run it. tests/integration/test_ci_required_checks.py owns that condition.
+        self.assertEqual(job.get("if"), "github.event_name != 'pull_request'")
+        self._assert_unfiltered_pr(workflow, {key: value for key, value in job.items() if key != "if"})
         commands = _commands(job).splitlines()
         self.assertIn("make coverage-platform", commands)
         self.assertIn("make coverage-platform-packages", commands)

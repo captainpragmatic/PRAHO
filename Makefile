@@ -754,12 +754,16 @@ test-platform-pytest-only:
 
 # Every platform test module that only means something on PostgreSQL, found by scanning the
 # tests. Needs a running PostgreSQL (`make ci-postgres-start`, or DB_* pointing at one).
+# PG_GATED_AFFECTED keeps only the modules under those labels (a pull request's affected modules,
+# from scripts/affected_test_modules.py); FULL runs them all, and empty runs none.
 # POSIX sh on purpose: the Makefile sets no SHELL, and /bin/sh is dash on Ubuntu runners.
+PG_GATED_AFFECTED ?= FULL
 .PHONY: test-platform-postgres-gated
 test-platform-postgres-gated:
 	@echo "🐘 [Platform] PostgreSQL-gated tests (derived from the tests themselves)..."
-	@modules=$$($(PWD)/$(VENV_DIR)/bin/python scripts/pg_gated_test_modules.py) || exit 1; \
-	if [ -z "$$modules" ]; then echo "🔥 [Platform] The PostgreSQL-gated scan found no modules" >&2; exit 1; fi; \
+	@modules=$$($(PWD)/$(VENV_DIR)/bin/python scripts/pg_gated_test_modules.py --affected "$(PG_GATED_AFFECTED)") || exit 1; \
+	if [ -z "$$modules" ]; then if [ "$(PG_GATED_AFFECTED)" = FULL ]; then echo "🔥 [Platform] The PostgreSQL-gated scan found no modules" >&2; \
+		exit 1; fi; echo "✅ [Platform] No PostgreSQL-gated module under the affected modules: $(PG_GATED_AFFECTED)"; exit 0; fi; \
 	cd services/platform && PYTHONPATH=$(PWD)/services/platform $(PWD)/$(VENV_DIR)/bin/python manage.py test $$modules \
 		--settings=config.settings.ci --verbosity=2 --noinput $(POSTGRES_TEST_FLAGS)
 

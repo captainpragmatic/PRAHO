@@ -1,7 +1,7 @@
 # ADR-0036: Tiered CI Testing Strategy
 
 ## Status
-**Active** - March 2026, amended October 2026 (PR CI as the merge gate, release-candidate promotion; then the merge queue)
+**Active** - March 2026, amended October 2026 (PR CI as the merge gate, release-candidate promotion; then the merge queue), November 2026 (a fast pull request tier; the queue is the merge gate)
 
 ## Context
 
@@ -31,22 +31,39 @@ pull request on top of `master` and of what is queued ahead of it, runs the requ
 commit, and moves `master` to exactly the commit it tested. The lab runs there, once per merge, and no
 longer on a push to a pull request.
 
+### Fast pull request tier (November 2026)
+
+Each merge still cost about 820 runner-minutes: the pull request run was a near-full copy of the queue
+run, the queue ran the whole Platform suite twice (`platform-test` and `coverage-gate`), and the queue
+carried native deploy and CrowdSec qualification. Runner concurrency, not minutes, was the bottleneck.
+The pull request now runs a fast tier, the queue runs the merge gate, and native deploy, CrowdSec and the
+lab run nightly and in a release candidate that cannot reuse the nightly's proof for its exact commit.
+The accepted risk: a lab, native or CrowdSec break can sit on `master` until the next nightly, but it
+cannot ship, because the release candidate proves those scopes on the candidate.
+
 ## Decision
 
-### Tier 1 — every pull request is the full merge gate
+### Tier 1 — the pull request runs the fast tier, the merge queue runs the merge gate
 
-Every pull request to `master` runs, with no paths filter on any required workflow:
+Every pull request to `master` and every merge group start the same required workflows, with no paths
+filter on any of them. The queue-tier jobs skip on a pull request (`if: github.event_name != 'pull_request'`;
+a skipped job reports success) and run in the merge queue and on `master`:
 
-| Workflow | Required jobs | What they cover |
-|---|---|---|
-| `platform.yml` | `coverage-gate`, `platform-test`, `platform-postgres`, `platform-security` | the whole platform suite on SQLite with coverage floors, affected-module fast signal, pytest-only classes, mypy, PostgreSQL-gated tests, Bandit (blocking) |
-| `portal.yml` | `portal-test`, `portal-server` | portal unit tests and coverage floor, mypy, prod-settings server acceptance |
-| `integration.yml` | `lint-and-quality`, `integration-test` | every `make lint` phase, migration checks with the base branch's validators, parity, Semgrep (new findings, blocking), cross-service, cache, isolation and deploy tests on PostgreSQL. `integration-test` also requires the native deployment acceptance (split cases in parallel shards, plus both combined profiles) unless every changed path is known not to reach a native deploy, which application code always does (`scripts/ci_native_needed.py`, the base branch's copy; it fails open, and master pushes always run it) |
-| `browser.yml` | `browser-e2e`, `browser-csp` | the Playwright suite against both live services, and the strict-CSP gates on their own stack |
-| `virtualmin-lab-pr.yml` | `pull-request` | runs no lab: it reports success on every pull request and merge group, until the ruleset stops requiring it. The lab runs every night master changed (`virtualmin-lab.yml`), a failed night opens an issue, and a release candidate reuses the nightly lab on its exact commit or runs the lab on the candidate. Dispatch `virtualmin-lab.yml` with suite `containers` to run it on a branch first |
-| `dco-check.yml` | `dco` | sign-off on every commit of the pull request and on its description, which becomes the squash message; in the queue, on the queue's own squash commits |
+| Workflow | Required jobs | Pull request (fast tier) | Merge queue (the merge gate) |
+|---|---|---|---|
+| `platform.yml` | `coverage-gate` | skipped | the whole platform suite on SQLite with coverage floors, the only full run |
+| `platform.yml` | `platform-test` | the affected test modules (`scripts/affected_test_modules.py`), pytest-only classes, mypy | pytest-only classes, mypy |
+| `platform.yml` | `platform-postgres` | the PostgreSQL-gated tests under the affected modules (all of them when the detection says FULL, none when no platform module is affected) | every PostgreSQL-gated test |
+| `platform.yml` | `platform-security` | Bandit (blocking) | the same |
+| `portal.yml` | `portal-test` | portal unit tests and coverage floor, mypy | the same |
+| `portal.yml` | `portal-server` | skipped | prod-settings server acceptance |
+| `integration.yml` | `lint-and-quality` | every `make lint` phase, migration checks with the base branch's validators, parity, Semgrep (new findings, blocking) | the same, on the merged tree |
+| `integration.yml` | `integration-test` | passes on the skipped suite (accepted on a pull request only) | the integration suite: cross-service, cache, isolation and deploy tests on PostgreSQL, the Ruff no-new-debt gate. Native deploy and CrowdSec qualification are not in it |
+| `browser.yml` | `browser-e2e`, `browser-csp` | skipped | the Playwright suite against both live services, and the strict-CSP gates on their own stack |
+| `virtualmin-lab-pr.yml` | `pull-request` | runs no lab: reports success | the same, until the ruleset stops requiring it. The lab runs every night master changed (`virtualmin-lab.yml`), a failed night opens an issue, and a release candidate reuses the nightly lab on its exact commit or runs the lab on the candidate. Dispatch `virtualmin-lab.yml` with suite `containers` to run it on a branch first |
+| `dco-check.yml` | `dco` | sign-off on every commit of the pull request and on its description, which becomes the squash message | sign-off on the queue's own squash commits |
 
-Every required workflow also runs on `merge_group`, and the queue lands a pull request only when the same checks pass on the queue's commit. `.github/rulesets/master.json` makes these checks required (only the GitHub Actions app can satisfy them), merges through the queue (squash, every entry's own group green, 150 minutes for checks to report), and allows squash merges only. A branch need not be up to date: the queue tests it on the current `master`. The owner may bypass on a pull request, never by a direct push. A workflow skipped by a paths filter never reports, so a required check on it would block forever: selection, where it exists, happens inside a job that reports success when it skips. No other workflow may have a job of a required check's name, because a skipped run of it would read as success. `tests/integration/test_ci_required_checks.py` enforces both.
+Every required workflow also runs on `merge_group`, and the queue lands a pull request only when the same checks pass on the queue's commit. `.github/rulesets/master.json` makes these checks required (only the GitHub Actions app can satisfy them), merges through the queue (squash, every entry's own group green, 150 minutes for checks to report), and allows squash merges only. A branch need not be up to date: the queue tests it on the current `master`. The owner may bypass on a pull request, never by a direct push. A workflow skipped by a paths filter never reports, so a required check on it would block forever: the fast tier skips jobs, never workflows, and only on a pull request. A job that waits on a queue-tier job keeps `always()` so that it judges a failed dependency instead of skipping with it. No other workflow may have a job of a required check's name, because a skipped run of it would read as success. `tests/integration/test_ci_required_checks.py` enforces both.
 
 A new push to a pull request cancels the run on its previous head (`concurrency` with `cancel-in-progress` on `pull_request` only).
 
@@ -74,31 +91,31 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 
 ### Affected-Module Detection
 
-`scripts/affected_test_modules.py` maps changed platform paths to test modules; `platform-test` uses it for a fast first signal on pull requests. It no longer limits what must pass: `coverage-gate` runs the whole suite on every pull request.
+`scripts/affected_test_modules.py` maps changed platform paths to test modules; on a pull request `platform-test` runs those modules and `platform-postgres` runs the PostgreSQL-gated tests under them (`make test-platform-postgres-gated PG_GATED_AFFECTED=...`). It limits only the pull request's fast signal: the merge queue runs the whole suite (`coverage-gate`) and every gated test whatever it says.
 
 ### Workflow Files
 
 | File | Purpose |
 |------|---------|
-| `.github/workflows/platform.yml`, `portal.yml`, `integration.yml`, `browser.yml`, `dco-check.yml` | Tier 1 — every pull request, required |
+| `.github/workflows/platform.yml`, `portal.yml`, `integration.yml`, `browser.yml`, `dco-check.yml` | Tier 1 — every pull request (fast tier) and merge group (merge gate), required |
 | `.github/workflows/virtualmin-lab-pr.yml` | required check only; the lab itself runs nightly (Tier 2) |
 | `.github/workflows/virtualmin-lab.yml` | Nightly container lab and drift runs; the release candidate reuses a nightly lab run on its exact commit or calls this workflow on the candidate |
 | `.github/workflows/nightly.yml` | Tier 2 — scheduled nightly |
 | `.github/workflows/release-candidate.yml` | Tier 2 — the release gate before staging |
 | `.github/rulesets/*.json` | Branch and tag rules, applied with `gh api` (see that directory's README) |
 
-`full-test.yml` and its `/full-test` comment trigger were removed in October 2026: pull requests now run everything it did, and it executed pull-request code with write permissions.
+`full-test.yml` and its `/full-test` comment trigger were removed in October 2026: the required checks run everything it did (since November 2026 in the merge queue, not on the pull request), and it executed pull-request code with write permissions.
 
 ## Consequences
 
 ### Positive
 - A red check blocks the merge; nothing depends on contributors or agents remembering to run the full gate
 - Local machines run seconds of checks instead of 15–20 minutes, and agents are not blocked waiting for them
-- Every commit staging receives passed the queue's checks and the lab suites on that exact SHA, and the whole suite on PostgreSQL; the full lab (node deploy, faults, browser tests) last passed on master, possibly on an earlier commit
+- Every commit staging receives passed the queue's checks on that exact SHA, and the whole suite on PostgreSQL, the container lab, native deploy and CrowdSec qualification on that exact SHA too (reused from the nightly or run by the release candidate)
 - No test is permanently skipped — the full suite always runs somewhere
 
 ### Negative
-- Pull request feedback takes about 30 minutes (Integration and the browser suites are the long jobs); a lab failure surfaces only in the queue, about an hour after queueing, and ejects the pull request. Dispatch `virtualmin-lab.yml` on the branch to learn it earlier
+- A pull request no longer runs the full suite, the integration suite or the browser suites: a failure there surfaces only in the queue and ejects the pull request. A lab, native deploy or CrowdSec break surfaces only at the next nightly and blocks the release, not the merge. Dispatch `virtualmin-lab.yml` on the branch to learn about the lab earlier
 - A flaky required check now also ejects a queued pull request and rebuilds the groups behind it
 - A required browser test that flakes blocks merges; flakes must be fixed, never retried away (ADR-0014)
 - A PostgreSQL-only bug outside the gated modules surfaces at the nightly or release-candidate run, not on the pull request
@@ -106,7 +123,7 @@ Staging deploys stay manual: fi-staging admits only the operator IPs, and the de
 
 ### Neutral
 - Portal tests are always SQLite (no change — Portal has no business database)
-- The checks other than the lab run twice per merge, on the pull request and in the queue; runners are free for a public repository (October 2026 amendment), so only wall-clock time counts
+- Lint, types, Bandit, the Portal tests and the gated PostgreSQL tests run on the pull request and again in the queue, on the merged tree; runner concurrency, not minutes, is the constraint (November 2026 amendment)
 - A queued squash takes the pull request's title and description as its commit message (repository setting), so the description is written as the commit message and ends with a `Signed-off-by:` line
 
 ## Reference Commits

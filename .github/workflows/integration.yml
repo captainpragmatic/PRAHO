@@ -6,8 +6,9 @@
 #
 # Both jobs are required checks on master (.github/rulesets/master.json), so the pull_request trigger has
 # no paths filter: a workflow skipped by a filter never reports, and its required check would block forever.
-# Selection happens inside instead: `native-changes` decides whether a change can reach a native deploy
-# (scripts/ci_native_needed.py, fails open), and `integration-test` accepts a native skip only when it said no.
+# The integration suite is in the queue tier (ADR-0036): a pull request skips it, and `integration-test`
+# accepts that skip on a pull request only. Native deploy and CrowdSec qualification run nightly and in a
+# release candidate that cannot reuse the nightly's proof (release-candidate.yml).
 
 name: Integration CI
 
@@ -153,6 +154,7 @@ jobs:
   # Integration Tests — requires PostgreSQL
   # ---------------------------------------------------------------------------
   integration-suite:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-24.04  # Playwright 1.58 does not support Ubuntu 26.04.
 
     # Override workflow-level settings: integration tests need PostgreSQL + DatabaseCache
@@ -260,21 +262,10 @@ jobs:
     - name: Install the browser the page-monitor self-tests drive
       run: '"$UV_PROJECT_ENVIRONMENT/bin/playwright" install --with-deps chromium'
 
-    - name: CrowdSec native artifact qualification
-      run: make test-crowdsec-docker
-
-    - name: Preserve CrowdSec binaries and build provenance
-      uses: actions/upload-artifact@v4
-      with:
-        name: crowdsec-bouncer-${{ github.sha }}
-        path: build/crowdsec-patched/
-        if-no-files-found: error
-        retention-days: 30
-
     - name: Integration test suite (make test-integration)
       env:
-        # The required native step above already executes these suites. Keep every other
-        # Docker suite in the aggregate and leave local Make defaults unchanged.
+        # CrowdSec's Docker qualification runs nightly and in a release candidate, not in the merge
+        # queue. Keep every other Docker suite in the aggregate and leave local Make defaults unchanged.
         PYTEST_ADDOPTS: --ignore-glob=tests/deploy/test_crowdsec*_docker.py
       run: make test-integration
 
@@ -292,112 +283,21 @@ jobs:
       if: always()
       run: make ci-postgres-stop
 
-  # ---------------------------------------------------------------------------
-  # Does this change reach a native deploy? Fails open (see scripts/ci_native_needed.py).
-  # Master pushes and dispatches always run it, so every merged change is qualified after the merge.
-  # ---------------------------------------------------------------------------
-  native-changes:
-    runs-on: ubuntu-latest
-    outputs:
-      native: ${{ steps.decide.outputs.native }}
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        persist-credentials: false
-
-    - name: Decide whether the native deploy runs
-      id: decide
-      env:
-        EVENT: ${{ github.event_name }}
-        BASE_SHA: ${{ github.event.merge_group.base_sha || github.event.pull_request.base.sha }}
-      run: |
-        set -uo pipefail
-        if [ "$EVENT" != "pull_request" ] && [ "$EVENT" != "merge_group" ]; then
-          echo "Native deploy needed: true ($EVENT always runs it)"
-          echo "native=true" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        # Without a base there is no diff and no base copy of the rules (`git show :path` would read the
-        # pull request's own copy from the index), so the native deploy runs.
-        if [ -z "${BASE_SHA}" ]; then
-          echo "Native deploy needed: true (no base commit)"
-          echo "native=true" >> "$GITHUB_OUTPUT"
-          exit 0
-        fi
-        # --no-renames lists a moved file's old path too, so moving code out of a deploy path still counts.
-        changed="$(git diff --no-renames --name-only "${BASE_SHA}...HEAD" 2>/dev/null)" || changed=""
-        printf '%s\n' "$changed"
-        # The base branch's copy of the rules decides, so a pull request cannot talk itself out of it.
-        if rules="$(git show "${BASE_SHA}:scripts/ci_native_needed.py" 2>/dev/null)"; then
-          native="$(printf '%s\n' "$changed" | python3 -c "$rules")" || native=true
-        else
-          native=true
-        fi
-        echo "Native deploy needed: $native"
-        echo "native=$native" >> "$GITHUB_OUTPUT"
-
-  # Native qualification owns its databases and SSH hosts, so it can run alongside
-  # the general suite instead of consuming the merge queue's deadline serially.
-  # The split cases run as shards (scripts/run_native_acceptance.py), each on its own lab.
-  native-deploy:
-    needs: native-changes
-    # !cancelled(): if `native-changes` itself fails, its output is empty, which is not 'false', so this runs.
-    if: "!cancelled() && needs.native-changes.outputs.native != 'false'"
-    runs-on: ubuntu-24.04
-    strategy:
-      fail-fast: false
-      matrix:
-        profile: [split-prod-1, split-prod-2, split-prod-3, split-prod-4, combined-staging, combined-prod]
-    env:
-      PRAHO_NATIVE_ACCEPTANCE_PROFILE: ${{ matrix.profile }}
-    steps:
-    - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - uses: astral-sh/setup-uv@v7
-      with:
-        enable-cache: true
-        cache-dependency-glob: "uv.lock"
-
-    - name: Install the frozen qualification dependencies
-      run: |
-        uv python install
-        uv sync --all-groups --frozen
-
-    - name: Native split and combined deployment acceptance
-      run: make test-native-deploy
-
-    # Not profile-specific: one matrix entry runs it.
-    - uses: hashicorp/setup-terraform@v3
-      if: matrix.profile == 'combined-prod'
-      with:
-        terraform_version: 1.13.5
-
-    - name: Native infrastructure topology and adoption safety
-      if: matrix.profile == 'combined-prod'
-      run: make test-native-infra
-
-  # Preserve the required check name and reject failed, cancelled or skipped suites.
-  # A native skip passes only when the selection ran and answered false; any other skip fails.
+  # Preserve the required check name and reject failed or cancelled suites. The suite skips only on a
+  # pull request (the fast tier); a skip on any other event fails.
   integration-test:
-    needs: [integration-suite, native-changes, native-deploy]
+    needs: [integration-suite]
     if: always()
     runs-on: ubuntu-24.04
     env:
+      EVENT: ${{ github.event_name }}
       GENERAL_RESULT: ${{ needs.integration-suite.result }}
-      NATIVE_RESULT: ${{ needs.native-deploy.result }}
-      SELECTION_RESULT: ${{ needs.native-changes.result }}
-      NATIVE_SELECTED: ${{ needs.native-changes.outputs.native }}
     steps:
-    - name: Require both integration suites to pass
+    - name: Require the integration suite to pass
       run: |
-        printf 'General suite: %s; native qualification: %s (selection %s: %s)\n' \
-          "$GENERAL_RESULT" "$NATIVE_RESULT" "$SELECTION_RESULT" "$NATIVE_SELECTED"
-        test "$GENERAL_RESULT" = success
-        if [ "$NATIVE_RESULT" = skipped ] && [ "$SELECTION_RESULT" = success ] && [ "$NATIVE_SELECTED" = false ]; then
-          echo "Native qualification skipped: this change cannot reach a native deploy."
+        printf 'Integration suite on %s: %s\n' "$EVENT" "$GENERAL_RESULT"
+        if [ "$GENERAL_RESULT" = skipped ] && [ "$EVENT" = pull_request ]; then
+          echo "The integration suite runs in the merge queue, not on a pull request."
           exit 0
         fi
-        test "$NATIVE_RESULT" = success
+        test "$GENERAL_RESULT" = success
