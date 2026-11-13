@@ -344,14 +344,16 @@ def _value_end(text: str, start: int) -> int:
     quote = _opening_quote(text, start)
     if quote == text[start : start + 1]:
         return _quoted_end(text, start)
-    if quote:  # An escaped quote: the value ends at a quote escaped exactly as the opening one was
+    if quote:  # An escaped quote: the value ends at the next quote escaped at the opening one's depth
+        # With k backslashes before the opening quote, a closing quote has k more 2(k+1) per backslash in the value
+        # just before it (1, 5, 9... one level down); an interior quote has a run that doesn't fit (3, 7...).
         escapes, mark = len(quote) - 1, quote[-1]
         index = start + len(quote)
         while (index := text.find(mark, index)) >= 0:
             run = index
             while run > start and text[run - 1] == "\\":
                 run -= 1
-            if index - run == escapes:
+            if (index - run) % (2 * (escapes + 1)) == escapes:
                 return index + 1
             index += 1
         return len(text)

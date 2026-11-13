@@ -460,3 +460,19 @@ class SensitiveDataRedactionTests(SimpleTestCase):
                 started = time.perf_counter()
                 redact_sensitive_text(text)
                 self.assertLess(time.perf_counter() - started, 1.0)
+
+    def test_a_value_ending_in_a_backslash_keeps_the_text_after_it(self) -> None:
+        """Inside JSON nested in JSON, the value's closing quote is found by escape depth, not swallowed with the rest."""
+        from apps.common.logging import redact_sensitive_text  # noqa: PLC0415
+
+        for secret in ("secret-bs\\", "secret-bs\\\\", 'secret-bs\\"'):
+            with self.subTest(secret=secret):
+                text = json.dumps(
+                    {"error": json.dumps({"password": secret, "after": "kept-inner"}), "next": "kept-outer"}
+                )
+                redacted = redact_sensitive_text(text)
+                self.assertNotIn("secret-bs", redacted)
+                self.assertIn("kept-inner", redacted)
+                self.assertIn("kept-outer", redacted)
+                json.loads(redacted)  # still valid JSON at both levels
+                json.loads(json.loads(redacted)["error"])
