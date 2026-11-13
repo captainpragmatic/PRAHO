@@ -50,6 +50,21 @@ class QuotaDatabaseStorageTests(SimpleTestCase):
             with self.assertRaises(ValueError):
                 self.native._configured_limit({key: "unknown"}, key)
 
+    def test_a_leftover_backup_dump_is_seen_without_following_links(self):
+        home = self.root / "home"
+        home.mkdir()
+        self.assertFalse(self.native._backup_staging_left(home))
+        (home / ".backup").mkdir()
+        self.assertTrue(self.native._backup_staging_left(home))
+        (home / ".backup").rmdir()
+        (home / ".backup").symlink_to(self.root / "absent-target")
+        self.assertTrue(self.native._backup_staging_left(home))  # A dangling link the tenant planted still counts.
+
+    def test_every_probe_reports_whether_a_backup_dump_was_left(self):
+        source = (Path(settings.BASE_DIR) / "infrastructure/ansible/playbooks/files/praho_quota_native.py").read_text()
+        probe = source[source.index("    def _probe(") : source.index("    def apply(")]
+        self.assertIn('"backup_staging_left": _backup_staging_left(Path(account.pw_dir))', probe)
+
     def test_probe_budget_stops_before_spawning_another_native_command(self):
         token = self.native._PROBE_DEADLINE.set(10.0)
         self.addCleanup(self.native._PROBE_DEADLINE.reset, token)

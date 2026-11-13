@@ -22,7 +22,17 @@ account's caps while it writes the dump into `~/.backup` and restores them when
 the backup process exits. A backup or restore that was killed rather than failed
 (OOM, reboot, a stopped Webmin) leaves both caps unlimited and may leave the dump
 behind ([ADR-0075](../ADRs/ADR-0075-database-files-outside-the-kernel-quota.md)).
-After any such event on a managed node, check each affected account, as root:
+Platform re-applies and verifies a managed account's caps within about 5 minutes
+of every PRAHO backup or restore job ending. Staff see the outcome on the
+account's **Apply Hosting Limits** job:
+
+- *completed*, with "A leftover ~/.backup remains in the account's home" in its
+  message: remove the dump (step 1 below). The caps are already back.
+- *attention*, after repeated refusals: the caps may still be lifted. Usually the
+  leftover dump makes the files exceed the cap; follow the steps below.
+
+For a node or account outside Platform's view (an imported account, a backup run
+by hand on the node), check by hand, as root:
 
 ```bash
 grep -E '^(quota|uquota)=' /etc/webmin/virtual-server/domains/<domain-id>   # configured caps, KiB

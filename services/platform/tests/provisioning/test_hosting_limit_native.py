@@ -123,6 +123,13 @@ class NativeQuotaReceiptTests(SimpleTestCase):
         with self.assertRaises(ValueError):
             self.verify(changed)
 
+    def test_the_leftover_backup_report_is_optional_but_must_be_a_boolean(self) -> None:
+        for value in (True, False):
+            self.verify({**self.receipt, "backup_staging_left": value})
+        for value in ("yes", 1, None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                self.verify({**self.receipt, "backup_staging_left": value})
+
     def test_canonical_observation_is_separate_and_never_certifies_kernel_enforcement(self) -> None:
         good = {"files_bytes": 8192, "database_bytes": 4096, "total_bytes": 12288}
         self.assertEqual(self.verify({**self.receipt, "observation": good}).safety_used_bytes, 2048)
