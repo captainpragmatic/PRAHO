@@ -246,6 +246,8 @@ SENSITIVE_VALUES = (
     "beta-secret",
     "byte-secret",
     "object-secret",
+    "byte-key-secret",
+    "spaced-bearer-secret",
 )
 
 
@@ -288,6 +290,7 @@ def _records() -> dict[str, logging.LogRecord]:
     extras.session_note = "visible-note"
     extras.payload = b"password=byte-secret"
     extras.label = _Labelled()
+    extras.headers = {b"password": "byte-key-secret"}
     return {
         "key=value": record("login failed password=Hunter2-pw vat_number=RO76543210 cui=76543217"),
         "list value": record("{'password': ['first-secret', 'second-secret']}"),
@@ -299,6 +302,7 @@ def _records() -> dict[str, logging.LogRecord]:
         "database detail": record("Key (vat_number)=(RO76543210) already exists."),
         "authorization scheme": record("upstream refused Authorization=Bearer bearer-secret retry=1"),
         "apostrophe": record("password=can'tkeepsecret"),
+        "authorization spacing": record("Authorization=Bearer \t  spaced-bearer-secret next=1"),
         "colon list": record("password: alpha,beta-secret"),
         "extras": extras,
         "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
@@ -376,10 +380,23 @@ class SensitiveDataRedactionTests(SimpleTestCase):
     def test_keys_redacted_alike_keep_both_entries(self) -> None:
         from apps.common.logging import redact_sensitive_data  # noqa: PLC0415
 
-        redacted = redact_sensitive_data({"password=one": {"result": "success"}, "password=two": {"result": "failure"}})
-        self.assertEqual(sorted(item["result"] for item in redacted.values()), ["failure", "success"])
-        self.assertNotIn("one", "".join(redacted))
-        self.assertNotIn("two", "".join(redacted))
+        for pair in (
+            {"password=one": {"result": "success"}, "password=two": {"result": "failure"}},
+            {"password=one": {"result": "success"}, "password=[REDACTED]": {"result": "failure"}},
+            {"password=[REDACTED]": {"result": "success"}, "password=one": {"result": "failure"}},
+            {
+                "password=[REDACTED] (2)": {"result": "success"},
+                "password=a": {"result": "x"},
+                "password=b": {"result": "failure"},
+            },
+        ):
+            with self.subTest(keys=list(pair)):
+                redacted = redact_sensitive_data(pair)
+                # Every entry survives; a key naming a password is itself sensitive, so its value is redacted too.
+                self.assertEqual(len(redacted), len(pair), redacted)
+                self.assertEqual(list(redacted.values()), ["[REDACTED]"] * len(pair))
+                for secret in ("one", "two", "=a", "=b"):
+                    self.assertNotIn(secret, "".join(redacted))
 
     def test_sentry_receives_no_sensitive_value(self) -> None:
         """Production's Sentry options, on the real SentryHandler, with an in-memory transport instead of the network."""

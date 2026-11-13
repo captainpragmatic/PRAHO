@@ -254,9 +254,9 @@ _SENSITIVE_KEYS = (
     "cui",  # Romanian tax ID
     "vat_number",
 )
-# A key is sensitive when one of the words above is a whole part of it ("new_password1", "csrf_token", "customer_cui"),
-# not merely a substring ("circuit").
-_SENSITIVE_KEY_NAME = re.compile(r"(?:^|[_.\-])(?:" + "|".join(_SENSITIVE_KEYS) + r")(?:$|[_.\-\d])", re.IGNORECASE)
+# A key is sensitive when one of the words above is a whole part of it ("new_password1", "csrf_token", "b'password'"),
+# not merely a substring ("circuit", "passwordless").
+_SENSITIVE_KEY_NAME = re.compile(r"(?<![A-Za-z0-9])(?:" + "|".join(_SENSITIVE_KEYS) + r")(?![A-Za-z])", re.IGNORECASE)
 # Where a key=value or key: value may start in free text: an optional quote or parenthesis around a name, then = or :.
 _KEY_CANDIDATE = re.compile(r"""(["'(]?)([A-Za-z_][\w.\-]*)(["')]?)[ \t]*([=:])[ \t]*""")
 _CLOSING = {"[": "]", "{": "}", "(": ")"}
@@ -272,6 +272,8 @@ _MAX_DEPTH = 32
 
 
 def _is_sensitive_key(name: object) -> bool:
+    if isinstance(name, (bytes, bytearray)):
+        name = bytes(name).decode("utf-8", "replace")
     return isinstance(name, str) and _SENSITIVE_KEY_NAME.search(name) is not None
 
 
@@ -310,7 +312,7 @@ def _unquoted_end(text: str, start: int, separator: str) -> int:
         char = text[index]
         if char in _VALUE_END:
             break
-        if char in " \t" and separator == "=" and text[start:index].lower() not in _AUTH_SCHEMES:
+        if char in " \t" and separator == "=" and text[start:index].strip().lower() not in _AUTH_SCHEMES:
             break
         if char in ",&" and _NEXT_KEY.match(text, index + 1):
             break
@@ -370,7 +372,7 @@ def redact_sensitive_data(value: Any, _path: frozenset[int] = frozenset(), _dept
         redacted: dict[Any, Any] = {}
         for key, item in value.items():
             new_key = redact_sensitive_data(key, path, _depth + 1)
-            if new_key != key and new_key in redacted:  # Two keys redacted alike: keep both entries
+            if new_key in redacted:  # Keys that read alike once redacted: keep every entry
                 count = 2
                 while f"{new_key} ({count})" in redacted:
                     count += 1
