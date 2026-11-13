@@ -241,7 +241,19 @@ SENSITIVE_VALUES = (
     "horse battery",
     "extra-secret",
     "key-secret",
+    "bearer-secret",
+    "tkeepsecret",
+    "beta-secret",
+    "byte-secret",
+    "object-secret",
 )
+
+
+class _Labelled:
+    """An object a formatter can only write as text, which carries a secret when it does."""
+
+    def __str__(self) -> str:
+        return "password=object-secret"
 
 
 def _deployed_handler_output(config: dict[str, Any], handler_name: str, record: logging.LogRecord) -> str:
@@ -274,6 +286,8 @@ def _records() -> dict[str, logging.LogRecord]:
     extras.password = "extra-secret"
     extras.query = {"card_number": ["4111111111111111"], "page": "2", "password=key-secret": 1}
     extras.session_note = "visible-note"
+    extras.payload = b"password=byte-secret"
+    extras.label = _Labelled()
     return {
         "key=value": record("login failed password=Hunter2-pw vat_number=RO76543210 cui=76543217"),
         "list value": record("{'password': ['first-secret', 'second-secret']}"),
@@ -283,6 +297,9 @@ def _records() -> dict[str, logging.LogRecord]:
         "structured args": record("profile %s", ({"password": ["first-secret"], "token": {"value": "nested-secret"}},)),
         "spaced value": record("password: correct horse battery"),
         "database detail": record("Key (vat_number)=(RO76543210) already exists."),
+        "authorization scheme": record("upstream refused Authorization=Bearer bearer-secret retry=1"),
+        "apostrophe": record("password=can'tkeepsecret"),
+        "colon list": record("password: alpha,beta-secret"),
         "extras": extras,
         "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
         "record.args": record("profile %s", ({"vat_number": "RO76543210", "password": "Hunter2-pw"},)),
@@ -335,3 +352,57 @@ class SensitiveDataRedactionTests(SimpleTestCase):
         self.assertNotIn("tok-secret", output)
         self.assertNotIn("4111111111111111", output)
         self.assertIn('"q": ["ana"]', output)
+
+    def test_a_failed_redaction_withholds_every_extra(self) -> None:
+        """When walking one extra fails, no later extra may reach a handler unredacted."""
+
+        class Exploding(dict):
+            def items(self) -> Any:
+                raise RuntimeError("changed during iteration")
+
+        record = logging.LogRecord("apps.users", logging.ERROR, __file__, 1, "update", (), None)
+        record.broken = Exploding(a=1)
+        record.note = "token=exploding-secret"
+        for module in ("config.settings.staging", "config.settings.prod"):
+            config = _get_logging(module)
+            for handler_name in config["handlers"]:
+                with self.subTest(module=module, handler=handler_name):
+                    probe = logging.makeLogRecord(dict(vars(record)))
+                    probe.broken, probe.note = Exploding(a=1), "token=exploding-secret"
+                    output = _deployed_handler_output(config, handler_name, probe)
+                    self.assertIn("[log record withheld: redaction failed]", output)  # written, not dropped
+                    self.assertNotIn("exploding-secret", output)
+
+    def test_keys_redacted_alike_keep_both_entries(self) -> None:
+        from apps.common.logging import redact_sensitive_data  # noqa: PLC0415
+
+        redacted = redact_sensitive_data({"password=one": {"result": "success"}, "password=two": {"result": "failure"}})
+        self.assertEqual(sorted(item["result"] for item in redacted.values()), ["failure", "success"])
+        self.assertNotIn("one", "".join(redacted))
+        self.assertNotIn("two", "".join(redacted))
+
+    def test_sentry_receives_no_sensitive_value(self) -> None:
+        """Production's Sentry options, on the real SentryHandler, with an in-memory transport instead of the network."""
+        import sentry_sdk  # noqa: PLC0415
+        from sentry_sdk.integrations.logging import SentryHandler  # noqa: PLC0415
+        from sentry_sdk.transport import Transport  # noqa: PLC0415
+
+        from config.settings.sentry import sentry_options  # noqa: PLC0415
+
+        sent: list[object] = []
+
+        class Memory(Transport):
+            def capture_envelope(self, envelope: Any) -> None:
+                sent.extend(item.payload.json for item in envelope.items if item.payload.json is not None)
+
+        options = {**sentry_options("https://key@sentry.example.test/1", release="test"), "transport": Memory}
+        client = sentry_sdk.Client(default_integrations=False, **options)
+        with sentry_sdk.isolation_scope() as scope:
+            scope.set_client(client)
+            for record in _records().values():
+                SentryHandler().handle(record)
+            client.flush()
+        self.assertTrue(sent, "the handler sent events")
+        payload = json.dumps(sent)
+        for value in SENSITIVE_VALUES:
+            self.assertNotIn(value, payload)

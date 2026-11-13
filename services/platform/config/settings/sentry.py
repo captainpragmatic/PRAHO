@@ -77,12 +77,22 @@ class SentryOptions(TypedDict):
     before_send_transaction: Callable[[Any, Any], Any]
 
 
+def scrub_event(event: Any, hint: Any) -> Any:
+    """Secret links and the values of sensitive keys, wherever they sit in the event (exception text included).
+
+    Sentry builds its exception from the record's exc_info, never from the log filter's redacted text.
+    """
+    from apps.common.logging import redact_sensitive_data  # noqa: PLC0415  # Settings import before apps are ready
+
+    return redact_sensitive_data(scrub_sentry_event(event, hint))
+
+
 def sentry_options(dsn: str, *, release: str) -> SentryOptions:
     """The sentry_sdk.init arguments every production deployment uses, integrations aside."""
     return {
         "dsn": dsn,
-        "before_send": scrub_sentry_event,
-        "before_send_transaction": scrub_sentry_event,
+        "before_send": scrub_event,
+        "before_send_transaction": scrub_event,
         "traces_sample_rate": 0.1,
         "send_default_pii": False,
         "include_local_variables": False,

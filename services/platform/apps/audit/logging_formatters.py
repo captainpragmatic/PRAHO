@@ -109,7 +109,9 @@ class AuditContextFilter(logging.Filter):
 
 def _redacted_text(value: object) -> str:
     """A value json cannot encode (a Decimal, a datetime, an object), written as redacted text."""
-    return redact_text(str(value))
+    from apps.common.logging import redact_sensitive_text  # noqa: PLC0415  # apps.common.logging imports audit
+
+    return redact_sensitive_text(redact_text(str(value)))
 
 
 class SIEMJSONFormatter(logging.Formatter):
