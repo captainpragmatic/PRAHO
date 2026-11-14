@@ -12,6 +12,9 @@ from sentry_sdk.utils import AnnotatedValue
 
 from apps.common.secret_urls import scrub_sentry_event
 
+# What Sentry's own scrub writes in place of a denylisted value, beside a "_meta" annotation saying so.
+_SENTRY_SUBSTITUTE = AnnotatedValue.substituted_because_contains_sensitive_data().value
+
 # Sentry's own denylist covers passwords and tokens; these are PRAHO's other secrets: registrant
 # identity and domain transfer codes, the identity check's code and the portal session's id.
 SECRET_KEYS = (
@@ -113,16 +116,80 @@ def _render_redacted_log_entry(event: Any) -> None:
     entry["params"] = params
 
 
+def _substituted_paths(event: dict[str, Any], meta: Any, path: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+    """Where Sentry's own scrub put its substitute and annotated it: request data, headers, extras, any section.
+
+    Only a substitution ("s" in the annotation's removal) whose value is still Sentry's substitute; a length or
+    trimming annotation marks content that stays and is redacted like any other.
+    """
+    if not isinstance(meta, dict):
+        return []
+    found: list[tuple[str, ...]] = []
+    for key, child in meta.items():
+        if key == "":
+            removals = child.get("rem", []) if isinstance(child, dict) else []
+            substituted = any(isinstance(rule, list) and rule[1:2] == ["s"] for rule in removals)
+            if substituted and _at(event, path) == _SENTRY_SUBSTITUTE:
+                found.append(path)
+        else:
+            found.extend(_substituted_paths(event, child, (*path, key)))
+    return found
+
+
+_MISSING = object()
+
+
+def _at(value: Any, path: tuple[str, ...]) -> Any:
+    """The value at an annotation's path ("_meta" names a list index as a string), or _MISSING."""
+    for key in path:
+        if isinstance(value, dict) and key in value:
+            value = value[key]
+        elif isinstance(value, list) and key.isdigit() and int(key) < len(value):
+            value = value[int(key)]
+        else:
+            return _MISSING
+    return value
+
+
+def _redact_meta_keys(meta: Any) -> Any:
+    """The annotations with the event's field names redacted as text, as the event's own keys were."""
+    from apps.common.logging import redact_sensitive_text  # noqa: PLC0415  # Settings import before apps are ready
+
+    if not isinstance(meta, dict):
+        return meta
+    return {
+        key if key == "" else redact_sensitive_text(str(key)): child if key == "" else _redact_meta_keys(child)
+        for key, child in meta.items()
+    }
+
+
 def scrub_event(event: Any, hint: Any) -> Any:
     """Secret links and the values of sensitive keys, wherever they sit in the event (exception text included).
 
-    Sentry builds its exception from the record's exc_info, never from the log filter's redacted text, and its
-    logging integration reads records before any handler's filters run.
+    Sentry's own scrub has already blanked the fields its denylist names and recorded each removal in "_meta":
+    the annotations are left as they are, and so is each value Sentry substituted, so the report still says what
+    was removed. Everything else is redacted here, by key and as text. Sentry builds its exception from the
+    record's exc_info, never from the log filter's redacted text, and its logging integration reads records before
+    any handler's filters run.
     """
     from apps.common.logging import redact_sensitive_data  # noqa: PLC0415  # Settings import before apps are ready
 
+    event = scrub_sentry_event(event, hint)
+    if not isinstance(event, dict):
+        return redact_sensitive_data(event)
+    meta = event.pop("_meta", None)
+    substituted = _substituted_paths(event, meta)
     _render_redacted_log_entry(event)
-    return redact_sensitive_data(scrub_sentry_event(event, hint))
+    redacted = redact_sensitive_data(event)
+    for path in substituted:
+        container = _at(redacted, path[:-1])
+        if isinstance(container, dict) and path[-1] in container:
+            container[path[-1]] = _SENTRY_SUBSTITUTE
+        elif isinstance(container, list) and path[-1].isdigit() and int(path[-1]) < len(container):
+            container[int(path[-1])] = _SENTRY_SUBSTITUTE
+    if meta is not None:
+        redacted["_meta"] = _redact_meta_keys(meta)
+    return redacted
 
 
 def sentry_options(dsn: str, *, release: str) -> SentryOptions:
