@@ -25,6 +25,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext
 from django.views.decorators.http import require_http_methods, require_POST
 from django_q.tasks import async_task
 
@@ -365,6 +366,29 @@ def account_action_attrs(
     }
 
 
+def _missing_database_notice(account: VirtualminAccount) -> str:
+    """Staff attention for databases Virtualmin registers but MariaDB dropped (#776). Removal is never automatic."""
+    from .virtualmin_usage_models import AccountUsageState  # noqa: PLC0415
+
+    # Only alongside the current disk reading it came with; an invalidated reading takes its list with it.
+    names = (
+        AccountUsageState.objects.filter(account=account, disk_reading__isnull=False)
+        .values_list("missing_databases", flat=True)
+        .first()
+    )
+    if not names:
+        return ""
+    return ngettext(
+        "Virtualmin still registers the database %(names)s for %(domain)s, but MariaDB no longer has it. It counts "
+        "as 0 bytes. Remove the registration with: virtualmin delete-database --domain %(domain)s --name NAME "
+        "(see docs/deployment/HOSTING_USAGE_WARNINGS.md). Nothing removes it automatically.",
+        "Virtualmin still registers the databases %(names)s for %(domain)s, but MariaDB no longer has them. They "
+        "count as 0 bytes. Remove each registration with: virtualmin delete-database --domain %(domain)s --name NAME "
+        "(see docs/deployment/HOSTING_USAGE_WARNINGS.md). Nothing removes them automatically.",
+        len(names),
+    ) % {"names": ", ".join(names), "domain": account.domain}
+
+
 def _quota_text(megabytes: int | None) -> str:
     """A stored quota as a person reads it: MB below 1 GB, GB with one decimal above.
 
@@ -584,6 +608,7 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
         "restore_pair_url": reverse("provisioning:virtualmin_account_restore_pair", args=[account.id]),
         "disk_quota_text": _quota_text(account.disk_quota_mb),
+        "missing_database_notice": _missing_database_notice(account),
         "bandwidth_quota_text": _quota_text(account.bandwidth_quota_mb),
         "hold_reenable_url": reverse("provisioning:virtualmin_account_hold_reenable", args=[account.id]),
         "hold_restore_safety_url": reverse("provisioning:virtualmin_account_hold_restore_safety", args=[account.id]),

@@ -654,3 +654,53 @@ class UsageCollectorTests(SimpleTestCase):
         ledger = self.collector.Ledger(database)
         self.addCleanup(ledger.close)
         self.assertEqual(ledger.total("node", "42", 0, 200), 120)
+
+
+class MissingDatabaseGaugeTests(SimpleTestCase):
+    """A dropped database the adapter named travels with the measurement that left it out (#776)."""
+
+    # The same collector harness, without re-running the other class's tests.
+    setUp = UsageCollectorTests.setUp
+    node_fixture = UsageCollectorTests.node_fixture
+    refresh_fixture = UsageCollectorTests.refresh_fixture
+
+    def record(self, ledger, logs, account, observed):
+        self.refresh_fixture(ledger, logs, [account], observed)
+        return self.collector.export_snapshot(ledger, "node", {"intervals": []})["records"][0]
+
+    def test_the_named_list_is_exported_with_its_measurement_and_cleared_by_a_later_one(self):
+        ledger, logs, account = self.node_fixture()
+        (logs / "usage.log").touch()
+        account["missing_databases"] = ["gone", "old_shop"]
+        first = self.record(ledger, logs, account, "2026-10-01T00:00:00+00:00")
+        self.assertEqual(first["missing_databases"], ["gone", "old_shop"])
+        self.assertEqual(first["scan_started_at"], "2026-10-01T00:00:00+00:00")
+        account["missing_databases"] = []
+        self.assertEqual(self.record(ledger, logs, account, "2026-10-01T01:00:00+00:00")["missing_databases"], [])
+
+    def test_an_adapter_that_reports_nothing_means_none_are_missing(self):
+        ledger, logs, account = self.node_fixture()
+        (logs / "usage.log").touch()
+        self.assertEqual(self.record(ledger, logs, account, "2026-10-01T00:00:00+00:00")["missing_databases"], [])
+
+    def test_an_unavailable_scan_keeps_the_last_measured_list(self):
+        ledger, logs, account = self.node_fixture()
+        (logs / "usage.log").touch()
+        account["missing_databases"] = ["gone"]
+        self.record(ledger, logs, account, "2026-10-01T00:00:00+00:00")
+        account["unavailable"] = True
+        del account["missing_databases"]
+        later = self.record(ledger, logs, account, "2026-10-01T01:00:00+00:00")
+        self.assertEqual(later["missing_databases"], ["gone"])
+        self.assertEqual(later["scan_started_at"], "2026-10-01T00:00:00+00:00")
+
+    def test_an_invalid_list_is_no_measurement(self):
+        for value in (["bad name"], ["gone", "gone"], "gone", [7], [{}], [[]], [f"db{n}" for n in range(33)], None):
+            with self.subTest(value=value):
+                self.setUp()
+                ledger, logs, account = self.node_fixture()
+                (logs / "usage.log").touch()
+                account["missing_databases"] = value
+                record = self.record(ledger, logs, account, "2026-10-01T00:00:00+00:00")
+                self.assertIsNone(record["disk_total_bytes"])
+                self.assertIsNone(record["missing_databases"])

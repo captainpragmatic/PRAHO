@@ -165,17 +165,18 @@ class QuotaCoordinatorTests(SimpleTestCase):
             patch.object(backend, "probe", return_value=observed),
             patch.object(backend, "_domain", return_value=(domain, owner)),
             patch.object(backend, "_storage", return_value=("/dev/fixture", identity["filesystem_uuid"])),
+            patch.object(backend, "_metadata", return_value={}),
             patch.object(self.native, "_run") as metadata,
             patch.object(self.native, "_set_kernel_quota") as kernel,
         ):
-            backend._apply(request, lock_fd=3)
+            backend._apply(request, lock_fd=3, journal=self.root / "journal.json")
             self.assertEqual(kernel.call_count, 2)
             self.assertEqual(metadata.call_count, 1)
             kernel.reset_mock()
             metadata.reset_mock()
             request["policy"]["expiry_reduction"] = False
             with self.assertRaisesRegex(ValueError, "usage exceeds"):
-                backend._apply(request, lock_fd=3)
+                backend._apply(request, lock_fd=3, journal=self.root / "journal.json")
             kernel.assert_not_called()
             metadata.assert_not_called()
 
@@ -202,10 +203,11 @@ class QuotaCoordinatorTests(SimpleTestCase):
             patch.object(backend, "probe", return_value=observed),
             patch.object(backend, "_domain", return_value=(domain, owner)),
             patch.object(backend, "_storage", return_value=("/dev/fixture", identity["filesystem_uuid"])),
+            patch.object(backend, "_metadata", return_value={}),
             patch.object(self.native, "_run"),
             patch.object(self.native, "_set_kernel_quota") as kernel,
         ):
-            backend._apply(request, lock_fd=3)
+            backend._apply(request, lock_fd=3, journal=self.root / "journal.json")
         self.assertEqual(kernel.call_count, 2)
 
     def test_native_cleanup_rechecks_both_hard_caps_before_any_mutation(self):
@@ -244,6 +246,7 @@ class QuotaCoordinatorTests(SimpleTestCase):
             patch.object(backend, "probe", return_value=observed),
             patch.object(backend, "_domain", return_value=(domain, owner)),
             patch.object(backend, "_storage", return_value=("/dev/fixture", identity["filesystem_uuid"])),
+            patch.object(backend, "_metadata", return_value={}),
             patch.object(self.native, "_run") as metadata,
             patch.object(self.native, "_set_kernel_quota") as kernel,
             patch.object(
@@ -255,18 +258,18 @@ class QuotaCoordinatorTests(SimpleTestCase):
                     with self.subTest(key=key, cap=cap):
                         observed[key] = cap
                         with self.assertRaisesRegex(ValueError, "increase"):
-                            backend._apply(request, lock_fd=3)
+                            backend._apply(request, lock_fd=3, journal=self.root / "journal.json")
                         metadata.assert_not_called()
                         kernel.assert_not_called()
                     observed[key] = request["disk_limit_kib"]
             current.return_value = SimpleNamespace(hard=request["disk_limit_kib"] - 1)
             with self.assertRaisesRegex(ValueError, "increase"):
-                backend._apply(request, lock_fd=3)
+                backend._apply(request, lock_fd=3, journal=self.root / "journal.json")
             metadata.assert_called_once()
             kernel.assert_not_called()
             metadata.reset_mock()
             current.return_value = SimpleNamespace(hard=request["disk_limit_kib"])
-            backend._apply(request, lock_fd=3)
+            backend._apply(request, lock_fd=3, journal=self.root / "journal.json")
             self.assertEqual(metadata.call_count, 1)
             self.assertEqual(kernel.call_count, 2)
 
@@ -365,7 +368,8 @@ class QuotaCoordinatorTests(SimpleTestCase):
             "coordinator = load('coordinator', sys.argv[1])\n"
             "native = load('native', sys.argv[2])\n"
             "class Backend:\n"
-            " def apply(self, request, *, lock_fd=None):\n"
+            " def qualify_storage(self, request): pass\n"
+            " def apply(self, request, *, lock_fd=None, journal=None):\n"
             "  options = {} if lock_fd is None else {'lock_fd': lock_fd}\n"
             "  native._run([sys.executable, *sys.argv[5:]], timeout=15, **options)\n"
             " def probe(self, request): return {}\n"

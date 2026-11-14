@@ -16,6 +16,8 @@ our ($module_config_directory, $templates_dir, @list_templates_cache, %config);
 die "Root required\n" unless $> == 0;
 my $state_root = '/var/lib/praho/usage';
 my $destination = '/var/log/praho/usage.log';
+my $mariadb = '/usr/bin/mariadb';
+my $max_databases = 32;
 my $mode = @ARGV ? $ARGV[0] : '';
 die "Unsupported usage operation\n" if @ARGV > 1 || $mode !~ /^(?:|reconcile|reconcile-hook|reconcile-locked)$/;
 if ($mode eq 'reconcile-hook') {
@@ -52,6 +54,30 @@ sub usage_top_id {
         $domain = $by_id->{$domain->{'parent'}} or die "Unknown hosting owner\n";
     }
     return "$domain->{'id'}";
+}
+
+sub usage_schema_missing {
+    # True only when an exact-name SCHEMATA query, answered by a server that can see its own `mysql` schema,
+    # proves the database dropped. Any error, timeout, restricted view or other answer is unknown (#776).
+    my ($name) = @_;
+    return 0 unless defined($name) && $name =~ /^[A-Za-z0-9_]{1,64}$/;
+    my $query = "SELECT (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY 'mysql'),"
+        ."(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY '$name')";
+    my ($answer, $pid) = ('');
+    my $finished = eval {
+        local $SIG{ALRM} = sub { die "Database existence query timed out\n" };
+        alarm(10);
+        $pid = open(my $pipe, '-|', $mariadb, '--protocol=socket', '--batch', '--skip-column-names', '--execute', $query)
+            or die "Database existence query unavailable\n";
+        my $count = read($pipe, $answer, 64);
+        die "Database existence query unreadable\n" unless defined($count);
+        my $closed = close($pipe);
+        alarm(0);
+        $closed && $? == 0;
+    };
+    alarm(0);
+    if (!$finished && $pid) { kill('KILL', $pid); waitpid($pid, 0); }
+    return $finished && $answer =~ /\A1\t0\n?\z/ ? 1 : 0;
 }
 
 sub usage_ports {
@@ -346,7 +372,7 @@ for my $top (grep { !$_->{'parent'} && !$_->{'alias'} } @all) {
     my $row = {id => $top_id, domain => "$top->{'dom'}", username => "$top->{'user'}", home => "$top->{'home'}",
         members => [map { "$_->{'id'}" } @members], mailboxes => (grep { $_->{'mail'} } @members) ? undef : 0,
         %{$bindings->{$top_id}}};
-    my (@databases, %seen);
+    my (@databases, @missing, %seen);
     my $ok;
     {
         # Native diagnostics can contain SQL or credentials. Only our allowlist
@@ -367,7 +393,15 @@ for my $top (grep { !$_->{'parent'} && !$_->{'alias'} } @all) {
                     next if $seen{$key}++;
                     die "Unsupported storage\n" unless $db->{'type'} eq 'mysql';
                     my $path = &get_mysql_database_dir($domain, $db->{'name'});
-                    die "Unknown storage\n" unless defined($path) && -d $path;
+                    die "Unknown storage\n" unless defined($path);
+                    # Nothing at all at the path (not even a dangling link) may be a database MariaDB dropped.
+                    if (!-e $path && !-l $path) {
+                        die "Unknown storage\n" unless usage_schema_missing($db->{'name'});
+                        push @missing, "$db->{'name'}";
+                        die "Unknown storage\n" if @missing > $max_databases;
+                        next;
+                    }
+                    die "Unknown storage\n" unless -d $path;
                     my ($bytes) = &mysql_size($domain, $db->{'name'}, 1);
                     die "Unknown allocation\n" unless defined($bytes) && $bytes >= 0;
                     push @databases, {path => $path, bytes => 0 + $bytes};
@@ -376,7 +410,7 @@ for my $top (grep { !$_->{'parent'} && !$_->{'alias'} } @all) {
             1;
         };
     }
-    if ($ok) { $row->{'databases'} = \@databases; }
+    if ($ok) { $row->{'databases'} = \@databases; $row->{'missing_databases'} = [sort @missing]; }
     else { $row->{'unavailable'} = JSON::PP::true; }
     push @rows, $row;
 }

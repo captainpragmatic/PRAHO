@@ -80,6 +80,26 @@ the users it locked. Any failure leaves the site's database writes stopped and
 rerun with a **new token**; it resumes from the journal. Roll forward only: the
 previous probe refuses a repaired account.
 
+## Dropped databases
+
+A database the customer dropped in MariaDB (for example with `DROP DATABASE` from their
+own client) stays registered in Virtualmin. The usage collector and the quota lane check
+such a database by exact name in `information_schema.SCHEMATA`, as root over the socket.
+Only an answer from a server that can see its own `mysql` schema proves it gone. A
+proven-dropped database counts as 0 bytes, the quota lane skips it, and the staff
+account page names it. Any other answer, or a database that MariaDB still has without
+its directory, keeps the account's disk usage unavailable and makes a quota application
+refuse by name. The application is recorded as refused, never uncertain.
+
+To clean up, check with the customer, then on the node, as root:
+
+```bash
+virtualmin delete-database --domain <domain> --name <database>
+```
+
+Nothing removes the registration automatically. The note on the account page clears
+with the next accepted usage reading that no longer reports the database.
+
 ## Before enablement
 
 Deploy additive Platform schema and current workers before Portal. Install the

@@ -88,8 +88,8 @@ sub restart_apache {
     return !$fixture->{'fail_reload'};
 }
 sub domain_databases { return @{$_[0]->{'databases'} || []}; }
-sub get_mysql_database_dir { return "$fixture_root/database"; }
-sub mysql_size { return (4096); }
+sub get_mysql_database_dir { return ($fixture->{'database_dirs'} || {})->{$_[1]} // "$fixture_root/database"; }
+sub mysql_size { die "measured a dropped database\n" if ($fixture->{'unmeasurable'} || {})->{$_[1]}; return (4096); }
 package apache;
 sub wsplit { return [Text::ParseWords::shellwords($_[0])]; }
 sub find_directive {
@@ -126,6 +126,16 @@ class UsagePerlAdapterTests(SimpleTestCase):
         self.source = self.source.replace('/usr/share/webmin/virtual-server', str(self.native))
         self.source = self.source.replace('/var/lib/praho/usage', str(self.root / "state"))
         self.source = self.source.replace('/var/log/praho', str(self.root / "logs"))
+        # The exact-name SCHEMATA query goes to a fake server that records its arguments and answers as told.
+        self.mariadb = self.root / "mariadb"
+        self.mariadb.write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$@" >> "$PRAHO_NATIVE_FIXTURE/mariadb-calls"\n'
+            'printf "%s" "$PRAHO_SCHEMATA_ANSWER"\nexit "${PRAHO_SCHEMATA_EXIT:-0}"\n'
+        )
+        self.mariadb.chmod(0o755)
+        self.assertIn("'/usr/bin/mariadb'", self.source)
+        self.source = self.source.replace("'/usr/bin/mariadb'", repr(str(self.mariadb)))
+        self.schemata = {"PRAHO_SCHEMATA_ANSWER": "1\t0"}
         (self.native / "virtual-server-lib.pl").write_text(NATIVE)
         (self.root / "adapter.pl").write_text(self.source)
 
@@ -143,7 +153,7 @@ class UsagePerlAdapterTests(SimpleTestCase):
         return subprocess.run(  # noqa: S603 -- fixed interpreter and adapter created in this test's private directory
             ["/usr/bin/perl", str(self.root / "adapter.pl"), *([mode or "reconcile"] if reconcile else [])],
             capture_output=True, text=True, timeout=10,
-            env={**os.environ, "PRAHO_NATIVE_FIXTURE": str(self.root)}, check=False,
+            env={**os.environ, "PRAHO_NATIVE_FIXTURE": str(self.root), **self.schemata}, check=False,
         )
 
     def test_alias_cannot_replace_primary_literal_identity(self):
@@ -349,3 +359,60 @@ class UsagePerlAdapterTests(SimpleTestCase):
         result = self.run_adapter(mode="reconcile-locked")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(reloads.read_text().count("reload"), before + 1)
+
+
+class MissingDatabaseCollectorTests(SimpleTestCase):
+    """A database Virtualmin registers but MariaDB dropped is 0 bytes and named, never an unavailable account (#776)."""
+
+    # The same real adapter and native fixture, without re-running the other class's tests.
+    vhost = UsagePerlAdapterTests.vhost
+    run_adapter = UsagePerlAdapterTests.run_adapter
+
+    def setUp(self):
+        UsagePerlAdapterTests.setUp(self)
+        self.vhost()
+        self.fixture["domains"][0]["databases"] = [
+            {"type": "mysql", "host": "localhost", "name": "shop"},
+            {"type": "mysql", "host": "localhost", "name": "gone"},
+        ]
+        self.fixture["database_dirs"] = {"gone": str(self.root / "dropped/gone")}
+        self.fixture["unmeasurable"] = {"gone": True}
+
+    def row(self):
+        result = self.run_adapter(reconcile=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["accounts"][0]
+
+    def calls(self):
+        path = self.root / "mariadb-calls"
+        return path.read_text() if path.exists() else ""
+
+    def test_a_proven_missing_database_counts_nothing_and_is_named(self):
+        row = self.row()
+        self.assertNotIn("unavailable", row)
+        self.assertEqual(row["databases"], [{"path": str(self.root / "database"), "bytes": 4096}])
+        self.assertEqual(row["missing_databases"], ["gone"])
+        self.assertIn("SCHEMA_NAME = BINARY 'mysql'", self.calls())
+        self.assertIn("SCHEMA_NAME = BINARY 'gone'", self.calls())
+        self.assertIn("--protocol=socket", self.calls())
+
+    def test_present_databases_report_an_empty_list_and_ask_nothing(self):
+        self.fixture["database_dirs"] = {}
+        self.fixture["unmeasurable"] = {}
+        row = self.row()
+        self.assertEqual(row["missing_databases"], [])
+        self.assertEqual(self.calls(), "")
+
+    def test_anything_but_a_proof_keeps_the_account_unavailable(self):
+        for answer, code in (("1\t1", "0"), ("0\t0", "0"), ("", "0"), ("1\t0", "1"), ("garbage", "0")):
+            self.schemata = {"PRAHO_SCHEMATA_ANSWER": answer, "PRAHO_SCHEMATA_EXIT": code}
+            with self.subTest(answer=answer, code=code):
+                row = self.row()
+                self.assertIs(row.get("unavailable"), True)
+                self.assertNotIn("missing_databases", row)
+
+    def test_a_dangling_link_is_not_absent_and_mariadb_is_not_asked(self):
+        (self.root / "dropped").mkdir()
+        (self.root / "dropped/gone").symlink_to(self.root / "nowhere")
+        self.assertIs(self.row().get("unavailable"), True)
+        self.assertEqual(self.calls(), "")

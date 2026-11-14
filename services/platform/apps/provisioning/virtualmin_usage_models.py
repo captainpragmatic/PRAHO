@@ -48,6 +48,8 @@ class AccountUsageState(UsageModel):
     disk_reading = models.ForeignKey("UsageReading", null=True, on_delete=models.SET_NULL, related_name="+")
     bandwidth_reading = models.ForeignKey("UsageReading", null=True, on_delete=models.SET_NULL, related_name="+")
     bandwidth_incomplete_since = models.DateTimeField(null=True)
+    # Databases Virtualmin still registers but MariaDB proved dropped, as of the accepted disk reading (#776).
+    missing_databases = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "provisioning_account_usage_state"

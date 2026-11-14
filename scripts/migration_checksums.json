@@ -154,6 +154,7 @@
     "services/platform/apps/provisioning/migrations/0038_merge_crowdsec_hosting_observation.py": "790721b2fa06f741b3bd93ebdb210e92109312703f88d80d9d7aa50da43749e3",
     "services/platform/apps/provisioning/migrations/0039_servicehostingraise_and_more.py": "de9da4a54256a2bcb51fa5582e1687f5454aca9bd84434bcf8fea78946edac1c",
     "services/platform/apps/provisioning/migrations/0040_merge_crowdsec_hosting_warnings.py": "98d850cb7bc62e07cf8ebcf2cb2596a69b5a7f0e46eed52e441bb833567e5997",
+    "services/platform/apps/provisioning/migrations/0041_accountusagestate_missing_databases.py": "b10869c9d631ee9e821ce3e422f60e001f65490860e0dad0befd81d5de768520",
     "services/platform/apps/security/migrations/0001_initial.py": "9ac8ff6a7df2ad1fc63a6347f38bae4bb6ad67fead62219f0c6e975ec2ec200a",
     "services/platform/apps/security/migrations/0002_actions.py": "3f864099e603c43882f95a69401af9890e0745d8c50add9c0a846f530e00f6f9",
     "services/platform/apps/security/migrations/0002_customer_ip_observations.py": "3b8d89961adadb9a8e49cb2ad266c1cbfa60d8d46522ef49e3dd42023f4b4344",

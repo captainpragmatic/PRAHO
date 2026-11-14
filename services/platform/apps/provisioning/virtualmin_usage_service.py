@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
 
@@ -96,7 +98,16 @@ def locked_state(account_id: UUID) -> tuple[AccountUsageState, LockedAccount]:
         state.chain_epoch_snapshot = account.chain_epoch
         state.gauge_not_before = timezone.now()
         state.disk_reading = None
-        state.save(update_fields=["chain_epoch_snapshot", "gauge_not_before", "disk_reading", "updated_at"])
+        state.missing_databases = []  # The dropped-database list belongs to the reading it came with.
+        state.save(
+            update_fields=[
+                "chain_epoch_snapshot",
+                "gauge_not_before",
+                "disk_reading",
+                "missing_databases",
+                "updated_at",
+            ]
+        )
     UsageInterval.objects.get_or_create(
         account=account,
         ended_at__isnull=True,
@@ -130,6 +141,7 @@ def reset_owner_scope(account_id: UUID) -> None:
         owner_start_known=True,
         gauge_not_before=now,
         disk_reading=None,
+        missing_databases=[],
         bandwidth_reading=None,
         domain_id="",
         installation=None,
@@ -169,6 +181,7 @@ def move_interval(account_id: UUID, server_id: UUID) -> None:
         server_id_snapshot=server_id,
         gauge_not_before=now,
         disk_reading=None,
+        missing_databases=[],
         domain_id="",
         installation=None,
         bandwidth_incomplete_since=now,
@@ -181,7 +194,9 @@ def invalidate_gauge(account_id: UUID) -> None:
     if account is None:
         return
     state = current_state(account)
-    AccountUsageState.objects.filter(pk=state.pk).update(gauge_not_before=timezone.now(), disk_reading=None)
+    AccountUsageState.objects.filter(pk=state.pk).update(
+        gauge_not_before=timezone.now(), disk_reading=None, missing_databases=[]
+    )
 
 
 def rebind_created_account(account_id: UUID) -> None:
@@ -223,6 +238,23 @@ def record_failure(server_id: UUID, reason: str) -> None:
     NodeUsageSyncState.objects.update_or_create(
         server_id=server_id, defaults={"outcome": reason, "last_attempt_at": timezone.now()}
     )
+
+
+MAX_MISSING_DATABASES = 32
+_DATABASE_NAME = re.compile(r"[A-Za-z0-9_]{1,64}")
+
+
+def missing_database_names(row: dict[str, Any]) -> list[str]:
+    """The node's proof of dropped databases (#776): absent means none; anything malformed rejects the reading."""
+    names = row.get("missing_databases", [])
+    if (
+        not isinstance(names, list)
+        or len(names) > MAX_MISSING_DATABASES
+        or any(not isinstance(name, str) or _DATABASE_NAME.fullmatch(name) is None for name in names)
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError("Invalid missing database list")
+    return sorted(names)
 
 
 @transaction.atomic
@@ -300,6 +332,7 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
                     continue
                 files, database = integer(row.get("disk_files_bytes")), integer(row.get("disk_db_bytes"))
                 databases = integer(row.get("databases"))
+                missing = missing_database_names(row)
                 mailboxes = integer(row["mailboxes"]) if row.get("mailboxes") is not None else None
                 if (
                     files + database > MAX_VALUE
@@ -334,7 +367,9 @@ def publish_snapshot(  # noqa: C901, PLR0912, PLR0915  # Independent publication
                 continue
             state.disk_reading = reading
             state.domain_id, state.installation = domain_id, installation
-            state.save(update_fields=["disk_reading", "domain_id", "installation", "updated_at"])
+            # Only an accepted reading may name or clear a dropped database; staff see it on the account page.
+            state.missing_databases = missing
+            state.save(update_fields=["disk_reading", "domain_id", "installation", "missing_databases", "updated_at"])
             UsageInterval.objects.filter(account=account, ended_at__isnull=True).update(
                 domain_id=domain_id, installation=installation
             )
