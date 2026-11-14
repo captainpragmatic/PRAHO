@@ -32654,6 +32654,10 @@ msgstr "Operațiunea nativă de găzduire a returnat dovezi invalide."
 msgid "Unsupported native quota action."
 msgstr "Acțiune nativă de aplicare a cotelor neacceptată."
 
+#: apps/provisioning/hosting_node_transport.py:60
+msgid "Unsupported native database hold action."
+msgstr "Acțiune nativă de blocare a scrierii în baza de date neacceptată."
+
 #: apps/provisioning/hosting_node_transport.py:63
 msgid "Unsupported native helper preparation action."
 msgstr "Acțiune nativă de pregătire a utilitarelor neacceptată."
