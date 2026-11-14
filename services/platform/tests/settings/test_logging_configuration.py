@@ -477,6 +477,27 @@ class SensitiveDataRedactionTests(SimpleTestCase):
         for value in SENSITIVE_VALUES:
             self.assertNotIn(value, payload)
 
+    def test_sentry_redacts_a_secret_link_in_a_mapping_message(self) -> None:
+        message = {"url": "/auth/password-reset-confirm/uid42/reset-token-secret/", "step": "confirm"}
+        record = logging.LogRecord("apps.users", logging.ERROR, __file__, 1, message, (), None)
+        (event,) = self._sentry_events([record])
+        self.assertIn("confirm", event["logentry"]["formatted"])
+        self.assertNotIn("reset-token-secret", json.dumps(event))
+
+    def test_sentry_trims_a_rebuilt_mapping_message_to_its_own_limit(self) -> None:
+        from sentry_sdk.consts import DEFAULT_MAX_VALUE_LENGTH  # noqa: PLC0415
+
+        for extra, trimmed in ((0, False), (1, True)):
+            with self.subTest(extra=extra):
+                # str() of {"note": "x..."} adds 12 characters around the value
+                message = {"note": "x" * (DEFAULT_MAX_VALUE_LENGTH - 12 + extra)}
+                record = logging.LogRecord("apps.users", logging.ERROR, __file__, 1, message, (), None)
+                (event,) = self._sentry_events([record])
+                for field in ("message", "formatted"):
+                    text = event["logentry"][field]
+                    self.assertLessEqual(len(text), DEFAULT_MAX_VALUE_LENGTH)
+                    self.assertEqual(text.endswith("..."), trimmed)
+
     def test_sentry_keeps_the_formatted_message(self) -> None:
         """Sentry sends positional arguments as a list; the message is rendered from them as logging renders it."""
         cases: list[tuple[str, tuple[object, ...], str]] = [

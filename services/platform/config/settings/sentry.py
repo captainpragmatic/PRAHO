@@ -7,8 +7,9 @@ denylist can name, so they are not sent at all. Imported only when sentry_sdk is
 from collections.abc import Callable, Mapping
 from typing import Any, TypedDict
 
+from sentry_sdk.consts import DEFAULT_MAX_VALUE_LENGTH
 from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
-from sentry_sdk.utils import AnnotatedValue
+from sentry_sdk.utils import AnnotatedValue, strip_string
 
 from apps.common.secret_urls import scrub_sentry_event
 
@@ -80,7 +81,7 @@ class SentryOptions(TypedDict):
     before_send_transaction: Callable[[Any, Any], Any]
 
 
-def _render_redacted_log_entry(event: Any, hint: Any = None) -> None:
+def _render_redacted_log_entry(event: Any) -> None:
     """Sentry renders a logged message from its raw parameters; render it again from redacted ones.
 
     "submitted=%(password)s" renders the password under a key no text scan can recognise, so the parameters are
@@ -97,11 +98,6 @@ def _render_redacted_log_entry(event: Any, hint: Any = None) -> None:
     )
 
     entry = event.get("logentry") if isinstance(event, dict) else None
-    record = hint.get("log_record") if isinstance(hint, dict) else None
-    if isinstance(entry, dict) and isinstance(getattr(record, "msg", None), Mapping | list | tuple):
-        # A mapping logged as the message itself: Sentry wrote it as text, where a key like "password value" can't
-        # be recognised, so it is written again from the structure redacted by key.
-        entry["message"] = entry["formatted"] = str(redact_sensitive_data(record.msg))
     if not isinstance(entry, dict) or not entry.get("params"):
         return
     message = str(entry.get("message", ""))
@@ -179,6 +175,23 @@ def _resolving_meta(meta: Any, value: Any) -> Any:
     return kept
 
 
+def _rebuild_structured_message(event: Any, hint: Any) -> None:
+    """A mapping, list or tuple logged as the message itself, written again from the structure redacted by key.
+
+    Sentry wrote it as text, where a key like "password value" can't be recognised. It runs before every other
+    scrub, so the secret-URL scrub and the text redaction still read the rebuilt text, and it is trimmed to
+    Sentry's own length limit, since Sentry's trimming of the original text has already run.
+    """
+    from apps.common.logging import redact_sensitive_data  # noqa: PLC0415  # Settings import before apps are ready
+
+    entry = event.get("logentry") if isinstance(event, dict) else None
+    record = hint.get("log_record") if isinstance(hint, dict) else None
+    if not isinstance(entry, dict) or not isinstance(getattr(record, "msg", None), Mapping | list | tuple):
+        return
+    text = strip_string(str(redact_sensitive_data(record.msg)), max_length=DEFAULT_MAX_VALUE_LENGTH)
+    entry["message"] = entry["formatted"] = text.value if isinstance(text, AnnotatedValue) else text
+
+
 def scrub_event(event: Any, hint: Any) -> Any:
     """Secret links and the values of sensitive keys, wherever they sit in the event (exception text included).
 
@@ -190,12 +203,13 @@ def scrub_event(event: Any, hint: Any) -> Any:
     """
     from apps.common.logging import redact_sensitive_data  # noqa: PLC0415  # Settings import before apps are ready
 
+    _rebuild_structured_message(event, hint)
     event = scrub_sentry_event(event, hint)
     if not isinstance(event, dict):
         return redact_sensitive_data(event)
     meta = event.pop("_meta", None)
     substituted = _substituted_paths(event, meta)
-    _render_redacted_log_entry(event, hint)
+    _render_redacted_log_entry(event)
     redacted = redact_sensitive_data(event)
     for path in substituted:
         container = _at(redacted, path[:-1])
