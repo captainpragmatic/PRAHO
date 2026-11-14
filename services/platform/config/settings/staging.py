@@ -24,6 +24,7 @@ from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured as _ImproperlyConfigured
 
+from apps.common.logging import with_sensitive_data_redaction
 from apps.common.secret_urls import secure_logging_config
 
 from .base import *  # noqa: F403  # Django settings pattern
@@ -412,6 +413,7 @@ STAGING_FEATURES = {
 # Handler filters cover Django request and exception logging as well as app logs.
 
 LOGGING = secure_logging_config(LOGGING)
+LOGGING = with_sensitive_data_redaction(LOGGING)
 
 PORTAL_HMAC_REQUIRE_ISOLATION = True
 PORTAL_HMAC_MODE = os.environ.get("PORTAL_HMAC_MODE", "enforce")

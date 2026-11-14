@@ -10,6 +10,7 @@ annotations serialisation writes intact.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from django.test import SimpleTestCase
@@ -103,3 +104,69 @@ class IdentityCheckFieldsTests(SimpleTestCase):
         self.assertNotIn(b"hunter2", sent)
         self.assertIn(b'"_meta"', sent)
         self.assertIn(b"!config", sent)  # the removal's annotation, not "[Filtered]" in its place
+
+    def test_an_extra_sentry_scrubbed_keeps_its_annotation(self) -> None:
+        sent = _send({"message": "boom", "extra": {"password": "hunter2", "note": "password=extra-secret"}})
+        self.assertNotIn(b"hunter2", sent)
+        self.assertNotIn(b"extra-secret", sent)  # free text in an extra is still redacted
+        self.assertIn(b'"password":"[Filtered]"', sent)  # Sentry's own substitute, matching its annotation
+        self.assertIn(b"!config", sent)
+
+    def test_free_text_in_request_data_is_redacted(self) -> None:
+        sent = _send({"message": "boom", "request": {"data": {"note": "password=request-secret"}}})
+        self.assertIn(b"boom", sent)
+        self.assertNotIn(b"request-secret", sent)
+
+    def test_content_sentry_trims_is_still_redacted(self) -> None:
+        extra = {"a_note": "password=trim-secret", **{f"field_{index:02}": index for index in range(12)}}
+        sent = _send({"message": "boom", "extra": extra})
+        self.assertIn(b'"len"', sent)  # Sentry trimmed the extras and annotated it
+        self.assertNotIn(b"trim-secret", sent)
+
+    def test_a_sensitive_parent_is_redacted_whole_though_sentry_annotated_its_child(self) -> None:
+        sent = _send({"message": "boom", "extra": {"new_password1": {"password": "inner", "value": "outer-secret"}}})
+        self.assertNotIn(b"outer-secret", sent)
+        self.assertNotIn(b"inner", sent)
+
+    def test_colliding_redacted_keys_are_all_kept(self) -> None:
+        sent = _send({"message": "boom", "extra": {"password": "p", "password=one": 1, "password=two": 2}})
+        event = json.loads(sent)
+        self.assertEqual(len(event["extra"]), 3, event["extra"])
+        self.assertNotIn(b"one", sent)
+        self.assertNotIn(b"two", sent)
+
+    def test_a_secret_in_a_key_never_returns_through_the_annotations(self) -> None:
+        sent = _send({"message": "boom", "extra": {"password=key-secret": {"password": "hunter2"}}})
+        self.assertIn(b'"_meta"', sent)
+        self.assertNotIn(b"key-secret", sent)
+        self.assertNotIn(b"hunter2", sent)
+
+    def test_annotations_never_outlive_what_was_redacted(self) -> None:
+        def paths(meta: Any, path: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+            if not isinstance(meta, dict):
+                return []
+            found = [path] if "" in meta else []
+            return found + [p for key, child in meta.items() if key != "" for p in paths(child, (*path, key))]
+
+        def resolves(value: Any, path: tuple[str, ...]) -> bool:
+            for key in path:
+                if isinstance(value, dict) and key in value:
+                    value = value[key]
+                elif isinstance(value, list) and key.isdigit() and int(key) < len(value):
+                    value = value[int(key)]
+                else:
+                    return False
+            return True
+
+        cases = {
+            "secret key under a sensitive parent": {"new_password1": {"actual-secret": {"password": "inner"}}},
+            "colliding keys with annotated children": {"password=one": {"password": "a"}, "password=two": {"password": "b"}},
+        }
+        for name, extra in cases.items():
+            with self.subTest(name):
+                sent = _send({"message": "boom", "extra": extra})
+                for secret in (b"actual-secret", b"inner", b"one", b"two"):
+                    self.assertNotIn(secret, sent)
+                event = json.loads(sent)
+                for path in paths(event.get("_meta")):
+                    self.assertTrue(resolves(event, path), path)

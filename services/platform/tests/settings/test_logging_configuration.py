@@ -9,7 +9,12 @@ runtime (e.g. handler referencing a non-existent formatter).
 from __future__ import annotations
 
 import importlib
+import io
+import json
+import logging
+import logging.config
 import os
+import sys
 from typing import Any
 from unittest.mock import patch
 
@@ -221,3 +226,314 @@ class SecretURLFilterWiringTests(SimpleTestCase):
                 self.assertTrue(config["handlers"], "handlers are configured")
                 for name, handler in config["handlers"].items():
                     self.assertIn("secret_urls", handler.get("filters", []), f"{module}: handler {name}")
+
+
+SENSITIVE_VALUES = (
+    "Hunter2-pw",
+    "RO76543210",
+    "76543217",
+    "4111111111111111",
+    "first-secret",
+    "second-secret",
+    "nested-secret",
+    "tuple-secret",
+    "quote-secret",
+    "horse battery",
+    "extra-secret",
+    "key-secret",
+    "bearer-secret",
+    "tkeepsecret",
+    "beta-secret",
+    "byte-secret",
+    "object-secret",
+    "byte-key-secret",
+    "spaced-bearer-secret",
+    "whole-secret",
+    "nested-json-secret",
+    "stack-secret",
+    "cached-exc-secret",
+    "cli-secret",
+    "suffix-secret",
+    "bracket-tail",
+    "submitted-secret",
+    "line-secret",
+    "8675309",
+)
+
+
+class _Labelled:
+    """An object a formatter can only write as text, which carries a secret when it does."""
+
+    def __str__(self) -> str:
+        return "password=object-secret"
+
+
+def _deployed_handler_output(config: dict[str, Any], handler_name: str, record: logging.LogRecord) -> str:
+    """What one configured handler writes for a record: its own filters and formatter, a stream instead of a file.
+
+    The filters and formatter are built the way dictConfig builds them, without dictConfig itself, which would
+    replace the test run's own logging: one instance per filter name, so a name listed twice is added once.
+    """
+    spec = config["handlers"][handler_name]
+    configurator = logging.config.DictConfigurator(config)
+    stream = io.StringIO()
+    handler = logging.StreamHandler(stream)
+    built: dict[str, logging.Filter] = {}
+    for name in spec.get("filters", []):
+        if name not in built:
+            built[name] = configurator.configure_filter(dict(config["filters"][name]))
+        handler.addFilter(built[name])
+    if "formatter" in spec:
+        handler.setFormatter(configurator.configure_formatter(dict(config["formatters"][spec["formatter"]])))
+    handler.handle(record)
+    return stream.getvalue()
+
+
+def _records() -> dict[str, logging.LogRecord]:
+    def record(message: str, args: tuple[object, ...] = (), exc_info: Any = None) -> logging.LogRecord:
+        return logging.LogRecord("apps.users", logging.ERROR, __file__, 1, message, args, exc_info)
+
+    try:
+        raise ValueError("charge failed card_number=4111111111111111 password=Hunter2-pw")
+    except ValueError:
+        failure = sys.exc_info()
+    stack = record("lookup failed")
+    stack.stack_info = "Stack (most recent call last):\n  check(password=stack-secret)"
+    stack.exc_text = "Traceback: cached password=cached-exc-secret"
+    extras = record("update")
+    extras.password = "extra-secret"
+    extras.query = {"card_number": ["4111111111111111"], "page": "2", "password=key-secret": 1}
+    extras.session_note = "visible-note"
+    extras.payload = b"password=byte-secret"
+    extras.label = _Labelled()
+    extras.headers = {b"password": "byte-key-secret"}
+    return {
+        "key=value": record("login failed password=Hunter2-pw vat_number=RO76543210 cui=76543217"),
+        "list value": record("{'password': ['first-secret', 'second-secret']}"),
+        "nested dict value": record("{'token': {'value': 'nested-secret'}}"),
+        "tuple value": record("{'password': ('tuple-secret-1', 'tuple-secret-2')}"),
+        "escaped quote": record('password="has\\"quote-secret"'),
+        "structured args": record("profile %s", ({"password": ["first-secret"], "token": {"value": "nested-secret"}},)),
+        "spaced value": record("password: correct horse battery"),
+        "database detail": record("Key (vat_number)=(RO76543210) already exists."),
+        "authorization scheme": record("upstream refused Authorization=Bearer bearer-secret retry=1"),
+        "apostrophe": record("password=can'tkeepsecret"),
+        "authorization spacing": record("Authorization=Bearer \t  spaced-bearer-secret next=1"),
+        "colon list": record("password: alpha,beta-secret"),
+        "leading delimiter": record("password=;whole-secret"),
+        "spaced equals": record("password=correct horse battery"),
+        "nested json": record(json.dumps({"error": json.dumps({"password": "nested-json-secret"})})),
+        "closing brackets": record("password=abc)bracket-tail token=x]bracket-tail cui=7}bracket-tail"),
+        "reset link beside a mapping": record(
+            "link=%(url)s submitted=%(password)s",
+            ({"url": "/auth/password-reset-confirm/uid/reset-token/", "password": "submitted-secret"},),
+        ),
+        "positional value across lines": record("login failed password=%s user=%s", ("prefix\nline-secret", "ana")),
+        "numeric placeholder": record("card check cvv=%d, user=%s", (8675309, "ana")),
+        "command line": record("ran tool --password=cli-secret --verbose; also {'--token': 'cli-secret'}"),
+        "nested json inner quote": record(json.dumps({"error": json.dumps({"password": 'prefix"suffix-secret'})})),
+        "stack and cached exception": stack,
+        "extras": extras,
+        "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
+        "record.args": record("profile %s", ({"vat_number": "RO76543210", "password": "Hunter2-pw"},)),
+        "exception text": record("payment error", (), failure),
+    }
+
+
+class SensitiveDataRedactionTests(SimpleTestCase):
+    """Every configured handler, in every environment, writes a sensitive key's value as [REDACTED]."""
+
+    def test_every_handler_redacts_sensitive_values(self) -> None:
+        for module in ("config.settings.dev", "config.settings.staging", "config.settings.prod"):
+            config = _get_logging(module)
+            for handler_name in config["handlers"]:
+                for shape, record in _records().items():
+                    with self.subTest(module=module, handler=handler_name, shape=shape):
+                        output = _deployed_handler_output(config, handler_name, record)
+                        # The record itself is clean too, whatever this formatter happens to write (exc_info keeps the
+                        # original exception object for formatters that need it; its text lives in exc_text).
+                        attributes = repr({k: v for k, v in vars(record).items() if k != "exc_info"})
+                        self.assertEqual([value for value in SENSITIVE_VALUES if value in attributes], [])
+                        # A formatter may write no exception, or no extras; where it writes them, they're redacted.
+                        written = {
+                            "exception text": "ValueError",
+                            "extras": "visible-note",
+                            "stack and cached exception": "most recent call last",
+                        }.get(shape)
+                        if written is None or written in output:
+                            self.assertIn("[REDACTED]", output)
+                        if output.startswith("{"):
+                            json.loads(output)  # still one valid JSON line
+                        for value in SENSITIVE_VALUES:
+                            self.assertNotIn(value, output)
+
+    def test_ordinary_words_are_left_alone(self) -> None:
+        config = _get_logging("config.settings.prod")
+        record = logging.LogRecord("apps.users", logging.INFO, __file__, 1, "Password changed for %s", ("ana",), None)
+        output = _deployed_handler_output(config, "console", record)
+        self.assertIn("Password changed for ana", output)
+        self.assertNotIn("[REDACTED]", output)
+
+    def test_audit_middleware_query_parameters_are_redacted(self) -> None:
+        """AuditMiddleware logs a request's query as an extra (a dict of lists); production writes none of its secrets."""
+        from django.contrib.auth.models import AnonymousUser  # noqa: PLC0415
+        from django.http import HttpResponse  # noqa: PLC0415
+        from django.test import RequestFactory  # noqa: PLC0415
+
+        from apps.common.middleware import AuditMiddleware  # noqa: PLC0415
+
+        request = RequestFactory().get(
+            "/customers/", {"token": "tok-secret", "card_number": "4111111111111111", "q": "ana"}
+        )
+        request.user = AnonymousUser()
+        with self.assertLogs("apps.common.middleware", level="INFO") as captured:
+            AuditMiddleware(lambda _request: HttpResponse("ok"))(request)
+        record = next(record for record in captured.records if getattr(record, "event", "") == "request")
+        output = _deployed_handler_output(_get_logging("config.settings.prod"), "console", record)
+        self.assertNotIn("tok-secret", output)
+        self.assertNotIn("4111111111111111", output)
+        self.assertIn('"q": ["ana"]', output)
+
+    def test_a_failed_redaction_withholds_every_extra(self) -> None:
+        """When walking one extra fails, no later extra may reach a handler unredacted."""
+
+        class Exploding(dict):
+            def items(self) -> Any:
+                raise RuntimeError("changed during iteration")
+
+        record = logging.LogRecord("apps.users", logging.ERROR, __file__, 1, "update", (), None)
+        record.broken = Exploding(a=1)
+        record.note = "token=exploding-secret"
+        for module in ("config.settings.staging", "config.settings.prod"):
+            config = _get_logging(module)
+            for handler_name in config["handlers"]:
+                with self.subTest(module=module, handler=handler_name):
+                    probe = logging.makeLogRecord(dict(vars(record)))
+                    probe.broken, probe.note = Exploding(a=1), "token=exploding-secret"
+                    output = _deployed_handler_output(config, handler_name, probe)
+                    self.assertIn("[log record withheld: redaction failed]", output)  # written, not dropped
+                    self.assertNotIn("exploding-secret", output)
+                    self.assertEqual(probe.note, "[REDACTED]")  # withheld on the record, not just unwritten
+
+    def test_keys_redacted_alike_keep_both_entries(self) -> None:
+        from apps.common.logging import redact_sensitive_data  # noqa: PLC0415
+
+        for pair in (
+            {"password=one": {"result": "success"}, "password=two": {"result": "failure"}},
+            {"password=one": {"result": "success"}, "password=[REDACTED]": {"result": "failure"}},
+            {"password=[REDACTED]": {"result": "success"}, "password=one": {"result": "failure"}},
+            {
+                "password=[REDACTED] (2)": {"result": "success"},
+                "password=a": {"result": "x"},
+                "password=b": {"result": "failure"},
+            },
+        ):
+            with self.subTest(keys=list(pair)):
+                redacted = redact_sensitive_data(pair)
+                # Every entry survives; a key naming a password is itself sensitive, so its value is redacted too.
+                self.assertEqual(len(redacted), len(pair), redacted)
+                self.assertEqual(list(redacted.values()), ["[REDACTED]"] * len(pair))
+                for secret in ("one", "two", "=a", "=b"):
+                    self.assertNotIn(secret, "".join(redacted))
+
+    @staticmethod
+    def _sentry_events(records: list[logging.LogRecord]) -> list[Any]:
+        """What production's Sentry options send for these records: the real SentryHandler, an in-memory transport."""
+        import sentry_sdk  # noqa: PLC0415
+        from sentry_sdk.integrations.logging import SentryHandler  # noqa: PLC0415
+        from sentry_sdk.transport import Transport  # noqa: PLC0415
+
+        from config.settings.sentry import sentry_options  # noqa: PLC0415
+
+        sent: list[Any] = []
+
+        class Memory(Transport):
+            def capture_envelope(self, envelope: Any) -> None:
+                sent.extend(item.payload.json for item in envelope.items if item.payload.json is not None)
+
+        options = {**sentry_options("https://key@sentry.example.test/1", release="test"), "transport": Memory}
+        client = sentry_sdk.Client(default_integrations=False, **options)
+        with sentry_sdk.isolation_scope() as scope:
+            scope.set_client(client)
+            for record in records:
+                SentryHandler().handle(record)
+            client.flush()
+        return sent
+
+    def test_sentry_receives_no_sensitive_value(self) -> None:
+        sent = self._sentry_events(list(_records().values()))
+        self.assertTrue(sent, "the handler sent events")
+        payload = json.dumps(sent)
+        for value in SENSITIVE_VALUES:
+            self.assertNotIn(value, payload)
+
+    def test_sentry_keeps_the_formatted_message(self) -> None:
+        """Sentry sends positional arguments as a list; the message is rendered from them as logging renders it."""
+        cases: list[tuple[str, tuple[object, ...], str]] = [
+            ("order %s failed", ("A-1",), "order A-1 failed"),
+            ("order %s failed: %s", ("A-1", "timeout"), "order A-1 failed: timeout"),
+            ("user %(user)s signed in from %(ip)s", ({"user": "ana", "ip": "10.0.0.1"},), "user ana signed in from 10.0.0.1"),
+            ("login failed with password=%s", ("pw-positional",), "login failed with password=[REDACTED]"),
+            ("submitted=%(password)s for %(user)s", ({"password": "pw-mapping", "user": "ana"},), "submitted=[REDACTED] for ana"),
+            # The value equals text the message shows anyway, and a value across lines: decided by where it sits.
+            ("login failed with password=%s", ("password",), "login failed with password=[REDACTED]"),
+            ("password=%s user=%s", ("prefix\npw-tail", "ana"), "password=[REDACTED] user=ana"),
+            ("card check cvv=%d, user=%s", (8675309, "ana"), "card check cvv=[REDACTED], user=ana"),
+            # No placement shows these as sensitive (a key passed as an argument, a mapping a bare %s writes whole,
+            # a "*" width), so every parameter is withheld once the rendered text needed redacting.
+            ("%s=%s", ("password", "pw-dynamic"), "password=[REDACTED]"),
+            ("password=%s", ({"value": "pw-mapping-whole"},), "password=[REDACTED]"),
+            ("password=%*s, user=%s", (12, "pw-star", "ana"), "password=     [REDACTED], user=ana"),
+        ]
+        for message, args, expected in cases:
+            with self.subTest(message=message):
+                record = logging.LogRecord("apps.users", logging.ERROR, __file__, 1, message, args, None)
+                (event,) = self._sentry_events([record])
+                self.assertEqual(event["logentry"]["formatted"], expected)
+                self.assertNotIn("pw-", json.dumps(event))
+                self.assertNotIn("8675309", json.dumps(event))
+                if message.startswith("login failed with password"):
+                    self.assertEqual(event["logentry"]["params"], ["[REDACTED]"])
+                if message == "order %s failed: %s":
+                    self.assertEqual(event["logentry"]["params"], ["A-1", "timeout"])
+
+    def test_long_text_is_redacted_in_linear_time(self) -> None:
+        """A long unbroken word (a base64 blob, a token) must not stall the worker that logs it."""
+        import time  # noqa: PLC0415
+
+        from apps.common.logging import redact_sensitive_text  # noqa: PLC0415
+
+        # Big enough that a scan retried at every character (seconds) fails, small enough that it fails quickly.
+        for text in ("a" * 20_000, "password=" + "x " * 10_000, "a=" * 10_000, ", " * 10_000, "a" + " " * 20_000):
+            with self.subTest(text=text[:12]):
+                started = time.perf_counter()
+                redact_sensitive_text(text)
+                self.assertLess(time.perf_counter() - started, 1.0)
+
+    def test_a_value_ending_in_a_backslash_keeps_the_text_after_it(self) -> None:
+        """Inside JSON nested in JSON, the value's closing quote is found by escape depth, not swallowed with the rest."""
+        from apps.common.logging import redact_sensitive_text  # noqa: PLC0415
+
+        for secret in ("secret-bs\\", "secret-bs\\\\", 'secret-bs\\"'):
+            with self.subTest(secret=secret):
+                text = json.dumps(
+                    {"error": json.dumps({"password": secret, "after": "kept-inner"}), "next": "kept-outer"}
+                )
+                redacted = redact_sensitive_text(text)
+                self.assertNotIn("secret-bs", redacted)
+                self.assertIn("kept-inner", redacted)
+                self.assertIn("kept-outer", redacted)
+                json.loads(redacted)  # still valid JSON at both levels
+                json.loads(json.loads(redacted)["error"])
+
+    def test_colliding_keys_are_redacted_in_linear_time(self) -> None:
+        """Query parameters reach AuditMiddleware's extras, so whoever sends the request picks how many keys collide."""
+        import time  # noqa: PLC0415
+
+        from apps.common.logging import redact_sensitive_data  # noqa: PLC0415
+
+        keys = {f"password={index}": index for index in range(4000)}
+        started = time.perf_counter()
+        redacted = redact_sensitive_data(keys)
+        self.assertLess(time.perf_counter() - started, 1.0)
+        self.assertEqual(len(redacted), len(keys))
