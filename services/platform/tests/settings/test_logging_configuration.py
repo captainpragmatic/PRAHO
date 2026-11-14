@@ -432,15 +432,16 @@ class SensitiveDataRedactionTests(SimpleTestCase):
                 for secret in ("one", "two", "=a", "=b"):
                     self.assertNotIn(secret, "".join(redacted))
 
-    def test_sentry_receives_no_sensitive_value(self) -> None:
-        """Production's Sentry options, on the real SentryHandler, with an in-memory transport instead of the network."""
+    @staticmethod
+    def _sentry_events(records: list[logging.LogRecord]) -> list[Any]:
+        """What production's Sentry options send for these records: the real SentryHandler, an in-memory transport."""
         import sentry_sdk  # noqa: PLC0415
         from sentry_sdk.integrations.logging import SentryHandler  # noqa: PLC0415
         from sentry_sdk.transport import Transport  # noqa: PLC0415
 
         from config.settings.sentry import sentry_options  # noqa: PLC0415
 
-        sent: list[object] = []
+        sent: list[Any] = []
 
         class Memory(Transport):
             def capture_envelope(self, envelope: Any) -> None:
@@ -450,13 +451,33 @@ class SensitiveDataRedactionTests(SimpleTestCase):
         client = sentry_sdk.Client(default_integrations=False, **options)
         with sentry_sdk.isolation_scope() as scope:
             scope.set_client(client)
-            for record in _records().values():
+            for record in records:
                 SentryHandler().handle(record)
             client.flush()
+        return sent
+
+    def test_sentry_receives_no_sensitive_value(self) -> None:
+        sent = self._sentry_events(list(_records().values()))
         self.assertTrue(sent, "the handler sent events")
         payload = json.dumps(sent)
         for value in SENSITIVE_VALUES:
             self.assertNotIn(value, payload)
+
+    def test_sentry_keeps_the_formatted_message(self) -> None:
+        """Sentry sends positional arguments as a list; the message is rendered from them as logging renders it."""
+        cases: list[tuple[str, tuple[object, ...], str]] = [
+            ("order %s failed", ("A-1",), "order A-1 failed"),
+            ("order %s failed: %s", ("A-1", "timeout"), "order A-1 failed: timeout"),
+            ("user %(user)s signed in from %(ip)s", ({"user": "ana", "ip": "10.0.0.1"},), "user ana signed in from 10.0.0.1"),
+            ("login failed with password=%s", ("pw-positional",), "login failed with password=[REDACTED]"),
+            ("submitted=%(password)s for %(user)s", ({"password": "pw-mapping", "user": "ana"},), "submitted=[REDACTED] for ana"),
+        ]
+        for message, args, expected in cases:
+            with self.subTest(message=message):
+                record = logging.LogRecord("apps.users", logging.ERROR, __file__, 1, message, args, None)
+                (event,) = self._sentry_events([record])
+                self.assertEqual(event["logentry"]["formatted"], expected)
+                self.assertNotIn("pw-", json.dumps(event))
 
     def test_long_text_is_redacted_in_linear_time(self) -> None:
         """A long unbroken word (a base64 blob, a token) must not stall the worker that logs it."""
