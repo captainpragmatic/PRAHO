@@ -80,6 +80,9 @@ class FakeDatabase:
         self.fail_after: int | None = None
         self.crash_after: int | None = None
         self.ignored: set[str] = set()  # Privileges a GRANT silently fails to apply.
+        self.after_revoke: list = []  # Callbacks run once each, after a REVOKE took effect.
+        self.after_sessions: list = []  # Callbacks run once each, after a process list was read.
+        self.sessions_fail = False
 
     # -- setup ------------------------------------------------------------------------------------------------
     def principal(self, user: str, host: str = "localhost") -> None:
@@ -142,6 +145,8 @@ class FakeDatabase:
             image[column] = "N"
         if all(value == "N" for value in image.values()):
             del self.rows[(user, host, db)]  # MariaDB deletes a row once every privilege is gone.
+        while self.after_revoke:
+            self.after_revoke.pop(0)()
         self._applied()
 
     def grant(self, user: str, host: str, db: str, columns: list[str]) -> None:
@@ -153,7 +158,12 @@ class FakeDatabase:
         self._applied()
 
     def sessions(self, users: list[str]) -> set[int]:
-        return {number for number, user in self.connections.items() if user in users}
+        if self.sessions_fail:
+            raise RuntimeError("the node died before the drain")
+        found = {number for number, user in self.connections.items() if user in users}
+        while self.after_sessions:
+            self.after_sessions.pop(0)()
+        return found
 
     def kill_soft(self, number: int) -> None:
         self.statements.append(f"KILL SOFT CONNECTION {number}")
@@ -393,10 +403,11 @@ class SessionTests(HoldFixture):
 
 class RefusalTests(HoldFixture):
     def refused(self, code: str) -> None:
-        before = dict(self.database.rows)
+        before = {key: dict(image) for key, image in self.database.rows.items()}
         receipt = self.act("hold")
         self.assertEqual((receipt["outcome"], receipt["code"]), ("refused", code), receipt)
         self.assertEqual(self.database.rows, before)
+        self.assertEqual([s for s in self.database.statements if s.startswith(("REVOKE", "GRANT"))], [])
         self.assertNotIn(HASH, json.dumps(receipt))
 
     def test_a_global_privilege_beyond_usage(self) -> None:
@@ -645,3 +656,169 @@ class NativeStatementTests(SimpleTestCase):
                 "GRANT USAGE ON `shop\\_db`.* TO 'shop'@'localhost' WITH GRANT OPTION",
             ],
         )
+
+
+class RoundTwoFindingTests(HoldFixture):
+    def test_a_crash_before_the_drain_leaves_every_in_scope_session_outstanding(self) -> None:
+        self.database.connections = {11: "shop"}
+        self.database.sessions_fail = True
+        with self.assertRaises(RuntimeError):
+            self.act("hold")
+        self.database.sessions_fail = False
+        self.assertIs(self.journal()["sessions_recorded"], False)
+        self.assertEqual(self.act("verify")["sessions_remaining"], [11])
+        self.assertEqual(self.act("hold")["phase"], "held")
+        self.assertNotIn(11, self.database.connections)
+        self.assertIs(self.journal()["sessions_recorded"], True)
+
+    def test_a_principal_added_during_the_hold_makes_it_uncertain_not_held(self) -> None:
+        self.database.after_revoke.append(
+            lambda: self.database.grant_row("helper", "shop\\_db", privileges("Select_priv", "Insert_priv"))
+        )
+        with self.assertRaises(ValueError):
+            self.act("hold")
+        self.assertEqual(self.journal()["phase"], "holding")
+        # The helper is watched from the moment it was seen, so verify reports its write privilege.
+        self.assertIn("regranted:helper@localhost:shop\\_db", self.act("verify")["drift"])
+
+    def test_a_refusal_found_after_a_change_is_uncertain_not_refused(self) -> None:
+        self.database.after_revoke.append(lambda: self.database.definers.update({"shop_db": {"admin@localhost"}}))
+        with self.assertRaises(ValueError):
+            self.act("hold")
+        self.assertEqual(self.journal()["phase"], "holding")
+
+    def test_verify_reports_a_definer_outside_the_scope(self) -> None:
+        self.act("hold")
+        self.database.definers["shop_db"] = {"admin@localhost"}
+        self.assertIn("unqualified:definer_outside_scope", self.act("verify")["drift"])
+
+
+class DrainRecordTests(HoldFixture):
+    def test_after_a_timed_out_drain_only_the_recorded_sessions_are_outstanding(self) -> None:
+        self.database.connections = {11: "shop"}
+        self.database.sticky = {11}
+        self.assertEqual(self.act("hold")["sessions_remaining"], [11])
+        # 11 ends; 12 connects after the revoke, so it never had write privileges and does not count.
+        self.database.connections = {12: "shop"}
+        self.assertEqual(self.act("verify")["sessions_remaining"], [])
+
+    def test_a_hold_that_fails_its_final_check_no_longer_trusts_its_session_record(self) -> None:
+        def regranted_and_reconnected() -> None:
+            # After the snapshot, someone re-grants INSERT and a session connects with it.
+            self.database.rows[("shop", "localhost", "shop\\_logs")]["Insert_priv"] = "Y"
+            self.database.connections[21] = "shop"
+
+        self.database.after_sessions.append(regranted_and_reconnected)
+        with self.assertRaises(ValueError):
+            self.act("hold")
+        self.assertIs(self.journal()["sessions_recorded"], False)
+        self.database.rows[("shop", "localhost", "shop\\_logs")]["Insert_priv"] = "N"  # Revoked again by hand.
+        self.assertEqual(self.act("verify")["sessions_remaining"], [21])
+
+    def test_a_session_record_is_trusted_only_once_the_whole_hold_succeeded(self) -> None:
+        # The final scope read itself fails (an SQL error): the record written before it is never trusted.
+        calls = {"count": 0}
+        real = self.database.definers_of
+
+        def failing(databases):
+            calls["count"] += 1
+            if calls["count"] == 2:  # The first is the qualification; the second, the final check.
+                raise ValueError("the SQL client failed")
+            return real(databases)
+
+        self.database.definers_of = failing
+        with self.assertRaises(ValueError):
+            self.act("hold")
+        self.assertIs(self.journal()["sessions_recorded"], False)
+
+    def test_a_principal_found_new_by_the_final_check_stays_watched(self) -> None:
+        def granted_and_connected() -> None:
+            self.database.grant_row("helper", "shop\\_db", privileges("Insert_priv"))
+            self.database.connections[31] = "helper"
+
+        self.database.after_sessions.append(granted_and_connected)
+        with self.assertRaises(ValueError):
+            self.act("hold")
+        del self.database.rows[("helper", "localhost", "shop\\_db")]  # Its only grant goes; the session stays.
+        self.assertIn(31, self.act("verify")["sessions_remaining"])
+
+    def test_a_principal_refused_by_the_final_check_stays_watched(self) -> None:
+        def granted_globally_and_connected() -> None:
+            self.database.grant_row("helper", "shop\\_db", privileges("Insert_priv"))
+            self.database.extra_grants[("helper", "localhost")] = ["GRANT INSERT ON *.* TO `helper`@`localhost`"]
+            self.database.connections[41] = "helper"
+
+        self.database.after_sessions.append(granted_globally_and_connected)
+        with self.assertRaises(ValueError):
+            self.act("hold")
+        del self.database.rows[("helper", "localhost", "shop\\_db")]
+        self.database.extra_grants.clear()
+        self.assertIn(41, self.act("verify")["sessions_remaining"])
+        self.act("hold")
+        self.assertNotIn(41, self.database.connections)
+
+    def test_a_watched_principal_is_qualified_again_after_its_schema_row_is_gone(self) -> None:
+        def granted_globally_and_connected() -> None:
+            self.database.grant_row("helper", "shop\\_db", privileges("Insert_priv"))
+            self.database.extra_grants[("helper", "localhost")] = ["GRANT INSERT ON *.* TO `helper`@`localhost`"]
+            self.database.connections[51] = "helper"
+
+        self.database.after_sessions.append(granted_globally_and_connected)
+        with self.assertRaises(ValueError):
+            self.act("hold")
+        del self.database.rows[("helper", "localhost", "shop\\_db")]  # The global grant stays.
+        self.assertIn("unqualified:global_privilege", self.act("verify")["drift"])
+        self.assertEqual(self.act("hold")["code"], "global_privilege")
+
+    def test_a_principal_the_final_read_saw_stays_watched_without_rediscovery(self) -> None:
+        def granted_and_connected() -> None:
+            self.database.grant_row("helper", "shop\\_db", privileges("Insert_priv"))
+            self.database.connections[61] = "helper"
+
+        self.database.after_sessions.append(granted_and_connected)
+        calls = {"count": 0}
+        real = self.database.definers_of
+
+        def revoked_after_the_read(databases):
+            calls["count"] += 1
+            if calls["count"] == 2:  # The final check read helper's row; now its grant goes.
+                self.database.rows.pop(("helper", "localhost", "shop\\_db"), None)
+            return real(databases)
+
+        self.database.definers_of = revoked_after_the_read
+        with self.assertRaises(ValueError):
+            self.act("hold")
+        self.assertIn(61, self.act("verify")["sessions_remaining"])
+
+    def test_a_principal_seen_before_an_sql_failure_stays_watched(self) -> None:
+        def granted_and_connected() -> None:
+            self.database.grant_row("helper", "shop\\_db", privileges("Insert_priv"))
+            self.database.connections[71] = "helper"
+
+        self.database.after_sessions.append(granted_and_connected)
+        calls = {"count": 0}
+        real = self.database.definers_of
+
+        def failing(databases):
+            calls["count"] += 1
+            if calls["count"] == 2:
+                raise ValueError("the SQL client failed")
+            return real(databases)
+
+        self.database.definers_of = failing
+        with self.assertRaises(ValueError):
+            self.act("hold")
+        del self.database.rows[("helper", "localhost", "shop\\_db")]
+        self.assertIn(71, self.act("verify")["sessions_remaining"])
+
+    def test_a_retry_never_ends_sessions_of_a_username_now_used_elsewhere(self) -> None:
+        self.act("hold")
+        # The held principal is dropped, and the same username now serves another account's database.
+        for key in [key for key in self.database.rows if key[0] == "shop"]:
+            del self.database.rows[key]
+        self.database.hosts_of["shop"] = {"remote"}
+        self.database.grant_row("shop", "other\\_db", privileges("Select_priv"), host="remote")
+        self.database.connections = {81: "shop"}
+        receipt = self.act("hold")
+        self.assertEqual((receipt["outcome"], receipt["code"]), ("refused", "shared_username"))
+        self.assertIn(81, self.database.connections)

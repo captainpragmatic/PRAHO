@@ -222,6 +222,14 @@ def _classify(line: str) -> str | None:
     return "unsupported_grant"
 
 
+def _watched(journal: dict[str, Any] | None) -> set[Principal]:
+    """The journal's rows' principals and every principal a hold has watched; empty once released."""
+    if not journal:
+        return set()
+    rows = {(row["user"], row["host"]) for row in journal.get("rows", [])}
+    return rows | {(pair[0], pair[1]) for pair in journal.get("watched", [])}
+
+
 def _written_states(row: dict[str, Any], columns: list[str]) -> list[Image]:
     """Every image this helper itself can leave a journalled row in, including between two of its statements."""
     states = [_image(columns, row.get(name)) for name in ("before", "pre", "held", "restore_from") if row.get(name)]
@@ -284,6 +292,7 @@ class DatabaseHold:
 
     def perform(self, request: object) -> dict[str, Any]:
         action, identity, token, generation = self._request(request)
+        self._seen: set[Principal] = set()  # Every principal any discovery in this run returned.
         receipt: dict[str, Any] = {"action": action, "identity": identity, "token": token, "generation": generation}
         try:
             with self._locked(identity["domain_id"]):
@@ -388,14 +397,21 @@ class DatabaseHold:
 
         `known` are the journal's principals: a host whose only row this hold deleted is still in scope.
         """
-        scoped = self.database.principals(databases) | (known or set())
-        if any(USER.fullmatch(user) is None or HOST.fullmatch(host) is None for user, host in scoped):
+        discovered = self.database.principals(databases)
+        # Recorded before any check can refuse: a principal once seen in scope stays watched (review finding).
+        self._seen |= discovered | (known or set())
+        watched = discovered | (known or set())
+        if any(USER.fullmatch(user) is None or HOST.fullmatch(host) is None for user, host in watched):
             raise HoldRefusal("unsupported_grant", "a principal identity is unsupported")
-        for user in sorted({user for user, _host in scoped}):
-            # Sessions are matched by username, so every host of an in-scope username must be in scope.
-            if self.database.hosts(user) - {host for name, host in scoped if name == user}:
+        for user in sorted({user for user, _host in watched}):
+            # Sessions are matched by username, so every host of a watched username, dropped principals included,
+            # must be in scope: a reused username must never have another account's sessions ended.
+            if self.database.hosts(user) - {host for name, host in watched if name == user}:
                 raise HoldRefusal("shared_username", f"username {user} has hosts outside the scope")
-        principals = sorted(scoped)
+        # A watched principal since dropped has no grants to qualify; its sessions are still watched by username.
+        principals = sorted(
+            (user, host) for user, host in watched if (user, host) in discovered or host in self.database.hosts(user)
+        )
         roles, proxies = self.database.roles_and_proxies(principals)
         if roles:
             raise HoldRefusal("role", "a principal has a role")
@@ -463,8 +479,15 @@ class DatabaseHold:
             raise HoldRefusal("generation_conflict", "this generation holds with another token")
         self._admission(identity["domain_id"])
         columns = self._columns()
-        known = {(row["user"], row["host"]) for row in (journal or {}).get("rows", [])} if active else set()
-        live = self._scope(databases, columns, known)
+        known = _watched(journal) if active else set()
+        try:
+            live = self._scope(databases, columns, known)
+        except Exception:
+            if active and journal is not None:
+                # An active hold keeps watching whatever this attempt saw, even when it refuses before changing.
+                watched = sorted([user, host] for user, host in self._seen | known)
+                _write_json(scope / "journal.json", {**journal, "watched": watched, "sessions_recorded": False})
+            raise
         # The original image of a row already journalled survives every re-hold (plan revision 3).
         journalled = {(row["user"], row["host"], row["db"]): row for row in (journal or {}).get("rows", []) if active}
         rows = []
@@ -481,10 +504,43 @@ class DatabaseHold:
             "phase": "holding",
             "rows": rows,
             "sessions": list((journal or {}).get("sessions", [])) if active else [],
+            # Until the sessions open at revoke time are recorded, every in-scope session may still write.
+            "sessions_recorded": False,
+            # Every principal this hold has seen in scope: a session outlives the grants that put it there, and a
+            # watched principal is qualified again on every hold and verify.
+            "watched": sorted([user, host] for user, host in self._seen | known),
             "held_digest": None,
         }
         path = scope / "journal.json"
         _write_json(path, state)
+        try:
+            return self._apply_hold(databases, columns, known, rows, state, path)
+        except HoldRefusal as refusal:
+            # Privileges may already have changed: a refusal found now is an uncertain outcome, never a clean one.
+            self._distrust_sessions(state, path)
+            raise ValueError(f"The hold scope changed during the hold ({refusal.code})") from refusal
+        except Exception:
+            # Any other failure (an SQL error, a timeout) also keeps every principal it saw watched.
+            self._distrust_sessions(state, path)
+            raise
+
+    def _distrust_sessions(self, state: dict[str, Any], path: Path) -> None:
+        """A failed hold: a writer may have connected after the record, so every session counts again, and every
+        principal any discovery returned stays watched, since a session can outlive the grants that put it there.
+        """
+        state["watched"] = sorted([user, host] for user, host in self._seen | _watched(state))
+        state["sessions_recorded"] = False
+        _write_json(path, state)
+
+    def _apply_hold(  # noqa: PLR0913 -- The journal and the scope it was qualified against.
+        self,
+        databases: list[str],
+        columns: list[str],
+        known: set[Principal],
+        rows: list[dict[str, Any]],
+        state: dict[str, Any],
+        path: Path,
+    ) -> dict[str, Any]:
         for row in rows:
             key = (row["user"], row["host"], row["db"])
             current = self._live(key, columns)
@@ -497,10 +553,12 @@ class DatabaseHold:
             row["held"] = self._live(key, columns)
             row["phase"] = "held"
             _write_json(path, state)
-        users = sorted({row["user"] for row in rows})
+        users = sorted({user for user, _host in _watched(state)})
         # Sessions open when the write privileges went keep them until they end (plan revision 3). Only an id that
         # is an in-scope session right now is ended: after a restart a recorded id may be someone else's.
         recorded = self.database.sessions(users) if users else set()
+        state["sessions"] = sorted(recorded)
+        _write_json(path, state)  # Recorded, but trusted only once the whole hold below has succeeded.
         for number in sorted(recorded & (self.database.sessions(users) if users else set())):
             self.database.kill_soft(number)
         deadline = self.clock() + self.drain_seconds
@@ -509,10 +567,15 @@ class DatabaseHold:
             self.sleep(min(1.0, max(0.0, deadline - self.clock())))
             remaining = recorded & self.database.sessions(users)
         state["sessions"] = sorted(remaining)
+        # The whole scope again: a principal or privilege added during the revokes was never held.
+        final = self._scope(databases, columns, known | {(r["user"], r["host"]) for r in rows})
+        journalled = {(r["user"], r["host"], r["db"]) for r in rows}
+        if set(final) - journalled or any(image.get(c) == "Y" for image in final.values() for c in REVOKED):
+            self._distrust_sessions(state, path)
+            raise ValueError("The hold scope changed during the hold; verify, then hold again")
         state["phase"] = "holding" if remaining else "held"
-        state["held_digest"] = self._digest(
-            self._scope(databases, columns, known | {(r["user"], r["host"]) for r in rows})
-        )
+        state["held_digest"] = self._digest(final)
+        state["sessions_recorded"] = True
         _write_json(path, state)
         return self._result(state["phase"], state["held_digest"], state["sessions"], [])
 
@@ -554,7 +617,7 @@ class DatabaseHold:
                 self.database.grant(*key, missing)
             if self._live(key, columns) != before:
                 raise ValueError("A released row does not read back as its original image")
-        state.update({"phase": "released", "rows": [], "sessions": [], "held_digest": None})
+        state.update({"phase": "released", "rows": [], "sessions": [], "watched": [], "held_digest": None})
         _write_json(path, state)
         return {**self._result("released", None, [], []), "token": hold_token}
 
@@ -566,12 +629,12 @@ class DatabaseHold:
         if journal is None or journal.get("phase") not in {"holding", "held"} or generation > previous:
             return {**self._result("verified", None, [], ["not_held"]), "token": hold_token}
         columns = self._columns()
-        known = {(row["user"], row["host"]) for row in journal["rows"]}
+        known = _watched(journal)
         drift = []
         try:
-            # Every principal, journalled or new, is qualified again: a global, role, proxy or object grant can add
-            # write access that no mysql.db row shows.
-            self._principals(databases, known)
+            # The whole scope is qualified again, definers included: a global, role, proxy or object grant, or a
+            # routine running as someone else, can add write access that no mysql.db row shows.
+            self._scope(databases, columns, known)
         except HoldRefusal as refusal:
             drift.append(f"unqualified:{refusal.code}")
         scoped = self.database.principals(databases) | known
@@ -587,8 +650,12 @@ class DatabaseHold:
         )
         drift.extend(f"new_principal:{user}@{host}" for user, host in sorted(scoped - known))
         users = sorted({user for user, _host in known})
-        remaining = sorted(set(journal.get("sessions", [])) & (self.database.sessions(users) if users else set()))
-        return {**self._result("verified", self._digest(live), remaining, drift), "token": hold_token}
+        current = self.database.sessions(users) if users else set()
+        # Before the drain finished, any in-scope session may be one that kept its write privileges.
+        # Once recorded, only those sessions count: one opened after the revoke never had the write privileges.
+        recorded = journal.get("sessions_recorded")
+        outstanding = set(journal.get("sessions", [])) & current if recorded else current
+        return {**self._result("verified", self._digest(live), sorted(outstanding), drift), "token": hold_token}
 
     def _fence(self, identity, databases, scope, journal, token, generation) -> dict[str, Any]:  # noqa: ANN001, PLR0913
         # Never expires: a hold queued before a reboot may arrive later. The locks prove an old hold has exited.
