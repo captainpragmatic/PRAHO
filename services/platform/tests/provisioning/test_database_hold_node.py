@@ -79,7 +79,11 @@ class FakeDatabase:
         self.column_names = list(ALL)
         # id -> (user, current database) or (user, current database, command); a bare pair is an idle session.
         self.connections: dict[int, tuple] = {}
-        self.global_accounts: set[tuple[str, str]] = {("root", "localhost"), ("mysql", "localhost")}
+        # Account -> its global privileges, as information_schema.USER_PRIVILEGES names them.
+        self.global_accounts: dict[tuple[str, str], set[str]] = {
+            ("root", "localhost"): {"ALL PRIVILEGES", "GRANT OPTION"},
+            ("mysql", "localhost"): {"ALL PRIVILEGES", "GRANT OPTION"},
+        }
         self.sticky: set[int] = set()
         self.statements: list[str] = []
         self.fail_after: int | None = None
@@ -109,11 +113,12 @@ class FakeDatabase:
     def hosts(self, user: str) -> set[str]:
         return set(self.hosts_of.get(user, ()))
 
-    def global_privileges(self) -> set[tuple[str, str]]:
-        found = set(self.global_accounts)
+    def global_privileges(self) -> dict[tuple[str, str], set[str]]:
+        found = {principal: set(names) for principal, names in self.global_accounts.items()}
         for principal, lines in self.extra_grants.items():
-            if any(re.fullmatch(r"GRANT (?!USAGE ).+ ON \*\.\* TO .*", line) for line in lines):
-                found.add(principal)
+            for line in lines:
+                if match := re.fullmatch(r"GRANT (?!USAGE )(.+) ON \*\.\* TO .*", line):
+                    found.setdefault(principal, set()).update(name.strip() for name in match.group(1).split(","))
         return found
 
     def grants(self, user: str, host: str) -> list[str]:
@@ -499,13 +504,40 @@ class RefusalTests(HoldFixture):
         self.database.extra_grants[("shop", "localhost")] = ["GRANT FILE ON *.* TO `shop`@`localhost`"]
         self.refused("global_privilege")
 
-    def test_any_account_with_a_global_privilege_outside_the_dba_list(self) -> None:
-        # Not in scope at all, yet a global write privilege reaches the held databases.
-        self.database.global_accounts.add(("backup", "localhost"))
+    def test_any_account_that_can_write_or_grant_globally_outside_the_dba_list(self) -> None:
+        # Not in scope at all, yet a global write or grant privilege reaches the held databases.
+        for names in (
+            {"INSERT"},
+            {"DELETE"},
+            {"DROP"},
+            {"CREATE TEMPORARY TABLES"},
+            {"FILE"},  # The write barrier's database_global_writer counts it too.
+            {"SUPER"},
+            {"CREATE USER"},
+            {"GRANT OPTION"},
+            {"ALL PRIVILEGES"},
+            {"SELECT", "SOMETHING NEW"},  # A privilege the helper cannot classify fails closed.
+        ):
+            with self.subTest(names=names):
+                self.setUp()
+                self.database.global_accounts[("backup", "localhost")] = names
+                self.refused("global_privilege")
+        self.setUp()
+        self.database.global_accounts[("root", "%")] = {"SELECT", "INSERT"}  # Exact user@host, not usernames.
         self.refused("global_privilege")
-        self.database.global_accounts.discard(("backup", "localhost"))
-        self.database.global_accounts.add(("root", "%"))  # The DBA list is exact user@host, not usernames.
-        self.refused("global_privilege")
+
+    def test_read_only_and_operational_global_privileges_do_not_refuse(self) -> None:
+        self.database.global_accounts[("monitor", "localhost")] = {"PROCESS", "RELOAD"}
+        self.database.global_accounts[("backup", "localhost")] = {
+            "SELECT",
+            "SHOW DATABASES",
+            "LOCK TABLES",
+            "SHOW VIEW",
+            "EXECUTE",
+            "REPLICATION CLIENT",
+            "BINLOG MONITOR",
+        }
+        self.assertEqual(self.act("hold")["phase"], "held")
 
     def test_role_membership_and_a_default_role(self) -> None:
         self.database.extra_grants[("shop", "localhost")] = ["GRANT `editors` TO `shop`@`localhost`"]
@@ -766,8 +798,20 @@ class NativeStatementTests(SimpleTestCase):
 
     def test_every_grantee_with_a_global_privilege_is_an_identity(self) -> None:
         database = self.native()
-        database.execute = lambda query: [("'root'@'localhost'",), ("'it''s'@'%'",)]
-        self.assertEqual(database.global_privileges(), {("root", "localhost"), ("'it''s'@'%'", "")})
+        database.execute = lambda query: [
+            ("'root'@'localhost'", "SELECT", "YES"),
+            ("'root'@'localhost'", "INSERT", "YES"),
+            ("'monitor'@'%'", "PROCESS", "NO"),
+            ("'it''s'@'%'", "SELECT", "NO"),
+        ]
+        self.assertEqual(
+            database.global_privileges(),
+            {
+                ("root", "localhost"): {"SELECT", "INSERT", "GRANT OPTION"},
+                ("monitor", "%"): {"PROCESS"},
+                ("'it''s'@'%'", ""): {"SELECT"},
+            },
+        )
 
 
 class RoundTwoFindingTests(HoldFixture):

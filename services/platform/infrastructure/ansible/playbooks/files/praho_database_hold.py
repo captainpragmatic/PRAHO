@@ -78,6 +78,28 @@ Principal = tuple[str, str]
 # user@host identities of the server's own administration (MariaDB and its Debian packaging), as in
 # mysql.global_priv. Any other account with a global privilege refuses the hold.
 DBA: frozenset[Principal] = frozenset({("root", "localhost"), ("mysql", "localhost"), ("mariadb.sys", "localhost")})
+# Global privileges that cannot change a held database: reading, monitoring and server operation. Every other one
+# (the revoked write set, DELETE, DROP, FILE, GRANT OPTION, SUPER, CREATE USER, ALL PRIVILEGES, or a name this
+# list does not know) lets its account write around the hold, and refuses it. The write barrier's
+# database_global_writer check counts INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, SUPER and FILE; this is a
+# superset of it.
+READ_ONLY_GLOBALS = frozenset(
+    {
+        "USAGE",
+        "SELECT",
+        "SHOW DATABASES",
+        "SHOW VIEW",
+        "SHOW CREATE ROUTINE",
+        "EXECUTE",
+        "LOCK TABLES",
+        "PROCESS",
+        "RELOAD",
+        "REPLICATION CLIENT",
+        "BINLOG MONITOR",
+        "SLAVE MONITOR",
+        "REPLICA MONITOR",
+    }
+)
 
 
 class HoldRefusal(Exception):  # noqa: N818 -- A named refusal, reported in the receipt, not an error.
@@ -107,7 +129,7 @@ class Database(Protocol):
 
     def grant(self, user: str, host: str, db: str, columns: list[str]) -> None: ...
 
-    def global_privileges(self) -> set[Principal]: ...
+    def global_privileges(self) -> dict[Principal, set[str]]: ...
 
     def sessions_on(self, databases: list[str], users: list[str]) -> dict[int, str]: ...
 
@@ -406,9 +428,14 @@ class DatabaseHold:
         scoped = discovered | (known or set())
         if any(USER.fullmatch(user) is None or HOST.fullmatch(host) is None for user, host in scoped):
             raise HoldRefusal("unsupported_grant", "a principal identity is unsupported")
-        # A global privilege reaches every database, in scope or not; only the exact DBA identities may hold one.
-        if outside := sorted(self.database.global_privileges() - DBA):
-            raise HoldRefusal("global_privilege", "{}@{}".format(*outside[0]))
+        # A global write or grant privilege reaches every database, in scope or not; only the exact DBA
+        # identities may hold one.
+        if writers := sorted(
+            principal
+            for principal, names in self.database.global_privileges().items()
+            if principal not in DBA and names - READ_ONLY_GLOBALS
+        ):
+            raise HoldRefusal("global_privilege", "{}@{}".format(*writers[0]))
         # A journalled principal since dropped has no grants left to qualify.
         principals = sorted(
             (user, host) for user, host in scoped if (user, host) in discovered or host in self.database.hosts(user)
@@ -767,16 +794,16 @@ class NativeDatabase:
         option = " WITH GRANT OPTION" if "Grant_priv" in columns else ""
         self.execute(f"GRANT {', '.join(names)} ON {self._target(db)} TO {self._principal(user, host)}{option}")
 
-    def global_privileges(self) -> set[Principal]:
-        rows = self.execute(
-            "SELECT DISTINCT GRANTEE FROM information_schema.USER_PRIVILEGES "
-            "WHERE PRIVILEGE_TYPE <> 'USAGE' OR IS_GRANTABLE = 'YES'"
-        )
-        found = set()
-        for (grantee,) in rows:
+    def global_privileges(self) -> dict[Principal, set[str]]:
+        rows = self.execute("SELECT GRANTEE, PRIVILEGE_TYPE, IS_GRANTABLE FROM information_schema.USER_PRIVILEGES")
+        found: dict[Principal, set[str]] = {}
+        for grantee, name, grantable in rows:
             # An identity outside the supported shape is still an account with a global privilege.
             match = re.fullmatch(r"'([^']*)'@'([^']*)'", grantee)
-            found.add((match.group(1), match.group(2)) if match else (grantee, ""))
+            names = found.setdefault((match.group(1), match.group(2)) if match else (grantee, ""), set())
+            names.add(name)
+            if grantable == "YES":
+                names.add("GRANT OPTION")
         return found
 
     def sessions_on(self, databases: list[str], users: list[str]) -> dict[int, str]:
