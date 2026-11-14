@@ -19,6 +19,8 @@ my $destination = '/var/log/praho/usage.log';
 my $mariadb = '/usr/bin/mariadb';
 my $max_databases = 32;
 my $existence_seconds = 10;  # One exact-name existence query; a hang makes only that database unknown.
+my $existence_budget = 20;  # All existence queries in one run share this, below the parent's 60s kill.
+my $existence_spent = 0;
 my $mode = @ARGV ? $ARGV[0] : '';
 die "Unsupported usage operation\n" if @ARGV > 1 || $mode !~ /^(?:|reconcile|reconcile-hook|reconcile-locked)$/;
 if ($mode eq 'reconcile-hook') {
@@ -62,6 +64,12 @@ sub usage_schema_missing {
     # proves the database dropped. Any error, timeout, restricted view or other answer is unknown (#776).
     my ($name) = @_;
     return 0 unless defined($name) && $name =~ /^[A-Za-z0-9_]{1,64}$/;
+    # Each query restarting its own clock would let a few hangs outlast the parent's kill, and then no
+    # account is published. Once the shared budget is spent, every later check is unknown at once.
+    my $left = $existence_budget - $existence_spent;
+    return 0 if $left <= 0;
+    my $limit = POSIX::ceil($left < $existence_seconds ? $left : $existence_seconds);
+    my $started = Time::HiRes::time();
     my $query = "SELECT (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY 'mysql'),"
         ."(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY '$name')";
     # The handle lives outside the eval: a lexical one would be closed implicitly when the alarm unwinds,
@@ -69,7 +77,7 @@ sub usage_schema_missing {
     my ($answer, $pid, $pipe) = ('');
     my $finished = eval {
         local $SIG{ALRM} = sub { die "Database existence query timed out\n" };
-        alarm($existence_seconds);
+        alarm($limit);
         $pid = open($pipe, '-|', $mariadb, '--protocol=socket', '--batch', '--skip-column-names', '--execute', $query)
             or die "Database existence query unavailable\n";
         my $count = read($pipe, $answer, 64);
@@ -84,6 +92,7 @@ sub usage_schema_missing {
         waitpid($pid, 0);
     }
     close($pipe) if $pipe && defined(fileno($pipe));
+    $existence_spent += Time::HiRes::time() - $started;
     return $finished && $answer =~ /\A1\t0\n?\z/ ? 1 : 0;
 }
 

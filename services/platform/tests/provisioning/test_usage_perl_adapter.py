@@ -131,15 +131,18 @@ class UsagePerlAdapterTests(SimpleTestCase):
         self.mariadb = self.root / "mariadb"
         self.mariadb.write_text(
             '#!/bin/sh\nprintf "%s\\n" "$@" >> "$PRAHO_NATIVE_FIXTURE/mariadb-calls"\n'
-            'case "$*" in *"BINARY \'gone\'"*) [ -z "$PRAHO_SCHEMATA_HANG" ] || exec sleep 30;; esac\n'
+            'case "$*" in *"BINARY \'gone"*) [ -z "$PRAHO_SCHEMATA_HANG" ] || exec sleep 30;; esac\n'
             'printf "%s" "$PRAHO_SCHEMATA_ANSWER"\nexit "${PRAHO_SCHEMATA_EXIT:-0}"\n'
         )
         self.mariadb.chmod(0o755)
         self.assertIn("'/usr/bin/mariadb'", self.source)
         self.source = self.source.replace("'/usr/bin/mariadb'", repr(str(self.mariadb)))
-        # The production bound is 10s; two keeps a hang test inside the adapter's own 10s test timeout.
+        # Production: 10s per query, 20s shared per run (below the parent's 60s kill). The test scale keeps a
+        # hang inside the adapter's 10s test timeout and leaves a clear gap when the last query ignores the budget.
         self.assertIn("my $existence_seconds = 10;", self.source)
-        self.source = self.source.replace("my $existence_seconds = 10;", "my $existence_seconds = 2;")
+        self.source = self.source.replace("my $existence_seconds = 10;", "my $existence_seconds = 4;")
+        self.assertIn("my $existence_budget = 20;", self.source)
+        self.source = self.source.replace("my $existence_budget = 20;", "my $existence_budget = 5;")
         self.schemata = {"PRAHO_SCHEMATA_ANSWER": "1\t0"}
         (self.native / "virtual-server-lib.pl").write_text(NATIVE)
         (self.root / "adapter.pl").write_text(self.source)
@@ -458,3 +461,32 @@ class HungExistenceQueryTests(SimpleTestCase):
         self.assertNotIn("unavailable", rows["43"])
         self.assertEqual(rows["43"]["databases"], [{"path": str(self.root / "database"), "bytes": 4096}])
         self.assertLess(elapsed, 8, "the hung query held the whole collection past its bound")
+
+    def test_many_hung_queries_share_one_budget_so_a_later_account_is_still_published(self):
+        hung = ["44", "45", "46"]
+        for identity in hung:
+            self.vhost(identity, f"hung{identity}.test")
+            (self.root / f"home{identity}").mkdir()
+            self.fixture["domains"].insert(
+                -1,
+                {
+                    "id": identity,
+                    "dom": f"hung{identity}.test",
+                    "user": f"hung{identity}",
+                    "home": str(self.root / f"home{identity}"),
+                    "web": 1,
+                    "databases": [{"type": "mysql", "host": "localhost", "name": f"gone{identity}"}],
+                },
+            )
+            self.fixture["database_dirs"][f"gone{identity}"] = str(self.root / f"dropped/gone{identity}")
+        self.assertEqual(self.fixture["domains"][-1]["id"], "43")
+        started = time.monotonic()
+        result = self.run_adapter(reconcile=False)
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = {row["id"]: row for row in json.loads(result.stdout)["accounts"]}
+        for identity in ["42", *hung]:
+            self.assertIs(rows[identity].get("unavailable"), True, identity)
+        self.assertNotIn("unavailable", rows["43"])
+        # The shared 5s budget ends the queries near 5s (4s, then the 1s left); a second full 4s clock reaches 8s.
+        self.assertLess(elapsed, 7, "the hung queries overran the run's shared budget")
