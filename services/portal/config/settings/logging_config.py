@@ -17,6 +17,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from apps.common.logging import with_sensitive_data_redaction
 from apps.common.secret_urls import secure_logging_config
 
 DEFAULT_LOG_DIR = "/var/log/praho/portal"
@@ -127,4 +128,4 @@ def portal_logging(log_dir: str, *, apps_level: str = "INFO", auth_log_path: str
 
     if auth_log_path is not None:
         add_crowdsec_auth_logging(config, auth_log_path)
-    return secure_logging_config(config)
+    return with_sensitive_data_redaction(secure_logging_config(config))

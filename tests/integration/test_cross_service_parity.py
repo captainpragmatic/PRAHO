@@ -168,6 +168,56 @@ class TestNewTagParity(TestCase):
                 self.assertEqual(platform, portal)
 
 
+_REDACTION_NAMES = (
+    "_SENSITIVE_KEYS",
+    "_SENSITIVE_KEY_NAME",
+    "_KEY_CANDIDATE",
+    "_CLOSING",
+    "_DELIMITERS",
+    "_MAX_QUOTE_ESCAPES",
+    "_NEXT_KEY",
+    "REDACTION_TEXT",
+    "_MAX_DEPTH",
+    "_is_sensitive_key",
+    "_quoted_end",
+    "_bracketed_end",
+    "_unquoted_end",
+    "_opening_quote",
+    "_value_end",
+    "redact_sensitive_text",
+    "redact_sensitive_data",
+    "_CONVERSION",
+    "_sensitive_placements",
+    "redact_placed_arguments",
+    "render_log_message",
+    "_STANDARD_RECORD_ATTRIBUTES",
+    "SensitiveDataFilter",
+    "with_sensitive_data_redaction",
+)
+
+
+def _redaction_definitions(service: str) -> dict[str, str]:
+    tree = ast.parse((REPO_ROOT / f"services/{service}/apps/common/logging.py").read_text())
+    found: dict[str, str] = {}
+    for node in tree.body:
+        names = [node.name] if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else []
+        if isinstance(node, ast.Assign):
+            names = [target.id for target in node.targets if isinstance(target, ast.Name)]
+        for name in names:
+            if name in _REDACTION_NAMES:
+                found[name] = ast.unparse(node)
+    return found
+
+
+class TestSensitiveDataRedactionParity(TestCase):
+    """Both services redact the same keys the same way; the Portal holds a copy because it can't import Platform."""
+
+    def test_the_redaction_code_is_the_same_in_both_services(self) -> None:
+        platform, portal = _redaction_definitions("platform"), _redaction_definitions("portal")
+        self.assertEqual(sorted(platform), sorted(_REDACTION_NAMES), "the platform's redaction code moved")
+        self.assertEqual(platform, portal)
+
+
 class TestCustomerViewReturnPath(TestCase):
     """An ended customer view sends its tab to the customer's Platform page, a path the portal builds itself."""
 
