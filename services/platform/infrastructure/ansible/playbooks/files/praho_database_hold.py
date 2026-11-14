@@ -784,7 +784,8 @@ class NativeDatabase:
         if not names:
             return {}
         accounts = ",".join(f"'{user}'" for user in users if USER.fullmatch(user))
-        busy = f" OR (USER IN ({accounts}) AND COMMAND <> 'Sleep')" if accounts else ""
+        # BINARY: the process list compares case-insensitively, but `Shop` is another tenant's account.
+        busy = f" OR (BINARY USER IN ({accounts}) AND COMMAND <> 'Sleep')" if accounts else ""
         # The helper's own connection and the server's own threads are never a customer's writer.
         rows = self.execute(
             "SELECT ID, USER FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() "  # noqa: S608 -- Validated names.

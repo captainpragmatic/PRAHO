@@ -757,7 +757,10 @@ class NativeStatementTests(SimpleTestCase):
         (query,) = database.statements
         self.assertIn("ID <> CONNECTION_ID()", query)
         self.assertTrue(
-            query.endswith("AND (BINARY DB IN ('shop_db','shop_logs') OR (USER IN ('shop') AND COMMAND <> 'Sleep'))"),
+            # Both compared byte for byte: the process list's columns are case-insensitive, account names are not.
+            query.endswith(
+                "AND (BINARY DB IN ('shop_db','shop_logs') OR (BINARY USER IN ('shop') AND COMMAND <> 'Sleep'))"
+            ),
             query,
         )
 
