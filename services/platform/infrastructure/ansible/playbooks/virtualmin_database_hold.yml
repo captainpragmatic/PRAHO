@@ -1,0 +1,57 @@
+---
+# One database write hold action for one hosting account (#776): probe | hold | release | verify | fence.
+# files/praho_database_hold.py does all of it under the migration barrier's own lock, both component fence
+# locks and a hold lock, and prints exactly one JSON receipt. A non-zero exit means the outcome is uncertain:
+# Platform verifies before it decides anything.
+- name: Run one database write hold action under the native locks
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Validate the single-host hold action
+      ansible.builtin.assert:
+        that:
+          - ansible_play_hosts_all | length == 1
+          - hold_request is mapping
+          - hold_action in ['probe', 'hold', 'release', 'verify', 'fence']
+          - hold_request.action == hold_action
+
+    - name: Run the hold helper from a root-private directory
+      block:
+        - name: Allocate the private helper directory
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: praho-database-hold-
+          register: hold_directory
+
+        - name: Install the hold helper and the shared principal discovery it reuses
+          ansible.builtin.copy:
+            src: "files/{{ item }}"
+            dest: "{{ hold_directory.path }}/{{ item }}"
+            owner: root
+            group: root
+            mode: '0700'
+          loop:
+            - praho_database_hold.py
+            - praho-component-mysql.py
+
+        - name: Run the hold action
+          ansible.builtin.command:
+            argv:
+              - /usr/bin/python3
+              - "{{ hold_directory.path }}/praho_database_hold.py"
+            stdin: "{{ hold_request | to_json }}"
+            stdin_add_newline: false
+          register: hold_result
+          changed_when: hold_request.action in ['hold', 'release', 'fence']
+          no_log: true
+
+        - name: Return the bounded hold receipt
+          ansible.builtin.debug:
+            msg: "PRAHO_DATABASE_HOLD_RESULT={{ hold_result.stdout | trim | b64encode }}"
+      always:
+        - name: Remove only this action's helper directory
+          ansible.builtin.file:
+            path: "{{ hold_directory.path }}"
+            state: absent
+          when: hold_directory.path is defined

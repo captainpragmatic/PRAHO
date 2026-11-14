@@ -51,6 +51,22 @@ def run_quota_operation(server: VirtualminServer, action: str, request: dict[str
     )
 
 
+# Each outlasts the helper's four lock waits (30s each), the hold's 60s drain and the SSH and SQL around them.
+DATABASE_HOLD_TIMEOUTS = {"probe": 300, "hold": 420, "release": 300, "verify": 300, "fence": 240}
+
+
+def run_database_hold_operation(server: VirtualminServer, action: str, request: dict[str, Any]) -> dict[str, Any]:
+    if action not in DATABASE_HOLD_TIMEOUTS:
+        raise ValidationError(_("Unsupported native database hold action."))
+    return _run(
+        server,
+        "virtualmin_database_hold.yml",
+        {"hold_action": action, "hold_request": request},
+        "PRAHO_DATABASE_HOLD_RESULT",
+        timeout=DATABASE_HOLD_TIMEOUTS[action],
+    )
+
+
 def run_node_operation(server: VirtualminServer, action: str, request: dict[str, Any]) -> dict[str, Any]:
     if action not in {"inspect", "handover", "fence", "quota_policy", "quota_fence", "requalify", "requalify_fence"}:
         raise ValidationError(_("Unsupported native hosting policy action."))

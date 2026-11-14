@@ -269,6 +269,7 @@ class AnsibleService:
             "virtualmin_hosting_policy.yml",
             "virtualmin_hosting_prepare.yml",
             "virtualmin_quota.yml",
+            "virtualmin_database_hold.yml",
             "virtualmin_component.yml",
             "virtualmin_component_bridge.yml",
             "virtualmin_security_enroll.yml",

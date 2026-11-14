@@ -33,6 +33,11 @@ HOSTING_ROUTES = (
     ("node", "requalify_fence", "virtualmin_hosting_policy.yml", "PRAHO_HOSTING_RESULT", 180),
     ("helper", "prepare", "virtualmin_hosting_prepare.yml", "PRAHO_HOSTING_RESULT", 180),
     ("helper", "fence", "virtualmin_hosting_prepare.yml", "PRAHO_HOSTING_RESULT", 180),
+    ("hold", "probe", "virtualmin_database_hold.yml", "PRAHO_DATABASE_HOLD_RESULT", 300),
+    ("hold", "hold", "virtualmin_database_hold.yml", "PRAHO_DATABASE_HOLD_RESULT", 420),
+    ("hold", "release", "virtualmin_database_hold.yml", "PRAHO_DATABASE_HOLD_RESULT", 300),
+    ("hold", "verify", "virtualmin_database_hold.yml", "PRAHO_DATABASE_HOLD_RESULT", 300),
+    ("hold", "fence", "virtualmin_database_hold.yml", "PRAHO_DATABASE_HOLD_RESULT", 240),
 )
 
 
@@ -51,6 +56,7 @@ def assert_hosting_route(family: str, action: str, playbook: str, marker: str, t
         "quota": (hosting_node_transport.run_quota_operation, "quota"),
         "node": (hosting_node_transport.run_node_operation, "hosting"),
         "helper": (hosting_node_transport.run_helper_operation, "hosting"),
+        "hold": (hosting_node_transport.run_database_hold_operation, "hold"),
     }[family]
     with patch.object(AnsibleService, "run_server_playbook", autospec=True, return_value=result) as boundary:
         assert runner(server, action, request) == observed
