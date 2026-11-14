@@ -452,7 +452,8 @@ def redact_placed_arguments(message: str, args: Any) -> Any:
     marks, hidden = placements
     if isinstance(args, Mapping):
         names = {marks[index]["name"] for index in hidden}
-        return {key: REDACTION_TEXT if key in names else value for key, value in args.items()}
+        # A bare "%s" writes the whole mapping, so a sensitive one withholds all of it.
+        return {key: REDACTION_TEXT if key in names or None in names else value for key, value in args.items()}
     positions = [index for index, match in enumerate(marks) if match["name"] is None]
     redacted = [
         REDACTION_TEXT if position < len(positions) and positions[position] in hidden else value

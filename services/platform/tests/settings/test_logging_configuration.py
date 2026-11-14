@@ -479,6 +479,11 @@ class SensitiveDataRedactionTests(SimpleTestCase):
             ("login failed with password=%s", ("password",), "login failed with password=[REDACTED]"),
             ("password=%s user=%s", ("prefix\npw-tail", "ana"), "password=[REDACTED] user=ana"),
             ("card check cvv=%d, user=%s", (8675309, "ana"), "card check cvv=[REDACTED], user=ana"),
+            # No placement shows these as sensitive (a key passed as an argument, a mapping a bare %s writes whole,
+            # a "*" width), so every parameter is withheld once the rendered text needed redacting.
+            ("%s=%s", ("password", "pw-dynamic"), "password=[REDACTED]"),
+            ("password=%s", ({"value": "pw-mapping-whole"},), "password=[REDACTED]"),
+            ("password=%*s, user=%s", (12, "pw-star", "ana"), "password=     [REDACTED], user=ana"),
         ]
         for message, args, expected in cases:
             with self.subTest(message=message):
@@ -489,6 +494,8 @@ class SensitiveDataRedactionTests(SimpleTestCase):
                 self.assertNotIn("8675309", json.dumps(event))
                 if message.startswith("login failed with password"):
                     self.assertEqual(event["logentry"]["params"], ["[REDACTED]"])
+                if message == "order %s failed: %s":
+                    self.assertEqual(event["logentry"]["params"], ["A-1", "timeout"])
 
     def test_long_text_is_redacted_in_linear_time(self) -> None:
         """A long unbroken word (a base64 blob, a token) must not stall the worker that logs it."""

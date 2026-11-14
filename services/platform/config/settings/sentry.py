@@ -4,7 +4,7 @@ Frame locals hold registrant data and transfer codes under ordinary names (data,
 denylist can name, so they are not sent at all. Imported only when sentry_sdk is installed.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, TypedDict
 
 from sentry_sdk.scrubber import DEFAULT_DENYLIST, EventScrubber
@@ -86,6 +86,7 @@ def _render_redacted_log_entry(event: Any) -> None:
     tuple logging had. A message that doesn't format with them keeps no rendered text at all.
     """
     from apps.common.logging import (  # noqa: PLC0415  # Settings import before apps are ready
+        REDACTION_TEXT,
         redact_placed_arguments,
         redact_sensitive_data,
         redact_sensitive_text,
@@ -96,12 +97,20 @@ def _render_redacted_log_entry(event: Any) -> None:
     if not isinstance(entry, dict) or not entry.get("params"):
         return
     message = str(entry.get("message", ""))
-    entry["params"] = redact_placed_arguments(message, redact_sensitive_data(entry["params"]))
+    params = redact_placed_arguments(message, redact_sensitive_data(entry["params"]))
     try:
-        formatted = render_log_message(message, entry["params"])
+        rendered = render_log_message(message, params)
     except (TypeError, ValueError, KeyError, IndexError):
-        formatted = message
-    entry["formatted"] = redact_sensitive_text(formatted)
+        rendered = message
+    entry["formatted"] = redact_sensitive_text(rendered)
+    if entry["formatted"] != rendered:
+        # The text held a value no key or placement accounted for ("%s=%s" with the key as an argument, a "*"
+        # width): which parameter carried it is unknown, so none is sent.
+        if isinstance(params, Mapping):
+            params = dict.fromkeys(params, REDACTION_TEXT)
+        else:
+            params = [REDACTION_TEXT] * len(params) if isinstance(params, list | tuple) else REDACTION_TEXT
+    entry["params"] = params
 
 
 def scrub_event(event: Any, hint: Any) -> Any:
