@@ -143,7 +143,10 @@ def _decode(
 ) -> Result[HoldReceipt, HoldRefusal]:
     action = request["action"]
     outcome = receipt.get("outcome")
-    if set(receipt) != (RECEIPT_KEYS if outcome == "ok" else REFUSAL_KEYS) or outcome not in {"ok", "refused"}:
+    # Named values are compared as strings first: a list or an object would make the set lookups below raise.
+    if not isinstance(outcome, str) or outcome not in {"ok", "refused"}:
+        raise _UnreadableError("the receipt has no known outcome")
+    if set(receipt) != (RECEIPT_KEYS if outcome == "ok" else REFUSAL_KEYS):
         raise _UnreadableError("the receipt has other terms")
     if receipt["action"] != action or receipt["identity"] != request["identity"]:
         raise _UnreadableError("the receipt names another action or identity")
@@ -152,7 +155,12 @@ def _decode(
         if receipt["token"] != request.get("token") or receipt["generation"] != request.get("generation"):
             raise _UnreadableError("the refusal is for another token or generation")
         code, detail = receipt["code"], receipt["detail"]
-        if code not in NODE_REFUSALS or not isinstance(detail, str) or len(detail) > MAX_TEXT:
+        if (
+            not isinstance(code, str)
+            or code not in NODE_REFUSALS
+            or not isinstance(detail, str)
+            or len(detail) > MAX_TEXT
+        ):
             raise _UnreadableError("the refusal is not a named node refusal")
         return Err(HoldRefusal(code, detail))
     return Ok(_receipt(identity, request, receipt))
@@ -174,7 +182,7 @@ def _receipt(identity: HoldIdentity, request: dict[str, Any], receipt: dict[str,
         raise _UnreadableError("the journal token is not a UUID")
     phase, digest = receipt["phase"], receipt["held_digest"]
     sessions, drift = receipt["sessions_remaining"], receipt["drift"]
-    if phase not in PHASES[action]:
+    if not isinstance(phase, str) or phase not in PHASES[action]:
         raise _UnreadableError("the phase is not one this action ends in")
     if digest is not None and (not isinstance(digest, str) or DIGEST.fullmatch(digest) is None):
         raise _UnreadableError("the digest is not a SHA-256")

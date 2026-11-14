@@ -244,6 +244,12 @@ class UncertainTests(GatewayFixture):
         with self.node(missing):
             self.uncertain(gateway.hold(self.identity, token=self.token, generation=3))
 
+    def test_unhashable_or_nested_values_in_the_named_fields(self) -> None:
+        for value in ([], {}, ["held"], {"held": 1}):
+            for receipt in (self.ok("hold", phase=value), self.refused("hold", value), self.ok("hold", outcome=value)):
+                with self.subTest(receipt=receipt), self.node(receipt):
+                    self.uncertain(gateway.hold(self.identity, token=self.token, generation=3))
+
     def test_a_refusal_shaped_receipt_with_another_outcome(self) -> None:
         with self.node(self.refused("hold", "lock_busy", outcome="maybe")):
             self.uncertain(gateway.hold(self.identity, token=self.token, generation=3))

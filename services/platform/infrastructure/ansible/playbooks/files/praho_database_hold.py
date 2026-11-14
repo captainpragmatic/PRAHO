@@ -78,7 +78,8 @@ Principal = tuple[str, str]
 # user@host identities of the server's own administration (MariaDB and its Debian packaging), as in
 # mysql.global_priv. Any other account with a global privilege refuses the hold.
 DBA: frozenset[Principal] = frozenset({("root", "localhost"), ("mysql", "localhost"), ("mariadb.sys", "localhost")})
-# Global privileges that cannot change a held database: reading, monitoring and server operation. Every other one
+# Global privileges that cannot change a held database: reading, monitoring and server operation. EXECUTE is not
+# one: it calls a DEFINER routine in any schema, and only the held schemas' definers are qualified. Every other one
 # (the revoked write set, DELETE, DROP, FILE, GRANT OPTION, SUPER, CREATE USER, ALL PRIVILEGES, or a name this
 # list does not know) lets its account write around the hold, and refuses it. The write barrier's
 # database_global_writer check counts INSERT, UPDATE, DELETE, CREATE, DROP, ALTER, SUPER and FILE; this is a
@@ -90,7 +91,6 @@ READ_ONLY_GLOBALS = frozenset(
         "SHOW DATABASES",
         "SHOW VIEW",
         "SHOW CREATE ROUTINE",
-        "EXECUTE",
         "LOCK TABLES",
         "PROCESS",
         "RELOAD",

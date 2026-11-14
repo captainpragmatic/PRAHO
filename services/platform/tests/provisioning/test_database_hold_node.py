@@ -516,6 +516,7 @@ class RefusalTests(HoldFixture):
             {"CREATE USER"},
             {"GRANT OPTION"},
             {"ALL PRIVILEGES"},
+            {"EXECUTE"},  # Calls a DEFINER routine in another schema that may write a held database.
             {"SELECT", "SOMETHING NEW"},  # A privilege the helper cannot classify fails closed.
         ):
             with self.subTest(names=names):
@@ -533,7 +534,6 @@ class RefusalTests(HoldFixture):
             "SHOW DATABASES",
             "LOCK TABLES",
             "SHOW VIEW",
-            "EXECUTE",
             "REPLICATION CLIENT",
             "BINLOG MONITOR",
         }
