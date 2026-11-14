@@ -370,14 +370,26 @@ def _missing_database_notice(account: VirtualminAccount) -> str:
     """Staff attention for databases Virtualmin registers but MariaDB dropped (#776). Removal is never automatic."""
     from .virtualmin_usage_models import AccountUsageState  # noqa: PLC0415
 
-    # Only alongside the current disk reading it came with; an invalidated reading takes its list with it.
-    names = (
-        AccountUsageState.objects.filter(account=account, disk_reading__isnull=False)
-        .values_list("missing_databases", flat=True)
+    # Only beside the disk reading it came with, while that reading still describes this account: after a
+    # restore's new chain epoch, a move or an ownership change, the advice could delete a recreated database.
+    # The account is read in the same query, not reused from earlier in the request: a restore admitted while the
+    # page rendered moves the stored epoch.
+    state = (
+        AccountUsageState.objects.select_related("disk_reading", "account")
+        .filter(account_id=account.pk, disk_reading__isnull=False)
         .first()
     )
-    if not names:
+    if state is None or not state.missing_databases:
         return ""
+    reading, current = state.disk_reading, state.account
+    if (
+        reading is None
+        or reading.chain_epoch != current.chain_epoch
+        or reading.server_id_snapshot != current.server_id
+        or reading.owner_scope != state.owner_scope
+    ):
+        return ""
+    names = list(state.missing_databases)
     return ngettext(
         "Virtualmin still registers the database %(names)s for %(domain)s, but MariaDB no longer has it. It counts "
         "as 0 bytes. Remove the registration with: virtualmin delete-database --domain %(domain)s --name NAME "

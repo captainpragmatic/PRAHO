@@ -91,9 +91,14 @@ account page names it. Any other answer, or a database that MariaDB still has wi
 its directory, keeps the account's disk usage unavailable and makes a quota application
 refuse by name. The application is recorded as refused, never uncertain.
 
-To clean up, check with the customer, then on the node, as root:
+`virtualmin delete-database` also drops the database in MariaDB if it exists again (a
+restore or the customer may have recreated it). To clean up, check with the customer,
+confirm on the node that MariaDB still has no such database, then remove the
+registration, as root:
 
 ```bash
+# Exact name (LIKE would read _ as a wildcard). Must print 0:
+mariadb --batch --skip-column-names -e "SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY '<database>'"
 virtualmin delete-database --domain <domain> --name <database>
 ```
 

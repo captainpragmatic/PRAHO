@@ -4,6 +4,7 @@ Only an accepted reading changes what Platform believes; a rejected one never ad
 """
 
 from datetime import timedelta
+from unittest.mock import patch
 from uuid import uuid4
 
 from django.db import transaction
@@ -11,6 +12,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from apps.provisioning import virtualmin_usage_service as usage
+from apps.provisioning.virtualmin_backup_service import VirtualminBackupService
+from apps.provisioning.virtualmin_models import VirtualminAccount
 from apps.provisioning.virtualmin_usage_models import AccountUsageState, UsageReading
 from tests.provisioning.test_cov_virtualmin_views_servers import VirtualminViewsFixture
 from tests.provisioning.test_virtualmin_migration_service import MigrationTestBase
@@ -72,11 +75,20 @@ class MissingDatabasePublicationTests(MigrationTestBase):
         self.assertEqual(self.missing(), ["gone"])
 
     def test_an_invalid_list_rejects_the_whole_reading(self):
-        for value in (["bad name"], ["gone", "gone"], "gone", [7], [{}], [[]], [f"db{n}" for n in range(33)], None, {"a": 1}):
+        for value in (
+            ["bad name"],
+            ["gone", "gone"],
+            "gone",
+            [7],
+            [{}],
+            [[]],
+            [f"db{n}" for n in range(33)],
+            None,
+            {"a": 1},
+        ):
             with self.subTest(value=value):
                 self.assertEqual(self.publish(missing_databases=value), 0)
                 self.assertEqual(self.missing(), [])
-
 
     def test_anything_that_invalidates_the_reading_clears_its_list(self):
         def chain_epoch():
@@ -106,9 +118,9 @@ class MissingDatabaseStaffNoteTests(VirtualminViewsFixture):
     def page(self):
         return self.client.get(reverse("provisioning:virtualmin_account_detail", args=[self.account.pk]))
 
-    def test_staff_see_each_dropped_database_and_the_cleanup(self):
+    def note(self, names):
         state = usage.current_state(self.account)
-        state.missing_databases = ["gone", "old_shop"]
+        state.missing_databases = names
         state.disk_reading = UsageReading.objects.create(
             account=self.account,
             owner_scope=state.owner_scope,
@@ -121,11 +133,46 @@ class MissingDatabaseStaffNoteTests(VirtualminViewsFixture):
             period_timezone="UTC",
         )
         state.save(update_fields=["missing_databases", "disk_reading"])
+
+    def test_staff_see_each_dropped_database_and_the_cleanup(self):
+        self.note(["gone", "old_shop"])
         content = self.page().content.decode()
         self.assertIn("gone", content)
         self.assertIn("old_shop", content)
         self.assertIn("virtualmin delete-database", content)
         self.assertIn(self.account.domain, content)
+
+    def test_no_note_once_the_account_moved_past_its_reading(self):
+        # Before anything syncs the usage state again: a restore's new chain epoch, another server or another
+        # owner already makes the reading stale, and its advice could delete a database the restore recreated.
+        self.note(["gone"])
+        content = self.page().content.decode()
+        self.assertIn("virtualmin delete-database", content)
+        for change in ("chain_epoch", "server", "owner"):
+            with self.subTest(change):
+                state = AccountUsageState.objects.get(account=self.account)
+                reading = state.disk_reading
+                if change == "chain_epoch":
+                    UsageReading.objects.filter(pk=reading.pk).update(chain_epoch=self.account.chain_epoch + 1)
+                elif change == "server":
+                    UsageReading.objects.filter(pk=reading.pk).update(server_id_snapshot=uuid4())
+                else:
+                    UsageReading.objects.filter(pk=reading.pk).update(owner_scope=uuid4())
+                self.assertNotIn("virtualmin delete-database", self.page().content.decode())
+                self.note(["gone"])
+
+    def test_a_restore_admitted_while_the_page_renders_hides_the_note(self):
+        # The page loads the account first, then lists backups over the network; a restore admitted meanwhile
+        # moves the stored chain epoch, and the note must judge the account as it is now, not as first loaded.
+        self.note(["gone"])
+        real = VirtualminBackupService.list_backups
+
+        def restore_admitted(service, **kwargs):
+            VirtualminAccount.objects.filter(pk=self.account.pk).update(chain_epoch=self.account.chain_epoch + 1)
+            return real(service, **kwargs)
+
+        with patch.object(VirtualminBackupService, "list_backups", autospec=True, side_effect=restore_admitted):
+            self.assertNotIn("virtualmin delete-database", self.page().content.decode())
 
     def test_no_note_without_the_reading_it_came_from(self):
         state = usage.current_state(self.account)
