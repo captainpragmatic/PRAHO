@@ -170,3 +170,8 @@ class IdentityCheckFieldsTests(SimpleTestCase):
                 event = json.loads(sent)
                 for path in paths(event.get("_meta")):
                     self.assertTrue(resolves(event, path), path)
+
+    def test_parameters_a_message_cannot_format_are_withheld(self) -> None:
+        sent = _send({"message": "boom", "logentry": {"message": "total %d", "params": ["fallback-secret"]}})
+        self.assertIn(b"boom", sent)
+        self.assertNotIn(b"fallback-secret", sent)

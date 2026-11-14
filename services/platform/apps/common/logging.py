@@ -386,18 +386,19 @@ def redact_sensitive_text(value: str) -> str:
 def redact_sensitive_data(value: Any, _path: frozenset[int] = frozenset(), _depth: int = 0) -> Any:
     """A copy of a structured value with every sensitive key's value replaced, and its text redacted.
 
-    Walks dicts, lists and tuples (dict keys included); other values are returned as they are.
+    Walks mappings of any type (dict keys included; a UserDict or mappingproxy becomes a dict), lists and tuples;
+    other values are returned as they are.
     """
     if isinstance(value, str):
         return redact_sensitive_text(value)
     if isinstance(value, (bytes, bytearray)):  # A formatter would write it as text: redact that text now
         return redact_sensitive_text(bytes(value).decode("utf-8", "replace"))
-    if not isinstance(value, (dict, list, tuple)):
+    if not isinstance(value, Mapping | list | tuple):
         return value
     if id(value) in _path or _depth >= _MAX_DEPTH:
         return REDACTION_TEXT
     path = _path | {id(value)}
-    if isinstance(value, dict):
+    if isinstance(value, Mapping):
         redacted: dict[Any, Any] = {}
         next_suffix: dict[Any, int] = {}  # Per redacted key, so many colliding keys stay linear
         for key, item in value.items():
@@ -522,12 +523,15 @@ class SensitiveDataFilter(logging.Filter):
         return True
 
     def _redact(self, record: logging.LogRecord) -> None:
+        if isinstance(record.msg, Mapping | list | tuple):  # Logged as the message itself: redact it by key first
+            record.msg = redact_sensitive_data(record.msg)
         if record.args:
             record.args = redact_sensitive_data(record.args)
         try:
             rendered = render_log_message(str(record.msg), record.args)
         except Exception:
-            rendered = f"{record.msg} (arguments: {redact_placed_arguments(str(record.msg), record.args)!r})"
+            # Arguments the message can't format have no placement to judge them by: say so, never write them
+            rendered = f"{record.msg} (arguments: {REDACTION_TEXT}, the message could not format them)"
         record.msg, record.args = redact_sensitive_text(rendered), ()
         for name, value in tuple(vars(record).items()):
             if name in _STANDARD_RECORD_ATTRIBUTES:

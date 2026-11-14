@@ -80,7 +80,7 @@ class SentryOptions(TypedDict):
     before_send_transaction: Callable[[Any, Any], Any]
 
 
-def _render_redacted_log_entry(event: Any) -> None:
+def _render_redacted_log_entry(event: Any, hint: Any = None) -> None:
     """Sentry renders a logged message from its raw parameters; render it again from redacted ones.
 
     "submitted=%(password)s" renders the password under a key no text scan can recognise, so the parameters are
@@ -97,6 +97,11 @@ def _render_redacted_log_entry(event: Any) -> None:
     )
 
     entry = event.get("logentry") if isinstance(event, dict) else None
+    record = hint.get("log_record") if isinstance(hint, dict) else None
+    if isinstance(entry, dict) and isinstance(getattr(record, "msg", None), Mapping | list | tuple):
+        # A mapping logged as the message itself: Sentry wrote it as text, where a key like "password value" can't
+        # be recognised, so it is written again from the structure redacted by key.
+        entry["message"] = entry["formatted"] = str(redact_sensitive_data(record.msg))
     if not isinstance(entry, dict) or not entry.get("params"):
         return
     message = str(entry.get("message", ""))
@@ -104,9 +109,11 @@ def _render_redacted_log_entry(event: Any) -> None:
     try:
         rendered = render_log_message(message, params)
     except (TypeError, ValueError, KeyError, IndexError):
-        rendered = message
+        rendered, unplaced = message, True  # Arguments the message can't format have no placement to judge
+    else:
+        unplaced = False
     entry["formatted"] = redact_sensitive_text(rendered)
-    if entry["formatted"] != rendered:
+    if unplaced or entry["formatted"] != rendered:
         # The text held a value no key or placement accounted for ("%s=%s" with the key as an argument, a "*"
         # width): which parameter carried it is unknown, so none is sent.
         if isinstance(params, Mapping):
@@ -188,7 +195,7 @@ def scrub_event(event: Any, hint: Any) -> Any:
         return redact_sensitive_data(event)
     meta = event.pop("_meta", None)
     substituted = _substituted_paths(event, meta)
-    _render_redacted_log_entry(event)
+    _render_redacted_log_entry(event, hint)
     redacted = redact_sensitive_data(event)
     for path in substituted:
         container = _at(redacted, path[:-1])

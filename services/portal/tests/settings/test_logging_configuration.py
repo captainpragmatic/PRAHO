@@ -13,6 +13,8 @@ import logging
 import logging.config
 import os
 import sys
+from collections import UserDict
+from types import MappingProxyType
 from typing import Any
 from unittest.mock import patch
 
@@ -228,6 +230,10 @@ SENSITIVE_VALUES = (
     "submitted-secret",
     "line-secret",
     "8675309",
+    "userdict-secret",
+    "proxy-secret",
+    "fallback-secret",
+    "dictmsg-secret",
 )
 
 
@@ -263,7 +269,7 @@ def _deployed_handler_output(config: dict[str, Any], handler_name: str, record: 
 
 
 def _records() -> dict[str, logging.LogRecord]:
-    def record(message: str, args: tuple[object, ...] = (), exc_info: Any = None) -> logging.LogRecord:
+    def record(message: object, args: tuple[object, ...] = (), exc_info: Any = None) -> logging.LogRecord:
         return logging.LogRecord("apps.users", logging.ERROR, __file__, 1, message, args, exc_info)
 
     try:
@@ -302,6 +308,10 @@ def _records() -> dict[str, logging.LogRecord]:
             ({"url": "/auth/password-reset-confirm/uid/reset-token/", "password": "submitted-secret"},),
         ),
         "positional value across lines": record("login failed password=%s user=%s", ("prefix\nline-secret", "ana")),
+        "mapping types": record("rows %s %s", (UserDict({"password value": "userdict-secret"}), "x")),
+        "single mapping argument": record("profile %s", (MappingProxyType({"token value": "proxy-secret"}),)),
+        "unformattable arguments": record("total %d", ("fallback-secret",)),
+        "dict as the message": record({"password value": "dictmsg-secret"}),
         "numeric placeholder": record("card check cvv=%d, user=%s", (8675309, "ana")),
         "command line": record("ran tool --password=cli-secret --verbose; also {'--token': 'cli-secret'}"),
         "nested json inner quote": record(json.dumps({"error": json.dumps({"password": 'prefix"suffix-secret'})})),
