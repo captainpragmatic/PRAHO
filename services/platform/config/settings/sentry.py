@@ -151,16 +151,25 @@ def _at(value: Any, path: tuple[str, ...]) -> Any:
     return value
 
 
-def _redact_meta_keys(meta: Any) -> Any:
-    """The annotations with the event's field names redacted as text, as the event's own keys were."""
-    from apps.common.logging import redact_sensitive_text  # noqa: PLC0415  # Settings import before apps are ready
+def _resolving_meta(meta: Any, value: Any) -> Any:
+    """The annotations whose paths still lead somewhere in the redacted event; the rest are dropped.
 
+    A field redacted whole, or renamed because its name held a secret, leaves no path for its annotations to
+    describe, and an annotation path that outlived it would carry the old name.
+    """
     if not isinstance(meta, dict):
         return meta
-    return {
-        key if key == "" else redact_sensitive_text(str(key)): child if key == "" else _redact_meta_keys(child)
-        for key, child in meta.items()
-    }
+    kept: dict[str, Any] = {}
+    for key, child in meta.items():
+        if key == "":
+            kept[key] = child
+            continue
+        target = _at(value, (key,))
+        if target is not _MISSING:
+            pruned = _resolving_meta(child, target)
+            if pruned:
+                kept[key] = pruned
+    return kept
 
 
 def scrub_event(event: Any, hint: Any) -> Any:
@@ -188,7 +197,7 @@ def scrub_event(event: Any, hint: Any) -> Any:
         elif isinstance(container, list) and path[-1].isdigit() and int(path[-1]) < len(container):
             container[int(path[-1])] = _SENTRY_SUBSTITUTE
     if meta is not None:
-        redacted["_meta"] = _redact_meta_keys(meta)
+        redacted["_meta"] = _resolving_meta(meta, redacted)
     return redacted
 
 

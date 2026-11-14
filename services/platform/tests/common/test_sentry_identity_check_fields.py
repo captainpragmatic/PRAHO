@@ -140,3 +140,33 @@ class IdentityCheckFieldsTests(SimpleTestCase):
         self.assertIn(b'"_meta"', sent)
         self.assertNotIn(b"key-secret", sent)
         self.assertNotIn(b"hunter2", sent)
+
+    def test_annotations_never_outlive_what_was_redacted(self) -> None:
+        def paths(meta: Any, path: tuple[str, ...] = ()) -> list[tuple[str, ...]]:
+            if not isinstance(meta, dict):
+                return []
+            found = [path] if "" in meta else []
+            return found + [p for key, child in meta.items() if key != "" for p in paths(child, (*path, key))]
+
+        def resolves(value: Any, path: tuple[str, ...]) -> bool:
+            for key in path:
+                if isinstance(value, dict) and key in value:
+                    value = value[key]
+                elif isinstance(value, list) and key.isdigit() and int(key) < len(value):
+                    value = value[int(key)]
+                else:
+                    return False
+            return True
+
+        cases = {
+            "secret key under a sensitive parent": {"new_password1": {"actual-secret": {"password": "inner"}}},
+            "colliding keys with annotated children": {"password=one": {"password": "a"}, "password=two": {"password": "b"}},
+        }
+        for name, extra in cases.items():
+            with self.subTest(name):
+                sent = _send({"message": "boom", "extra": extra})
+                for secret in (b"actual-secret", b"inner", b"one", b"two"):
+                    self.assertNotIn(secret, sent)
+                event = json.loads(sent)
+                for path in paths(event.get("_meta")):
+                    self.assertTrue(resolves(event, path), path)
