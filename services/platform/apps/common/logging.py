@@ -473,13 +473,15 @@ def with_sensitive_data_redaction(config: dict[str, Any]) -> dict[str, Any]:
 
     First, so structured arguments are redacted by key before any other filter renders them into text (the
     secret-URL filter does when a link is in the message); last, because the secret-URL filter rebuilds exc_text.
+    The two places need two names: dictConfig builds one instance per name, and addFilter drops a repeated one.
     """
     result = copy.deepcopy(config)
-    result.setdefault("filters", {})["sensitive_data"] = {"()": "apps.common.logging.SensitiveDataFilter"}
+    for name in ("sensitive_data", "sensitive_data_last"):
+        result.setdefault("filters", {})[name] = {"()": "apps.common.logging.SensitiveDataFilter"}
     for handler in result.get("handlers", {}).values():
         filters = handler.setdefault("filters", [])
         filters.insert(0, "sensitive_data")
-        filters.append("sensitive_data")
+        filters.append("sensitive_data_last")
     return result
 
 
