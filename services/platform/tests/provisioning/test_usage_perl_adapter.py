@@ -462,8 +462,7 @@ class HungExistenceQueryTests(SimpleTestCase):
         self.assertEqual(rows["43"]["databases"], [{"path": str(self.root / "database"), "bytes": 4096}])
         self.assertLess(elapsed, 8, "the hung query held the whole collection past its bound")
 
-    def test_many_hung_queries_share_one_budget_so_a_later_account_is_still_published(self):
-        hung = ["44", "45", "46"]
+    def add_hung_accounts(self, hung):
         for identity in hung:
             self.vhost(identity, f"hung{identity}.test")
             (self.root / f"home{identity}").mkdir()
@@ -480,6 +479,10 @@ class HungExistenceQueryTests(SimpleTestCase):
             )
             self.fixture["database_dirs"][f"gone{identity}"] = str(self.root / f"dropped/gone{identity}")
         self.assertEqual(self.fixture["domains"][-1]["id"], "43")
+
+    def test_many_hung_queries_share_one_budget_so_a_later_account_is_still_published(self):
+        hung = ["44", "45", "46"]
+        self.add_hung_accounts(hung)
         started = time.monotonic()
         result = self.run_adapter(reconcile=False)
         elapsed = time.monotonic() - started
@@ -490,3 +493,14 @@ class HungExistenceQueryTests(SimpleTestCase):
         self.assertNotIn("unavailable", rows["43"])
         # The shared 5s budget ends the queries near 5s (4s, then the 1s left); a second full 4s clock reaches 8s.
         self.assertLess(elapsed, 7, "the hung queries overran the run's shared budget")
+
+    def test_a_wall_clock_stepping_back_does_not_refill_the_budget(self):
+        # Every wall-clock read steps back 100s, as an NTP correction would; the budget must not notice.
+        self.assertIn("use Time::HiRes ();\n", self.source)
+        rewind = "{ no warnings 'redefine'; my $wall = 1e9; *Time::HiRes::time = sub { $wall -= 100; $wall }; }\n"
+        (self.root / "adapter.pl").write_text(self.source.replace("use Time::HiRes ();\n", "use Time::HiRes ();\n" + rewind, 1))
+        self.add_hung_accounts(["44", "45", "46"])
+        result = self.run_adapter(reconcile=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = {row["id"]: row for row in json.loads(result.stdout)["accounts"]}
+        self.assertNotIn("unavailable", rows["43"])

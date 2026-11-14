@@ -69,7 +69,7 @@ sub usage_schema_missing {
     my $left = $existence_budget - $existence_spent;
     return 0 if $left <= 0;
     my $limit = POSIX::ceil($left < $existence_seconds ? $left : $existence_seconds);
-    my $started = Time::HiRes::time();
+    my $started = Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC());  # A wall-clock step must not refill it.
     my $query = "SELECT (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY 'mysql'),"
         ."(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY '$name')";
     # The handle lives outside the eval: a lexical one would be closed implicitly when the alarm unwinds,
@@ -92,7 +92,7 @@ sub usage_schema_missing {
         waitpid($pid, 0);
     }
     close($pipe) if $pipe && defined(fileno($pipe));
-    $existence_spent += Time::HiRes::time() - $started;
+    $existence_spent += Time::HiRes::clock_gettime(Time::HiRes::CLOCK_MONOTONIC()) - $started;
     return $finished && $answer =~ /\A1\t0\n?\z/ ? 1 : 0;
 }
 
