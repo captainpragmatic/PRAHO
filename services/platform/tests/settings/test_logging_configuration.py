@@ -256,6 +256,8 @@ SENSITIVE_VALUES = (
     "suffix-secret",
     "bracket-tail",
     "submitted-secret",
+    "line-secret",
+    "8675309",
 )
 
 
@@ -326,6 +328,8 @@ def _records() -> dict[str, logging.LogRecord]:
             "link=%(url)s submitted=%(password)s",
             ({"url": "/auth/password-reset-confirm/uid/reset-token/", "password": "submitted-secret"},),
         ),
+        "positional value across lines": record("login failed password=%s user=%s", ("prefix\nline-secret", "ana")),
+        "numeric placeholder": record("card check cvv=%d, user=%s", (8675309, "ana")),
         "command line": record("ran tool --password=cli-secret --verbose; also {'--token': 'cli-secret'}"),
         "nested json inner quote": record(json.dumps({"error": json.dumps({"password": 'prefix"suffix-secret'})})),
         "stack and cached exception": stack,
@@ -471,6 +475,10 @@ class SensitiveDataRedactionTests(SimpleTestCase):
             ("user %(user)s signed in from %(ip)s", ({"user": "ana", "ip": "10.0.0.1"},), "user ana signed in from 10.0.0.1"),
             ("login failed with password=%s", ("pw-positional",), "login failed with password=[REDACTED]"),
             ("submitted=%(password)s for %(user)s", ({"password": "pw-mapping", "user": "ana"},), "submitted=[REDACTED] for ana"),
+            # The value equals text the message shows anyway, and a value across lines: decided by where it sits.
+            ("login failed with password=%s", ("password",), "login failed with password=[REDACTED]"),
+            ("password=%s user=%s", ("prefix\npw-tail", "ana"), "password=[REDACTED] user=ana"),
+            ("card check cvv=%d, user=%s", (8675309, "ana"), "card check cvv=[REDACTED], user=ana"),
         ]
         for message, args, expected in cases:
             with self.subTest(message=message):
@@ -478,6 +486,9 @@ class SensitiveDataRedactionTests(SimpleTestCase):
                 (event,) = self._sentry_events([record])
                 self.assertEqual(event["logentry"]["formatted"], expected)
                 self.assertNotIn("pw-", json.dumps(event))
+                self.assertNotIn("8675309", json.dumps(event))
+                if message.startswith("login failed with password"):
+                    self.assertEqual(event["logentry"]["params"], ["[REDACTED]"])
 
     def test_long_text_is_redacted_in_linear_time(self) -> None:
         """A long unbroken word (a base64 blob, a token) must not stall the worker that logs it."""

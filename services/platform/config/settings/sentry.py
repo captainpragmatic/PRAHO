@@ -81,34 +81,27 @@ def _render_redacted_log_entry(event: Any) -> None:
     """Sentry renders a logged message from its raw parameters; render it again from redacted ones.
 
     "submitted=%(password)s" renders the password under a key no text scan can recognise, so the parameters are
-    redacted by key first. Sentry sends positional arguments as a list; they format as the tuple logging had.
-    A message that doesn't format with them keeps no rendered text at all. "password=%s" has no key on its
-    argument, so an argument the redacted text no longer shows is withheld from the parameters too.
+    redacted by key first. "password=%s" has no key on its argument, so an argument the message places as a
+    sensitive value is withheld by where it sits. Sentry sends positional arguments as a list; they format as the
+    tuple logging had. A message that doesn't format with them keeps no rendered text at all.
     """
     from apps.common.logging import (  # noqa: PLC0415  # Settings import before apps are ready
-        REDACTION_TEXT,
+        redact_placed_arguments,
         redact_sensitive_data,
         redact_sensitive_text,
+        render_log_message,
     )
 
     entry = event.get("logentry") if isinstance(event, dict) else None
     if not isinstance(entry, dict) or not entry.get("params"):
         return
-    params = redact_sensitive_data(entry["params"])
+    message = str(entry.get("message", ""))
+    entry["params"] = redact_placed_arguments(message, redact_sensitive_data(entry["params"]))
     try:
-        formatted = str(entry.get("message", "")) % (tuple(params) if isinstance(params, list) else params)
-    except (TypeError, ValueError, KeyError):
-        formatted = str(entry.get("message", ""))
-    entry["formatted"] = formatted = redact_sensitive_text(formatted)
-
-    def shown(value: Any) -> Any:
-        return value if str(value) in formatted else REDACTION_TEXT
-
-    if isinstance(params, list):
-        params = [shown(value) for value in params]
-    elif isinstance(params, dict):
-        params = {key: shown(value) for key, value in params.items()}
-    entry["params"] = params
+        formatted = render_log_message(message, entry["params"])
+    except (TypeError, ValueError, KeyError, IndexError):
+        formatted = message
+    entry["formatted"] = redact_sensitive_text(formatted)
 
 
 def scrub_event(event: Any, hint: Any) -> Any:
