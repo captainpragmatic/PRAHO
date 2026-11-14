@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import gettext
 import importlib.util
+import os
 import shutil
 import subprocess
 import sys
@@ -663,6 +664,55 @@ def test_runtime_names_elsewhere_are_still_extracted(checker, project: Path, rel
     directory.mkdir()
     (directory / "message.html").write_text('{% trans "Still extract this message" %}')
     assert "Still extract this message" in rejects(checker, project, "added")
+
+
+COVERAGE_OUTPUTS = ["services/platform/htmlcov", "services/portal/htmlcov", "shared/ui/htmlcov", "services/portal/apps/htmlcov"]
+
+
+@pytest.mark.parametrize("relative", COVERAGE_OUTPUTS)
+def test_coverage_output_is_not_a_translation_source(checker, project: Path, relative: str) -> None:
+    # Coverage HTML quotes the source it measured, translatable strings included (#881).
+    directory = project / relative
+    directory.mkdir(parents=True)
+    (directory / "x.html").write_text('{% load i18n %}{% trans "Quoted by a coverage report" %}')
+    checker.check_catalogs(project)
+
+
+@pytest.mark.parametrize("relative", COVERAGE_OUTPUTS)
+def test_coverage_output_is_excluded_before_reading(checker, project: Path, relative: str) -> None:
+    directory = project / relative
+    directory.mkdir(parents=True)
+    report = directory / "unreadable.html"
+    report.symlink_to(directory / "missing-target")
+    before = files(project)
+    checker.check_catalogs(project)
+    assert files(project) == before
+
+
+def test_the_extraction_recipe_skips_coverage_output(project: Path) -> None:
+    # The recipe on its own, without the check's capture in front of it.
+    for relative in COVERAGE_OUTPUTS:
+        (project / relative).mkdir(parents=True)
+        (project / relative / "x.html").write_text('{% load i18n %}{% trans "Quoted by a coverage report" %}')
+    make = shutil.which("make")
+    assert make is not None
+    env = {"PATH": os.environ.get("PATH", ""), "PRAHO_SKIP_DOTENV": "1", "PWD": str(project)}
+    subprocess.run([make, "i18n-extract"], cwd=project, env=env, check=True, capture_output=True)  # noqa: S603
+    for tree in TREES:
+        catalog = polib.pofile(str(project / tree / CATALOG))
+        assert catalog.find("Quoted by a coverage report") is None, tree
+
+
+def test_capture_and_recipe_exclude_the_same_coverage_output(checker) -> None:
+    """Both rules must change together: the check stages only what the capture read."""
+    makefile = (ROOT / "Makefile").read_text()
+    recipe = makefile.split("i18n-extract:\n", 1)[1].split("\ni18n-compile:", 1)[0]
+    commands = [line for line in recipe.splitlines() if "makemessages" in line]
+    assert len(commands) == len(TREES)
+    for command in commands:
+        ignored = {part.removeprefix("--ignore=") for part in command.split() if part.startswith("--ignore=")}
+        assert ignored == set(checker._COVERAGE_OUTPUT_DIRECTORIES), command
+    assert "htmlcov" in checker._COVERAGE_OUTPUT_DIRECTORIES
 
 
 def test_capture_runtime_roots_match_the_recipe_development_settings(checker) -> None:

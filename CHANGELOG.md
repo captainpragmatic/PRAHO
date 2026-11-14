@@ -60,6 +60,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `make i18n-check` and `make i18n-extract` no longer read coverage HTML (`htmlcov/`) under a service tree as translation source (#881).
+
 - Hosting caps come back after a killed backup or restore (#776, ADR-0075): Virtualmin lifts both kernel caps while it backs up or restores and restores them only on a clean exit. Platform now re-applies and verifies a managed account's caps after every backup or restore job it runs, raises attention when that keeps failing, and reports a leftover `~/.backup` dump.
 - A failed node deployment names where a controller error came from: a missing role or a syntax error prints its `[ERROR]` and `Origin:` on stderr, and the recorded reason now keeps that `Origin:` too. A refused node policy now quotes a Webmin principal's name as it does the node's other text.
 

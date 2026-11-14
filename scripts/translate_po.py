@@ -1628,6 +1628,9 @@ _RUNTIME_DIRECTORIES = {
     Path("services/platform/staticfiles"),
     Path("services/portal/staticfiles"),
 }
+# Coverage HTML quotes the source it measured, so it would read as new messages (#881). Excluded by name at any
+# depth, as makemessages matches the recipe's --ignore; a contract test keeps this list and the recipe in step.
+_COVERAGE_OUTPUT_DIRECTORIES = ("htmlcov",)
 _GUARD_INPUTS = (
     "Makefile",
     "pyproject.toml",
@@ -1642,7 +1645,7 @@ def _capture_catalog_inputs(root: Path, *, require_catalogs: bool = True) -> dic
     """Capture source bytes, including untracked files; never follow directory links.
 
     Match the recipe's Python/HTML/text service inputs and HTML/text shared inputs.
-    Exclude hidden, runtime and directory-symlink trees before reading any contents;
+    Exclude hidden, runtime, coverage-output and directory-symlink trees before reading any contents;
     Git ignore rules do not control Django extraction. File symlinks are read as bytes,
     just as makemessages reads them.
     """
@@ -1656,6 +1659,7 @@ def _capture_catalog_inputs(root: Path, *, require_catalogs: bool = True) -> dic
                 if name != "locale"
                 and not (Path(directory) / name).is_symlink()
                 and (Path(directory) / name).relative_to(root) not in _RUNTIME_DIRECTORIES
+                and name not in _COVERAGE_OUTPUT_DIRECTORIES
                 and not any(fnmatch.fnmatch(name, pattern) for pattern in _DISCOVERY_IGNORES)
             ]
             for name in names:
