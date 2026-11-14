@@ -244,6 +244,23 @@ class UncertainTests(GatewayFixture):
         with self.node(missing):
             self.uncertain(gateway.hold(self.identity, token=self.token, generation=3))
 
+    def test_a_refusal_shaped_receipt_with_another_outcome(self) -> None:
+        with self.node(self.refused("hold", "lock_busy", outcome="maybe")):
+            self.uncertain(gateway.hold(self.identity, token=self.token, generation=3))
+
+    def test_a_fence_generation_that_is_not_a_count(self) -> None:
+        # Fence reports the journal's generation, so only its type and sign can be checked.
+        for generation in (True, -1, "0", None):
+            with self.subTest(generation=generation), self.node(self.ok("fence", generation=generation)):
+                self.uncertain(gateway.fence(self.identity, token=self.token))
+
+    def test_holding_with_remaining_sessions_that_are_not_process_ids(self) -> None:
+        for sessions in (["12"], [-1], [True], [12.0]):
+            with self.subTest(sessions=sessions), self.node(
+                self.ok("hold", phase="holding", sessions_remaining=sessions)
+            ):
+                self.uncertain(gateway.hold(self.identity, token=self.token, generation=3))
+
     def test_an_unknown_refusal_code_or_a_refusal_with_extra_terms(self) -> None:
         for receipt in (
             self.refused("hold", "something_new"),
