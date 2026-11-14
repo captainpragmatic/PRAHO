@@ -18,6 +18,7 @@ my $state_root = '/var/lib/praho/usage';
 my $destination = '/var/log/praho/usage.log';
 my $mariadb = '/usr/bin/mariadb';
 my $max_databases = 32;
+my $existence_seconds = 10;  # One exact-name existence query; a hang makes only that database unknown.
 my $mode = @ARGV ? $ARGV[0] : '';
 die "Unsupported usage operation\n" if @ARGV > 1 || $mode !~ /^(?:|reconcile|reconcile-hook|reconcile-locked)$/;
 if ($mode eq 'reconcile-hook') {
@@ -63,11 +64,13 @@ sub usage_schema_missing {
     return 0 unless defined($name) && $name =~ /^[A-Za-z0-9_]{1,64}$/;
     my $query = "SELECT (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY 'mysql'),"
         ."(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY '$name')";
-    my ($answer, $pid) = ('');
+    # The handle lives outside the eval: a lexical one would be closed implicitly when the alarm unwinds,
+    # and that close waits for the hung child, so the bound would not hold.
+    my ($answer, $pid, $pipe) = ('');
     my $finished = eval {
         local $SIG{ALRM} = sub { die "Database existence query timed out\n" };
-        alarm(10);
-        $pid = open(my $pipe, '-|', $mariadb, '--protocol=socket', '--batch', '--skip-column-names', '--execute', $query)
+        alarm($existence_seconds);
+        $pid = open($pipe, '-|', $mariadb, '--protocol=socket', '--batch', '--skip-column-names', '--execute', $query)
             or die "Database existence query unavailable\n";
         my $count = read($pipe, $answer, 64);
         die "Database existence query unreadable\n" unless defined($count);
@@ -76,7 +79,11 @@ sub usage_schema_missing {
         $closed && $? == 0;
     };
     alarm(0);
-    if (!$finished && $pid) { kill('KILL', $pid); waitpid($pid, 0); }
+    if (!$finished && $pid) {
+        kill('KILL', $pid);
+        waitpid($pid, 0);
+    }
+    close($pipe) if $pipe && defined(fileno($pipe));
     return $finished && $answer =~ /\A1\t0\n?\z/ ? 1 : 0;
 }
 

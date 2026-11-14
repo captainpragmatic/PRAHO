@@ -18,7 +18,7 @@ from pathlib import Path
 from types import TracebackType
 from uuid import UUID
 
-METADATA_SHA256 = "1f49e4c83bacdb560020e87ff9da45971267db56d0567a81c9abcb42c6b4b3ec"
+METADATA_SHA256 = "331c570a8d12f49fbc85d586539fd0ee2b66b094531018a5410a7e60649e7abd"
 WRAPPER_SHA256 = "008d8f3108ceb0b1f1ad33ad1a10b61cadee0ddec8044984ff498a56440145d0"
 COLLECTOR_SHA256 = "9d11f39f2db9e7d01e6193f675ec356492f92a3ad4c33dc651569f68cadc7398"
 HOOK = "/usr/local/libexec/praho-usage-hook"

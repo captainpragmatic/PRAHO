@@ -6,6 +6,7 @@ import os
 import shlex
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from django.test import SimpleTestCase
@@ -130,11 +131,15 @@ class UsagePerlAdapterTests(SimpleTestCase):
         self.mariadb = self.root / "mariadb"
         self.mariadb.write_text(
             '#!/bin/sh\nprintf "%s\\n" "$@" >> "$PRAHO_NATIVE_FIXTURE/mariadb-calls"\n'
+            'case "$*" in *"BINARY \'gone\'"*) [ -z "$PRAHO_SCHEMATA_HANG" ] || exec sleep 30;; esac\n'
             'printf "%s" "$PRAHO_SCHEMATA_ANSWER"\nexit "${PRAHO_SCHEMATA_EXIT:-0}"\n'
         )
         self.mariadb.chmod(0o755)
         self.assertIn("'/usr/bin/mariadb'", self.source)
         self.source = self.source.replace("'/usr/bin/mariadb'", repr(str(self.mariadb)))
+        # The production bound is 10s; two keeps a hang test inside the adapter's own 10s test timeout.
+        self.assertIn("my $existence_seconds = 10;", self.source)
+        self.source = self.source.replace("my $existence_seconds = 10;", "my $existence_seconds = 2;")
         self.schemata = {"PRAHO_SCHEMATA_ANSWER": "1\t0"}
         (self.native / "virtual-server-lib.pl").write_text(NATIVE)
         (self.root / "adapter.pl").write_text(self.source)
@@ -416,3 +421,40 @@ class MissingDatabaseCollectorTests(SimpleTestCase):
         (self.root / "dropped/gone").symlink_to(self.root / "nowhere")
         self.assertIs(self.row().get("unavailable"), True)
         self.assertEqual(self.calls(), "")
+
+
+class HungExistenceQueryTests(SimpleTestCase):
+    """A hung existence query makes only that database unknown; the node's other accounts are collected on time."""
+
+    vhost = UsagePerlAdapterTests.vhost
+    run_adapter = UsagePerlAdapterTests.run_adapter
+
+    def setUp(self):
+        UsagePerlAdapterTests.setUp(self)
+        self.vhost()
+        self.vhost("43", "other.test")
+        (self.root / "home43").mkdir()
+        self.fixture["domains"][0]["databases"] = [{"type": "mysql", "host": "localhost", "name": "gone"}]
+        self.fixture["domains"].append(
+            {
+                "id": "43",
+                "dom": "other.test",
+                "user": "other",
+                "home": str(self.root / "home43"),
+                "web": 1,
+                "databases": [{"type": "mysql", "host": "localhost", "name": "present"}],
+            }
+        )
+        self.fixture["database_dirs"] = {"gone": str(self.root / "dropped/gone")}
+        self.schemata = {"PRAHO_SCHEMATA_ANSWER": "1\t0", "PRAHO_SCHEMATA_HANG": "1"}
+
+    def test_only_the_hung_database_is_unknown_and_the_run_keeps_its_bound(self):
+        started = time.monotonic()
+        result = self.run_adapter(reconcile=False)
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = {row["id"]: row for row in json.loads(result.stdout)["accounts"]}
+        self.assertIs(rows["42"].get("unavailable"), True)
+        self.assertNotIn("unavailable", rows["43"])
+        self.assertEqual(rows["43"]["databases"], [{"path": str(self.root / "database"), "bytes": 4096}])
+        self.assertLess(elapsed, 8, "the hung query held the whole collection past its bound")
