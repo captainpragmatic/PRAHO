@@ -243,14 +243,17 @@ def _deployed_handler_output(config: dict[str, Any], handler_name: str, record: 
     """What one configured handler writes for a record: its own filters and formatter, a stream instead of a file.
 
     The filters and formatter are built the way dictConfig builds them, without dictConfig itself, which would
-    replace the test run's own logging.
+    replace the test run's own logging: one instance per filter name, so a name listed twice is added once.
     """
     spec = config["handlers"][handler_name]
     configurator = logging.config.DictConfigurator(config)
     stream = io.StringIO()
     handler = logging.StreamHandler(stream)
+    built: dict[str, logging.Filter] = {}
     for name in spec.get("filters", []):
-        handler.addFilter(configurator.configure_filter(dict(config["filters"][name])))
+        if name not in built:
+            built[name] = configurator.configure_filter(dict(config["filters"][name]))
+        handler.addFilter(built[name])
     if "formatter" in spec:
         handler.setFormatter(configurator.configure_formatter(dict(config["formatters"][spec["formatter"]])))
     handler.handle(record)
