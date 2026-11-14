@@ -77,7 +77,8 @@ class FakeDatabase:
         self.proxy_rows = 0
         self.definers: dict[str, set[str]] = {}
         self.column_names = list(ALL)
-        self.connections: dict[int, tuple[str, str | None]] = {}  # id -> (user, current database)
+        # id -> (user, current database) or (user, current database, command); a bare pair is an idle session.
+        self.connections: dict[int, tuple] = {}
         self.global_accounts: set[tuple[str, str]] = {("root", "localhost"), ("mysql", "localhost")}
         self.sticky: set[int] = set()
         self.statements: list[str] = []
@@ -170,10 +171,13 @@ class FakeDatabase:
                 image[column] = "Y"
         self._applied()
 
-    def sessions_on(self, databases: list[str]) -> dict[int, str]:
+    def sessions_on(self, databases: list[str], users: list[str]) -> dict[int, str]:
         if self.sessions_fail:
             raise RuntimeError("the node died before the drain")
-        found = {number: user for number, (user, db) in self.connections.items() if db in databases}
+        found = {}
+        for number, (user, db, *command) in self.connections.items():
+            if db in databases or (user in users and (command or ["Sleep"])[0] != "Sleep"):
+                found[number] = user
         while self.after_sessions:
             self.after_sessions.pop(0)()
         return found
@@ -448,6 +452,28 @@ class SessionTests(HoldFixture):
         self.database.connections = {1: ("root", "shop_db")}
         self.assertEqual(self.act("hold")["phase"], "held")
         self.assertNotIn(1, self.database.connections)
+
+    def test_a_statement_in_flight_from_no_current_database_is_ended(self) -> None:
+        # `INSERT INTO shop_db.t ...` started before the revoke keeps running after it; an in-scope username
+        # can only be working on a held database, so its executing sessions are ended wherever they sit.
+        self.database.connections = {
+            31: ("shop", None, "Query"),
+            32: ("shop", None),  # Idle: its next statement is checked against the held grants.
+            33: ("someone_else", None, "Query"),
+        }
+        self.assertEqual(self.act("hold")["phase"], "held")
+        self.assertEqual(sorted(self.database.connections), [32, 33])
+
+    def test_a_refused_re_hold_stops_trusting_the_session_record(self) -> None:
+        self.assertEqual(self.act("hold")["phase"], "held")
+        # Write access appears for a while, a session enters, and the next hold refuses before changing anything.
+        self.database.grant_row("helper", "shop\\_db", privileges("Insert_priv"))
+        self.database.extra_grants[("helper", "localhost")] = ["GRANT INSERT ON *.* TO `helper`@`localhost`"]
+        self.database.connections = {41: ("helper", "shop_db")}
+        self.assertEqual(self.act("hold")["code"], "global_privilege")
+        del self.database.rows[("helper", "localhost", "shop\\_db")]
+        self.database.extra_grants.clear()
+        self.assertEqual(self.act("verify")["sessions_remaining"], [41])
 
     def test_verify_never_ends_a_session(self) -> None:
         self.database.connections = {12: ("shop", "shop_db")}
@@ -727,10 +753,13 @@ class NativeStatementTests(SimpleTestCase):
     def test_sessions_are_read_by_exact_current_database_without_the_helpers_own(self) -> None:
         database = self.native()
         database.execute = lambda query: database.statements.append(query) or [("11", "shop"), ("x", "bad")]
-        self.assertEqual(database.sessions_on(["shop_db", "bad'name", "shop_logs"]), {11: "shop"})
+        self.assertEqual(database.sessions_on(["shop_db", "bad'name", "shop_logs"], ["shop", "bad'user"]), {11: "shop"})
         (query,) = database.statements
         self.assertIn("ID <> CONNECTION_ID()", query)
-        self.assertTrue(query.endswith("AND BINARY DB IN ('shop_db','shop_logs')"), query)
+        self.assertTrue(
+            query.endswith("AND (BINARY DB IN ('shop_db','shop_logs') OR (USER IN ('shop') AND COMMAND <> 'Sleep'))"),
+            query,
+        )
 
     def test_every_grantee_with_a_global_privilege_is_an_identity(self) -> None:
         database = self.native()

@@ -109,7 +109,7 @@ class Database(Protocol):
 
     def global_privileges(self) -> set[Principal]: ...
 
-    def sessions_on(self, databases: list[str]) -> dict[int, str]: ...
+    def sessions_on(self, databases: list[str], users: list[str]) -> dict[int, str]: ...
 
     def kill_soft(self, number: int) -> None: ...
 
@@ -297,6 +297,7 @@ class DatabaseHold:
 
     def perform(self, request: object) -> dict[str, Any]:
         action, identity, token, generation = self._request(request)
+        self._in_scope: list[Principal] = []  # The principals the latest qualification accepted.
         receipt: dict[str, Any] = {"action": action, "identity": identity, "token": token, "generation": generation}
         try:
             with self._locked(identity["domain_id"]):
@@ -415,6 +416,7 @@ class DatabaseHold:
         for user in sorted({user for user, _host in principals}):
             if self.database.hosts(user) - {host for name, host in principals if name == user}:
                 raise HoldRefusal("shared_username", f"username {user} has hosts outside the scope")
+        self._in_scope = principals
         roles, proxies = self.database.roles_and_proxies(principals)
         if roles:
             raise HoldRefusal("role", "a principal has a role")
@@ -483,7 +485,14 @@ class DatabaseHold:
         self._admission(identity["domain_id"])
         columns = self._columns()
         known = _journalled(journal) if active else set()
-        live = self._scope(databases, columns, known)
+        try:
+            live = self._scope(databases, columns, known)
+        except Exception:
+            if active and journal is not None:
+                # The scope changed since the record: write access may have come and gone, and a session that
+                # entered a held database meanwhile kept it. Every session in one counts until a hold succeeds.
+                _write_json(scope / "journal.json", {**journal, "sessions_recorded": False})
+            raise
         # The original image of a row already journalled survives every re-hold (plan revision 3).
         journalled = {(row["user"], row["host"], row["db"]): row for row in (journal or {}).get("rows", []) if active}
         rows = []
@@ -514,13 +523,18 @@ class DatabaseHold:
             raise ValueError(f"The hold scope changed during the hold ({refusal.code})") from refusal
 
     def _writers(self, databases: list[str]) -> set[int]:
-        """Sessions whose current database is held: each may have that database's write privileges cached from
-        before the revoke (MariaDB 11.8.3 caches them per current database; a qualified statement or a fresh USE
-        is checked again). A username is exempt only when every one of its accounts is a DBA identity, since the
-        process list shows the username, not which of its hosts the session authenticated as."""
+        """Sessions that may still write a held database after the revoke:
+        - every session whose current database is held, since MariaDB 11.8.3 caches its database privileges per
+          current database (a qualified statement or a fresh USE is checked again);
+        - every executing session of an in-scope username, wherever it sits: a statement started before the
+          revoke runs to its end, and an in-scope principal has rows on held databases only, its username on no
+          other account (shared_username).
+        A username is exempt only when every one of its accounts is a DBA identity, since the process list shows
+        the username, not which of its hosts the session authenticated as."""
+        users = sorted({user for user, _host in self._in_scope})
         exempt: dict[str, bool] = {}
         found = set()
-        for number, user in self.database.sessions_on(databases).items():
+        for number, user in self.database.sessions_on(databases, users).items():
             if user not in exempt:
                 hosts = self.database.hosts(user) if USER.fullmatch(user) else set()
                 exempt[user] = bool(hosts) and {(user, host) for host in hosts} <= DBA
@@ -765,14 +779,16 @@ class NativeDatabase:
             found.add((match.group(1), match.group(2)) if match else (grantee, ""))
         return found
 
-    def sessions_on(self, databases: list[str]) -> dict[int, str]:
+    def sessions_on(self, databases: list[str], users: list[str]) -> dict[int, str]:
         names = ",".join(f"'{name}'" for name in databases if DATABASE.fullmatch(name))
         if not names:
             return {}
+        accounts = ",".join(f"'{user}'" for user in users if USER.fullmatch(user))
+        busy = f" OR (USER IN ({accounts}) AND COMMAND <> 'Sleep')" if accounts else ""
         # The helper's own connection and the server's own threads are never a customer's writer.
         rows = self.execute(
             "SELECT ID, USER FROM information_schema.PROCESSLIST WHERE ID <> CONNECTION_ID() "  # noqa: S608 -- Validated names.
-            f"AND COMMAND <> 'Daemon' AND USER <> 'system user' AND BINARY DB IN ({names})"
+            f"AND COMMAND <> 'Daemon' AND USER <> 'system user' AND (BINARY DB IN ({names}){busy})"
         )
         return {int(row[0]): row[1] for row in rows if row[0].isdecimal()}
 
