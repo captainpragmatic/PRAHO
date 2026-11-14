@@ -226,6 +226,8 @@ SENSITIVE_VALUES = (
     "suffix-secret",
     "bracket-tail",
     "submitted-secret",
+    "line-secret",
+    "8675309",
 )
 
 
@@ -299,6 +301,8 @@ def _records() -> dict[str, logging.LogRecord]:
             "link=%(url)s submitted=%(password)s",
             ({"url": "/auth/password-reset-confirm/uid/reset-token/", "password": "submitted-secret"},),
         ),
+        "positional value across lines": record("login failed password=%s user=%s", ("prefix\nline-secret", "ana")),
+        "numeric placeholder": record("card check cvv=%d, user=%s", (8675309, "ana")),
         "command line": record("ran tool --password=cli-secret --verbose; also {'--token': 'cli-secret'}"),
         "nested json inner quote": record(json.dumps({"error": json.dumps({"password": 'prefix"suffix-secret'})})),
         "stack and cached exception": stack,

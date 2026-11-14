@@ -13,6 +13,7 @@ import copy
 import json
 import logging
 import re
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
@@ -216,6 +217,80 @@ def redact_sensitive_data(value: Any, _path: frozenset[int] = frozenset(), _dept
     return items if isinstance(value, list) else tuple(items)
 
 
+# A printf-style conversion: %s, %(name)s, %-8.3f, %%.
+_CONVERSION = re.compile(
+    r"%(?:\((?P<name>[^)]*)\))?(?P<spec>[#0 +\-]*(?:\*|\d+)?(?:\.(?:\*|\d+))?[hlL]?)(?P<type>[diouxXeEfFgGcrsa%])"
+)
+
+
+def _sensitive_placements(message: str) -> tuple[list[re.Match[str]], set[int]] | None:
+    """The message's conversions, and the indexes of those it places as a sensitive value ("password=%s").
+
+    Decided by where an argument sits, not by its value: the message with a marker word in place of each conversion
+    is redacted as text, and a conversion whose marker is gone is sensitive. A value redacted only after rendering
+    can match text the message shows anyway, or end at a line break inside it. None when "*" widths are used.
+    """
+    marks: list[re.Match[str]] = []
+
+    def mark(match: re.Match[str]) -> str:
+        if match["type"] == "%":
+            return "%"
+        marks.append(match)
+        return f"zqarg{len(marks) - 1}z"
+
+    skeleton = _CONVERSION.sub(mark, message)
+    if any("*" in match["spec"] for match in marks):
+        return None
+    shown = redact_sensitive_text(skeleton)
+    return marks, {index for index in range(len(marks)) if f"zqarg{index}z" not in shown}
+
+
+def redact_placed_arguments(message: str, args: Any) -> Any:
+    """The arguments, with every one the message places as a sensitive value replaced by REDACTION_TEXT."""
+    placements = _sensitive_placements(message) if isinstance(args, tuple | list | Mapping) else None
+    if not placements or not placements[1]:
+        return args
+    marks, hidden = placements
+    if isinstance(args, Mapping):
+        names = {marks[index]["name"] for index in hidden}
+        # A bare "%s" writes the whole mapping, so a sensitive one withholds all of it.
+        return {key: REDACTION_TEXT if key in names or None in names else value for key, value in args.items()}
+    positions = [index for index, match in enumerate(marks) if match["name"] is None]
+    redacted = [
+        REDACTION_TEXT if position < len(positions) and positions[position] in hidden else value
+        for position, value in enumerate(args)
+    ]
+    return redacted if isinstance(args, list) else tuple(redacted)
+
+
+def render_log_message(message: str, args: Any) -> str:
+    """message % args, as logging renders it, with every sensitive placement written as REDACTION_TEXT.
+
+    The conversion itself is replaced, so "cvv=%d" needs no number and a value is never rendered to be redacted.
+    """
+    if not args:
+        return message
+    placements = _sensitive_placements(message) if isinstance(args, tuple | list | Mapping) else None
+    if not placements or not placements[1]:
+        return message % (tuple(args) if isinstance(args, list) else args)
+    marks, hidden = placements
+    parts: list[str] = []
+    kept: list[Any] = []
+    end = position = 0
+    positional = not isinstance(args, Mapping)
+    for index, match in enumerate(marks):
+        parts.append(message[end : match.start()])
+        parts.append(REDACTION_TEXT if index in hidden else match.group(0))
+        if positional and match["name"] is None:
+            if index not in hidden and position < len(args):
+                kept.append(args[position])
+            position += 1
+        end = match.end()
+    parts.append(message[end:])
+    remaining = (*kept, *args[position:]) if positional else args
+    return "".join(parts) % remaining
+
+
 # The attributes every LogRecord has; anything else on a record came from `extra=` or a filter.
 _STANDARD_RECORD_ATTRIBUTES = frozenset(vars(logging.LogRecord("", 0, "", 0, "", (), None))) | {"message", "asctime"}
 
@@ -251,9 +326,9 @@ class SensitiveDataFilter(logging.Filter):
         if record.args:
             record.args = redact_sensitive_data(record.args)
         try:
-            rendered = record.getMessage()
+            rendered = render_log_message(str(record.msg), record.args)
         except Exception:
-            rendered = f"{record.msg} (arguments: {record.args!r})"
+            rendered = f"{record.msg} (arguments: {redact_placed_arguments(str(record.msg), record.args)!r})"
         record.msg, record.args = redact_sensitive_text(rendered), ()
         for name, value in tuple(vars(record).items()):
             if name in _STANDARD_RECORD_ATTRIBUTES:
