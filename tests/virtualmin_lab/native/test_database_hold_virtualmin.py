@@ -1,4 +1,4 @@
-"""The database write hold on a stock Virtualmin 8.3.0 node (#776, plan 7A.4).
+"""The database write hold, and 7A.1's quota metadata restore, on a stock Virtualmin 8.3.0 node (#776, plan 7A.4).
 
 A disposable container of the lab image (praho-virtualmin-lab:8.3.0, Debian 12, its MariaDB 10.11) creates a real
 hosting account whose domain name gives an underscore database, then runs praho_database_hold.py inside it as root
@@ -151,8 +151,12 @@ def node():
         )
         instance.run("install", "-d", "-m", "0700", "/var/lib/praho/usage", HELPER)
         instance.run("sh", "-c", f"umask 077; echo {INSTALLATION} > /var/lib/praho/usage/installation")
-        for name in ("praho_database_hold.py", "praho-component-mysql.py"):
+        for name in ("praho_database_hold.py", "praho-component-mysql.py", "praho-quota-metadata.pl"):
             checked(["docker", "cp", str(FILES / name), f"{cid}:{HELPER}/{name}"])
+        checked(["docker", "cp", str(Path(__file__).with_name("quota_metadata_driver.py")), f"{cid}:{HELPER}/driver.py"])
+        # The node policy the metadata child enforces on apply, installed where virtualmin_hosting_tasks.yml puts it.
+        instance.run("install", "-d", "-m", "0755", "/usr/local/lib/praho")
+        checked(["docker", "cp", str(FILES / "praho-notification-policy.pl"), f"{cid}:/usr/local/lib/praho/"])
         yield instance
     finally:
         actual = json.loads(checked(["docker", "inspect", cid]))[0]
@@ -205,3 +209,50 @@ def test_a_hold_and_release_on_the_real_account(node, identity):
         f"CREATE TABLE {DATABASE}.probe (x INT); INSERT INTO {DATABASE}.probe VALUES (1); DROP TABLE {DATABASE}.probe"
     )
     assert probe.returncode == 0, probe.stderr
+
+
+def test_the_quota_metadata_restore_puts_back_exactly_what_the_application_changed(node):
+    """7A.1: the child's PRAHO_QUOTA_METADATA images, read by the coordinator's own parser, drive a restore through
+    Virtualmin's lock_domain/save_domain; an administrator's edit since the application is never overwritten."""
+    quota = load("quota_native_virtualmin", FILES / "praho_quota_native.py")
+    path = f"/etc/webmin/virtual-server/domains/{node.domain_id}"
+    fields = ("quota", "uquota", "bw_limit", "bw_no_disable", "letsencrypt_email")
+
+    def metadata() -> dict[str, str]:
+        lines = node.run("grep", "-E", f"^({'|'.join(fields)})=", path).splitlines()
+        return dict(line.split("=", 1) for line in lines)
+
+    def child(mode: str, payload: dict[str, Any]) -> dict[str, Any]:
+        script = f"{HELPER}/praho-quota-metadata.pl"
+        return json.loads(node.run("/usr/bin/python3", f"{HELPER}/driver.py", mode, script, stdin=json.dumps(payload)))
+
+    owner = dict(line.split("=", 1) for line in node.run("grep", "-E", "^(uid|gid)=", path).splitlines())
+    request = {
+        "identity": {
+            "installation": INSTALLATION,
+            "domain_id": node.domain_id,
+            "domain": DOMAIN,
+            "uid": owner["uid"],
+            "gid": owner["gid"],
+        },
+        "token": str(uuid4()),
+        "generation": 1,
+        "disk_limit_kib": 102400,
+        "bandwidth_limit_bytes": 1073741824,
+    }
+    original = metadata()
+    applied = child("apply", request)
+    assert applied["rc"] == 0, applied
+    images = quota._metadata_images(applied["stdout"])
+    assert images is not None and images["after"]["quota"] == "102400"
+    assert images["before"]["bw_no_disable"] is None and images["after"]["bw_no_disable"] == "1"
+    restored = child("restore", {"request": request, "restore": images["before"], "expected": images["after"]})
+    assert restored["rc"] == 0, restored
+    assert metadata() == original  # bw_no_disable, absent before, is deleted rather than left empty.
+
+    assert child("apply", request)["rc"] == 0
+    node.run("sed", "-i", "s/^bw_limit=.*/bw_limit=5/", path)  # An administrator's edit after the application.
+    edited = metadata()
+    refused = child("restore", {"request": request, "restore": images["before"], "expected": images["after"]})
+    assert refused["rc"] != 0
+    assert metadata() == edited
