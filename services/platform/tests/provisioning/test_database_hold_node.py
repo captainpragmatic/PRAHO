@@ -273,11 +273,15 @@ class HoldAndReleaseTests(HoldFixture):
         self.assertIn(("shop", "localhost", "shop\\_db"), self.database.rows)
 
     def test_release_is_idempotent_and_needs_no_token(self) -> None:
+        original = {db: self.image(db) for db in ("shop\\_db", "shop\\_logs")}
         self.assertEqual(self.act("release", generation=1)["phase"], "released")  # Nothing held yet.
-        self.act("hold")
-        self.act("fence")
-        self.assertEqual(self.act("release", generation=1)["phase"], "released")
-        self.assertEqual(self.act("release", generation=1)["phase"], "released")
+        # That release recorded generation 1, so the next hold takes a newer one.
+        self.assertEqual(self.act("hold", generation=2)["phase"], "held")
+        self.assertEqual(self.image("shop\\_db")["Insert_priv"], "N")
+        self.assertEqual(self.act("fence")["outcome"], "ok")
+        self.assertEqual(self.act("release", generation=2)["phase"], "released")  # A fenced token still releases.
+        self.assertEqual(self.act("release", generation=2)["phase"], "released")
+        self.assertEqual({db: self.image(db) for db in ("shop\\_db", "shop\\_logs")}, original)
 
     def test_a_re_hold_after_drift_keeps_the_original_before_image(self) -> None:
         original = {db: self.image(db) for db in ("shop\\_db", "shop\\_logs")}
