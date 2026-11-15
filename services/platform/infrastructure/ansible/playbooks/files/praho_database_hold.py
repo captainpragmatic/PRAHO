@@ -620,8 +620,11 @@ class DatabaseHold:
             raise HoldRefusal("obsolete_generation", "a newer hold exists")
         hold_token = journal.get("token") if journal else None
         if journal is None or journal.get("phase") == "released" or not journal.get("rows"):
-            if journal is not None and generation > previous:
-                _write_json(scope / "journal.json", {**journal, "generation": generation, "phase": "released"})
+            # Nothing to restore, but the release is still recorded with its generation: a delayed older hold then
+            # refuses as obsolete, and verify reports not_held (review finding).
+            base = journal or {"domain": identity["domain"], "installation": identity["installation"], "token": None}
+            released = {**base, "generation": generation, "phase": "released", "rows": [], "sessions": []}
+            _write_json(scope / "journal.json", {**released, "held_digest": None})
             return {**self._result("released", None, [], []), "token": hold_token}
         columns = self._columns()
         rows = [row for row in journal["rows"] if row.get("phase") != "open"]

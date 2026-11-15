@@ -380,6 +380,24 @@ class GenerationAndFenceTests(HoldFixture):
         self.assertEqual(self.image("shop\\_logs"), privileges("Select_priv", "Insert_priv"))
         self.assertTrue((self.paths.state / INSTALLATION / "42" / f"cancelled-{self.token}.json").exists())
 
+    def test_a_release_before_any_hold_fences_a_delayed_older_hold(self) -> None:
+        self.assertEqual(self.act("release", generation=5)["phase"], "released")
+        self.assertEqual((self.journal()["phase"], self.journal()["generation"]), ("released", 5))
+        late = self.act("hold", generation=1)
+        self.assertEqual((late["outcome"], late["code"]), ("refused", "obsolete_generation"))
+        self.assertEqual(self.image("shop\\_db"), everything())
+        self.assertEqual(self.act("verify", generation=5)["drift"], ["not_held"])
+
+    def test_releasing_a_hold_with_no_rows_at_its_own_generation_ends_it(self) -> None:
+        for key in list(self.database.rows):
+            del self.database.rows[key]
+        self.assertEqual(self.act("hold", generation=2)["phase"], "held")
+        self.assertEqual(self.journal()["rows"], [])
+        self.assertEqual(self.act("release", generation=2)["phase"], "released")
+        self.assertEqual(self.journal()["phase"], "released")
+        self.assertEqual(self.act("verify", generation=2)["drift"], ["not_held"])
+        self.assertEqual(self.act("hold", generation=2)["code"], "obsolete_generation")
+
     def test_a_release_after_a_newer_hold_never_restores_over_it(self) -> None:
         self.act("hold", generation=3)
         self.assertEqual(self.act("release", generation=2)["code"], "obsolete_generation")
