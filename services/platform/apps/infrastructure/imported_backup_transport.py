@@ -42,6 +42,8 @@ ACTION_SCOPED_PLAYBOOKS: dict[str, tuple[str, frozenset[str]]] = {
     ),
     "virtualmin_hosting_prepare.yml": ("hosting_action", frozenset({"prepare", "fence"})),
     "virtualmin_quota.yml": ("quota_action", frozenset({"probe", "apply", "fence"})),
+    # The billing hold's write actions (#776). Nothing probes through the server runner, so probe stays out.
+    "virtualmin_database_hold.yml": ("hold_action", frozenset({"hold", "verify", "fence", "release"})),
     "virtualmin_component_bridge.yml": (
         "component_bridge_action",
         frozenset({"prepare", "origin_install", "origin_verify", "install", "verify", "remove", "origin_remove"}),

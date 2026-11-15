@@ -9,13 +9,17 @@ import base64
 import importlib.util
 import inspect
 import json
+import subprocess
 import sys
+import tempfile
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
+import paramiko
 from django.conf import settings
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from apps.common.types import Ok
 from apps.infrastructure.ansible_service import AnsibleResult, AnsibleService
@@ -285,3 +289,48 @@ class UncertainTests(GatewayFixture):
         with self.node(self.ok("hold")) as boundary, self.assertRaises(VirtualminServer.DoesNotExist):
             gateway.hold(identity, token=self.token, generation=3)
         boundary.assert_not_called()
+
+
+class TransportAdmissionTests(GatewayFixture):
+    """Through the real server runner: its archive-transport admission, host trust and inputs. Only the Ansible
+    process itself is faked, so a playbook missing from the transport's allow-list fails here."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        pin = paramiko.RSAKey.generate(2048)
+        self.server.imported_ssh_host_keys = f"{pin.get_name()} {pin.get_base64()}"
+        self.server.save(update_fields=["imported_ssh_host_keys"])
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        key = Path(directory.name) / "imported-root-key"
+        key.write_text("fixture-private-key")
+        key.chmod(0o600)
+        self.enterContext(override_settings(VIRTUALMIN_IMPORTED_SSH_PRIVATE_KEY_PATH=str(key)))
+        self.enterContext(patch.object(AnsibleService, "_find_ansible", return_value="/usr/bin/ansible-playbook"))
+        self.executed: list[str] = []
+
+    def ansible(self, *receipts: dict[str, Any]):
+        outputs = iter(receipts)
+
+        def execute(command, environment, timeout):
+            variables = json.loads(Path(command[command.index("-e") + 1].removeprefix("@")).read_text())
+            self.executed.append(variables["hold_action"])
+            text = json.dumps(next(outputs))
+            marker = "PRAHO_DATABASE_HOLD_RESULT=" + base64.b64encode(text.encode()).decode()
+            return subprocess.CompletedProcess(command, 0, marker, "")
+
+        return patch.object(AnsibleService, "_execute_process", side_effect=execute)
+
+    def test_hold_verify_fence_and_release_reach_the_node(self) -> None:
+        receipts = [self.ok("hold"), self.ok("verify", token=None), self.ok("fence", generation=0), self.ok("release", token=None)]
+        with self.ansible(*receipts):
+            self.assertTrue(gateway.hold(self.identity, token=self.token, generation=3).is_ok())
+            self.assertTrue(gateway.verify(self.identity, generation=3).is_ok())
+            self.assertTrue(gateway.fence(self.identity, token=self.token).is_ok())
+            self.assertTrue(gateway.release(self.identity, generation=3).is_ok())
+        self.assertEqual(self.executed, ["hold", "verify", "fence", "release"])
+
+    def test_probe_is_not_admitted_to_the_node(self) -> None:
+        with self.ansible(self.ok("probe")):
+            self.uncertain(gateway.probe(self.identity, token=self.token, generation=3))
+        self.assertEqual(self.executed, [])
