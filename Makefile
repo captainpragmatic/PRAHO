@@ -1514,6 +1514,16 @@ test-virtualmin-contract:
 test-virtualmin-quota-sql:
 	@$(PYTHON_SHARED) -m pytest -c /dev/null --rootdir="$(PWD)" -p no:django tests/virtualmin_lab/native/test_quota_sql.py -q
 
+# The database write hold against a disposable MariaDB 11.8.3 (#776): -s keeps the USER_PRIVILEGES evidence.
+.PHONY: test-virtualmin-database-hold-sql
+test-virtualmin-database-hold-sql:
+	@$(PYTHON_SHARED) -m pytest -c /dev/null --rootdir="$(PWD)" -p no:django tests/virtualmin_lab/native/test_database_hold_sql.py -q -s
+
+# The same hold on a stock Virtualmin 8.3.0 lab node (needs make virtualmin-lab-build); prints its USER_PRIVILEGES.
+.PHONY: test-virtualmin-database-hold-node
+test-virtualmin-database-hold-node:
+	@$(PYTHON_SHARED) -m pytest -c /dev/null --rootdir="$(PWD)" -p no:django tests/virtualmin_lab/native/test_database_hold_virtualmin.py -q -s
+
 # A provider-owned Ubuntu kernel is required for enforcement/reboot proof. This
 # private manifest is explicit so a typo cannot select a customer or fleet node.
 NATIVE_VM_MANIFEST ?=

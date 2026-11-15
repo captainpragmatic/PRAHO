@@ -230,6 +230,47 @@ read_accounts() {
   account_json="[${entries%,}]"
 }
 
+# Global privileges that cannot change a database. Any other one held by an account outside DBA_ACCOUNTS (a
+# write, DELETE, DROP, FILE, EXECUTE, GRANT OPTION, SUPER, CREATE USER, ALL PRIVILEGES or a name not listed here)
+# lets it write around the barrier. Kept equal to praho_database_hold.py's lists by a test.
+READ_ONLY_GLOBALS=(
+  'USAGE'
+  'SELECT'
+  'SHOW DATABASES'
+  'SHOW VIEW'
+  'SHOW CREATE ROUTINE'
+  'LOCK TABLES'
+  'PROCESS'
+  'RELOAD'
+  'REPLICATION CLIENT'
+  'BINLOG MONITOR'
+  'SLAVE MONITOR'
+  'REPLICA MONITOR'
+)
+DBA_ACCOUNTS=(
+  'root@localhost'
+  'mysql@localhost'
+  'mariadb.sys@localhost'
+)
+listed() { # listed VALUE ITEM... -> 0 when VALUE is exactly one of the items
+  local value=$1 item
+  shift
+  for item in "$@"; do [[ $item == "$value" ]] && return 0; done
+  return 1
+}
+global_writers() { # prints how many global privileges let an account outside DBA_ACCOUNTS write or grant
+  local rows grantee privilege grantable account n=0 dba_grantees=()
+  for account in "${DBA_ACCOUNTS[@]}"; do dba_grantees+=("'${account%@*}'@'${account##*@}'"); done
+  rows=$(sql "SELECT GRANTEE, PRIVILEGE_TYPE, IS_GRANTABLE FROM information_schema.USER_PRIVILEGES") || return 1
+  while IFS=$'\t' read -r grantee privilege grantable; do
+    [[ -n $grantee ]] || continue
+    # GRANTEE is 'user'@'host' with no escaping ('ro'ot'@'localhost' on 11.8.3): compared whole, never root.
+    listed "$grantee" "${dba_grantees[@]}" && continue
+    if [[ $grantable == YES ]] || ! listed "$privilege" "${READ_ONLY_GLOBALS[@]}"; then n=$((n + 1)); fi
+  done <<<"$rows"
+  echo "$n"
+}
+
 # Why the barrier cannot be put up here; empty when it can. Read-only.
 refusal() {
   local count db user host info
@@ -246,7 +287,7 @@ refusal() {
     count=$(sql "SELECT IF(@@event_scheduler = 'ON', (SELECT COUNT(*) FROM information_schema.events WHERE EVENT_SCHEMA IN ($(in_list))), 0)") || { echo "database_unreadable"; return 0; }
     [[ $count == 0 ]] || { echo "database_events"; return 0; }
   fi
-  count=$(sql "SELECT COUNT(*) FROM mysql.user WHERE (Insert_priv = 'Y' OR Update_priv = 'Y' OR Delete_priv = 'Y' OR Create_priv = 'Y' OR Drop_priv = 'Y' OR Alter_priv = 'Y' OR Super_priv = 'Y' OR File_priv = 'Y') AND NOT (User IN ('root', 'mysql') AND Host = 'localhost')") || { echo "database_unreadable"; return 0; }
+  count=$(global_writers) || { echo "database_unreadable"; return 0; }
   [[ $count == 0 ]] || { echo "database_global_writer"; return 0; }
   local managed
   managed=$(virtualmin list-users --domain "$domain" --multiline 2>/dev/null \

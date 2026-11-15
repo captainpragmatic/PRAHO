@@ -25,6 +25,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext
 from django.views.decorators.http import require_http_methods, require_POST
 from django_q.tasks import async_task
 
@@ -365,6 +366,41 @@ def account_action_attrs(
     }
 
 
+def _missing_database_notice(account: VirtualminAccount) -> str:
+    """Staff attention for databases Virtualmin registers but MariaDB dropped (#776). Removal is never automatic."""
+    from .virtualmin_usage_models import AccountUsageState  # noqa: PLC0415
+
+    # Only beside the disk reading it came with, while that reading still describes this account: after a
+    # restore's new chain epoch, a move or an ownership change, the advice could delete a recreated database.
+    # The account is read in the same query, not reused from earlier in the request: a restore admitted while the
+    # page rendered moves the stored epoch.
+    state = (
+        AccountUsageState.objects.select_related("disk_reading", "account")
+        .filter(account_id=account.pk, disk_reading__isnull=False)
+        .first()
+    )
+    if state is None or not state.missing_databases:
+        return ""
+    reading, current = state.disk_reading, state.account
+    if (
+        reading is None
+        or reading.chain_epoch != current.chain_epoch
+        or reading.server_id_snapshot != current.server_id
+        or reading.owner_scope != state.owner_scope
+    ):
+        return ""
+    names = list(state.missing_databases)
+    return ngettext(
+        "Virtualmin still registers the database %(names)s for %(domain)s, but MariaDB no longer has it. It counts "
+        "as 0 bytes. Remove the registration with: virtualmin delete-database --domain %(domain)s --name NAME "
+        "(see docs/deployment/HOSTING_USAGE_WARNINGS.md). Nothing removes it automatically.",
+        "Virtualmin still registers the databases %(names)s for %(domain)s, but MariaDB no longer has them. They "
+        "count as 0 bytes. Remove each registration with: virtualmin delete-database --domain %(domain)s --name NAME "
+        "(see docs/deployment/HOSTING_USAGE_WARNINGS.md). Nothing removes them automatically.",
+        len(names),
+    ) % {"names": ", ".join(names), "domain": account.domain}
+
+
 def _quota_text(megabytes: int | None) -> str:
     """A stored quota as a person reads it: MB below 1 GB, GB with one decimal above.
 
@@ -584,6 +620,7 @@ def virtualmin_account_detail(request: HttpRequest, account_id: str) -> HttpResp
         "restore_url": reverse("provisioning:virtualmin_account_restore", args=[account.id]),
         "restore_pair_url": reverse("provisioning:virtualmin_account_restore_pair", args=[account.id]),
         "disk_quota_text": _quota_text(account.disk_quota_mb),
+        "missing_database_notice": _missing_database_notice(account),
         "bandwidth_quota_text": _quota_text(account.bandwidth_quota_mb),
         "hold_reenable_url": reverse("provisioning:virtualmin_account_hold_reenable", args=[account.id]),
         "hold_restore_safety_url": reverse("provisioning:virtualmin_account_hold_restore_safety", args=[account.id]),

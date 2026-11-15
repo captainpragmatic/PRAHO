@@ -301,6 +301,82 @@ class HostingLimitWorkerTests(HostingLimitWorkerFixture, VirtualminTaskTestBase)
         replacement = admit_application(self.application.pk)
         self.assertEqual(replacement.account_epoch, execution.account_epoch + 1)
 
+    def refused(self, **changes):
+        """The node's terminal storage refusal for whatever execution the worker issues (#776)."""
+
+        def answer(_server, action, request):
+            self.assertEqual(action, "apply")
+            return {
+                "outcome": "refused",
+                "token": request["token"],
+                "generation": request["generation"],
+                "refusal": "Database shop: MariaDB still has it, but its directory is missing",
+                **changes,
+            }
+
+        return answer
+
+    def test_a_named_storage_refusal_releases_the_job_for_a_retry_without_attention(self) -> None:
+        with (
+            patch("apps.provisioning.hosting_limit_transport.probe_account_quota", return_value=self.receipt()),
+            patch("apps.provisioning.hosting_limit_transport.run_quota_operation", side_effect=self.refused()),
+        ):
+            self.assertEqual(apply_hosting_limits(self.application.pk), "refused")
+        execution = HostingLimitExecution.objects.get()
+        self.assertEqual(execution.phase, "superseded")
+        self.assertIsNotNone(execution.reservation_released_at)
+        job = VirtualminProvisioningJob.objects.get(pk=execution.job_id)
+        self.assertEqual(job.status, "failed")
+        self.assertIn("Database shop: MariaDB still has it", job.status_message)
+        self.assertIsNotNone(job.next_retry_at)
+        self.assertFalse(account_blocks_reconcile(self.account))
+        self.assertIsNone(ServiceHostingLimits.objects.get(service=self.service).applied_revision)
+        # The retry is a new application on the node: a new token and the next generation, never a replay.
+        VirtualminProvisioningJob.objects.filter(pk=job.pk).update(next_retry_at=timezone.now() - timedelta(seconds=1))
+        replacement = admit_application(self.application.pk)
+        self.assertEqual(replacement.account_epoch, execution.account_epoch + 1)
+        self.assertNotEqual(replacement.job.execution_token, job.execution_token)
+
+    def test_a_refusal_that_does_not_name_this_execution_stays_uncertain(self) -> None:
+        for changes in (
+            {"token": str(uuid4())},
+            {"generation": 999},
+            {"generation": True},
+            {"refusal": 7},
+            {"extra": "field"},
+            {"outcome": "refused ", "refusal": "x"},
+        ):
+            with self.subTest(changes=sorted(changes)):
+                HostingLimitExecution.objects.all().delete()
+                VirtualminProvisioningJob.objects.filter(operation="apply_hosting_limits").delete()
+                with (
+                    patch(
+                        "apps.provisioning.hosting_limit_transport.probe_account_quota", return_value=self.receipt()
+                    ),
+                    patch(
+                        "apps.provisioning.hosting_limit_transport.run_quota_operation",
+                        side_effect=self.refused(**changes),
+                    ),
+                ):
+                    self.assertEqual(apply_hosting_limits(self.application.pk), "attention")
+                execution = HostingLimitExecution.objects.get()
+                self.assertEqual(execution.phase, "attention")
+                self.assertIsNone(execution.reservation_released_at)
+
+    def test_repeated_refusals_have_bounded_retries_then_attention(self) -> None:
+        outcomes = []
+        with (
+            patch("apps.provisioning.hosting_limit_transport.probe_account_quota", return_value=self.receipt()),
+            patch("apps.provisioning.hosting_limit_transport.run_quota_operation", side_effect=self.refused()),
+        ):
+            for _attempt in range(3):
+                outcomes.append(apply_hosting_limits(self.application.pk))
+                VirtualminProvisioningJob.objects.filter(operation="apply_hosting_limits").update(
+                    next_retry_at=timezone.now() - timedelta(seconds=1),
+                )
+        self.assertEqual(outcomes, ["refused", "refused", "attention"])
+        self.assertEqual(VirtualminProvisioningJob.objects.filter(status="attention").count(), 1)
+
     def test_insufficient_capacity_never_issues_or_changes_operational_state(self) -> None:
         with (
             patch(
@@ -563,6 +639,33 @@ class HostingLimitWorkerTests(HostingLimitWorkerFixture, VirtualminTaskTestBase)
         with patch("apps.provisioning.hosting_limit_transport.run_quota_operation") as transport:
             self.assertEqual(apply_hosting_limits(self.application.pk), "pending")
         transport.assert_not_called()
+
+    def test_a_refusal_keeps_the_capacity_a_running_parent_still_owns(self) -> None:
+        parent = VirtualminProvisioningJob.objects.create(
+            account=self.account,
+            server=self.server,
+            operation="create_domain",
+            status="running",
+            correlation_id="native-create-refused",
+        )
+        self.assertTrue(reserve_managed_creation(self.account, parent, 10 * 1024**3).is_ok())
+        execution = HostingLimitExecution.objects.get()
+        reserved = execution.reserved_bytes
+        self.assertGreater(reserved, 0)
+        with (
+            patch("apps.provisioning.hosting_limit_transport.probe_account_quota", return_value=self.receipt()),
+            patch("apps.provisioning.hosting_limit_transport.run_quota_operation", side_effect=self.refused()),
+        ):
+            self.assertTrue(ensure_managed_limits(self.account, parent_job=parent).is_err())
+        execution.refresh_from_db()
+        # The create still owns that capacity: releasing it would let other admissions count it free.
+        self.assertIsNone(execution.reservation_released_at)
+        self.assertEqual(execution.reserved_bytes, reserved)
+        self.assertEqual(execution.phase, "attention")
+        job = VirtualminProvisioningJob.objects.get(pk=execution.job_id)
+        self.assertEqual(job.status, "attention")
+        self.assertIn("Database shop: MariaDB still has it", job.status_message)
+        self.assertIn("parent", job.status_message)
 
     def test_unknown_create_capacity_never_publishes_a_claim(self) -> None:
         parent = VirtualminProvisioningJob.objects.create(

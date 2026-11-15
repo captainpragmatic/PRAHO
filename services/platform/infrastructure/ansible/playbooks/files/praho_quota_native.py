@@ -11,6 +11,7 @@ import re
 import stat
 import subprocess
 import time
+from collections.abc import Callable
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +30,9 @@ PROBE_BUDGET_SECONDS = 60
 APPLY_BUDGET_SECONDS = 240
 _PROBE_DEADLINE: ContextVar[float | None] = ContextVar("quota_probe_deadline", default=None)
 DOMAIN_ROOT = Path("/etc/webmin/virtual-server/domains")
+DATABASE_NAME = re.compile(r"[A-Za-z0-9_]{1,64}")
+# Every domain field the metadata child may change: the limits, and the bandwidth and certificate policy it enforces.
+METADATA_FIELDS = ("quota", "uquota", "bw_limit", "bw_no_disable", "letsencrypt_email")
 
 
 def _overlay_window(request: dict[str, object]) -> bool:
@@ -51,6 +55,46 @@ def _overlay_window(request: dict[str, object]) -> bool:
     if policy["expiry_reduction"] and (policy.get("extra_mib") != 0 or not expired):
         raise ValueError("A preauthorized quota expiry requires an expired zero-extra overlay")
     return policy["expiry_reduction"]
+
+
+def _metadata_images(output: str) -> dict[str, dict[str, str | None]] | None:
+    """The child's one `PRAHO_QUOTA_METADATA` line: exactly the journalled fields, before and after, as strings."""
+    lines = [line for line in output.splitlines() if line.startswith("PRAHO_QUOTA_METADATA ")]
+    if len(lines) != 1:
+        return None
+    try:
+        images = json.loads(lines[0].removeprefix("PRAHO_QUOTA_METADATA "))
+    except ValueError:
+        return None
+    if not isinstance(images, dict) or set(images) != {"before", "after"}:
+        return None
+    for image in images.values():
+        if (
+            not isinstance(image, dict)
+            or set(image) != set(METADATA_FIELDS)
+            or any(value is not None and not isinstance(value, str) for value in image.values())
+        ):
+            return None
+    return images
+
+
+def _write_private(path: Path, content: dict[str, object]) -> None:
+    """Root-private, fsynced replacement of one small journal file and its directory entry."""
+    temporary = path.with_name(".journal-" + path.name)
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(descriptor, "w") as stream:
+            json.dump(content, stream, sort_keys=True, separators=(",", ":"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _no_cap_increase(limit: int, user_hard: object, group_hard: object) -> None:
@@ -249,6 +293,28 @@ def _backup_staging_left(home: Path) -> bool:
     return True
 
 
+def schema_presence(name: str, *, run: Callable[..., str] | None = None) -> bool:
+    """Whether MariaDB has this exact schema. False only when the answer proves it dropped.
+
+    The server's own `mysql` schema is the visibility control: an identity that cannot see it gets an empty answer
+    for every name, which proves nothing. Anything but exit 0 with exactly `1<TAB>0` or `1<TAB>1` raises ValueError.
+    """
+    if DATABASE_NAME.fullmatch(name) is None:
+        raise ValueError("The database storage name is unsupported")
+    query = (
+        "SELECT (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY 'mysql'),"  # noqa: S608 -- The name is a bounded ASCII identifier, never arbitrary SQL.
+        f"(SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = BINARY '{name}')"
+    )
+    output = (run or _run)(
+        ["/usr/bin/mariadb", "--protocol=socket", "--batch", "--skip-column-names", "--execute", query], timeout=10
+    )
+    if output == "1\t0":
+        return False
+    if output == "1\t1":
+        return True
+    raise ValueError("MariaDB could not confirm whether the database exists")
+
+
 def _entry_label(name: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.@-]", "?", name)[:96]
 
@@ -330,6 +396,54 @@ def repair_database_directory(
     for path in entries:
         os.chown(path, *writer, follow_symlinks=False)
     os.chown(directory, *writer, follow_symlinks=False)
+
+
+def qualify_registered_databases(  # noqa: PLR0913 -- Every native fact is explicit, so tests can double each one.
+    names: list[str],
+    datadir: Path,
+    *,
+    writer: tuple[int, int],
+    tenant: tuple[int, int],
+    device: int,
+    presence: Callable[[str], bool] = schema_presence,
+    inventory: Callable[[str], list[dict[str, object]]] | None = None,
+) -> tuple[tuple[Path, ...], tuple[str, ...]]:
+    """Qualify each database Virtualmin registers; return (qualified directories, proven-missing names).
+
+    Decided again on every call, so a database dropped, or dropped and recreated, is never judged by an older look.
+    Only a path with nothing there is asked about; a link, a file or a racing change stays a named refusal.
+    """
+    if len(names) > MAX_DATABASES:
+        raise ValueError("The native database inventory exceeds the bounded qualification budget")
+    qualified: list[Path] = []
+    missing: list[str] = []
+    for name in names:
+        if DATABASE_NAME.fullmatch(name) is None:
+            raise ValueError("The database storage name is unsupported")
+        directory = datadir / name
+        try:
+            directory.lstat()
+        except FileNotFoundError:
+            try:
+                present = presence(name)
+            except (ValueError, OSError, subprocess.SubprocessError) as error:
+                raise DatabaseStorageRefusalError(
+                    f"Database {name}: its directory is missing and MariaDB could not confirm it was dropped"
+                ) from error
+            if present:
+                raise DatabaseStorageRefusalError(
+                    f"Database {name}: MariaDB still has it, but its directory is missing"
+                ) from None
+            missing.append(name)
+            continue
+        try:
+            qualify_database_directory(directory, writer=writer, tenant=tenant, device=device)
+            rows = (inventory or _table_inventory)(name)
+            qualify_table_storage(directory, rows, uid=writer[0], gid=writer[1], device=device)
+        except FileNotFoundError as error:
+            raise DatabaseStorageRefusalError(f"Database {name}: its storage changed while it was checked") from error
+        qualified.append(directory)
+    return tuple(qualified), tuple(missing)
 
 
 def qualify_table_layout(directory: Path, rows: list[dict[str, object]]) -> list[tuple[str, Path]]:
@@ -512,20 +626,25 @@ class NativeQuotaBackend:
         datadir = Path(database[0].rstrip("/"))
         if datadir.resolve() != datadir or datadir.stat().st_dev != home.stat().st_dev:
             raise ValueError("Home and tenant database data must share the quota filesystem")
-        names = domain.get("db_mysql", "").split()
-        if len(names) > MAX_DATABASES:
-            raise ValueError("The native database inventory exceeds the bounded qualification budget")
-        for name in names:
-            if re.fullmatch(r"[A-Za-z0-9_]{1,64}", name) is None:
-                raise ValueError("The database storage name is unsupported")
-            directory = datadir / name
-            device_id = home.stat().st_dev
-            qualify_database_directory(
-                directory, writer=writer, tenant=(account.pw_uid, account.pw_gid), device=device_id
-            )
-            qualify_table_storage(directory, _table_inventory(name), uid=writer[0], gid=writer[1], device=device_id)
-        self._qualified_databases = tuple(datadir / name for name in names)
+        # A database Virtualmin registers but MariaDB dropped is skipped, not a failure: it holds no bytes, and
+        # staff are told through the usage collector. Every call decides again.
+        self._qualified_databases, self._missing_databases = qualify_registered_databases(
+            domain.get("db_mysql", "").split(),
+            datadir,
+            writer=writer,
+            tenant=(account.pw_uid, account.pw_gid),
+            device=home.stat().st_dev,
+        )
         return source, filesystem_uuid
+
+    def qualify_storage(self, request: dict[str, object]) -> None:
+        """Everything the storage checks would refuse, before the lane records any running work."""
+        token = _PROBE_DEADLINE.set(time.monotonic() + PROBE_BUDGET_SECONDS)
+        try:
+            domain, account = self._domain(request)
+            self._storage(domain, account)
+        finally:
+            _PROBE_DEADLINE.reset(token)
 
     def probe(self, request: dict[str, object]) -> dict[str, object]:
         deadline = time.monotonic() + PROBE_BUDGET_SECONDS
@@ -601,14 +720,42 @@ class NativeQuotaBackend:
             },
         }
 
-    def apply(self, request: dict[str, object], *, lock_fd: int) -> None:
+    def apply(self, request: dict[str, object], *, lock_fd: int, journal: Path) -> None:
+        """Raises DatabaseStorageRefusalError only when no metadata change of this application remains."""
         token = _PROBE_DEADLINE.set(time.monotonic() + APPLY_BUDGET_SECONDS)
         try:
-            self._apply(request, lock_fd=lock_fd)
+            self._apply(request, lock_fd=lock_fd, journal=journal)
         finally:
             _PROBE_DEADLINE.reset(token)
 
-    def _apply(self, request: dict[str, object], *, lock_fd: int) -> None:
+    def _metadata(self, domain_id: str) -> dict[str, str | None]:
+        fields = _fields(DOMAIN_ROOT / domain_id)
+        return {key: fields.get(key) for key in METADATA_FIELDS}
+
+    def _restore_metadata(
+        self, request: dict[str, object], images: dict[str, dict[str, str | None]], *, lock_fd: int, journal: Path
+    ) -> None:
+        """Put back what the child saw, through Virtualmin's own domain lock, then read it back exactly.
+
+        The child refuses unless the fields still equal what it left: an edit since then is never overwritten.
+        """
+        identity = request["identity"]
+        if not isinstance(identity, dict):
+            raise ValueError("A restore requires the reviewed native identity")
+        _run(
+            ["/usr/bin/perl", str(Path(__file__).with_name("praho-quota-metadata.pl")), str(lock_fd), "restore"],
+            lock_fd=lock_fd,
+            payload=json.dumps(
+                {"request": request, "restore": images["before"], "expected": images["after"]},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+        )
+        if self._metadata(str(identity["domain_id"])) != images["before"]:
+            raise ValueError("The journalled quota metadata could not be verified after its restore")
+        _write_private(journal, {**images, "phase": "restored"})
+
+    def _apply(self, request: dict[str, object], *, lock_fd: int, journal: Path) -> None:
         identity = request["identity"]
         if not isinstance(identity, dict) or set(identity) != IDENTITY_FIELDS:
             raise ValueError("A mutation requires the complete reviewed native identity")
@@ -629,17 +776,33 @@ class NativeQuotaBackend:
             > limit * 1024
         ):
             raise ValueError("Current native usage exceeds the requested cap")
+        # The fields the child may change are journalled durably first, for an operator after a crash.
+        _write_private(journal, {"before": self._metadata(str(identity["domain_id"])), "phase": "changing"})
         # Only this fixed, synchronous metadata helper may mutate in a child. It
         # inherits the lane FD, rechecks the permanent fence under that lock, and
         # performs no quota CLI/post-action hooks or asynchronous work. A killed
         # coordinator therefore cannot release the lane before this child exits.
-        _run(
+        output = _run(
             ["/usr/bin/perl", str(Path(__file__).with_name("praho-quota-metadata.pl")), str(lock_fd)],
             lock_fd=lock_fd,
             payload=json.dumps(request, sort_keys=True, separators=(",", ":")),
         )
+        # What the child saw and left under the domain lock: the only images a restore may rely on.
+        images = _metadata_images(output)
+        if images is not None:
+            _write_private(journal, {**images, "phase": "changed"})
         domain, account = self._domain(request)
-        device, filesystem_uuid = self._storage(domain, account)
+        try:
+            device, filesystem_uuid = self._storage(domain, account)
+        except DatabaseStorageRefusalError as refusal:
+            try:
+                if images is None:
+                    raise ValueError("The metadata child reported no images to restore")
+                self._restore_metadata(request, images, lock_fd=lock_fd, journal=journal)
+            except (ValueError, OSError, subprocess.SubprocessError, TimeoutError) as failure:
+                # Never the refusal type: the lane must keep this application uncertain.
+                raise ValueError("A late storage refusal left quota metadata that could not be restored") from failure
+            raise refusal from None
         if (
             domain.get("id") != identity["domain_id"]
             or domain.get("dom") != identity["domain"]

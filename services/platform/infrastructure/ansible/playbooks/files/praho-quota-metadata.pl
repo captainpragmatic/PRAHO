@@ -9,7 +9,10 @@ use Fcntl qw(:flock);
 use Time::Local qw(timegm);
 use Time::HiRes ();
 
-die "Root quota metadata operation required\n" unless $> == 0 && @ARGV == 1 && $ARGV[0] =~ /^[0-9]{1,5}$/ && $ARGV[0] >= 3;
+die "Root quota metadata operation required\n" unless $> == 0 && (@ARGV == 1 || (@ARGV == 2 && $ARGV[1] eq 'restore'))
+    && $ARGV[0] =~ /^[0-9]{1,5}$/ && $ARGV[0] >= 3;
+# restore: put back exactly the fields journalled before this same running application changed them (#776).
+my $restore_mode = @ARGV == 2;
 open(my $lane, '>&='.$ARGV[0]) or die "Native quota lane unavailable\n";
 flock($lane, LOCK_EX | LOCK_NB) or die "Native quota lane unavailable\n";
 my @held = stat($lane);
@@ -23,8 +26,28 @@ while (length($input) <= 16384) {
     $input .= $part;
 }
 die "Quota metadata input exceeds bound\n" unless length($input) <= 16384;
-my $request = eval { JSON::PP::decode_json($input) };
+my $payload = eval { JSON::PP::decode_json($input) };
+die "Invalid quota metadata request\n" unless ref($payload) eq 'HASH';
+my ($request, $restore, $expected) = $restore_mode ? @{$payload}{qw(request restore expected)} : ($payload);
 die "Invalid quota metadata request\n" unless ref($request) eq 'HASH';
+my @restore_fields = qw(bw_limit bw_no_disable letsencrypt_email quota uquota);
+if ($restore_mode) {
+    # restore: the fields to write back; expected: what the apply child left, which must still be there.
+    for my $image ($restore, $expected) {
+        die "Invalid quota metadata restore\n" unless ref($image) eq 'HASH'
+            && join(',', sort keys %$image) eq join(',', @restore_fields);
+        for my $value (values %$image) {
+            # A domain file holds one key=value per line: a newline, or anything but a short scalar, could add a field.
+            die "Invalid quota metadata restore value\n" if defined($value)
+                && (ref($value) || JSON::PP::is_bool($value) || $value !~ /^[\x20-\x7e]{0,255}$/);
+        }
+    }
+}
+
+sub metadata_image {
+    my ($domain) = @_;
+    return {map { ($_ => defined($domain->{$_}) ? "$domain->{$_}" : undef) } @restore_fields};
+}
 my $identity = $request->{'identity'};
 die "Invalid quota metadata identity\n" unless ref($identity) eq 'HASH';
 my ($installation, $domain_id, $token) = @{$identity}{qw(installation domain_id)};
@@ -58,12 +81,29 @@ $0 = '/usr/share/webmin/virtual-server/praho-quota-metadata.pl';
 chdir('/usr/share/webmin/virtual-server') or die "Native Virtualmin unavailable\n";
 require './virtual-server-lib.pl';
 &lock_domain($domain_id);
+my $applied_images;
 my $ok = eval {
     my $domain = &get_domain($domain_id, undef, 1);
     die "Native quota domain changed\n" unless $domain && !$domain->{'parent'} && !$domain->{'alias'};
     for my $field (qw(id dom uid gid)) {
         my $expected = $field eq 'id' ? $identity->{'domain_id'} : $field eq 'dom' ? $identity->{'domain'} : $identity->{$field};
         die "Native quota ownership changed\n" unless defined($expected) && "$domain->{$field}" eq "$expected";
+    }
+    my $images = {before => main::metadata_image($domain)};
+    if ($restore_mode) {
+        # Read under the domain lock: a field changed since the application (an administrator's edit) is never
+        # overwritten. The caller keeps the outcome uncertain instead.
+        for my $field (@restore_fields) {
+            my ($current, $left) = ($images->{'before'}{$field}, $expected->{$field});
+            die "Native quota metadata changed since the application\n"
+                if defined($current) != defined($left) || (defined($current) && $current ne $left);
+        }
+        for my $field (@restore_fields) {
+            if (defined($restore->{$field})) { $domain->{$field} = "$restore->{$field}"; }
+            else { delete $domain->{$field}; }
+        }
+        &save_domain($domain) or die "Native quota metadata could not be restored\n";
+        return 1;
     }
     my $policy = $request->{'policy'};
     if (defined($policy)) {
@@ -84,9 +124,16 @@ my $ok = eval {
     &virtual_server::praho_enforce_resource_policy($domain);
     &virtual_server::praho_enforce_domain_notifications($domain);
     &save_domain($domain) or die "Native quota metadata could not be saved\n";
+    $images->{'after'} = main::metadata_image($domain);
+    $applied_images = $images;
     1;
 };
 my $error = $@;
 &unlock_domain($domain_id);
 die "Native quota metadata did not complete\n" unless $ok && !$error;
-print "Quota metadata persisted\n";
+if ($restore_mode) { print "Quota metadata restored\n"; }
+else {
+    # The images the coordinator journals, so a later refusal can put back exactly what this child changed.
+    print 'PRAHO_QUOTA_METADATA '.JSON::PP->new->canonical->encode($applied_images)."\n";
+    print "Quota metadata persisted\n";
+}

@@ -716,22 +716,77 @@ def _fail_unissued(execution_id: UUID, message: str) -> None:
                 )
                 _audit_status(execution.job_id)
                 return
-            _release(execution, phase="superseded", status="failed", message=message)
-            job = VirtualminProvisioningJob.objects.get(pk=execution.job_id)
-            if job.retry_count + 1 >= job.max_retries:
-                execution.phase = "attention"
-                execution.save(update_fields=["phase", "updated_at"])
-                # fsm-bypass: CharField job; locked unissued execution exhausted its bounded read-only budget.
-                VirtualminProvisioningJob.objects.filter(pk=job.pk).update(
-                    status="attention",
-                    next_retry_at=None,
-                    status_message="Read-only quota admission exhausted its retry budget: " + message,
-                )
-                _audit_status(job.pk)
-            else:
-                VirtualminProvisioningJob.objects.filter(pk=job.pk).update(
-                    next_retry_at=timezone.now() + timedelta(minutes=5)
-                )
+            _release_for_retry(execution, message, exhausted="Read-only quota admission exhausted its retry budget: ")
+
+
+def _release_for_retry(execution: HostingLimitExecution, message: str, *, exhausted: str) -> bool:
+    """Release a claim nothing native still holds; retry later, or ask staff once the budget is spent.
+
+    Returns True when the retry budget was spent. The caller holds the execution's locks.
+    """
+    _release(execution, phase="superseded", status="failed", message=message)
+    job = VirtualminProvisioningJob.objects.get(pk=execution.job_id)
+    if job.retry_count + 1 >= job.max_retries:
+        execution.phase = "attention"
+        execution.save(update_fields=["phase", "updated_at"])
+        # fsm-bypass: CharField job; locked execution with no native claim exhausted its bounded retry budget.
+        VirtualminProvisioningJob.objects.filter(pk=job.pk).update(
+            status="attention",
+            next_retry_at=None,
+            status_message=exhausted + message,
+        )
+        _audit_status(job.pk)
+        return True
+    VirtualminProvisioningJob.objects.filter(pk=job.pk).update(next_retry_at=timezone.now() + timedelta(minutes=5))
+    return False
+
+
+REFUSED_RECEIPT_FIELDS = frozenset({"outcome", "token", "generation", "refusal"})
+MAX_REFUSAL_CHARACTERS = 500
+
+
+def _refuse_issued(execution_id: UUID, receipt: dict[str, Any]) -> str | None:
+    """A named storage refusal the node recorded as terminal for exactly this token and generation (#776).
+
+    Nothing native remains of the application, so the claim is released for a retry with a new token and
+    generation. Returns None when the receipt does not name this execution; the caller keeps it uncertain.
+    """
+    refusal = receipt.get("refusal")
+    if (
+        set(receipt) != REFUSED_RECEIPT_FIELDS
+        or receipt.get("outcome") != "refused"
+        or not isinstance(refusal, str)
+        or not refusal.strip()
+        or len(refusal) > MAX_REFUSAL_CHARACTERS
+        or type(receipt.get("generation")) is not int
+    ):
+        return None
+    hint = HostingLimitExecution.objects.get(pk=execution_id)
+    with transaction.atomic():
+        _lock_context(hint)
+        execution = HostingLimitExecution.objects.select_for_update(of=("self",)).get(pk=execution_id)
+        if (
+            execution.phase != "issued"
+            or receipt["token"] != execution.request.get("token")
+            or receipt["generation"] != execution.account_epoch
+        ):
+            return None
+        message = "The node refused the quota application: " + refusal
+        if execution.reserved_bytes and _parent_still_active(execution):
+            # A create or migration still owns this capacity: keep it, as an unissued failure does.
+            execution.phase = "attention"
+            execution.save(update_fields=["phase", "updated_at"])
+            # fsm-bypass: CharField job; locked parent operation retains capacity and attention ownership.
+            VirtualminProvisioningJob.objects.filter(pk=execution.job_id).update(
+                status="attention",
+                status_message=message + " Resolve the parent native operation before releasing capacity.",
+                next_retry_at=None,
+                updated_at=timezone.now(),
+            )
+            _audit_status(execution.job_id)
+            return "attention"
+        exhausted = _release_for_retry(execution, message, exhausted="Quota application was refused on every attempt: ")
+    return "attention" if exhausted else "refused"
 
 
 def _parent_still_active(execution: HostingLimitExecution) -> bool:
@@ -1349,6 +1404,11 @@ def apply_hosting_limits(  # noqa: PLR0911 -- Distinguish pending, terminal, sup
         return "superseded"
     try:
         receipt = run_quota_operation(execution.job.server, "apply", request)
+        if isinstance(receipt, dict) and "outcome" in receipt:
+            # Only a refusal naming this exact application is terminal; anything else stays uncertain below.
+            if (outcome := _refuse_issued(execution.pk, receipt)) is not None:
+                return outcome
+            raise ValueError("The native quota outcome does not name this application.")
         return "completed" if _complete(execution.pk, receipt) else "superseded"
     except (ValidationError, ValueError, RuntimeError, OSError) as error:
         _attention(execution.pk, "Native quota outcome requires permanent fencing: " + str(error))

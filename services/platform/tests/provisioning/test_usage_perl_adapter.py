@@ -6,6 +6,7 @@ import os
 import shlex
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from django.test import SimpleTestCase
@@ -88,8 +89,8 @@ sub restart_apache {
     return !$fixture->{'fail_reload'};
 }
 sub domain_databases { return @{$_[0]->{'databases'} || []}; }
-sub get_mysql_database_dir { return "$fixture_root/database"; }
-sub mysql_size { return (4096); }
+sub get_mysql_database_dir { return ($fixture->{'database_dirs'} || {})->{$_[1]} // "$fixture_root/database"; }
+sub mysql_size { die "measured a dropped database\n" if ($fixture->{'unmeasurable'} || {})->{$_[1]}; return (4096); }
 package apache;
 sub wsplit { return [Text::ParseWords::shellwords($_[0])]; }
 sub find_directive {
@@ -126,6 +127,23 @@ class UsagePerlAdapterTests(SimpleTestCase):
         self.source = self.source.replace('/usr/share/webmin/virtual-server', str(self.native))
         self.source = self.source.replace('/var/lib/praho/usage', str(self.root / "state"))
         self.source = self.source.replace('/var/log/praho', str(self.root / "logs"))
+        # The exact-name SCHEMATA query goes to a fake server that records its arguments and answers as told.
+        self.mariadb = self.root / "mariadb"
+        self.mariadb.write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$@" >> "$PRAHO_NATIVE_FIXTURE/mariadb-calls"\n'
+            'case "$*" in *"BINARY \'gone"*) [ -z "$PRAHO_SCHEMATA_HANG" ] || exec sleep 30;; esac\n'
+            'printf "%s" "$PRAHO_SCHEMATA_ANSWER"\nexit "${PRAHO_SCHEMATA_EXIT:-0}"\n'
+        )
+        self.mariadb.chmod(0o755)
+        self.assertIn("'/usr/bin/mariadb'", self.source)
+        self.source = self.source.replace("'/usr/bin/mariadb'", repr(str(self.mariadb)))
+        # Production: 10s per query, 20s shared per run (below the parent's 60s kill). The test scale keeps a
+        # hang inside the adapter's 10s test timeout and leaves a clear gap when the last query ignores the budget.
+        self.assertIn("my $existence_seconds = 10;", self.source)
+        self.source = self.source.replace("my $existence_seconds = 10;", "my $existence_seconds = 4;")
+        self.assertIn("my $existence_budget = 20;", self.source)
+        self.source = self.source.replace("my $existence_budget = 20;", "my $existence_budget = 5;")
+        self.schemata = {"PRAHO_SCHEMATA_ANSWER": "1\t0"}
         (self.native / "virtual-server-lib.pl").write_text(NATIVE)
         (self.root / "adapter.pl").write_text(self.source)
 
@@ -143,7 +161,7 @@ class UsagePerlAdapterTests(SimpleTestCase):
         return subprocess.run(  # noqa: S603 -- fixed interpreter and adapter created in this test's private directory
             ["/usr/bin/perl", str(self.root / "adapter.pl"), *([mode or "reconcile"] if reconcile else [])],
             capture_output=True, text=True, timeout=10,
-            env={**os.environ, "PRAHO_NATIVE_FIXTURE": str(self.root)}, check=False,
+            env={**os.environ, "PRAHO_NATIVE_FIXTURE": str(self.root), **self.schemata}, check=False,
         )
 
     def test_alias_cannot_replace_primary_literal_identity(self):
@@ -349,3 +367,140 @@ class UsagePerlAdapterTests(SimpleTestCase):
         result = self.run_adapter(mode="reconcile-locked")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(reloads.read_text().count("reload"), before + 1)
+
+
+class MissingDatabaseCollectorTests(SimpleTestCase):
+    """A database Virtualmin registers but MariaDB dropped is 0 bytes and named, never an unavailable account (#776)."""
+
+    # The same real adapter and native fixture, without re-running the other class's tests.
+    vhost = UsagePerlAdapterTests.vhost
+    run_adapter = UsagePerlAdapterTests.run_adapter
+
+    def setUp(self):
+        UsagePerlAdapterTests.setUp(self)
+        self.vhost()
+        self.fixture["domains"][0]["databases"] = [
+            {"type": "mysql", "host": "localhost", "name": "shop"},
+            {"type": "mysql", "host": "localhost", "name": "gone"},
+        ]
+        self.fixture["database_dirs"] = {"gone": str(self.root / "dropped/gone")}
+        self.fixture["unmeasurable"] = {"gone": True}
+
+    def row(self):
+        result = self.run_adapter(reconcile=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)["accounts"][0]
+
+    def calls(self):
+        path = self.root / "mariadb-calls"
+        return path.read_text() if path.exists() else ""
+
+    def test_a_proven_missing_database_counts_nothing_and_is_named(self):
+        row = self.row()
+        self.assertNotIn("unavailable", row)
+        self.assertEqual(row["databases"], [{"path": str(self.root / "database"), "bytes": 4096}])
+        self.assertEqual(row["missing_databases"], ["gone"])
+        self.assertIn("SCHEMA_NAME = BINARY 'mysql'", self.calls())
+        self.assertIn("SCHEMA_NAME = BINARY 'gone'", self.calls())
+        self.assertIn("--protocol=socket", self.calls())
+
+    def test_present_databases_report_an_empty_list_and_ask_nothing(self):
+        self.fixture["database_dirs"] = {}
+        self.fixture["unmeasurable"] = {}
+        row = self.row()
+        self.assertEqual(row["missing_databases"], [])
+        self.assertEqual(self.calls(), "")
+
+    def test_anything_but_a_proof_keeps_the_account_unavailable(self):
+        for answer, code in (("1\t1", "0"), ("0\t0", "0"), ("", "0"), ("1\t0", "1"), ("garbage", "0")):
+            self.schemata = {"PRAHO_SCHEMATA_ANSWER": answer, "PRAHO_SCHEMATA_EXIT": code}
+            with self.subTest(answer=answer, code=code):
+                row = self.row()
+                self.assertIs(row.get("unavailable"), True)
+                self.assertNotIn("missing_databases", row)
+
+    def test_a_dangling_link_is_not_absent_and_mariadb_is_not_asked(self):
+        (self.root / "dropped").mkdir()
+        (self.root / "dropped/gone").symlink_to(self.root / "nowhere")
+        self.assertIs(self.row().get("unavailable"), True)
+        self.assertEqual(self.calls(), "")
+
+
+class HungExistenceQueryTests(SimpleTestCase):
+    """A hung existence query makes only that database unknown; the node's other accounts are collected on time."""
+
+    vhost = UsagePerlAdapterTests.vhost
+    run_adapter = UsagePerlAdapterTests.run_adapter
+
+    def setUp(self):
+        UsagePerlAdapterTests.setUp(self)
+        self.vhost()
+        self.vhost("43", "other.test")
+        (self.root / "home43").mkdir()
+        self.fixture["domains"][0]["databases"] = [{"type": "mysql", "host": "localhost", "name": "gone"}]
+        self.fixture["domains"].append(
+            {
+                "id": "43",
+                "dom": "other.test",
+                "user": "other",
+                "home": str(self.root / "home43"),
+                "web": 1,
+                "databases": [{"type": "mysql", "host": "localhost", "name": "present"}],
+            }
+        )
+        self.fixture["database_dirs"] = {"gone": str(self.root / "dropped/gone")}
+        self.schemata = {"PRAHO_SCHEMATA_ANSWER": "1\t0", "PRAHO_SCHEMATA_HANG": "1"}
+
+    def test_only_the_hung_database_is_unknown_and_the_run_keeps_its_bound(self):
+        started = time.monotonic()
+        result = self.run_adapter(reconcile=False)
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = {row["id"]: row for row in json.loads(result.stdout)["accounts"]}
+        self.assertIs(rows["42"].get("unavailable"), True)
+        self.assertNotIn("unavailable", rows["43"])
+        self.assertEqual(rows["43"]["databases"], [{"path": str(self.root / "database"), "bytes": 4096}])
+        self.assertLess(elapsed, 8, "the hung query held the whole collection past its bound")
+
+    def add_hung_accounts(self, hung):
+        for identity in hung:
+            self.vhost(identity, f"hung{identity}.test")
+            (self.root / f"home{identity}").mkdir()
+            self.fixture["domains"].insert(
+                -1,
+                {
+                    "id": identity,
+                    "dom": f"hung{identity}.test",
+                    "user": f"hung{identity}",
+                    "home": str(self.root / f"home{identity}"),
+                    "web": 1,
+                    "databases": [{"type": "mysql", "host": "localhost", "name": f"gone{identity}"}],
+                },
+            )
+            self.fixture["database_dirs"][f"gone{identity}"] = str(self.root / f"dropped/gone{identity}")
+        self.assertEqual(self.fixture["domains"][-1]["id"], "43")
+
+    def test_many_hung_queries_share_one_budget_so_a_later_account_is_still_published(self):
+        hung = ["44", "45", "46"]
+        self.add_hung_accounts(hung)
+        started = time.monotonic()
+        result = self.run_adapter(reconcile=False)
+        elapsed = time.monotonic() - started
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = {row["id"]: row for row in json.loads(result.stdout)["accounts"]}
+        for identity in ["42", *hung]:
+            self.assertIs(rows[identity].get("unavailable"), True, identity)
+        self.assertNotIn("unavailable", rows["43"])
+        # The shared 5s budget ends the queries near 5s (4s, then the 1s left); a second full 4s clock reaches 8s.
+        self.assertLess(elapsed, 7, "the hung queries overran the run's shared budget")
+
+    def test_a_wall_clock_stepping_back_does_not_refill_the_budget(self):
+        # Every wall-clock read steps back 100s, as an NTP correction would; the budget must not notice.
+        self.assertIn("use Time::HiRes ();\n", self.source)
+        rewind = "{ no warnings 'redefine'; my $wall = 1e9; *Time::HiRes::time = sub { $wall -= 100; $wall }; }\n"
+        (self.root / "adapter.pl").write_text(self.source.replace("use Time::HiRes ();\n", "use Time::HiRes ();\n" + rewind, 1))
+        self.add_hung_accounts(["44", "45", "46"])
+        result = self.run_adapter(reconcile=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = {row["id"]: row for row in json.loads(result.stdout)["accounts"]}
+        self.assertNotIn("unavailable", rows["43"])

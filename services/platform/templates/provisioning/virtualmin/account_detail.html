@@ -10,6 +10,10 @@
   {% url 'provisioning:component_migration' account.pk as component_url %}{% trans "Move selected website; retain source mail and DNS" as component_label %}{% button component_label href=component_url variant="secondary" size="sm" %}
   {% include "provisioning/virtualmin/migration_status.html" %}
   {% include "provisioning/virtualmin/partials/hosted_dns_status.html" %}
+  {% if missing_database_notice %}
+    {% trans "A registered database was dropped" as missing_database_title %}
+    {% alert missing_database_notice variant="warning" title=missing_database_title %}
+  {% endif %}
     <!-- =============================================================================== -->
     <!-- PAGE HEADER WITH ACTIONS -->
     <!-- =============================================================================== -->

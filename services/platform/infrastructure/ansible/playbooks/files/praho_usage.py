@@ -116,6 +116,24 @@ def allocated_bytes(root: Path, *, budget_seconds: float = 20, max_entries: int 
     return total
 
 
+MAX_MISSING_DATABASES = 32
+DATABASE_NAME = re.compile(r"[A-Za-z0-9_]{1,64}")
+
+
+def missing_databases(account: dict) -> list[str]:
+    """The registered databases the adapter proved dropped (#776): bounded, unique, valid names; absent means none."""
+    names = account.get("missing_databases", [])
+    if (
+        not isinstance(names, list)
+        or len(names) > MAX_MISSING_DATABASES
+        # Every element is a valid name before any is hashed: an unhashable one must refuse, not abort collection.
+        or any(not isinstance(name, str) or DATABASE_NAME.fullmatch(name) is None for name in names)
+        or len(set(names)) != len(names)
+    ):
+        raise ValueError("The adapter's missing database list is invalid")
+    return sorted(names)
+
+
 def disk_measurement(home: Path, databases: list[tuple[Path, int]], *, budget_seconds: float = 20) -> dict[str, int]:
     """Add physically separate database allocations once, never quota totals.
 
@@ -632,6 +650,7 @@ def refresh(ledger: Ledger) -> None:
                 "disk_db_bytes": None,
                 "disk_total_bytes": None,
                 "databases": None,
+                "missing_databases": None,
                 "mailboxes": None,
             }
         )
@@ -652,12 +671,20 @@ def refresh(ledger: Ledger) -> None:
             remaining = disk_deadline - time.monotonic()
             if not account.get("unavailable") and remaining > 0:
                 budget = min(HOME_SCAN_SECONDS, remaining)
+                missing = missing_databases(account)
                 measured = disk_measurement(
                     Path(account["home"]),
                     [(Path(db["path"]), db["bytes"]) for db in account["databases"]],
                     budget_seconds=budget,
                 )
-                row.update({"scan_started_at": started, "scan_finished_at": utc_now(), **measured})
+                row.update(
+                    {
+                        "scan_started_at": started,
+                        "scan_finished_at": utc_now(),
+                        **measured,
+                        "missing_databases": missing,
+                    }
+                )
                 measured_now = True
         except (OSError, ValueError, TimeoutError):
             pass  # Keep the last good gauge and its original collection interval.

@@ -32654,6 +32654,10 @@ msgstr "Operațiunea nativă de găzduire a returnat dovezi invalide."
 msgid "Unsupported native quota action."
 msgstr "Acțiune nativă de aplicare a cotelor neacceptată."
 
+#: apps/provisioning/hosting_node_transport.py:60
+msgid "Unsupported native database hold action."
+msgstr "Acțiune nativă de blocare a scrierii în baza de date neacceptată."
+
 #: apps/provisioning/hosting_node_transport.py:63
 msgid "Unsupported native helper preparation action."
 msgstr "Acțiune nativă de pregătire a utilitarelor neacceptată."
@@ -35453,3 +35457,15 @@ msgstr "✅ S-au sincronizat {count} registratori"
 #, python-brace-format
 msgid "✅ Order '{order_number}' created successfully. You can now add products."
 msgstr "✅ Comanda '{order_number}' a fost creată cu succes. Acum puteți adăuga produse."
+
+#: templates/provisioning/virtualmin/account_detail.html:14
+msgid "A registered database was dropped"
+msgstr "O bază de date înregistrată a fost ștearsă"
+
+#: apps/provisioning/virtualmin_views.py:376
+#, python-format
+msgid "Virtualmin still registers the database %(names)s for %(domain)s, but MariaDB no longer has it. It counts as 0 bytes. Remove the registration with: virtualmin delete-database --domain %(domain)s --name NAME (see docs/deployment/HOSTING_USAGE_WARNINGS.md). Nothing removes it automatically."
+msgid_plural "Virtualmin still registers the databases %(names)s for %(domain)s, but MariaDB no longer has them. They count as 0 bytes. Remove each registration with: virtualmin delete-database --domain %(domain)s --name NAME (see docs/deployment/HOSTING_USAGE_WARNINGS.md). Nothing removes them automatically."
+msgstr[0] "Virtualmin încă înregistrează baza de date %(names)s pentru %(domain)s, dar MariaDB nu o mai are. Se socotește 0 octeți. Eliminați înregistrarea cu: virtualmin delete-database --domain %(domain)s --name NAME (vezi docs/deployment/HOSTING_USAGE_WARNINGS.md). Nimic nu o elimină automat."
+msgstr[1] "Virtualmin încă înregistrează bazele de date %(names)s pentru %(domain)s, dar MariaDB nu le mai are. Se socotesc 0 octeți. Eliminați fiecare înregistrare cu: virtualmin delete-database --domain %(domain)s --name NAME (vezi docs/deployment/HOSTING_USAGE_WARNINGS.md). Nimic nu le elimină automat."
+msgstr[2] "Virtualmin încă înregistrează bazele de date %(names)s pentru %(domain)s, dar MariaDB nu le mai are. Se socotesc 0 octeți. Eliminați fiecare înregistrare cu: virtualmin delete-database --domain %(domain)s --name NAME (vezi docs/deployment/HOSTING_USAGE_WARNINGS.md). Nimic nu le elimină automat."

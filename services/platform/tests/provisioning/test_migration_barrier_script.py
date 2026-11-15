@@ -12,10 +12,13 @@ the same against a real node.
 from __future__ import annotations
 
 import base64
+import importlib.util
 import json
+import re
 import signal
 import stat
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -120,7 +123,12 @@ case $q in
     if [[ ${FAKE_GRANT_SECRET:-0} == 1 ]]; then echo "GRANT PROXY ON x TO y IDENTIFIED BY 'plain'"; fi ;;
   *is_role*) echo "${FAKE_ROLES:-0}" ;;
   *@@event_scheduler*) echo "${FAKE_EVENTS:-0}" ;;
-  *"Insert_priv = 'Y' OR"*) echo "${FAKE_GLOBAL_WRITERS:-0}" ;;
+  *"FROM information_schema.USER_PRIVILEGES"*)
+    # GRANTEE, PRIVILEGE_TYPE, IS_GRANTABLE: the DBA accounts, then anything a test adds.
+    [[ ${FAKE_PRIVILEGES_FAIL:-0} != 1 ]] || { echo "ERROR 2013: Lost connection" >&2; exit 1; }
+    printf "'root'@'localhost'\tALL PRIVILEGES\tYES\n'mysql'@'localhost'\tALL PRIVILEGES\tYES\n"
+    [[ ${FAKE_GLOBAL_WRITERS:-0} != 1 ]] || printf "'admin'@'%%'\tINSERT\tNO\n"
+    [[ -z ${FAKE_GLOBAL_PRIVILEGES:-} ]] || printf '%s\n' "$FAKE_GLOBAL_PRIVILEGES" ;;
   *"Db NOT IN"*) if [[ $(field User) == "${FAKE_SHARED_USER:-}" ]]; then echo 1; else echo 0; fi ;;
   *"Create_priv = 'Y' AND Insert_priv"*) echo "${FAKE_OWNER_CAN_PROBE:-1}" ;;
   "ALTER USER "*)
@@ -165,6 +173,15 @@ _SDBM = """use Fcntl; use SDBM_File; my ($db, $mode, @kv) = @ARGV;
 tie(my %s, "SDBM_File", $db, $mode eq "w" ? O_RDWR|O_CREAT : O_RDONLY, 0600) or die "tie";
 if ($mode eq "w") { while (@kv) { my $k = shift @kv; $s{$k} = shift @kv } }
 else { print join("\\n", map { "$_=$s{$_}" } sort keys %s), "\\n" }"""
+
+
+def _hold_module():
+    """The database hold helper, whose global-writer lists the barrier must share."""
+    spec = importlib.util.spec_from_file_location("barrier_peer_database_hold", SCRIPT.with_name("praho_database_hold.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # Dataclasses resolve their annotations through the module registry.
+    spec.loader.exec_module(module)
+    return module
 
 
 def _lines(rows: list[tuple[str, ...]]) -> str:
@@ -383,6 +400,49 @@ class RecordTests(BarrierScriptCase):
                 refused = self.step("record", **overrides)
                 self.assertEqual((refused["outcome"], refused["reason"]), ("refused", reason))
         self.assertEqual(self.calls(), [])
+
+    def test_read_only_and_operational_global_privileges_do_not_refuse_a_migration(self) -> None:
+        rows = "\n".join(
+            f"'{account}'\t{name}\tNO"
+            for account, name in (
+                ("monitor'@'localhost", "PROCESS"),
+                ("monitor'@'localhost", "RELOAD"),
+                ("backup'@'%", "SELECT"),
+                ("backup'@'%", "LOCK TABLES"),
+                ("backup'@'%", "SHOW VIEW"),
+            )
+        )
+        self.record(FAKE_GLOBAL_PRIVILEGES=rows)
+
+    def test_a_global_writer_or_granter_outside_the_dba_list_refuses_a_migration(self) -> None:
+        for row in (
+            "'admin'@'localhost'\tCREATE USER\tNO",
+            "'admin'@'localhost'\tSELECT\tYES",  # GRANT OPTION
+            "'admin'@'localhost'\tEXECUTE\tNO",
+            "'admin'@'localhost'\tCREATE TEMPORARY TABLES\tNO",
+            "'admin'@'localhost'\tSOMETHING NEW\tNO",  # Unknown names fail closed.
+            "'root'@'%'\tINSERT\tNO",  # The DBA list is exact user@host.
+            "'ro'ot'@'localhost'\tINSERT\tNO",  # MariaDB 11.8.3's unescaped spelling; not root.
+        ):
+            with self.subTest(row=row):
+                refused = self.step("record", FAKE_GLOBAL_PRIVILEGES=row)
+                self.assertEqual((refused["outcome"], refused["reason"]), ("refused", "database_global_writer"))
+
+    def test_an_unreadable_privilege_list_refuses_a_migration(self) -> None:
+        refused = self.step("record", FAKE_PRIVILEGES_FAIL="1")
+        self.assertEqual((refused["outcome"], refused["reason"]), ("refused", "database_unreadable"))
+
+    def test_the_barrier_and_the_database_hold_agree_on_a_global_writer(self) -> None:
+        hold = _hold_module()
+        source = SCRIPT.read_text()
+
+        def shell_list(name: str) -> set[str]:
+            match = re.search(rf"^{name}=\(\n(.*?)\n\)$", source, re.MULTILINE | re.DOTALL)
+            self.assertIsNotNone(match, name)
+            return set(re.findall(r"^\s+'([^'\n]+)'$", match.group(1), re.MULTILINE))
+
+        self.assertEqual(shell_list("READ_ONLY_GLOBALS"), set(hold.READ_ONLY_GLOBALS))
+        self.assertEqual(shell_list("DBA_ACCOUNTS"), {f"{user}@{host}" for user, host in hold.DBA})
 
     def test_an_enabled_domain_whose_owner_account_is_locked_is_refused(self) -> None:
         (self.state / f"locked.{OWNER}@localhost").touch()

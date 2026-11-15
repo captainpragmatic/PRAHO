@@ -25,9 +25,19 @@ OVERLAY_PROTOCOL_VERSION = 2
 
 
 class QuotaBackend(Protocol):
-    def apply(self, request: dict[str, object], *, lock_fd: int) -> None: ...
+    def qualify_storage(self, request: dict[str, object]) -> None: ...
+
+    def apply(self, request: dict[str, object], *, lock_fd: int, journal: Path) -> None: ...
 
     def probe(self, request: dict[str, object]) -> dict[str, object]: ...
+
+
+def _storage_refusal(error: BaseException) -> bool:
+    """The backend's named refusal: raised only when no change of this application remains on the node."""
+    return type(error).__name__ == "DatabaseStorageRefusalError"
+
+
+MAX_REFUSAL_CHARACTERS = 500
 
 
 def _private_directory(path: Path) -> None:
@@ -204,35 +214,87 @@ class QuotaCoordinator:
             if _read(cancelled) is not None:
                 raise ValueError("The quota application token was permanently cancelled")
             protocol = _application_protocol(request, state)
-            if state is not None:
-                previous = state.get("generation")
-                if type(previous) is not int or generation < previous:
-                    raise ValueError("The quota application generation is obsolete")
-                if generation == previous:
-                    if state.get("token") != token or state.get("digest") != digest:
-                        raise ValueError("The quota application generation has different terms")
-                    if state.get("phase") == "completed":
-                        return {**self.backend.probe(request), "token": token, "generation": generation}
-                if state.get("phase") not in {"completed", "fenced"}:
-                    raise ValueError("The previous quota application is uncertain; fence it before retrying")
-            _write(
-                path,
-                {"generation": generation, "token": token, "digest": digest, "phase": "running", "protocol": protocol},
-            )
-            self.backend.apply(request, lock_fd=descriptor)
-            result = {**self.backend.probe(request), "token": token, "generation": generation}
-            _write(
-                path,
-                {
-                    "generation": generation,
-                    "token": token,
-                    "digest": digest,
-                    "phase": "completed",
-                    "receipt": result,
-                    "protocol": protocol,
-                },
-            )
-            return result
+            if (replay := self._replay(request, state, token, generation, digest)) is not None:
+                return replay
+            return self._apply(request, scope, descriptor, (token, generation, digest, protocol))
+
+    def _replay(
+        self, request: dict[str, object], state: dict[str, object] | None, token: str, generation: int, digest: str
+    ) -> dict[str, object] | None:
+        """The terminal answer this exact application already has, or None when it may run now."""
+        if state is None:
+            return None
+        previous = state.get("generation")
+        if type(previous) is not int or generation < previous:
+            raise ValueError("The quota application generation is obsolete")
+        if generation == previous:
+            if state.get("token") != token or state.get("digest") != digest:
+                raise ValueError("The quota application generation has different terms")
+            if state.get("phase") == "completed":
+                return {**self.backend.probe(request), "token": token, "generation": generation}
+            if state.get("phase") == "refused":
+                return self._refused(token, generation, str(state.get("refusal", "")))
+        if state.get("phase") not in {"completed", "fenced", "refused"}:
+            raise ValueError("The previous quota application is uncertain; fence it before retrying")
+        return None
+
+    def _apply(
+        self, request: dict[str, object], scope: Path, descriptor: int, application: tuple[str, int, str, int]
+    ) -> dict[str, object]:
+        token, generation, digest, protocol = application
+        path = scope / "current.json"
+        # Storage is qualified before anything is recorded as running: a refusal here changed nothing.
+        try:
+            self.backend.qualify_storage(request)
+        except ValueError as error:
+            if not _storage_refusal(error):
+                raise
+            return self._refuse(path, token, generation, digest, protocol, error)
+        _write(
+            path,
+            {"generation": generation, "token": token, "digest": digest, "phase": "running", "protocol": protocol},
+        )
+        try:
+            self.backend.apply(request, lock_fd=descriptor, journal=scope / ("metadata-" + token + ".json"))
+        except ValueError as error:
+            if not _storage_refusal(error):
+                raise
+            return self._refuse(path, token, generation, digest, protocol, error)
+        result = {**self.backend.probe(request), "token": token, "generation": generation}
+        _write(
+            path,
+            {
+                "generation": generation,
+                "token": token,
+                "digest": digest,
+                "phase": "completed",
+                "receipt": result,
+                "protocol": protocol,
+            },
+        )
+        return result
+
+    @staticmethod
+    def _refused(token: str, generation: int, refusal: str) -> dict[str, object]:
+        return {"outcome": "refused", "token": token, "generation": generation, "refusal": refusal}
+
+    def _refuse(  # noqa: PLR0913 -- The terminal record carries the complete application identity.
+        self, path: Path, token: str, generation: int, digest: str, protocol: int, error: BaseException
+    ) -> dict[str, object]:
+        """Terminal and named: the same token and generation replay it, and the next generation may run."""
+        refusal = str(error)[:MAX_REFUSAL_CHARACTERS]
+        _write(
+            path,
+            {
+                "generation": generation,
+                "token": token,
+                "digest": digest,
+                "phase": "refused",
+                "refusal": refusal,
+                "protocol": protocol,
+            },
+        )
+        return self._refused(token, generation, refusal)
 
 
 def main() -> None:
