@@ -113,6 +113,9 @@ class Server:
         process.stdin.close()
         return process
 
+    def alive(self, user: str) -> bool:
+        return self.sql(f"SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE BINARY USER = '{user}'") != "0"
+
     def wait_for(self, user: str, state: str) -> None:
         """Until the user's session is inside its statement, so the hold meets it mid-flight."""
         deadline = monotonic() + 20
@@ -324,10 +327,12 @@ def test_another_tenants_busy_session_with_the_same_name_in_other_case_survives(
         f"CREATE USER '{other}'@'localhost' IDENTIFIED BY '{TENANT_PASSWORD}'; "
         f"GRANT ALL PRIVILEGES ON `{database}`.* TO '{other}'@'localhost'"
     )
-    session = server.background(other, f"USE {database}; SELECT SLEEP(6); INSERT INTO t VALUES (1)")
+    # Busy for longer than the hold can take, so the hold meets it whatever its own timing.
+    session = server.background(other, f"USE {database}; SELECT SLEEP(25); INSERT INTO t VALUES (1)")
     server.wait_for(other, "User sleep")
     assert account.act("hold")["phase"] == "held"
-    session.wait(timeout=30)
+    assert session.poll() is None and server.alive(other), "the other tenant's session was ended"
+    session.wait(timeout=40)
     assert session.returncode == 0, session.stderr.read()
     assert account.count(database) == 1
 
@@ -335,20 +340,25 @@ def test_another_tenants_busy_session_with_the_same_name_in_other_case_survives(
 def test_a_definer_routine_and_an_event_of_the_tenant_cannot_write(server, account):
     server.sql("SET GLOBAL event_scheduler = ON")
     try:
-        server.tenant(
+        created = server.tenant(
             account.user,
             f"CREATE PROCEDURE {account.db}.grow() SQL SECURITY DEFINER INSERT INTO {account.db}.t VALUES (7); "
+            f"CREATE EVENT {account.db}.slow ON SCHEDULE AT CURRENT_TIMESTAMP "
+            f"DO INSERT INTO {account.db}.t SELECT 8 FROM (SELECT SLEEP(25)) AS held; "
             f"CREATE EVENT {account.db}.tick ON SCHEDULE EVERY 1 SECOND DO INSERT INTO {account.db}.t VALUES (9)",
         )
+        assert created.returncode == 0, created.stderr
         deadline = monotonic() + 10
         while account.count() == 0 and monotonic() < deadline:
             Event().wait(0.2)
-        assert account.count() > 0, "the event never ran"
+        assert account.count() > 0, "the recurring event never ran"
+        # The one-shot event is inside its write, past every privilege check, when the hold starts.
+        server.wait_for(account.user, "User sleep")
         assert account.act("hold")["phase"] == "held"
-        Event().wait(1.5)  # An execution already past its privilege check may finish.
         settled = account.count()
-        Event().wait(3)
+        Event().wait(30)  # Past the end of the one-shot event's sleep, and many recurring runs.
         assert account.count() == settled
+        assert server.sql(f"SELECT COUNT(*) FROM {account.db}.t WHERE x = 8") == "0"
         assert server.tenant(account.user, f"CALL {account.db}.grow()").returncode != 0
         assert account.count() == settled
     finally:
