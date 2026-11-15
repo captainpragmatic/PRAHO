@@ -197,6 +197,9 @@ jobs:
     - name: Quota inventory SQL against the managed MariaDB schema
       run: make test-virtualmin-quota-sql
 
+    - name: Database write hold against a real MariaDB 11.8.3
+      run: make test-virtualmin-database-hold-sql
+
   platform-security:
     runs-on: ubuntu-latest
 
