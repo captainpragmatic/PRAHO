@@ -782,6 +782,21 @@ class NativeStatementTests(SimpleTestCase):
             ],
         )
 
+    def test_kill_takes_only_an_int_process_id_in_range(self) -> None:
+        database = self.native()
+        for bad in (0, True, "12", 1 << 63):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                database.kill_soft(bad)
+        database.kill_soft(12)
+        self.assertEqual(database.statements, ["KILL SOFT CONNECTION 12"])
+
+    def test_a_server_column_name_outside_the_privilege_shape_is_refused(self) -> None:
+        database = self.native()
+        database.columns = lambda: ["Select_priv", "x) FROM mysql.user; --_priv"]
+        with self.assertRaises(ValueError):
+            database.principal_rows("shop", "localhost")
+        self.assertEqual(database.statements, [])
+
     def test_sessions_are_read_by_exact_current_database_without_the_helpers_own(self) -> None:
         database = self.native()
         database.execute = lambda query: database.statements.append(query) or [("11", "shop"), ("x", "bad")]

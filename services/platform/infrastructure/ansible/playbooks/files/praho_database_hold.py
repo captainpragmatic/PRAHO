@@ -741,14 +741,19 @@ class NativeDatabase:
     def hosts(self, user: str) -> set[str]:
         if USER.fullmatch(user) is None:
             raise ValueError("A principal identity is unsupported")
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — USER fullmatched just above; native mysql CLI on stdin, not SQLAlchemy, no placeholders.
         return {row[0] for row in self.execute(f"SELECT Host FROM mysql.global_priv WHERE User = '{user}'")}  # noqa: S608
 
     def grants(self, user: str, host: str) -> list[str]:
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — _principal fullmatches USER and HOST before quoting; an identifier cannot be bound.
         return [row[0] for row in self.execute(f"SHOW GRANTS FOR {self._principal(user, host)}")]
 
     def principal_rows(self, user: str, host: str) -> list[tuple[str, Image]]:
         self._principal(user, host)
         columns = self.columns()
+        if any(re.fullmatch(r"[A-Z][A-Za-z_]*_priv", column) is None for column in columns):
+            raise ValueError("A mysql.db privilege column name is unsupported")
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — USER/HOST fullmatched by _principal, column names just above; identifiers cannot be bound.
         rows = self.execute(
             f"SELECT Db, {', '.join(columns)} FROM mysql.db WHERE User = '{user}' AND Host = '{host}'"  # noqa: S608 -- Validated identifiers.
         )
@@ -762,13 +767,16 @@ class NativeDatabase:
             f"(SELECT COUNT(*) FROM mysql.{table} WHERE (User, Host) IN ({pairs}))"  # noqa: S608 -- Validated identifiers.
             for table in ("tables_priv", "columns_priv", "procs_priv")
         )
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Fixed table names and _pairs, whose every USER/HOST _principal fullmatched.
         return int(self.execute("SELECT " + query)[0][0])
 
     def roles_and_proxies(self, principals: list[Principal]) -> tuple[int, int]:
         if not principals:
             return 0, 0
         pairs = self._pairs(principals)
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — _pairs quotes only USER/HOST values _principal fullmatched; native mysql CLI.
         roles = self.execute(f"SELECT COUNT(*) FROM mysql.roles_mapping WHERE (User, Host) IN ({pairs})")  # noqa: S608
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — _pairs quotes only USER/HOST values _principal fullmatched; native mysql CLI.
         proxies = self.execute(f"SELECT COUNT(*) FROM mysql.proxies_priv WHERE (User, Host) IN ({pairs})")  # noqa: S608
         return int(roles[0][0]), int(proxies[0][0])
 
@@ -787,11 +795,13 @@ class NativeDatabase:
     # One statement each, GRANT OPTION included, so a crash never leaves a row half changed (review finding).
     def revoke(self, user: str, host: str, db: str, columns: list[str]) -> None:
         names = [SQL_NAMES[column] for column in columns]
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Fixed SQL_NAMES privileges, STORED_DATABASE-fullmatched target, fullmatched USER/HOST.
         self.execute(f"REVOKE {', '.join(names)} ON {self._target(db)} FROM {self._principal(user, host)}")
 
     def grant(self, user: str, host: str, db: str, columns: list[str]) -> None:
         names = [SQL_NAMES[column] for column in columns if column != "Grant_priv"] or ["USAGE"]
         option = " WITH GRANT OPTION" if "Grant_priv" in columns else ""
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Fixed SQL_NAMES privileges, STORED_DATABASE-fullmatched target, fullmatched USER/HOST.
         self.execute(f"GRANT {', '.join(names)} ON {self._target(db)} TO {self._principal(user, host)}{option}")
 
     def global_privileges(self) -> dict[Principal, set[str]]:
@@ -822,8 +832,11 @@ class NativeDatabase:
 
     def kill_soft(self, number: int) -> None:
         # Already gone is fine: the drain decides from the process list, not from this statement.
+        if type(number) is not int or not 0 < number < 1 << 63:
+            raise ValueError("A process id is out of range")
         with suppress(ValueError):
-            self.execute(f"KILL SOFT CONNECTION {int(number)}")
+            # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — A range-checked int process id, the only form KILL takes; native mysql CLI.
+            self.execute(f"KILL SOFT CONNECTION {number}")
 
 
 def main() -> None:
