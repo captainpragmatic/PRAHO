@@ -264,7 +264,7 @@ global_writers() { # prints how many global privileges let an account outside DB
   rows=$(sql "SELECT GRANTEE, PRIVILEGE_TYPE, IS_GRANTABLE FROM information_schema.USER_PRIVILEGES") || return 1
   while IFS=$'\t' read -r grantee privilege grantable; do
     [[ -n $grantee ]] || continue
-    # GRANTEE is 'user'@'host', an apostrophe in a name doubled: compared whole, so `ro'ot` is never root.
+    # GRANTEE is 'user'@'host' with no escaping ('ro'ot'@'localhost' on 11.8.3): compared whole, never root.
     listed "$grantee" "${dba_grantees[@]}" && continue
     if [[ $grantable == YES ]] || ! listed "$privilege" "${READ_ONLY_GLOBALS[@]}"; then n=$((n + 1)); fi
   done <<<"$rows"

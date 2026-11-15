@@ -422,7 +422,7 @@ class RecordTests(BarrierScriptCase):
             "'admin'@'localhost'\tCREATE TEMPORARY TABLES\tNO",
             "'admin'@'localhost'\tSOMETHING NEW\tNO",  # Unknown names fail closed.
             "'root'@'%'\tINSERT\tNO",  # The DBA list is exact user@host.
-            "'ro''ot'@'localhost'\tINSERT\tNO",  # An apostrophe in the name is not root.
+            "'ro'ot'@'localhost'\tINSERT\tNO",  # MariaDB 11.8.3's unescaped spelling; not root.
         ):
             with self.subTest(row=row):
                 refused = self.step("record", FAKE_GLOBAL_PRIVILEGES=row)
