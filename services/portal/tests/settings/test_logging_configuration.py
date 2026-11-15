@@ -13,6 +13,7 @@ import logging
 import logging.config
 import os
 import sys
+import time
 from collections import UserDict
 from types import MappingProxyType
 from typing import Any
@@ -234,6 +235,21 @@ SENSITIVE_VALUES = (
     "proxy-secret",
     "fallback-secret",
     "dictmsg-secret",
+    "escaped-newline-secret",
+    "yaml-block-secret",
+    "yaml-wrapped-secret",
+    "yaml-list-secret",
+    "yaml-item-secret",
+    "escaped-start-secret",
+    "escaped-space-secret",
+    "yaml-comment-secret",
+    "yaml-crlf-secret",
+    "yaml-nested-secret",
+    "yaml-hash-secret",
+    "yaml-item-list-secret",
+    "backslash-password-secret",
+    "backslash-token-secret",
+    "yaml-dash-secret",
 )
 
 
@@ -315,6 +331,23 @@ def _records() -> dict[str, logging.LogRecord]:
         "numeric placeholder": record("card check cvv=%d, user=%s", (8675309, "ana")),
         "command line": record("ran tool --password=cli-secret --verbose; also {'--token': 'cli-secret'}"),
         "nested json inner quote": record(json.dumps({"error": json.dumps({"password": 'prefix"suffix-secret'})})),
+        # JSON-escaped text: a key right after a literal "\\n" must still read as a key.
+        "key after an escaped newline": record(json.dumps({"stderr": "Traceback\npassword=escaped-newline-secret"})),
+        # A YAML value continues on the lines indented under its key.
+        "yaml block value": record("failed:\n  stderr: |-\n    reason\n    password: |-\n      yaml-block-secret\n    after\n"),
+        "yaml wrapped value": record("failed:\n  password: first-part\n    yaml-wrapped-secret\n  rc: 1\n"),
+        "yaml list value": record("failed:\n  password:\n  - yaml-list-secret\n  rc: 1\n"),
+        "yaml list item key": record("users:\n  - password: |-\n      yaml-item-secret\n  - name: ana\n"),
+        "escaped newline after a quote": record(json.dumps({"stderr": "\npassword=escaped-start-secret"})),
+        "escaped newline after a space": record(json.dumps({"stderr": "Traceback \npassword=escaped-space-secret"})),
+        "yaml comment before the value": record("failed:\n  password:\n  # rotated\n    - yaml-comment-secret\n  rc: 1\n"),
+        "yaml crlf blank line": record("failed:\r\n  password: |-\r\n\r\n    yaml-crlf-secret\r\n  rc: 1\r\n"),
+        "yaml nested compact list": record("users:\n  - - password: |-\n        yaml-nested-secret\n  - name: ana\n"),
+        "yaml block line starting with a hash": record("failed:\n  password: |-\n    #yaml-hash-secret\n  rc: 1\n"),
+        "yaml list inside a list item": record("users:\n- password:\n  - yaml-item-list-secret\n  name: ana\n"),
+        # A literal backslash before a key, not an escape: it was redacted before and must stay so.
+        "key after a literal backslash": record("path C:\\password=backslash-password-secret and \\token=backslash-token-secret"),
+        "yaml standalone dash": record("failed:\n  password:\n  -\n    - yaml-dash-secret\n  after: kept\n"),
         "stack and cached exception": stack,
         "extras": extras,
         "dict-like text": record("{'password': 'Hunter2-pw', \"card_number\": \"4111111111111111\", 'cui': 76543217}"),
@@ -350,6 +383,16 @@ class TestSensitiveDataRedaction:
                 if leaked or not marked:
                     failures.append((handler_name, shape, leaked, output[:160]))
         assert failures == []
+
+    def test_many_key_value_pairs_on_one_line_stay_linear(self) -> None:
+        # A log line with many "password:x" pairs must not rescan the line for each one (the YAML check).
+        from apps.common.logging import redact_sensitive_text  # noqa: PLC0415
+
+        line = "password:x " * 40000
+        started = time.perf_counter()
+        redacted = redact_sensitive_text(line)
+        assert time.perf_counter() - started < 3.0
+        assert "password:x" not in redacted
 
     def test_ordinary_words_are_left_alone(self) -> None:
         config = _get_logging("config.settings.prod")
