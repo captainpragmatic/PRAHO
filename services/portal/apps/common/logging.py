@@ -71,6 +71,8 @@ _CLOSING = {"[": "]", "{": "}", "(": ")"}
 _DELIMITERS = frozenset(" \t,;&")
 _MAX_QUOTE_ESCAPES = 3  # Backslashes before a quote: JSON nested up to three deep
 _NEXT_KEY = re.compile(r"""["']?[A-Za-z_][\w.\-]*["']?[ \t]*[=:]""")
+# What may precede a YAML key on its line: indentation, and one "- " per list the key's item opens ("- - key:").
+_YAML_KEY_PREFIX = re.compile(r"[ \t]*(?:-[ \t]+)*")
 REDACTION_TEXT = "[REDACTED]"
 # How deep structured redaction walks; deeper (or cyclic) values are replaced, never recursed into.
 _MAX_DEPTH = 32
@@ -161,6 +163,48 @@ def _value_end(text: str, start: int) -> int:
     return _unquoted_end(text, start)
 
 
+def _yaml_value_end(text: str, key_start: int, end: int) -> int:
+    """Where a YAML key's value ends when it continues on the lines indented under the key.
+
+    A block scalar, list, mapping or wrapped plain value puts the value, or the rest of it, on the following lines
+    indented past the key's column, where a line starting with "#" is value too; a sequence may also sit at the key's
+    own column. Only a key that starts its line counts, found by scanning back over prefix characters alone, so a key
+    in running text costs nothing extra. Blank lines, and comments at or left of the key's column, are taken only
+    when a value line follows them.
+    """
+    line_start = key_start
+    while line_start > 0 and text[line_start - 1] in " \t-":
+        line_start -= 1
+    if (line_start > 0 and text[line_start - 1] != "\n") or not _YAML_KEY_PREFIX.fullmatch(text, line_start, key_start):
+        return end
+    column = key_start - line_start
+    position = text.find("\n", end)
+    while 0 <= position < len(text):
+        line_end = text.find("\n", position + 1)
+        line_end = len(text) if line_end < 0 else line_end
+        line = text[position + 1 : line_end].rstrip("\r")
+        content = line.lstrip(" \t")
+        indent = len(line) - len(content)
+        if content.startswith("#") and indent <= column:
+            content = ""  # A comment beside the key, like a blank line, neither ends the value nor extends it.
+        sequence = content == "-" or content.startswith("- ")
+        if content and not (indent > column or (indent == column and sequence)):
+            break
+        if content:
+            end = position + 1 + len(line)
+        position = line_end if line_end < len(text) else -1
+    return end
+
+
+def _escaped_sensitive_key(text: str, match: re.Match[str]) -> bool:
+    """A key read across an escaped line break or tab: "\\npassword" in JSON-escaped text is "password".
+
+    Both readings count, so a literal backslash before a key ("C:\\token=...") still names that key.
+    """
+    key, start = match[2], match.start(2)
+    return key[:1] in {"n", "r", "t"} and text[start - 1 : start] == "\\" and _is_sensitive_key(key[1:])
+
+
 def redact_sensitive_text(value: str) -> str:
     """Replace the value after every sensitive key in a piece of log text, keeping the key so the line still reads.
 
@@ -171,11 +215,13 @@ def redact_sensitive_text(value: str) -> str:
     parts: list[str] = []
     position = 0
     while (match := _KEY_CANDIDATE.search(value, position)) is not None:
-        if not _is_sensitive_key(match[2]):
+        if not _is_sensitive_key(match[2]) and not _escaped_sensitive_key(value, match):
             parts.append(value[position : match.end()])
             position = match.end()
             continue
         end = _value_end(value, match.end())
+        if match[4] == ":" and value[match.end() : end][:1] not in {'"', "'", "[", "{", "("}:
+            end = _yaml_value_end(value, match.start(), end)
         found = value[match.end() : end]
         quote = _opening_quote(value, match.end()) if found else ""
         parts.append(value[position : match.end()] + (f"{quote}{REDACTION_TEXT}{quote}" if found else ""))
