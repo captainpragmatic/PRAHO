@@ -259,12 +259,13 @@ listed() { # listed VALUE ITEM... -> 0 when VALUE is exactly one of the items
   return 1
 }
 global_writers() { # prints how many global privileges let an account outside DBA_ACCOUNTS write or grant
-  local rows grantee privilege grantable n=0
+  local rows grantee privilege grantable account n=0 dba_grantees=()
+  for account in "${DBA_ACCOUNTS[@]}"; do dba_grantees+=("'${account%@*}'@'${account##*@}'"); done
   rows=$(sql "SELECT GRANTEE, PRIVILEGE_TYPE, IS_GRANTABLE FROM information_schema.USER_PRIVILEGES") || return 1
   while IFS=$'\t' read -r grantee privilege grantable; do
     [[ -n $grantee ]] || continue
-    # GRANTEE is 'user'@'host'; an identity with quotes of its own never matches the list, so it counts.
-    listed "${grantee//\'/}" "${DBA_ACCOUNTS[@]}" && continue
+    # GRANTEE is 'user'@'host', an apostrophe in a name doubled: compared whole, so `ro'ot` is never root.
+    listed "$grantee" "${dba_grantees[@]}" && continue
     if [[ $grantable == YES ]] || ! listed "$privilege" "${READ_ONLY_GLOBALS[@]}"; then n=$((n + 1)); fi
   done <<<"$rows"
   echo "$n"
