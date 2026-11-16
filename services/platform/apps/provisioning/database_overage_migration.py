@@ -19,8 +19,10 @@ from django.db import transaction
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from apps.common.types import Err
+
 from .database_overage_models import DatabaseOverageEpisode, EpisodeState, SuspendedFor
-from .database_overage_service import audit_episode, next_hold_generation, overage_enabled
+from .database_overage_service import abandon_hold, audit_episode, next_hold_generation, overage_enabled
 from .virtualmin_models import VirtualminAccount
 
 logger = logging.getLogger(__name__)
@@ -71,6 +73,72 @@ def suspend_for_migration(account: VirtualminAccount, migration_id: UUID, *, hel
     episode.save()
     # The release itself goes on record with each attempt (release_requested); the migration audits its own start.
     logger.info("✅ [DatabaseOverage] Episode %s suspended for migration %s", episode.pk, migration_id)
+
+
+def suspend_for_recovery(account: VirtualminAccount, recovery_id: UUID) -> None:
+    """In the recovery's admission, its account locked, before the busy check: the source node is fenced, so a hold
+    there can't be released or verified. Its journal is left on record as abandoned (no node is asked), and an
+    episode that was holding or held is held again on the target before the target is enabled."""
+    episode = _open_episode(account.pk)
+    if episode is None:
+        return
+    if episode.suspended_for and episode.suspended_migration_id != recovery_id:
+        raise ValueError("The account's database write hold is suspended for another migration")
+    follows = episode.state in (EpisodeState.HOLDING, EpisodeState.HELD)
+    if episode.state != EpisodeState.GRACE:
+        abandon_hold(
+            episode,
+            f"source node fenced for recovery: its hold journal (generation {episode.hold_generation}) is abandoned",
+            for_staff=False,
+        )
+    if episode.state == EpisodeState.CLOSED:
+        return
+    episode.suspended_for, episode.suspended_migration_id = SuspendedFor.MIGRATION, recovery_id
+    episode.hold_follows_migration = follows
+    episode.save()
+
+
+def hold_before_enable(migration: Any, hold: dict[str, Any] | None) -> str:
+    """Recovery activation, before the target's runtime is enabled: the decided hold applied through the hold
+    gateway. Held or holding: on record, with a verify at the next sweep. Refused: the target activates, the
+    episode releases for staff. Not settled: the activation is retried later with this same hold."""
+    from .database_overage_tasks import RETRY_CODES, _ask, _gateway, _identity  # noqa: PLC0415
+
+    if hold is None:
+        return "no_hold"
+    gateway = _gateway()
+    episode = DatabaseOverageEpisode.objects.get(account_id=migration.account_id, suspended_migration_id=migration.pk)
+    identity = _identity(gateway, episode)
+    result = _ask(gateway, "hold", identity, token=UUID(hold["token"]), generation=hold["generation"])
+    refusal: Any = result.error if isinstance(result, Err) else None
+    receipt: Any = None if refusal is not None else result.unwrap()
+    if refusal is not None and refusal.code in RETRY_CODES:
+        raise MigrationHoldReleaseError(f"the target's database write hold is not settled: {refusal.code}")
+    if receipt is not None and (receipt.identity != identity or str(receipt.token) != hold["token"]):
+        raise MigrationHoldReleaseError("the target's database write hold receipt is for another request")
+    with transaction.atomic():
+        VirtualminAccount.objects.select_for_update().get(pk=migration.account_id)
+        current = _open_episode(migration.account_id)
+        if current is None or not activation_hold_current(migration, hold):
+            return "superseded"
+        episode = current
+        episode.suspended_for, episode.suspended_migration_id, episode.hold_follows_migration = "", None, False
+        if receipt is None:
+            episode.start_release("hold_refused")
+            episode.hold_refused_at = timezone.now()
+            episode.last_error = f"target hold refused: {refusal.code}: {refusal.detail}"
+            episode.save()
+            return "refused"
+        episode.needs_reconcile = True  # activation re-enables the logins: the first sweep verifies the grants
+        if receipt.phase == "held" and not receipt.sessions_remaining:
+            episode.confirm_held(digest=receipt.held_digest)
+            episode.needs_reconcile = True
+            episode.verified_at = timezone.now()
+            audit_episode(
+                episode, "database_overage_hold_applied", "Database write hold applied on the recovery target"
+            )
+        episode.save()
+    return "held"
 
 
 def release_before_move(migration_id: UUID, account_id: Any) -> None:

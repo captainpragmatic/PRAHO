@@ -154,6 +154,11 @@ class VirtualminRecoveryService(VirtualminMigrationService):
                     account=locked, retired_at__isnull=True, target_server_id=locked.server_id
                 ).exists():
                     raise ValueError("Recovery requires the account's existing live name on its original node")
+                # Before the busy check: a hold in flight on the fenced source would otherwise block its own recovery.
+                from .database_overage_migration import suspend_for_recovery  # noqa: PLC0415 -- episode boundary
+
+                recovery_id = uuid4()
+                suspend_for_recovery(locked, recovery_id)
                 if account_has_active_operation(locked) or locked.restore_hold:
                     raise ValueError("Resolve the account's existing operation or restore hold before recovery")
                 from .managed_dns_service import assert_move_ready  # noqa: PLC0415  # Customer zone integration
@@ -174,6 +179,7 @@ class VirtualminRecoveryService(VirtualminMigrationService):
                 )
 
                 migration = VirtualminMigration.objects.create(
+                    pk=recovery_id,
                     account=locked,
                     source_server=source,
                     target_server=target,
@@ -356,6 +362,11 @@ class VirtualminRecoveryService(VirtualminMigrationService):
         limits = ensure_managed_limits(migration.account, migration=migration, native_server=migration.target_server)
         if limits.is_err():
             raise ValueError(limits.unwrap_err())
+        from .database_overage_migration import (  # noqa: PLC0415 -- episode boundary
+            MigrationHoldReleaseError,
+            activation_hold,
+            hold_before_enable,
+        )
         from .migration_enabled_state import (  # noqa: PLC0415  # Same-app activation policy seam.
             activation_guard,
             converge_before_release,
@@ -363,6 +374,11 @@ class VirtualminRecoveryService(VirtualminMigrationService):
             record_activation,
         )
 
+        # Decided and committed before the guard, then applied before the runtime is enabled; a retry resends it.
+        try:
+            hold_before_enable(migration, activation_hold(migration))
+        except MigrationHoldReleaseError as error:
+            raise MigrationDeferredError(timezone.now() + timedelta(seconds=60), str(error)) from error
         with activation_guard(migration, token) as account:
             self._move(migration, token, "activating")
             self._node(migration, "activate", enabled=current_policy(account).enabled)

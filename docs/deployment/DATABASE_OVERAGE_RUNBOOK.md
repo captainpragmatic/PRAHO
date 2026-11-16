@@ -54,6 +54,13 @@ as a refused hold for staff. When the migration ends, however it ends, the suspe
 next hold decision follows the account to the node it is on. Accounts that are holding or releasing can't
 start a migration until that settles.
 
+A recovery from a fenced node can't release anything there. Its start leaves the source's hold journal on
+record as abandoned (*Last problem*: `source node fenced for recovery`), and an episode that was holding or
+held is held again on the target before the target's runtime is enabled, then verified at the next sweep.
+If the target refuses the hold, the recovery still completes and the hold is left for staff as a refused
+hold. Extend and waive after a recovery act on the target. If the old node ever comes back, its abandoned
+journal is for a domain that no longer runs there: remove the domain, never release onto it.
+
 A component migration records the source's database grants in its review, so it is refused while the
 episode is holding, held or releasing: extend (a write window) or waive first, then inspect and review.
 Its start suspends an episode in grace like any migration. The component activation hold built for the

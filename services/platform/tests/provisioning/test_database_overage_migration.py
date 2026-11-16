@@ -12,12 +12,15 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.utils import timezone
 
+from apps.audit.models import AuditEvent
 from apps.provisioning.database_overage_migration import (
     activation_hold,
     record_activation_hold,
     suspend_for_migration,
+    suspend_for_recovery,
 )
 from apps.provisioning.database_overage_models import DatabaseOverageEpisode
+from apps.provisioning.virtualmin_migration_models import account_has_active_operation
 from apps.provisioning.virtualmin_migration_service import MigrationDeferredError, VirtualminMigrationService
 from apps.provisioning.virtualmin_usage_models import AccountUsageState, UsageInterval
 from apps.settings.models import SystemSetting
@@ -390,3 +393,177 @@ class ComponentMigrationEpisodeTests(_Episode, ComponentAdmissionTestBase):
         episode = self.current()
         self.assertEqual((episode.state, episode.suspended_migration_id), ("grace", migration.pk))
         self.assertFalse(episode.hold_follows_migration)
+
+
+class RecoveryEpisodeTests(_Episode, TestCase):
+    """Recovery from a fenced node: the source journal is abandoned, the target held before it is enabled."""
+
+    def setUp(self) -> None:
+        _flag_on()
+        self.fixture = make_overage_account("recover")
+        self.target = make_overage_account("rescue").server
+        self.episode = self.hold(_episode(self.fixture))
+        DatabaseOverageEpisode.objects.filter(pk=self.episode.pk).update(deadline_at=timezone.now() - timedelta(days=1))
+        self.installation = uuid4()
+        UsageInterval.objects.create(
+            account=make_overage_account("rescued-neighbour").account,
+            owner_scope=uuid4(),
+            server=self.target,
+            server_id_snapshot=self.target.pk,
+            started_at=timezone.now() - timedelta(days=1),
+            domain_id="5",
+            installation=self.installation,
+        )
+        self.node = FakeNode()
+        self.migration = SimpleNamespace(
+            pk=uuid4(),
+            account_id=self.fixture.account.pk,
+            target_server_id=self.target.pk,
+            target_server=self.target,
+            account=self.fixture.account,
+            barrier_state={"target_domain_id": 28001},
+            cutover_committed_at=timezone.now(),
+            contract="recovery",
+        )
+
+    def test_a_held_episode_leaves_the_fenced_source_without_asking_it(self) -> None:
+        source = self.current()
+        suspend_for_recovery(self.fixture.account, self.migration.pk)
+        episode = self.current()
+        self.assertEqual(
+            (episode.state, episode.suspended_migration_id, episode.hold_follows_migration),
+            ("grace", self.migration.pk, True),
+        )
+        self.assertIn("fenced", episode.last_error)
+        self.assertIsNone(episode.hold_refused_at)  # the recovery holds the target itself
+        released = AuditEvent.objects.filter(object_id=str(episode.pk), action="database_overage_hold_released").last()
+        self.assertEqual(
+            (released.new_values["abandoned"], released.new_values["generation"]), (True, source.hold_generation)
+        )
+        self.assertFalse(account_has_active_operation(self.fixture.account))
+
+    def test_a_hold_or_release_in_flight_on_the_source_never_blocks_the_recovery(self) -> None:
+        episode = self.current()
+        episode.start_release("waived")
+        episode.save()
+        suspend_for_recovery(self.fixture.account, self.migration.pk)
+        self.assertEqual((self.current().state, self.current().close_reason), ("closed", "waived"))
+
+    def recover(self, *, hold_answer: str = "held") -> list[str]:
+        """The recovery activation with the node faked: the order of the hold and the runtime's enable."""
+        from contextlib import contextmanager  # noqa: PLC0415
+
+        from django.db import transaction  # noqa: PLC0415
+
+        from apps.common.types import Ok  # noqa: PLC0415
+        from apps.provisioning.virtualmin_recovery_service import VirtualminRecoveryService  # noqa: PLC0415
+
+        order: list[str] = []
+        self.node.hold_answer = hold_answer
+        hold = self.node.hold
+
+        def held(identity, *, token, generation):
+            order.append("hold")
+            return hold(identity, token=token, generation=generation)
+
+        self.node.hold = held
+
+        @contextmanager
+        def guard(migration, token):
+            with transaction.atomic():
+                yield self.fixture.account
+
+        module = "apps.provisioning"
+        released = SimpleNamespace(outcome="released")
+        with (
+            patch(f"{module}.virtualmin_recovery_service.destination_refusal", return_value=None),
+            patch(f"{module}.hosting_limit_execution.ensure_managed_limits", return_value=Ok(None)),
+            patch(f"{module}.migration_enabled_state.activation_guard", side_effect=guard),
+            patch(f"{module}.migration_enabled_state.current_policy", return_value=SimpleNamespace(enabled=True)),
+            patch(f"{module}.migration_enabled_state.converge_before_release", return_value=None),
+            patch(f"{module}.migration_enabled_state.record_activation", return_value=None),
+            patch(f"{module}.virtualmin_recovery_service.run_pair_step", return_value=Ok(released)),
+            patch(f"{module}.database_overage_tasks._gateway", side_effect=self.node.module),
+            patch.object(VirtualminRecoveryService, "_pair_variables", return_value={}),
+            patch.object(VirtualminRecoveryService, "_move", return_value=None),
+            patch.object(
+                VirtualminRecoveryService, "_node", side_effect=lambda migration, action, **kw: order.append(action)
+            ),
+        ):
+            VirtualminRecoveryService()._activate(self.migration, uuid4())
+        return order
+
+    def test_the_target_is_held_before_its_runtime_is_enabled(self) -> None:
+        suspend_for_recovery(self.fixture.account, self.migration.pk)
+        self.assertEqual(self.recover(), ["hold", "activate"])
+        episode = self.current()
+        self.assertEqual(
+            (episode.state, episode.server_id, episode.domain_id, episode.suspended_for),
+            ("held", self.target.pk, "28001", ""),
+        )
+        self.assertTrue(episode.needs_reconcile)  # verified at the next sweep: activation re-enables the logins
+        identity = self.node.calls[0][1]["identity"]
+        self.assertEqual((identity.server_id, identity.installation), (self.target.pk, self.installation))
+
+    def test_a_target_refusing_the_hold_activates_and_leaves_the_episode_to_staff(self) -> None:
+        suspend_for_recovery(self.fixture.account, self.migration.pk)
+        self.assertEqual(self.recover(hold_answer="refused"), ["hold", "activate"])
+        episode = self.current()
+        self.assertEqual(
+            (episode.state, episode.release_purpose, episode.suspended_for), ("releasing", "hold_refused", "")
+        )
+        self.assertIsNotNone(episode.hold_refused_at)
+
+    def test_a_busy_target_defers_the_activation_with_the_same_hold(self) -> None:
+        suspend_for_recovery(self.fixture.account, self.migration.pk)
+        with self.assertRaises(MigrationDeferredError):
+            self.recover(hold_answer="busy")
+        episode = self.current()
+        self.assertEqual((episode.state, episode.suspended_migration_id), ("holding", self.migration.pk))
+        token = episode.hold_token
+        self.node.hold = FakeNode.hold.__get__(self.node)
+        self.assertEqual(self.recover(), ["hold", "activate"])
+        self.assertEqual((self.current().state, self.current().hold_token), ("held", token))
+
+
+class RecoveryAdmissionTests(_Episode, MigrationTestBase):
+    """Through the real recovery admission: a hold in flight on the fenced source never blocks it."""
+
+    def _admit(self):
+        from apps.provisioning.account_hostname_models import AccountHostname  # noqa: PLC0415
+        from apps.provisioning.virtualmin_recovery_service import VirtualminRecoveryService  # noqa: PLC0415
+
+        name = AccountHostname.objects.create(
+            account=self.account, target_server=self.server, label="a1b2c3d4", zone="accounts.example.net"
+        )
+        result = VirtualminRecoveryService().start_recovery(
+            self.account,
+            self.target,
+            backup_ids=["b" * 32],
+            source_fenced="provider confirms old node powered off",
+            initiated_by=self.staff,
+            enqueue=False,
+        )
+        self.assertTrue(result.is_ok(), result)
+        return result.unwrap(), name
+
+    def test_a_release_stuck_on_the_fenced_source_is_abandoned_by_the_recovery_start(self) -> None:
+        _flag_on()
+        self.episode = self.hold(self.make_episode(self.account))
+        episode = self.current()
+        episode.start_release("extend")
+        episode.save()
+        migration, _name = self._admit()
+        episode = self.current()
+        self.assertEqual((episode.state, episode.suspended_migration_id), ("grace", migration.pk))
+        self.assertFalse(episode.hold_follows_migration)  # a write window was asked for: nothing follows
+
+    def test_a_refused_recovery_start_leaves_the_episode_as_it_was(self) -> None:
+        self.episode = self.hold(self.make_episode(self.account))
+        from apps.provisioning.virtualmin_recovery_service import VirtualminRecoveryService  # noqa: PLC0415
+
+        result = VirtualminRecoveryService().start_recovery(
+            self.account, self.target, backup_ids=["b" * 32], source_fenced=" ", initiated_by=self.staff
+        )
+        self.assertTrue(result.is_err())
+        self.assertEqual((self.current().state, self.current().suspended_for), ("held", ""))
