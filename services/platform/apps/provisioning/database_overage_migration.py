@@ -100,8 +100,9 @@ def suspend_for_recovery(account: VirtualminAccount, recovery_id: UUID) -> None:
 
 def hold_before_enable(migration: Any, hold: dict[str, Any] | None) -> str:
     """Recovery activation, before the target's runtime is enabled: the decided hold applied through the hold
-    gateway. Held or holding: on record, with a verify at the next sweep. Refused: the target activates, the
-    episode releases for staff. Not settled: the activation is retried later with this same hold."""
+    gateway. Held, every session at the revoke gone: on record, verified at the next sweep. Refused: the target
+    activates, the episode releases for staff. Not settled, or sessions still open: the activation is retried
+    later with this same hold."""
     from .database_overage_tasks import RETRY_CODES, _ask, _gateway, _identity  # noqa: PLC0415
 
     if hold is None:
@@ -116,6 +117,9 @@ def hold_before_enable(migration: Any, hold: dict[str, Any] | None) -> str:
         raise MigrationHoldReleaseError(f"the target's database write hold is not settled: {refusal.code}")
     if receipt is not None and (receipt.identity != identity or str(receipt.token) != hold["token"]):
         raise MigrationHoldReleaseError("the target's database write hold receipt is for another request")
+    if receipt is not None and (receipt.phase != "held" or receipt.sessions_remaining):
+        # Sessions open at the revoke may still write: the runtime stays off until the node confirms them gone.
+        raise MigrationHoldReleaseError("the target's database write hold waits for its sessions to end")
     with transaction.atomic():
         VirtualminAccount.objects.select_for_update().get(pk=migration.account_id)
         current = _open_episode(migration.account_id)
@@ -129,15 +133,11 @@ def hold_before_enable(migration: Any, hold: dict[str, Any] | None) -> str:
             episode.last_error = f"target hold refused: {refusal.code}: {refusal.detail}"
             episode.save()
             return "refused"
+        episode.confirm_held(digest=receipt.held_digest)
         episode.needs_reconcile = True  # activation re-enables the logins: the first sweep verifies the grants
-        if receipt.phase == "held" and not receipt.sessions_remaining:
-            episode.confirm_held(digest=receipt.held_digest)
-            episode.needs_reconcile = True
-            episode.verified_at = timezone.now()
-            audit_episode(
-                episode, "database_overage_hold_applied", "Database write hold applied on the recovery target"
-            )
+        episode.verified_at = timezone.now()
         episode.save()
+        audit_episode(episode, "database_overage_hold_applied", "Database write hold applied on the recovery target")
     return "held"
 
 

@@ -514,6 +514,16 @@ class RecoveryEpisodeTests(_Episode, TestCase):
         )
         self.assertIsNotNone(episode.hold_refused_at)
 
+    def test_sessions_still_open_on_the_target_keep_its_runtime_off(self) -> None:
+        suspend_for_recovery(self.fixture.account, self.migration.pk)
+        with self.assertRaises(MigrationDeferredError):
+            self.recover(hold_answer="sessions")
+        episode = self.current()
+        self.assertEqual((episode.state, episode.suspended_migration_id), ("holding", self.migration.pk))
+        self.node.hold = FakeNode.hold.__get__(self.node)
+        self.assertEqual(self.recover(), ["hold", "activate"])
+        self.assertEqual(self.current().state, "held")
+
     def test_a_busy_target_defers_the_activation_with_the_same_hold(self) -> None:
         suspend_for_recovery(self.fixture.account, self.migration.pk)
         with self.assertRaises(MigrationDeferredError):
@@ -559,11 +569,31 @@ class RecoveryAdmissionTests(_Episode, MigrationTestBase):
         self.assertFalse(episode.hold_follows_migration)  # a write window was asked for: nothing follows
 
     def test_a_refused_recovery_start_leaves_the_episode_as_it_was(self) -> None:
-        self.episode = self.hold(self.make_episode(self.account))
+        from apps.provisioning.account_hostname_models import AccountHostname  # noqa: PLC0415
         from apps.provisioning.virtualmin_recovery_service import VirtualminRecoveryService  # noqa: PLC0415
 
+        self.episode = self.hold(self.make_episode(self.account))
+        before = self.current()
+        AccountHostname.objects.create(
+            account=self.account, target_server=self.server, label="a1b2c3d4", zone="accounts.example.net"
+        )
+        # The target already has the domain: refused after the episode was suspended, in the same transaction.
+        self.target_gateway.seed_domain(self.account.domain, username=self.account.virtualmin_username, enabled=False)
         result = VirtualminRecoveryService().start_recovery(
-            self.account, self.target, backup_ids=["b" * 32], source_fenced=" ", initiated_by=self.staff
+            self.account,
+            self.target,
+            backup_ids=["b" * 32],
+            source_fenced="provider confirms old node powered off",
+            initiated_by=self.staff,
+            enqueue=False,
         )
         self.assertTrue(result.is_err())
-        self.assertEqual((self.current().state, self.current().suspended_for), ("held", ""))
+        self.assertIn("already holds", result.unwrap_err())
+        episode = self.current()
+        self.assertEqual(
+            (episode.state, episode.suspended_for, episode.revision, episode.hold_follows_migration),
+            ("held", "", before.revision, False),
+        )
+        self.assertFalse(
+            AuditEvent.objects.filter(object_id=str(episode.pk), action="database_overage_hold_released").exists()
+        )
