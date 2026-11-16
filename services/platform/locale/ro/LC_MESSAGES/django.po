@@ -12182,6 +12182,10 @@ msgstr "Marcat ca spam de destinatar"
 msgid "Accepted by the provider"
 msgstr "Acceptat de furnizor"
 
+#: apps/provisioning/database_overage_delivery.py:218
+msgid "Accepted by the provider (delivery details no longer kept)"
+msgstr "Acceptat de furnizor (detaliile de livrare nu mai sunt păstrate)"
+
 #~ msgid ""
 #~ "The service's owner changed. Review the current details before submitting "
 #~ "again."

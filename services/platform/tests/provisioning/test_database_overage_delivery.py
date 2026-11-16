@@ -217,6 +217,15 @@ class NoticeStatusTests(_Notices, TestCase):
         self.assertEqual(self.status(status="complained")["label"], "Marked as spam by the recipient")
         self.assertEqual(self.status(status="delivered")["label"], "Delivered")
 
+    def test_an_accepted_notice_whose_email_log_was_purged_stays_accepted(self):
+        sent = timezone.now()
+        self.status(status="sent", sent_at=sent)
+        record_notice_acceptance()
+        EmailLog.objects.all().delete()  # email retention removes logs; the notice keeps its acceptance
+        status = self.status()
+        self.assertEqual(status["label"], "Accepted by the provider (delivery details no longer kept)")
+        self.assertEqual(status["at"], DatabaseOverageNotice.objects.get(kind="day0").accepted_at)
+
     def test_a_refused_notice_says_why(self):
         DatabaseOverageNotice.objects.filter(kind="day0").update(refusal_reason="overage_recipient_changed")
         self.assertEqual(self.status()["label"], "Not sent: overage_recipient_changed")

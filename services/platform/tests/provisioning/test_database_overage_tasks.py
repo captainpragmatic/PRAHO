@@ -624,15 +624,20 @@ class DatabaseOverageReleaseTests(_Sweep, TestCase):
         episode = self.episode()
         self.assertEqual((episode.state, episode.close_reason, self.node.actions()), ("closed", "waived", []))
 
-    def test_an_installation_change_under_a_hold_stops_node_calls_and_asks_staff(self):
+    def test_a_recreation_reset_waits_for_the_new_id_then_abandons_the_old_hold(self):
+        from apps.provisioning.virtualmin_usage_service import rebind_created_account  # noqa: PLC0415
+
         deadline = self.held()
         self.node.calls.clear()
-        AccountUsageState.objects.filter(account=self.fixture.account).update(installation=uuid4())
+        rebind_created_account(self.fixture.account.pk)  # what a verified recreation's create_domain does
+        AccountUsageState.objects.filter(account=self.fixture.account).update(domain_id="")
         self.sweep(deadline + timedelta(hours=2))
-        episode = self.episode()
-        self.assertEqual((episode.state, self.node.actions()), ("held", []))
-        self.assertIn("installation changed", episode.last_error)
-        self.assertIn(episode, episodes_needing_attention(at=deadline + timedelta(hours=2)))
+        self.assertEqual(self.episode().state, "held")  # no verified new id yet: no evidence of a change
+        AccountUsageState.objects.filter(account=self.fixture.account).update(  # the collector verifies the new one
+            domain_id="17999", installation=self.fixture.installation, server_id_snapshot=self.fixture.server.pk
+        )
+        self.sweep(deadline + timedelta(hours=3))
+        self.assertEqual(self.episode().state, "grace")
 
     def test_a_held_episode_is_verified_hourly_and_drift_is_recorded(self):
         deadline = self.held()

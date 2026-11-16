@@ -34,14 +34,12 @@ A hold is bound to the domain id and collector installation the usage collector 
 grace, the episode follows any change (a move, or the domain recreated on the same node) at the next hold
 decision, and waits as `identity_unknown` until the collector has verified the new identity.
 
-Under a hold, the sweep stops asking the node and puts the episode on the attention list:
-- *identity changed: domain … was recreated*: the old hold's journal belongs to a domain that no longer
-  exists, and releasing it would rewrite the new domain's grants. The episode is back in grace (or closed, if
-  it was being waived or released for good) without the node, latched like a refused hold. Check the new
-  domain's grants, then extend or waive.
-- *installation changed*: the node's collector was reinstalled while the grants are still held under the
-  old installation. Nothing is released automatically. Resolve it on the node with the database hold helper
-  (release by the old installation's journal), then waive or extend.
+Under a hold, a domain recreated on the same node (*identity changed: domain … was recreated*) stops every
+node call for that hold: its journal belongs to a domain that no longer exists, and releasing it would
+rewrite the new domain's grants. The episode is back in grace (or closed, if it was being waived or
+released for good) without the node, latched like a refused hold and on the attention list. Check the new
+domain's grants, then extend or waive. A reinstalled collector can't change the identity under a hold: the
+collector refuses to publish for an account whose verified binding changed.
 
 ## Migrating an account with an episode
 

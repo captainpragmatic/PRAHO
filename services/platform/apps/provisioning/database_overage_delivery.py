@@ -214,6 +214,8 @@ _PENDING = frozenset({"queued", "sending", "failed", "soft_bounced"})
 def notice_status(notice: DatabaseOverageNotice) -> dict[str, Any]:
     """What staff see for a notice: derived from its email's own state, never assumed from its absence."""
     log = notice.email_log
+    if log is None and notice.accepted_at is not None and not notice.refusal_reason:
+        return {"label": _("Accepted by the provider (delivery details no longer kept)"), "at": notice.accepted_at}
     if notice.refusal_reason or log is None:
         reason = notice.refusal_reason
         return {"label": _("Not sent: %(reason)s") % {"reason": reason} if reason else _("Not sent"), "at": None}

@@ -468,17 +468,13 @@ def abandon_hold(episode: DatabaseOverageEpisode, reason: str, *, for_staff: boo
     logger.warning("⚠️ [DatabaseOverage] Episode %s: hold abandoned: %s", episode.pk, reason)
 
 
-def stale_identity(episode: DatabaseOverageEpisode, account: VirtualminAccount | None) -> str | None:
-    """For a hold on the node: how the account's verified identity on the same node differs from the hold's, if
-    it does. A move to another node is the migration's to settle; an identity not collected yet is no evidence."""
+def stale_identity(episode: DatabaseOverageEpisode, account: VirtualminAccount | None) -> bool:
+    """For a hold on the node: the domain was recreated on the same node since (a verified recreation resets the
+    collected identity, and the collector verifies the new domain id). A move to another node is the migration's
+    to settle; an identity not collected yet is no evidence. The collector never accepts another installation
+    under a verified binding, so only the domain id can change here."""
     collected = None if account is None else collected_identity(account)
-    if collected is None or collected[0] != episode.server_id:
-        return None
-    if collected[1] != episode.domain_id:
-        return "domain"
-    if collected[2] != episode.installation:
-        return "installation"
-    return None
+    return collected is not None and collected[0] == episode.server_id and collected[1] != episode.domain_id
 
 
 def rehold_refusal(episode: DatabaseOverageEpisode, account: VirtualminAccount | None) -> str | None:
