@@ -1247,7 +1247,13 @@ class GDPRExportService:
 
         if scope.get("include_tickets", True):
             try:
-                tickets = Ticket.objects.filter(created_by=user)
+                # A ticket Platform raised for the person has no author; it is theirs by its contact email,
+                # matched the way erasure matches it.
+                addresses, _left_for_staff = GDPRDeletionService._persons_addresses(capture_subject(user))
+                mentions = Q(created_by=user)
+                for address in addresses:
+                    mentions |= Q(contact_email__iexact=address)
+                tickets = Ticket.objects.filter(mentions).distinct()
                 for ticket in tickets:
                     data["support_tickets"].append(
                         {
@@ -5081,6 +5087,17 @@ class AuditRetentionService:
             "terms_of_service_accepted",
             "terms_accepted",
             "privacy_policy_accepted",
+            # What a customer was told about a database over-allowance, and what was done to their databases
+            "database_overage_opened",
+            "database_overage_notice_sent",
+            "database_overage_hold_requested",
+            "database_overage_hold_applied",
+            "database_overage_release_requested",
+            "database_overage_hold_released",
+            "database_overage_extended",
+            "database_overage_waived",
+            "database_overage_closed",
+            "database_hold_drift",
         }
     )
     # An order in one of these states was paid for, so its lifecycle events are contract evidence.

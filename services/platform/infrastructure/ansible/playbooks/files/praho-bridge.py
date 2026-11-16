@@ -22,6 +22,7 @@ import shlex
 import ssl
 import stat
 import subprocess
+import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -34,6 +35,42 @@ HTTPS_PORT = 443
 HTTP_PORT = 80
 MAX_HOSTNAME_LENGTH = 253
 NEUTRAL_BODY = "Not Found"
+UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+HOLD_HELPER = Path("/var/lib/praho/recovery/praho_database_hold.py")
+
+
+def billing_hold_request(text: str) -> dict[str, Any] | None:
+    """The activation's optional billing hold (#776): exactly a token, a generation and Platform's installation."""
+    if text == "":
+        return None
+    hold = json.loads(text)
+    if (
+        not isinstance(hold, dict)
+        or set(hold) != {"token", "generation", "installation"}
+        or not all(isinstance(hold[key], str) and UUID_TEXT.fullmatch(hold[key]) for key in ("token", "installation"))
+        or type(hold["generation"]) is not int
+        or not 0 < hold["generation"] < 1 << 62
+    ):
+        raise ValueError("The activation billing hold request is not exact")
+    return hold
+
+
+def run_hold_helper(request: dict[str, Any]) -> dict[str, Any]:
+    """One action of the node's database hold helper; a non-zero exit is an uncertain outcome."""
+    result = subprocess.run(  # noqa: S603  # Fixed root-owned helper; the request travels on stdin only.
+        ["/usr/bin/python3", str(HOLD_HELPER)],
+        input=json.dumps(request),
+        text=True,
+        capture_output=True,
+        timeout=300,
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError("The database hold helper did not complete")
+    receipt = json.loads(result.stdout)
+    if not isinstance(receipt, dict):
+        raise ValueError("The database hold helper returned no receipt")
+    return receipt
 
 
 def command(argv: list[str]) -> str:
@@ -60,6 +97,8 @@ class NodeBridge:
         self.hosts = root / "etc/hosts"
         self.credential_helper = root / "var/lib/praho/recovery/credentials.pl"
         self.execute = execute
+        self.run_hold: Callable[[dict[str, Any]], dict[str, Any]] = run_hold_helper
+        self.hold_helper = HOLD_HELPER
         self.minimum_certificate_lifetime = 48 * 3600
         self.binding_policy = None
 
@@ -793,7 +832,15 @@ class NodeBridge:
             mode = "LOCK" if account["locked"] else "UNLOCK"
             self.sql(f"ALTER USER '{user}'@'{host}' ACCOUNT {mode}")
 
-    def verify_accounts(self, record: dict[str, Any], *, verify_auth: bool = True) -> None:
+    def verify_accounts(
+        self,
+        record: dict[str, Any],
+        *,
+        verify_auth: bool = True,
+        check_locks: bool = True,
+        check_grants: bool = True,
+        grants_only: bool = False,
+    ) -> None:
         for account in record["accounts"]:
             user, host = account["user"], account["host"]
             predicate = f"User = '{user}' AND Host = '{host}'"
@@ -801,7 +848,7 @@ class NodeBridge:
                 "SELECT IFNULL(JSON_VALUE(Priv, '$.account_locked'), 'false') "  # noqa: S608  # Identifiers validated by restore_accounts before this read.
                 f"FROM mysql.global_priv WHERE {predicate}"
             ).strip() in {"true", "1"}
-            if locked != account["locked"]:
+            if check_locks and locked != account["locked"]:
                 raise ValueError("A target database account has another lock state")
             plugin = self.sql(
                 "SELECT IFNULL(JSON_VALUE(Priv, '$.plugin'), '') "  # noqa: S608  # Validated identifiers.
@@ -824,7 +871,10 @@ class NodeBridge:
             differences = [
                 name
                 for name, got, wanted in zip(("plugin", "authentication", "grants"), actual, expected, strict=True)
-                if got != wanted and (verify_auth or name != "authentication")
+                if got != wanted
+                and (verify_auth or name != "authentication")
+                and (check_grants or name != "grants")
+                and (not grants_only or name == "grants")
             ]
             if differences:
                 raise ValueError(
@@ -888,7 +938,7 @@ class NodeBridge:
             finally:
                 incoming.unlink(missing_ok=True)
 
-    def activate_target(
+    def activate_target(  # noqa: PLR0913  # The staged identity, its record, current policy and an optional hold.
         self,
         identity: str,
         domain: str,
@@ -896,8 +946,12 @@ class NodeBridge:
         record: dict[str, Any],
         *,
         enabled: bool | None = None,
-    ) -> None:
-        """Apply once on the target; replay may never overwrite state after writes were admitted."""
+        billing_hold: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """Apply once on the target; replay may never overwrite state after writes were admitted.
+
+        With a billing hold, the payload reports whether the target was held before its writes were admitted.
+        """
         with self.locked():
             binding = self.target_binding(domain, owner, record)
             directory = self.directory(identity)
@@ -910,14 +964,28 @@ class NodeBridge:
             kept = directory / "activation.crontab"
             if previous.get("phase") == "completed":
                 kept.unlink(missing_ok=True)
-                return
+                return previous.get("payload")
             if previous.get("phase") != "staged" or (directory / "origin-removed").exists():
                 raise ValueError(
                     "An interrupted or removed activation needs review; target state will not be overwritten"
                 )
             self.original_cron(kept, record)
             self.write(marker, json.dumps({**binding, "phase": "applying"}), durable=True)
-            self.restore_target_runtime(domain, owner, record, kept, enabled=enabled)
+            hold = (
+                None
+                if billing_hold is None
+                else {
+                    "identity": {
+                        "domain_id": binding["target_domain_id"],
+                        "domain": binding["domain"],
+                        "installation": billing_hold["installation"],
+                    },
+                    "token": billing_hold["token"],
+                    "generation": billing_hold["generation"],
+                }
+            )
+            outcome = self.restore_target_runtime(domain, owner, record, kept, enabled=enabled, billing_hold=hold)
+            payload = None if billing_hold is None else {"billing_hold": outcome}
             policy_record = {
                 "enabled": record["enabled"],
                 "accounts": [
@@ -932,11 +1000,14 @@ class NodeBridge:
                 },
             }
             self.write(
-                marker, json.dumps({**binding, "phase": "completed", "policy_record": policy_record}), durable=True
+                marker,
+                json.dumps({**binding, "phase": "completed", "policy_record": policy_record, "payload": payload}),
+                durable=True,
             )
             kept.unlink(missing_ok=True)
+            return payload
 
-    def restore_target_runtime(  # noqa: C901, PLR0912, PLR0915  # One locked native activation with ordered verification.
+    def restore_target_runtime(  # noqa: C901, PLR0912, PLR0913, PLR0915  # One locked native activation with ordered verification.
         self,
         domain: str,
         owner: str,
@@ -944,8 +1015,13 @@ class NodeBridge:
         kept: Path,
         *,
         enabled: bool | None = None,
-    ) -> None:
-        """The caller holds the node lock and has persisted the applying marker."""
+        billing_hold: dict[str, Any] | None = None,
+    ) -> dict[str, Any] | None:
+        """The caller holds the node lock and has persisted the applying marker.
+
+        A billing hold goes after the original grants are compared and before anything is unlocked or enabled, so
+        no write is admitted with the grants the hold removes (plan revision 3).
+        """
         desired = record["enabled"][0]["enabled"] if enabled is None else enabled
         if type(desired) is not bool:
             raise ValueError("Current enabled policy must be boolean")
@@ -955,6 +1031,13 @@ class NodeBridge:
         for account in effective["accounts"]:
             account["locked"] = account["locked"] or not desired
         record = effective
+        outcome = None
+        if billing_hold is not None:
+            # The accounts are still locked from the restore: compare the grants it put back, then hold. The
+            # credential is compared at the end: Virtualmin's enable callback restores a suspended MySQL password.
+            self.verify_accounts(record, check_locks=False, grants_only=True)
+            outcome = self._hold_api().hold_on_activation(self.run_hold, billing_hold)
+        held = outcome is not None and outcome["outcome"] == "held"
         self.restore_accounts(record)
         for item in record["enabled"]:
             name = hostname(item["name"])
@@ -994,7 +1077,10 @@ class NodeBridge:
                 False,
                 scope="recovery",
             )
-        self.verify_accounts(record, verify_auth=desired)
+        # A held target's grants were compared before the hold; now its hold must still be exactly in place.
+        self.verify_accounts(record, verify_auth=desired, check_grants=not held)
+        if held and billing_hold is not None and outcome is not None:
+            self._hold_api().verify_activation_hold(self.run_hold, billing_hold, outcome["held_digest"])
         disabled = set(self.execute(["virtualmin", "list-domains", "--disabled", "--name-only"]).splitlines())
         if any((item["name"] not in disabled) != item["enabled"] for item in record["enabled"]):
             raise ValueError("The target's enabled states do not match the original barrier record")
@@ -1013,7 +1099,18 @@ class NodeBridge:
         if self.active_cron_digest(cron) != expected_active:
             raise ValueError("The target cron differs from the original barrier record")
         if record["databases"]:
-            self.probe_target_write(domain, record)
+            self.probe_target_write(domain, record, held=held)
+        return outcome
+
+    def _hold_api(self) -> Any:
+        """The shared activation steps of the installed database hold helper (hold, verify, undo)."""
+        spec = importlib.util.spec_from_file_location("praho_bridge_database_hold", self.hold_helper)
+        if spec is None or spec.loader is None:
+            raise ValueError("The database hold helper is not installed")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module  # Its dataclasses resolve annotations through the module registry.
+        spec.loader.exec_module(module)
+        return module
 
     @staticmethod
     def _activation_identity(kept: Path) -> str:
@@ -1167,7 +1264,7 @@ class NodeBridge:
             self.write(policy_file, json.dumps({"enabled": enabled, "resume": resume}), durable=True)
             return proof
 
-    def probe_target_write(self, domain: str, record: dict[str, Any]) -> None:
+    def probe_target_write(self, domain: str, record: dict[str, Any], *, held: bool = False) -> None:
         listing = self.execute(["virtualmin", "list-domains", "--domain", domain, "--multiline"])
         attributes = dict(re.findall(r"^\s*(Username for mysql|Password for mysql): (.*)$", listing, re.M))
         user = attributes.get("Username for mysql", "")
@@ -1175,9 +1272,10 @@ class NodeBridge:
             raise ValueError("The target database owner could not be read")
         enabled = next(item["enabled"] for item in record["enabled"] if item["name"] == domain)
         table = "praho_activation_" + secrets.token_hex(8)
+        # A held owner logs in and reads; its writes are refused by design.
         sql = (
             f"CREATE TABLE {table} (x INT); INSERT INTO {table} VALUES (1); DROP TABLE {table}"  # noqa: S608  # Locally generated hexadecimal identifier.
-            if enabled
+            if enabled and not held
             else "SELECT 1"
         )
         outcome = subprocess.run(  # noqa: S603  # Fixed executable/argv, validated identifiers; password only in env.
@@ -1251,12 +1349,16 @@ def main() -> None:  # noqa: C901, PLR0912  # Explicit allowlisted node-operatio
     elif action == "retire_activation":
         node.retire_activation_data(identity)
     elif action == "activate":
-        node.activate_target(
-            identity,
-            os.environ["PRAHO_BRIDGE_DOMAIN"],
-            os.environ["PRAHO_BRIDGE_OWNER"],
-            json.loads(os.environ["PRAHO_BARRIER_RECORD"]),
-            enabled=enabled,
+        payload = (
+            node.activate_target(
+                identity,
+                os.environ["PRAHO_BRIDGE_DOMAIN"],
+                os.environ["PRAHO_BRIDGE_OWNER"],
+                json.loads(os.environ["PRAHO_BARRIER_RECORD"]),
+                enabled=enabled,
+                billing_hold=billing_hold_request(os.environ.get("PRAHO_BRIDGE_BILLING_HOLD", "")),
+            )
+            or ""
         )
     elif action == "reconcile_policy":
         if enabled is None:

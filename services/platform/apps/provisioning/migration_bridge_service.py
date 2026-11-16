@@ -24,6 +24,7 @@ from apps.common.types import Err, Ok, Result, Retriability, retriability_of
 
 from .account_hostname_config import bridge_window_hours
 from .account_hostname_models import AccountHostname
+from .database_hold_gateway import activation_hold_outcome, activation_hold_request
 from .virtualmin_gateway import listing_attribute
 from .virtualmin_migration_models import VirtualminMigration
 
@@ -274,13 +275,23 @@ def remove_bridge(migration: VirtualminMigration, *, source_removed: bool = Fals
     return Ok("removed")
 
 
-def activate_target(migration: VirtualminMigration, *, enabled: bool | None = None) -> Result[str, str]:
-    """After commit, activate only the target using its precommit-staged, domain-id-bound record."""
+def activate_target(
+    migration: VirtualminMigration, *, enabled: bool | None = None, billing_hold: dict[str, Any] | None = None
+) -> Result[dict[str, Any] | str, str]:
+    """After commit, activate only the target using its precommit-staged, domain-id-bound record.
+
+    With billing_hold ({token, generation, installation}), the target is held before its writes are admitted, and
+    the result is the node's exact hold outcome (#776); without it, the result stays "activated".
+    """
     if migration.cutover_committed_at is None:
         return Err("The target cannot be activated before the cutover commit")
     target = getattr(migration.target_server, "node_deployment", None)
     if target is None:
         return Err("The target needs a managed deployment", retriability=Retriability.NOT_RETRIABLE)
+    try:
+        hold = None if billing_hold is None else activation_hold_request(billing_hold)
+    except ValueError as error:
+        return Err(str(error), retriability=Retriability.NOT_RETRIABLE)
     record = _original_record(migration)
     if record.is_err():
         return Err(record.unwrap_err(), retriability=retriability_of(record))
@@ -293,11 +304,32 @@ def activate_target(migration: VirtualminMigration, *, enabled: bool | None = No
             "bridge_owner": migration.account.virtualmin_username,
             "bridge_barrier_record": record.unwrap(),
             **({"bridge_enabled": enabled} if enabled is not None else {}),
+            **({"bridge_billing_hold": hold} if hold is not None else {}),
         },
     )
     if activated.is_err():
         return Err(activated.unwrap_err(), retriability=retriability_of(activated))
-    return Ok("activated")
+    return Ok("activated") if hold is None else _hold_outcome(migration, hold, activated.unwrap())
+
+
+def _hold_outcome(
+    migration: VirtualminMigration, hold: dict[str, Any], payload: object
+) -> Result[dict[str, Any] | str, str]:
+    """The target activated; this is only what happened to its billing hold, or that it is unknown."""
+    try:
+        if not isinstance(payload, dict) or set(payload) != {"billing_hold"}:
+            raise ValueError("The activation returned no billing hold outcome")
+        known = migration.barrier_state.get("target_domain_id")
+        return Ok(
+            activation_hold_outcome(
+                payload["billing_hold"],
+                hold,
+                domain=migration.account.domain,
+                domain_id=str(known) if known is not None else None,
+            )
+        )
+    except ValueError as error:
+        return Err(f"The activation's billing hold is uncertain: {error}", retriability=Retriability.UNKNOWN)
 
 
 def enforce_target_policy(migration: VirtualminMigration, enabled: bool) -> Result[str, str]:

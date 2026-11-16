@@ -7,7 +7,7 @@ when some code writes it; the list is read from the code, so it cannot drift fro
 classification (category, severity, sensitivity, review) comes from `apps/audit/classification.py`.
 See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 
-592 actions, in 9 categories.
+602 actions, in 9 categories.
 
 ## Account management
 
@@ -129,6 +129,16 @@ See ADR-0016 for what must be audited and ADR-0043 for what an event may hold.
 | `credit_score_updated` | low | no | yes | customers |
 | `d390_export` | low | no | no | billing |
 | `daily_billing_completed` | low | no | no | billing |
+| `database_hold_drift` | low | no | no | provisioning |
+| `database_overage_closed` | low | no | no | provisioning |
+| `database_overage_extended` | low | no | no | provisioning |
+| `database_overage_hold_applied` | low | no | no | provisioning |
+| `database_overage_hold_released` | low | no | no | provisioning |
+| `database_overage_hold_requested` | low | no | no | provisioning |
+| `database_overage_notice_sent` | low | no | no | provisioning |
+| `database_overage_opened` | low | no | no | provisioning |
+| `database_overage_release_requested` | low | no | no | provisioning |
+| `database_overage_waived` | low | no | no | provisioning |
 | `delete` | low | no | no | audit, common, products, settings |
 | `dns_fallback` | low | no | no | common |
 | `dns_zone_crosscheck_requested` | low | no | no | domains |

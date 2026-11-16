@@ -511,6 +511,61 @@ class ComponentTargetCoordinatorTests(SimpleTestCase):
             target.activate("c" * 64, enabled=True)
         callback.assert_called_once()
 
+    def test_activation_holds_the_target_domain_with_platforms_token_and_installation(self):
+        target = self.activation_target()
+        target.seal("c" * 64)
+        native = self.enterContext(patch.object(target, "_activate_native"))
+        self.enterContext(patch.object(target, "_active", return_value={"phase": "active"}))
+        hold = {"token": str(uuid4()), "generation": 3, "installation": str(uuid4())}
+        target.activate("c" * 64, enabled=True, billing_hold=hold)
+        self.assertEqual(
+            native.call_args.kwargs["billing_hold"],
+            {
+                "identity": {"domain_id": "987654321", "domain": target.domain, "installation": hold["installation"]},
+                "token": hold["token"],
+                "generation": 3,
+            },
+        )
+
+    def test_the_installed_hold_helper_loads_with_its_dataclasses(self):
+        target = self.activation_target()
+        helper = target._hold_module()
+        self.assertTrue(callable(helper.hold_on_activation))
+        self.assertTrue(hasattr(helper.Paths(), "state"))
+
+    def test_a_malformed_hold_request_refuses_before_any_native_change(self):
+        target = self.activation_target()
+        target.seal("c" * 64)
+        native = self.enterContext(patch.object(target, "_activate_native"))
+        for bad in ({"token": "x", "generation": 3, "installation": str(uuid4())}, {"generation": 3}, "hold"):
+            with self.subTest(bad=bad), self.assertRaisesRegex(ValueError, "billing hold"):
+                target.activate("c" * 64, enabled=True, billing_hold=bad)
+        native.assert_not_called()
+        self.assertEqual(target.journal.read()["phase"], "sealed")
+
+    def test_a_completed_activation_returns_its_stored_hold_outcome(self):
+        target = self.activation_target()
+        outcome = {"outcome": "not_held", "reason": "refused", "code": "global_privilege"}
+        with target.journal.locked():
+            state = target._state()
+            state.update(phase="active", enabled=True, billing_hold_outcome=outcome)
+            target.journal.write(state)
+        self.enterContext(patch.object(target, "_active", return_value={"phase": "active"}))
+        self.assertEqual(target.activate("c" * 64, enabled=True)["billing_hold"], outcome)
+
+    def test_platform_records_a_hold_only_on_an_active_target(self):
+        target = self.activation_target()
+        sql = self.enterContext(patch.object(target, "_sql")).return_value
+        record = {"token": str(uuid4()), "generation": 3, "held_digest": "d" * 64}
+        with self.assertRaisesRegex(ValueError, "completed"):
+            target.record_billing_hold(record)
+        with target.journal.locked():
+            state = target._state()
+            state.update(phase="active", enabled=True)
+            target.journal.write(state)
+        self.assertEqual(target.record_billing_hold(record)["billing_hold"], record)
+        sql.record_billing_hold.assert_called_once_with(record)
+
     def test_held_target_cannot_activate_before_native_compensation_is_sealed(self):
         target = self.activation_target()
         callback = self.enterContext(patch.object(target, "_activate_native"))

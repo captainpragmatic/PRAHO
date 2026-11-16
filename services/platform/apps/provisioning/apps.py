@@ -13,6 +13,7 @@ class ProvisioningConfig(AppConfig):
     def ready(self) -> None:
         """Import signals when the app is ready"""
         import apps.provisioning.account_hostname_signals  # Circular: app registry
+        import apps.provisioning.database_overage_signals  # Circular: app registry
         import apps.provisioning.hosting_limit_signals  # Circular: app registry
         import apps.provisioning.hosting_node_policy_signals  # Circular: app registry
         import apps.provisioning.hosting_warning_signals  # Circular: app registry

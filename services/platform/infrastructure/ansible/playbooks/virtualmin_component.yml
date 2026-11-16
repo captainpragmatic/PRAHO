@@ -8,7 +8,7 @@
       ansible.builtin.assert:
         that:
           - ansible_play_hosts_all | length == 1
-          - component_action in ['inspect', 'source_hold', 'source_verify', 'source_export', 'source_release', 'source_commit', 'source_route', 'source_retire', 'source_retire_artifacts', 'target_prepare', 'target_restore', 'target_verify', 'target_seal', 'target_activate', 'target_policy', 'target_remove', 'target_retire_artifacts', 'target_retire_unprepared_archive']
+          - component_action in ['inspect', 'source_hold', 'source_verify', 'source_export', 'source_release', 'source_commit', 'source_route', 'source_retire', 'source_retire_artifacts', 'target_prepare', 'target_restore', 'target_verify', 'target_seal', 'target_activate', 'target_billing_hold', 'target_policy', 'target_remove', 'target_retire_artifacts', 'target_retire_unprepared_archive']
           - component_request is mapping
 
     - name: Inspect through temporary root-private native helpers
@@ -76,7 +76,7 @@
             - praho-component-file-retire.py
 
         - name: Install the qualified target restoration and activation helpers
-          when: component_action in ['target_prepare', 'target_restore', 'target_verify', 'target_seal', 'target_activate', 'target_policy', 'target_remove', 'target_retire_artifacts', 'target_retire_unprepared_archive']
+          when: component_action in ['target_prepare', 'target_restore', 'target_verify', 'target_seal', 'target_activate', 'target_billing_hold', 'target_policy', 'target_remove', 'target_retire_artifacts', 'target_retire_unprepared_archive']
           ansible.builtin.copy:
             src: "files/{{ item }}"
             dest: "{{ component_directory.path }}/{{ item }}"
@@ -89,6 +89,7 @@
             - praho-component-target-preflight.py
             - praho-component-target-archive.py
             - praho-component-target-database.py
+            - praho_database_hold.py
             - praho-component-file-restore.py
             - praho-component-native-command.pl
             - praho-component-policy.pl
@@ -97,7 +98,7 @@
             - praho-pair-restore.sh
 
         - name: Install the shared numeric owner shadow schema for target activation
-          when: component_action in ['target_prepare', 'target_restore', 'target_verify', 'target_seal', 'target_activate', 'target_policy', 'target_remove', 'target_retire_artifacts', 'target_retire_unprepared_archive']
+          when: component_action in ['target_prepare', 'target_restore', 'target_verify', 'target_seal', 'target_activate', 'target_billing_hold', 'target_policy', 'target_remove', 'target_retire_artifacts', 'target_retire_unprepared_archive']
           ansible.builtin.copy:
             src: "{{ playbook_dir }}/../../../apps/provisioning/backup_owner_shadow.py"
             dest: "{{ component_directory.path }}/praho_owner_shadow.py"
@@ -136,6 +137,15 @@
           when: component_action != 'inspect'
           ansible.builtin.debug:
             msg: "PRAHO_COMPONENT_RESULT={{ component_result.stdout | trim | b64encode }}"
+      rescue:
+        # no_log hides a failed action's whole output; its last stdout line is an allowlisted failure receipt.
+        - name: Return only the action's allowlisted failure receipt
+          when: component_result is defined and component_result.stdout is defined
+          ansible.builtin.debug:
+            msg: "PRAHO_COMPONENT_FAILURE={{ (component_result.stdout | trim).splitlines() | last | default('') | b64encode }}"
+        - name: Keep the failed component action failed
+          ansible.builtin.fail:
+            msg: The component action failed; Platform reads only its allowlisted failure receipt.
       always:
         - name: Remove only this action's temporary inspection directory
           ansible.builtin.file:

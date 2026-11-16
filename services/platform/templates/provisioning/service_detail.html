@@ -82,6 +82,8 @@
                       {% trans "Resource-only exception" as override_label %}{% button override_label variant="secondary" href=override_url %}
                       {% url 'provisioning:service_hosting_raise' service.pk as relief_url %}
                       {% trans "Temporary disk relief" as relief_label %}{% button relief_label variant="secondary" href=relief_url %}
+                      {% url 'provisioning:service_database_overage' service.pk as overage_url %}
+                      {% trans "Database over-allowance" as overage_label %}{% button overage_label variant="secondary" href=overage_url %}
                     {% endif %}
                 {% endif %}
                 {% url 'provisioning:services' as services_url %}

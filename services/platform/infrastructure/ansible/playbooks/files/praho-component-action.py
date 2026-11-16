@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 MAX_REQUEST_BYTES = 256 * 1024
+MAX_CHANGED_PARTS = 32
 SOURCE_ACTIONS = frozenset(
     {
         "source_hold",
@@ -29,6 +31,7 @@ TARGET_ACTIONS = frozenset(
         "target_verify",
         "target_seal",
         "target_activate",
+        "target_billing_hold",
         "target_policy",
         "target_remove",
         "target_retire_artifacts",
@@ -132,6 +135,8 @@ def perform_target(payload: dict[str, Any]) -> dict[str, Any]:
         receipt = target.seal(payload["target_receipt_sha256"])
     elif action == "target_policy":
         receipt = target.reconcile_policy(enabled=payload["enabled"])
+    elif action == "target_billing_hold":
+        receipt = target.record_billing_hold(payload["billing_hold"])
     elif action == "target_retire_artifacts":
         receipt = target.retire_artifacts()
     elif action == "target_retire_unprepared_archive":
@@ -139,8 +144,36 @@ def perform_target(payload: dict[str, Any]) -> dict[str, Any]:
     elif action == "target_remove":
         receipt = target.remove()
     else:
-        receipt = target.activate(payload["target_receipt_sha256"], enabled=payload["enabled"])
+        receipt = target.activate(
+            payload["target_receipt_sha256"], enabled=payload["enabled"], billing_hold=payload.get("billing_hold")
+        )
     return {**receipt, "action": action}
+
+
+RETIREMENT_STEPS = frozenset({"web", "database", "paths", "files", "cron", "ingress", "export"})
+_SAFE_REASON = re.compile(r"[A-Za-z0-9 _.,;()'/-]{1,200}")
+
+
+def failure_receipt(error: BaseException) -> dict[str, Any]:
+    """What a failed action may tell Platform past no_log: the type, the authored reason, retirement facts.
+
+    Only the message's own prefix is kept; text interpolated after ": " (helper stderr, paths) never leaves.
+    """
+    receipt: dict[str, Any] = {"type": type(error).__name__[:64]}
+    reason = str(error).split(": ", 1)[0]
+    if _SAFE_REASON.fullmatch(reason):
+        receipt["reason"] = reason
+    step = getattr(error, "retirement_step", None)
+    if step in RETIREMENT_STEPS:
+        receipt["step"] = step
+    changed = getattr(error, "retained_changed", None)
+    if (
+        isinstance(changed, list)
+        and len(changed) <= MAX_CHANGED_PARTS
+        and all(isinstance(name, str) and name.isidentifier() for name in changed)
+    ):
+        receipt["changed"] = changed
+    return receipt
 
 
 if __name__ == "__main__":
@@ -150,4 +183,10 @@ if __name__ == "__main__":
     value = json.loads(encoded)
     if not isinstance(value, dict):
         raise ValueError("An exact source component action is required")
-    print(json.dumps(perform(value), sort_keys=True, separators=(",", ":"), allow_nan=False))
+    try:
+        result = perform(value)
+    except Exception as error:
+        # The playbook's rescue returns this last line; the traceback stays on the node.
+        print(json.dumps({"failure": failure_receipt(error)}, sort_keys=True, separators=(",", ":")))
+        raise
+    print(json.dumps(result, sort_keys=True, separators=(",", ":"), allow_nan=False))

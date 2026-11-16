@@ -53,6 +53,32 @@ The account needs repair when its kernel hard caps differ from the configured
    application sets both kernel caps again and verifies them in its receipt.
 3. Refresh the account's quota evidence and confirm the caps now match.
 
+## Databases over the allowance
+
+Staff procedures are in [the database over-allowance runbook](DATABASE_OVERAGE_RUNBOOK.md).
+Off until `provisioning.database_overage_enabled` is on. Enable it only once the
+write hold is in the Terms ([ADR-0075](../ADRs/ADR-0075-database-files-outside-the-kernel-quota.md)).
+
+- An account whose databases put it over its verified allowance (plus active
+  temporary relief) gets a database over-allowance episode. It needs database
+  bytes: files alone never open one.
+- The customer gets a day-0 email and a support ticket with no author and their
+  own contact details. Writes stay enabled for
+  `provisioning.database_overage_grace_days` (default 14) from when the notice is
+  sent. While the episode is open the day-0 notice replaces the 100% disk warning.
+- Every notice is checked again just before the provider: a closed episode, a new
+  owner or recipient, a suppressed address or an inactive service fails it for
+  good, and the next sweep may send a replacement. A crash between the provider's
+  acceptance and its record can repeat an email; that rare repeat is accepted.
+- A day-0 email that soft-bounces is not a delivered notice: the hold waits for an
+  accepted day-0 notice, and after a day the deferral asks staff.
+- The episode closes after 24 observed hours under the allowance. Readings more
+  than 3 hours apart restart the 24 hours, so an outage never counts as "under".
+- While the service or account is inactive the clock stops. On resume the
+  deadline moves by the pause and at least 3 days remain.
+- The episode's audit trail (opened, notice sent, hold applied and released,
+  extended, waived, closed, drift) is kept as contract evidence.
+
 ## Repairing tenant-charged databases
 
 A node installed before ADR-0075 can hold databases charged to the account. Probes

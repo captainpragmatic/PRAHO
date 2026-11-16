@@ -75,6 +75,7 @@
 
                     {% include 'components/mobile_nav_item.html' with url_name='provisioning:virtualmin_servers' title='Virtualmin Servers' subtitle='Server management' staff_only=True icon_name='server' %}
                     {% include 'components/mobile_nav_item.html' with url_name='provisioning:virtualmin_accounts' title='Hosting Accounts' subtitle='Virtual hosting accounts' staff_only=True icon_name='building' %}
+                    {% include 'components/mobile_nav_item.html' with url_name='provisioning:database_overage_attention' title='Database Overage' subtitle='Episodes needing staff' staff_only=True icon_name='server' %}
                     {% include 'components/mobile_nav_item.html' with url='/domains/admin/registrars/' title='Registrars' subtitle='Domain registrar partners' staff_only=True icon_name='building' %}
                     {% include 'components/mobile_nav_item.html' with url='/domains/admin/tlds/' title='TLD Management' subtitle='Top-level domain config' staff_only=True icon_name='globe' %}
                     {% include 'components/mobile_nav_item.html' with url='/infrastructure/' title='Infrastructure' subtitle='Server infrastructure' staff_only=True icon_name='server' %}

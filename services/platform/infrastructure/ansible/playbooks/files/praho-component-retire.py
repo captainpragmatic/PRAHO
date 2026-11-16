@@ -33,8 +33,12 @@ files = _module("praho-component-file-retire.py", "component_retirement_files")
 exports = _module("praho-component-source-export.py", "component_retirement_exports")
 
 
-def _retained(source: Any, context: dict[str, Any]) -> str:
-    """Baseline CURRENT retained state, normalizing only authorized selected-component changes."""
+def _retained(source: Any, context: dict[str, Any], parts: dict[str, str] | None = None) -> str:
+    """Baseline CURRENT retained state, normalizing only authorized selected-component changes.
+
+    When `parts` is given, it receives one digest per top-level part, so a mismatch can name what changed
+    without recording any value.
+    """
     inspection = native.inspection
     manifest = context["manifest"]
     if native.authority_digest(manifest) != source.authority:
@@ -84,23 +88,24 @@ def _retained(source: Any, context: dict[str, Any]) -> str:
     for key in ("ssl_cert", "ssl_key", "ssl_chain", "ssl_combined", "ssl_everything"):
         if domain.get(key):
             certificates[key] = hashlib.sha256(inspection._read(Path(domain[key])).encode()).hexdigest()
-    return inspection._digest(
-        {
-            "domain": normalized(domain),
-            "retained_databases": sorted(set(domain.get("db_mysql", "").split()) - allowed),
-            "unix_authentication": hashlib.sha256(
-                inspection._command(["/usr/bin/getent", "shadow", domain["user"]]).encode()
-            ).hexdigest(),
-            "owner_cron": inspection._owner_cron(domain["user"], []),
-            "owner_domains": owner_domains,
-            "dns": {
-                key: value for key, value in records.items() if key not in {"apex_a", "apex_aaaa", "www_a", "www_aaaa"}
-            },
-            "mail": mail,
-            "ssl": ssl,
-            "certificates": certificates,
-        }
-    )
+    retained = {
+        "domain": normalized(domain),
+        "retained_databases": sorted(set(domain.get("db_mysql", "").split()) - allowed),
+        "unix_authentication": hashlib.sha256(
+            inspection._command(["/usr/bin/getent", "shadow", domain["user"]]).encode()
+        ).hexdigest(),
+        "owner_cron": inspection._owner_cron(domain["user"], []),
+        "owner_domains": owner_domains,
+        "dns": {
+            key: value for key, value in records.items() if key not in {"apex_a", "apex_aaaa", "www_a", "www_aaaa"}
+        },
+        "mail": mail,
+        "ssl": ssl,
+        "certificates": certificates,
+    }
+    if parts is not None:
+        parts.update({key: inspection._digest(value) for key, value in retained.items()})
+    return inspection._digest(retained)
 
 
 def _native(action: str, source: Any, context: dict[str, Any]) -> dict[str, Any]:
@@ -264,9 +269,93 @@ def _verify_empty_export(source: Any) -> None:
             raise ValueError("The retired private source export namespace was reused")
 
 
+MAX_ERROR_MESSAGE = 500
+
+
+class RetirementParkedError(ValueError):
+    """A retirement that cannot prove where it stopped; it keeps the original failure's record."""
+
+
+class RetainedChangeError(ValueError):
+    """Retained services differ from the recorded baseline; names the differing parts, never their values."""
+
+    def __init__(self, changed: list[str]) -> None:
+        super().__init__("Retained source services changed during component retirement: " + ", ".join(changed))
+        self.retained_changed = changed
+
+
 class SourceRetirement:
     def __init__(self, source: Any) -> None:
         self.source, self.coordinator = source, source.coordinator
+
+    def _recheck(self, retirement: dict[str, Any], context: dict[str, Any]) -> None:
+        """Retained services must still match the digest recorded before any retirement step."""
+        parts: dict[str, str] = {}
+        if _retained(self.source, context, parts) == retirement["retained_digest"]:
+            return
+        baseline = retirement.get("retained_parts")
+        if isinstance(baseline, dict) and baseline and parts:
+            changed = sorted(key for key in set(baseline) | set(parts) if baseline.get(key) != parts.get(key))
+        else:
+            changed = ["unknown"]
+        retirement["retained_changed"] = changed
+        raise RetainedChangeError(changed)
+
+    def _proven_complete(self, name: str, state: dict[str, Any], steps: dict[str, Any]) -> bool:
+        """Re-verify a step whose work returned, with the checks a retired source is held to.
+
+        Releasing the path fence has no idempotent post-condition, so it is never proven here; a retry
+        still accepts it as an earlier completed step, exactly as a retired source does.
+        """
+        context, retirement = state["context"], state["retirement"]
+        try:
+            if name == "web":
+                return (
+                    isinstance(retirement.get("web_sha256"), str)
+                    and _verify_web(self.source, context) == retirement["web_sha256"]
+                )
+            if name == "database":
+                _sql_absent(steps["database"])
+            elif name == "files":
+                files.retire(retirement["file_capture"])
+            elif name == "cron":
+                steps["cron"].retire()
+            elif name == "ingress":
+                steps["web"].retire_after_web_absence(_verify_web(self.source, context))
+            elif name == "export":
+                _verify_empty_export(self.source)
+            else:
+                return False
+        except (OSError, ValueError, KeyError, RuntimeError):
+            # RuntimeError: a native helper that can't answer; the step stays unproven and the retry parks.
+            return False
+        return True
+
+    def _finish_step(self, state: dict[str, Any], retirement: dict[str, Any]) -> None:
+        retirement["completed"].append(retirement["pending"])
+        retirement["pending"] = None
+        retirement.pop("step_done", None)
+        retirement.pop("last_error", None)
+        retirement.pop("retained_changed", None)
+        self.coordinator.journal.write(state)
+
+    def _record_failure(self, state: dict[str, Any], error: Exception) -> None:
+        """Keep the step and the error for diagnosis; never let this write mask the original failure."""
+        retirement = state.get("retirement")
+        if not isinstance(retirement, dict) or isinstance(error, RetirementParkedError):
+            return
+        # Any exception type can land here; the action's failure receipt reads this attribute.
+        error.__dict__["retirement_step"] = retirement.get("pending")
+        retirement["last_error"] = {
+            "step": retirement.get("pending"),
+            "type": type(error).__name__,
+            "message": str(error)[:MAX_ERROR_MESSAGE],
+        }
+        try:
+            self.coordinator.journal.write(state)
+        except (OSError, ValueError) as write_error:
+            # The original failure is what the caller must see; the lost record is noted on it instead.
+            error.add_note("The retirement failure record was not written: " + type(write_error).__name__)
 
     def _step(self, name: str, state: dict[str, Any], steps: dict[str, Any]) -> None:
         context, retirement = state["context"], state["retirement"]
@@ -293,6 +382,7 @@ class SourceRetirement:
             state = self.coordinator._state()
             context = state["context"]
             steps = self.source.build(context)
+            resumed = state["phase"] == "retiring"
             if state["phase"] == "committed":
                 for name in native.coordinator.ORDER:
                     steps[name].verify()
@@ -304,8 +394,10 @@ class SourceRetirement:
                     self.source.operation,
                     self.source.authority,
                 )
+                parts: dict[str, str] = {}
                 state["retirement"] = {
-                    "retained_digest": _retained(self.source, context),
+                    "retained_digest": _retained(self.source, context, parts),
+                    "retained_parts": parts,
                     "file_capture": captured,
                     "completed": [],
                     "pending": None,
@@ -334,23 +426,46 @@ class SourceRetirement:
             elif state["phase"] != "retiring":
                 raise ValueError("Only the exact committed source may retire selected components")
             retirement = state.get("retirement")
-            if (
-                not isinstance(retirement, dict)
-                or retirement.get("pending") is not None
-                or retirement.get("completed") != list(ORDER[: len(retirement.get("completed", []))])
+            if not isinstance(retirement, dict) or retirement.get("completed") != list(
+                ORDER[: len(retirement.get("completed", []))]
             ):
                 raise ValueError("Source retirement was interrupted or is uncertain; inspect its exact receipts")
-            for name in ORDER[len(retirement["completed"]) :]:
-                if _retained(self.source, context) != retirement["retained_digest"]:
-                    raise ValueError("Retained source services changed during component retirement")
-                retirement["pending"] = name
-                self.coordinator.journal.write(state)
-                self._step(name, state, steps)
-                if _retained(self.source, context) != retirement["retained_digest"]:
-                    raise ValueError("Retained source services changed during component retirement")
-                retirement["completed"].append(name)
-                retirement["pending"] = None
-                self.coordinator.journal.write(state)
+            try:
+                pending = retirement.get("pending")
+                # Any resumed retirement holds its finished steps to their retired post-conditions again:
+                # retired content can be recreated between runs, and the services check doesn't cover it.
+                if resumed and not all(
+                    self._proven_complete(name, state, steps) for name in retirement["completed"] if name != "paths"
+                ):
+                    raise RetirementParkedError(
+                        "Source retirement was interrupted or is uncertain; inspect its exact receipts"
+                    )
+                if pending is not None:
+                    # Only a step whose own work returned and still verifies may finish with a fresh re-check;
+                    # anything else stays parked for review, as before.
+                    if (
+                        pending != ORDER[len(retirement["completed"])]
+                        or retirement.get("step_done") != pending
+                        or not self._proven_complete(pending, state, steps)
+                    ):
+                        raise RetirementParkedError(
+                            "Source retirement was interrupted or is uncertain; inspect its exact receipts"
+                        )
+                    self._recheck(retirement, context)
+                    self._finish_step(state, retirement)
+                for name in ORDER[len(retirement["completed"]) :]:
+                    self._recheck(retirement, context)
+                    retirement["pending"] = name
+                    self.coordinator.journal.write(state)
+                    self._step(name, state, steps)
+                    # Written with the step's own outputs, such as web_sha256, before anything can fail.
+                    retirement["step_done"] = name
+                    self.coordinator.journal.write(state)
+                    self._recheck(retirement, context)
+                    self._finish_step(state, retirement)
+            except Exception as error:
+                self._record_failure(state, error)
+                raise
             state["phase"] = "retired"
             self.coordinator.journal.write(state)
             return {

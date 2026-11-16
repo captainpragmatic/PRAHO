@@ -369,15 +369,18 @@ _EXCLUSIVE_JOB_OPERATIONS = ("backup_domain", "restore_domain", "delete_domain",
 ACCOUNT_BUSY_REFUSAL = "Account already has another active operation"
 
 
-def account_has_active_operation(account: VirtualminAccount, *, ignore_job_id: uuid.UUID | None = None) -> bool:
-    """Two-sided admission: migrations, backups, restores and deletes mutually exclude.
+def account_has_active_operation(
+    account: VirtualminAccount, *, ignore_job_id: uuid.UUID | None = None, ignore_episode_id: uuid.UUID | None = None
+) -> bool:
+    """Two-sided admission: migrations, backups, restores, deletes and database holds mutually exclude.
 
     ``ignore_job_id`` names the job asking: a retried job is itself the account's
-    operation and must not refuse itself.
+    operation and must not refuse itself. ``ignore_episode_id`` does the same for a database hold's episode.
     """
+    from .database_overage_admission import episode_blocks  # noqa: PLC0415  # Circular
     from .virtualmin_models import VirtualminProvisioningJob  # noqa: PLC0415  # Circular
 
-    if account_has_active_migration(account):
+    if account_has_active_migration(account) or episode_blocks(account, ignore_episode_id=ignore_episode_id):
         return True
     active = VirtualminProvisioningJob.objects.filter(
         models.Q(operation__in=_EXCLUSIVE_JOB_OPERATIONS, status__in=_ACTIVE_JOB_STATUSES)

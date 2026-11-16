@@ -165,8 +165,14 @@ def _account_busy(
     parent: dict[str, Any] | None = None,
     transfer_job_id: UUID | None = None,
 ) -> bool:
+    from .database_overage_admission import episode_blocks  # noqa: PLC0415
     from .virtualmin_migration_models import VirtualminMigration  # noqa: PLC0415
 
+    # A database hold or release on its way to the node stops new quota work. A quota operation that already owns
+    # the account (it asks with its own job), or the child of an admitted restore or migration, finishes: a hold
+    # waited for them, and a release waits for them.
+    if ignore_job_id is None and not parent and episode_blocks(account):
+        return True
     parent = parent or {}
     migrations = VirtualminMigration.objects.filter(account_id=account.pk).exclude(
         status__in=("completed", "failed", "rolled_back")

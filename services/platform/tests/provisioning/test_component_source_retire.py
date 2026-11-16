@@ -51,6 +51,8 @@ class ComponentSourceRetirementTests(SimpleTestCase):
         self.steps["paths"].release.side_effect = lambda: self.events.append("release:paths")
         self.steps["cron"].retire.side_effect = lambda: self.events.append("retire:cron")
         self.steps["web"].retire_after_web_absence.side_effect = lambda _sha: self.events.append("retire:ingress")
+        # A retired fixture database: no selected schema or principal is left for the post-condition check.
+        self.steps["database"].selected, self.steps["database"].principals = (), ()
         coordinator = self.module.native.coordinator.SourceCoordinator(
             "123456789",
             self.operation,
@@ -158,6 +160,160 @@ class ComponentSourceRetirementTests(SimpleTestCase):
             self.module.SourceRetirement(self.source).retire()
         self.sql.assert_not_called()
         self.steps["paths"].release.assert_not_called()
+
+    def fail_after(self, step, error=None, *, digest=None, times=1):
+        """Make the re-check right after `step` raise `error`, or return `digest`, `times` times."""
+        remaining = {"count": times}
+
+        def retained(*_args):
+            if self.events and self.events[-1] == "retire:" + step and remaining["count"]:
+                remaining["count"] -= 1
+                if error is not None:
+                    raise error
+                return digest
+            return self.current_retained
+
+        self.module._retained.side_effect = retained
+
+    def retirement(self):
+        return self.source.coordinator.journal.read()["retirement"]
+
+    def test_a_transient_recheck_failure_after_the_export_completes_on_retry(self):
+        # A dig timeout (exit 9) in the post-step re-check, after the export's own work finished (#880).
+        self.fail_after("export", ValueError("Native component evidence is unreadable or exceeds its bound"))
+        with self.assertRaisesRegex(ValueError, "unreadable"):
+            self.module.SourceRetirement(self.source).retire()
+        retirement = self.retirement()
+        self.assertEqual((retirement["pending"], retirement["step_done"]), ("export", "export"))
+        self.assertEqual(retirement["last_error"]["step"], "export")
+        self.assertEqual(retirement["last_error"]["type"], "ValueError")
+        self.assertIn("unreadable", retirement["last_error"]["message"])
+        with patch.object(self.module, "_verify_empty_export") as tombstone:
+            result = self.module.SourceRetirement(self.source).retire()
+        tombstone.assert_called_once()
+        self.assertEqual(result["phase"], "retired")
+        self.assertEqual(self.events.count("retire:export"), 1)
+        self.assertEqual(self.source.coordinator.journal.read()["phase"], "retired")
+
+    def test_a_real_retained_change_still_refuses_on_retry(self):
+        for first in (ValueError("Native component evidence is unreadable"), None):
+            with self.subTest(first_run="transient" if first else "changed"):
+                self.setUp()
+                self.fail_after("export", first, digest="a retained mail change", times=1)
+                with self.assertRaises(ValueError):
+                    self.module.SourceRetirement(self.source).retire()
+                self.module._retained.side_effect = lambda *_args: "a retained mail change"
+                with (
+                    patch.object(self.module, "_verify_empty_export"),
+                    self.assertRaisesRegex(ValueError, "Retained source services changed"),
+                ):
+                    self.module.SourceRetirement(self.source).retire()
+                self.assertEqual(self.source.coordinator.journal.read()["phase"], "retiring")
+                self.assertEqual(self.events.count("retire:export"), 1)
+
+    def test_a_step_whose_work_is_not_proven_complete_still_refuses(self):
+        self.fail_after("export", ValueError("Native component evidence is unreadable"))
+        with self.assertRaises(ValueError):
+            self.module.SourceRetirement(self.source).retire()
+        with (
+            patch.object(self.module, "_verify_empty_export", side_effect=ValueError("namespace was reused")),
+            self.assertRaisesRegex(ValueError, "interrupted|uncertain"),
+        ):
+            self.module.SourceRetirement(self.source).retire()
+        self.assertEqual(self.events.count("retire:export"), 1)
+        # The parked retry keeps the original cause for diagnosis.
+        self.assertIn("unreadable", self.retirement()["last_error"]["message"])
+
+    def test_a_retry_re_verifies_every_completed_step_not_only_the_pending_one(self):
+        # A customer can recreate retired content between the failed run and the retry.
+        self.fail_after("export", ValueError("Native component evidence is unreadable"))
+        with self.assertRaises(ValueError):
+            self.module.SourceRetirement(self.source).retire()
+        self.module.files.retire.side_effect = ValueError("The retired source path was recreated")
+        with (
+            patch.object(self.module, "_verify_empty_export"),
+            self.assertRaisesRegex(ValueError, "interrupted|uncertain"),
+        ):
+            self.module.SourceRetirement(self.source).retire()
+        self.assertEqual(self.source.coordinator.journal.read()["phase"], "retiring")
+
+    def test_a_retry_between_steps_also_re_verifies_completed_steps(self):
+        # The re-check before ingress fails after files and cron finished, so nothing is pending.
+        calls = {"count": 0}
+
+        def before_ingress(*_args):
+            if self.events and self.events[-1] == "retire:cron":
+                calls["count"] += 1
+                if calls["count"] == 2:
+                    raise ValueError("Native component evidence is unreadable")
+            return self.current_retained
+
+        self.module._retained.side_effect = before_ingress
+        with self.assertRaisesRegex(ValueError, "unreadable"):
+            self.module.SourceRetirement(self.source).retire()
+        self.assertIsNone(self.retirement()["pending"])
+        self.module._retained.side_effect = lambda *_args: self.current_retained
+        self.module.files.retire.side_effect = ValueError("The retired source path was recreated")
+        with self.assertRaisesRegex(ValueError, "interrupted|uncertain"):
+            self.module.SourceRetirement(self.source).retire()
+        self.assertNotIn("retire:ingress", self.events)
+
+    def test_a_native_failure_while_re_verifying_parks_and_keeps_the_original_record(self):
+        self.fail_after("export", ValueError("Native component evidence is unreadable"))
+        with self.assertRaises(ValueError):
+            self.module.SourceRetirement(self.source).retire()
+        with (
+            patch.object(self.module, "_verify_web", side_effect=RuntimeError("Source native retirement step is uncertain")),
+            self.assertRaisesRegex(ValueError, "interrupted|uncertain"),
+        ):
+            self.module.SourceRetirement(self.source).retire()
+        self.assertIn("unreadable", self.retirement()["last_error"]["message"])
+
+    def test_a_failure_carries_its_step_and_changed_parts_for_the_receipt(self):
+        def parts_retained(_source, _context, parts=None):
+            changed = self.events and self.events[-1] == "retire:export"
+            values = {"domain": "same", "dns": "changed" if changed else "same"}
+            if parts is not None:
+                parts.update({key: self.module.native.inspection._digest(value) for key, value in values.items()})
+            return self.module.native.inspection._digest(values)
+
+        self.module._retained.side_effect = parts_retained
+        with self.assertRaises(ValueError) as raised:
+            self.module.SourceRetirement(self.source).retire()
+        self.assertEqual(raised.exception.retirement_step, "export")
+        self.assertEqual(raised.exception.retained_changed, ["dns"])
+
+    def test_a_step_without_a_completion_check_still_refuses(self):
+        # Releasing the path fence has no idempotent post-condition to re-verify.
+        self.steps["paths"].release.side_effect = lambda: self.events.append("retire:paths")
+        self.fail_after("paths", ValueError("Native component evidence is unreadable"))
+        with self.assertRaises(ValueError):
+            self.module.SourceRetirement(self.source).retire()
+        self.assertEqual(self.retirement()["pending"], "paths")
+        with self.assertRaisesRegex(ValueError, "interrupted|uncertain"):
+            self.module.SourceRetirement(self.source).retire()
+        self.steps["paths"].release.assert_called_once()
+
+    def test_the_differing_retained_parts_are_named_without_values(self):
+        def parts_retained(_source, _context, parts=None):
+            changed = self.events and self.events[-1] == "retire:export"
+            values = {"domain": "same", "dns": "changed" if changed else "same", "mail": "same"}
+            if parts is not None:
+                parts.update({key: self.module.native.inspection._digest(value) for key, value in values.items()})
+            return self.module.native.inspection._digest(values)
+
+        self.module._retained.side_effect = parts_retained
+        with self.assertRaisesRegex(ValueError, "dns"):
+            self.module.SourceRetirement(self.source).retire()
+        retirement = self.retirement()
+        self.assertEqual(retirement["retained_changed"], ["dns"])
+        self.assertNotIn("changed", str(retirement["retained_changed"]))
+
+    def test_a_baseline_without_part_digests_reports_unknown(self):
+        self.fail_after("export", None, digest="a retained mail change")
+        with self.assertRaises(ValueError):
+            self.module.SourceRetirement(self.source).retire()
+        self.assertEqual(self.retirement()["retained_changed"], ["unknown"])
 
     def test_released_export_cleanup_only_uses_private_artifacts_and_owned_parent_phase(self):
         state = self.source.coordinator.journal.read()

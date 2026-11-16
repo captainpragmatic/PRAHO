@@ -16,6 +16,7 @@ from .component_migration_models import (
     SourceServiceObligation,
     SourceServiceRelease,
 )
+from .database_overage_models import DatabaseOverageEpisode, DatabaseOverageNotice
 from .hosted_domain_dns_models import HostedDomainDnsStatus
 from .hosting_limit_execution_models import HostingLimitExecution
 from .hosting_limit_models import HostingLimitApplication, ServiceHostingLimits
@@ -49,6 +50,8 @@ __all__ = [
     "AccountUsageState",
     "ComponentMigrationApproval",
     "ComponentMigrationReview",
+    "DatabaseOverageEpisode",
+    "DatabaseOverageNotice",
     "HostedDomainDnsStatus",
     "HostingLimitApplication",
     "HostingLimitExecution",

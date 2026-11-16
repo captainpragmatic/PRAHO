@@ -273,7 +273,12 @@ def _observe_resource(publication: _Publication, resource: Resource) -> int:
     if fresh and reading is not None and recipient and result.state.condition and cursor.last_poll != publication.poll:
         threshold = result.state.condition
         episode = next(item for item in result.state.episodes if item.threshold == threshold)
-        if result.crossing or changed_recipient or new_handover:
+        from .database_overage_service import superseded_by_database_overage  # noqa: PLC0415 -- One overage rule.
+
+        # An open database overage episode's own notice tells the customer instead; the crossing stays latched.
+        if (result.crossing or changed_recipient or new_handover) and not superseded_by_database_overage(
+            resource, int(threshold), account.pk
+        ):
             _cancel_pending(cursor, "warning_superseded", below=int(threshold))
             _intent(
                 cursor,

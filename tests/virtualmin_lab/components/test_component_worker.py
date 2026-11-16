@@ -116,7 +116,8 @@ SOURCE_RETIREMENT_DIAGNOSTIC = r"""
 import importlib.util,json,sys
 from pathlib import Path
 d=json.load(sys.stdin)
-result={'phase':None,'completed':None,'pending':None,'error_code':None}
+result={'phase':None,'completed':None,'pending':None,'step_done':None,'last_error':None,'retained_changed':None,
+ 'error_code':None}
 try:
  path=Path(d['directory'])/'praho-component-journal.py'
  spec=importlib.util.spec_from_file_location('fixture_retirement_diagnostic',path)
@@ -143,6 +144,21 @@ try:
    if any(not isinstance(step,str) or step not in steps for step in completed):raise ValueError('completed')
    if pending is not None and (not isinstance(pending,str) or pending not in steps):raise ValueError('pending')
    result.update(completed=completed,pending=pending)
+   done=retirement.get('step_done')
+   if done is not None and (not isinstance(done,str) or done not in steps):raise ValueError('step_done')
+   result['step_done']=done
+   failure=retirement.get('last_error')
+   if failure is not None:
+    if not isinstance(failure,dict) or set(failure)!={'step','type','message'}:raise ValueError('last_error')
+    if failure['step'] is not None and failure['step'] not in steps:raise ValueError('last_error')
+    if not isinstance(failure['type'],str) or not failure['type'].isidentifier():raise ValueError('last_error')
+    if not isinstance(failure['message'],str):raise ValueError('last_error')
+    result['last_error']={**failure,'message':failure['message'][:500]}
+   changed=retirement.get('retained_changed')
+   if changed is not None:
+    if not isinstance(changed,list) or len(changed)>32 or any(not isinstance(k,str) or not k.isidentifier() for k in changed):
+     raise ValueError('retained_changed')
+    result['retained_changed']=changed
 except Exception as error:
  result['error_code']=type(error).__name__
 print(json.dumps(result,separators=(',',':')))

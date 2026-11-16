@@ -197,7 +197,8 @@ class ReceiptTests(GatewayFixture):
         )
 
     def test_every_closed_refusal_code_is_accepted(self) -> None:
-        self.assertEqual(len(gateway.NODE_REFUSALS), 20)
+        self.assertEqual(len(gateway.NODE_REFUSALS), 21)
+        self.assertIn("cascade_foreign_key", gateway.NODE_REFUSALS)
         for code in gateway.NODE_REFUSALS:
             with self.subTest(code=code), self.node(self.refused("verify", code)):
                 self.assertEqual(gateway.verify(self.identity, generation=3).unwrap_err().code, code)
@@ -323,12 +324,20 @@ class TransportAdmissionTests(GatewayFixture):
 
     def test_hold_verify_fence_and_release_reach_the_node(self) -> None:
         receipts = [self.ok("hold"), self.ok("verify", token=None), self.ok("fence", generation=0), self.ok("release", token=None)]
-        with self.ansible(*receipts):
+        # The episode-bound admission (tests/provisioning/test_database_overage_admission.py) admits these requests
+        # for an open episode; here only the transport's own admission is under test.
+        bound = patch("apps.provisioning.database_overage_admission.database_hold_transport_refusal", return_value=None)
+        with bound, self.ansible(*receipts):
             self.assertTrue(gateway.hold(self.identity, token=self.token, generation=3).is_ok())
             self.assertTrue(gateway.verify(self.identity, generation=3).is_ok())
             self.assertTrue(gateway.fence(self.identity, token=self.token).is_ok())
             self.assertTrue(gateway.release(self.identity, generation=3).is_ok())
         self.assertEqual(self.executed, ["hold", "verify", "fence", "release"])
+
+    def test_a_hold_no_open_episode_stands_for_never_reaches_the_node(self) -> None:
+        with self.ansible(self.ok("hold")):
+            self.uncertain(gateway.hold(self.identity, token=self.token, generation=3))
+        self.assertEqual(self.executed, [])
 
     def test_probe_is_not_admitted_to_the_node(self) -> None:
         with self.ansible(self.ok("probe")):

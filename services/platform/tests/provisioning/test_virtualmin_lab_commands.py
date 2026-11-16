@@ -377,3 +377,60 @@ class LabFeaturesTests(TestCase):
             call_command("virtualmin_lab_runserver", "--noreload", "--no-worker", "--features")
 
         self.assertEqual(seen, [False, True])
+
+
+class ComponentSourceReuseTests(SimpleTestCase):
+    """setup starts the source with --no-recreate, and its credentials are injected only at first boot."""
+
+    @staticmethod
+    def container(source="/repo/deploy/virtualmin-lab/.state/component-source/inject"):
+        return {"Image": "sha256:index", "Mounts": [{"Destination": "/etc/lab-node/inject", "Source": source}]}
+
+    def stale(self, existing):
+        from apps.provisioning.management.commands import virtualmin_lab_component_source as command  # noqa: PLC0415
+
+        return command.stale_container_reason(existing, Path("/repo/deploy/virtualmin-lab/.state/component-source/inject"))
+
+    def test_a_container_from_this_checkout_is_kept(self):
+        self.assertIsNone(self.stale(self.container()))
+
+    def test_docker_desktop_s_host_mount_prefix_is_the_same_checkout(self):
+        # Docker Desktop on macOS reports a bind mount's source under /host_mnt.
+        source = "/host_mnt/repo/deploy/virtualmin-lab/.state/component-source/inject"
+        self.assertIsNone(self.stale(self.container(source=source)))
+        self.assertIsNotNone(self.stale(self.container(source="/host_mnt/other/.state/component-source/inject")))
+
+    def test_a_container_from_another_checkout_is_stale(self):
+        # Its first boot took that checkout's password, so this checkout's API login fails (401).
+        self.assertIn("checkout", self.stale(self.container(source="/other/.state/component-source/inject")))
+
+    def test_no_container_is_nothing_to_replace(self):
+        self.assertIsNone(self.stale(None))
+
+    def test_a_checkout_that_really_lives_under_host_mnt_is_kept(self):
+        from apps.provisioning.management.commands import virtualmin_lab_component_source as command  # noqa: PLC0415
+
+        inject = Path("/host_mnt/repo/deploy/virtualmin-lab/.state/component-source/inject")
+        self.assertIsNone(command.stale_container_reason(self.container(source=str(inject)), inject))
+
+    def test_a_stale_container_is_removed_by_its_inspected_id_not_its_name(self):
+        # Another setup may already have replaced it under the same name; only the inspected container goes.
+        from apps.provisioning.management.commands import virtualmin_lab_component_source as command  # noqa: PLC0415
+
+        existing = {**self.container(source="/other/.state/component-source/inject"), "Id": "abc123"}
+        with patch.object(command, "_run") as run:
+            reason = command.remove_stale_container(
+                existing, Path("/repo/deploy/virtualmin-lab/.state/component-source/inject")
+            )
+        self.assertIn("checkout", reason)
+        run.assert_called_once_with(["docker", "rm", "-f", "abc123"])
+        with patch.object(command, "_run") as run:
+            self.assertIsNone(
+                command.remove_stale_container(
+                    {**self.container(), "Id": "abc123"}, Path("/repo/deploy/virtualmin-lab/.state/component-source/inject")
+                )
+            )
+        run.assert_not_called()
+
+    def test_a_container_without_the_inject_mount_is_stale(self):
+        self.assertIsNotNone(self.stale({"Image": "sha256:index", "Mounts": []}))

@@ -161,6 +161,11 @@ def fence_service_ownership(expected: dict[Any, int], *, using: str) -> Iterator
 
         changed = set(_services(using).filter(pk__in=expected).values_list("pk", "customer_id"))
         changed_services = {key for key, owner in changed if owner != expected[key]}
+        from .database_overage_admission import settle_ownership_change  # noqa: PLC0415 -- Ownership boundary.
+
+        settle_ownership_change(
+            identifier for identifier, service_id in accounts.items() if service_id in changed_services
+        )
         from .hosting_limit_assignments import reassign_hosting_limit_owner  # noqa: PLC0415 -- Ownership boundary.
 
         for service_id, customer_id in sorted(changed):
@@ -182,11 +187,17 @@ def fence_account_ownership(expected: dict[Any, int], desired: Iterable[int], *,
         if locked != expected or owners != current_owners or set(current_owners) != service_ids:
             raise _stale()
         yield
+        from .database_overage_admission import settle_ownership_change  # noqa: PLC0415 -- Ownership boundary.
         from .virtualmin_usage_service import reset_owner_scope  # noqa: PLC0415
 
-        for identifier, service_id in _accounts(using).filter(pk__in=expected).values_list("pk", "service_id"):
-            if service_id != expected[identifier]:
-                reset_owner_scope(identifier)
+        moved = [
+            identifier
+            for identifier, service_id in _accounts(using).filter(pk__in=expected).values_list("pk", "service_id")
+            if service_id != expected[identifier]
+        ]
+        settle_ownership_change(moved)
+        for identifier in moved:
+            reset_owner_scope(identifier)
 
 
 def _fence(kind: OwnershipKind, expected: dict[Any, int], desired: Iterable[int], using: str) -> Any:
@@ -336,3 +347,25 @@ class ServiceOwnershipQuerySet(_OwnershipQuerySet["Service"]):
 class AccountOwnershipQuerySet(_OwnershipQuerySet["VirtualminAccount"]):
     model: type[VirtualminAccount]
     ownership_kind = "account"
+
+    def bulk_create(  # noqa: PLR0913 -- Preserve Django's queryset API, including positional batch_size.
+        self,
+        objs: Iterable[Any],
+        batch_size: int | None = None,
+        ignore_conflicts: bool = False,
+        update_conflicts: bool = False,
+        update_fields: Collection[str] | None = None,
+        unique_fields: Collection[str] | None = None,
+    ) -> list[VirtualminAccount]:
+        update_fields = None if update_fields is None else tuple(update_fields)  # read once: it may be an iterator
+        # An upsert that rewrites the service of an existing account would change its owner around the fence.
+        if update_conflicts and {"service", "service_id"}.intersection(update_fields or ()):
+            raise ValidationError(_("Change an account's service through save() or update(), never a bulk upsert."))
+        return super().bulk_create(
+            objs,
+            batch_size=batch_size,
+            ignore_conflicts=ignore_conflicts,
+            update_conflicts=update_conflicts,
+            update_fields=update_fields,
+            unique_fields=unique_fields,
+        )
