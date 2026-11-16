@@ -147,6 +147,8 @@ provisioning.HostingWarningDelivery # technical EmailLog linkage and immutable d
 provisioning.HostingWarningDeliveryPart # technical immutable warning-intent/body membership and send-eligibility projection; delivery retains refusal history
 provisioning.NodeUsageSyncState  # bounded hourly usage claim and transport outcome; credential access retains audits (ADR-0068)
 provisioning.HostingLimitExecution # Technical native lease, fence and capacity projection; immutable HostingLimitApplication and VirtualminProvisioningJob retain acceptance and lifecycle audits.
+provisioning.DatabaseOverageEpisode # every decision audited explicitly by database_overage_service.audit_episode (database_overage_* events, before node calls); a model signal would duplicate them
+provisioning.DatabaseOverageNotice # provider acceptance audited on its episode (database_overage_notice_sent); a refusal before the provider and its replacement are kept on the row itself; EmailLog owns transport history
 provisioning.UsageInterval       # technical canonical-node attribution and finalized response-byte segments; migration retains lifecycle audits (ADR-0068)
 provisioning.UsageReading        # ninety-day technical observations; never business billing events or per-poll AuditEvents (ADR-0068)
 common.LegalDocument            # publish_legal_document() writes legal_document_published in the same transaction; rows are immutable, so there is no other write to audit
