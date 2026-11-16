@@ -22,7 +22,7 @@ from apps.provisioning.database_overage_models import DatabaseOverageEpisode, Da
 from apps.provisioning.database_overage_service import MIB
 from apps.provisioning.database_overage_tasks import SCHEDULE_NAME, sweep_database_overages
 from apps.provisioning.models import ServiceHostingLimits
-from apps.provisioning.virtualmin_migration_models import VirtualminMigration
+from apps.provisioning.virtualmin_migration_models import VirtualminMigration, account_has_active_operation
 from apps.provisioning.virtualmin_models import VirtualminProvisioningJob
 from apps.provisioning.virtualmin_tasks import setup_virtualmin_scheduled_tasks
 from apps.provisioning.virtualmin_usage_models import AccountUsageState, UsageReading
@@ -191,6 +191,21 @@ class DatabaseOverageDeadlineTests(_Sweep, TestCase):
         self.read(self.episode().deadline_at + timedelta(hours=24), OVER)
         self.sweep(self.episode().deadline_at + timedelta(hours=24, minutes=6))
         return self.episode().last_error
+
+    def test_a_domain_recreated_on_the_same_node_is_held_under_its_new_id(self):
+        deadline = self.open_and_reach_deadline()
+        AccountUsageState.objects.filter(account=self.fixture.account).update(domain_id="17999")  # recreated
+        self.sweep(deadline + timedelta(minutes=5))
+        episode = self.episode()
+        self.assertEqual((episode.state, episode.domain_id), ("held", "17999"))
+        self.assertEqual(self.node.calls[-1][1]["identity"].domain_id, "17999")
+
+    def test_an_identity_the_collector_lost_waits_instead_of_holding_the_old_one(self):
+        deadline = self.open_and_reach_deadline()
+        AccountUsageState.objects.filter(account=self.fixture.account).update(domain_id="")  # reset by a recreate
+        self.sweep(deadline + timedelta(minutes=5))
+        self.assertEqual(self.episode().state, "grace")
+        self.assertNotIn("hold", self.node.actions())
 
     def test_no_hold_when_a_pending_assignment_covers_the_usage(self):
         self.assert_deferred(self.pending_assignment)
@@ -580,6 +595,44 @@ class DatabaseOverageReleaseTests(_Sweep, TestCase):
         self.assertNotIn(self.episode(), episodes_needing_attention(at=deadline + timedelta(hours=2)))
         self.sweep(deadline + timedelta(hours=25, minutes=5))
         self.assertIn(self.episode(), episodes_needing_attention(at=deadline + timedelta(hours=25, minutes=10)))
+
+    def test_a_hold_on_a_domain_since_recreated_is_abandoned_for_staff_not_retried(self):
+        deadline = self.held()
+        old = self.episode()
+        self.node.calls.clear()
+        AccountUsageState.objects.filter(account=self.fixture.account).update(domain_id="17999")
+        self.sweep(deadline + timedelta(hours=2))
+        episode = self.episode()
+        self.assertEqual(self.node.actions(), [])  # never asked about the obsolete domain
+        self.assertEqual(episode.state, "grace")
+        self.assertIsNotNone(episode.hold_refused_at)  # staff decide, the sweep doesn't re-hold on its own
+        self.assertIn("identity changed", episode.last_error)
+        released = AuditEvent.objects.filter(object_id=str(episode.pk), action="database_overage_hold_released").last()
+        self.assertEqual(
+            (released.new_values["abandoned"], released.new_values["domain_id"]), (True, old.domain_id)
+        )
+        self.assertFalse(account_has_active_operation(self.fixture.account))
+
+    def test_a_release_on_a_domain_since_recreated_ends_without_the_node(self):
+        deadline = self.held()
+        episode = self.episode()
+        episode.start_release("waived")
+        episode.save()
+        self.node.calls.clear()
+        AccountUsageState.objects.filter(account=self.fixture.account).update(domain_id="17999")
+        self.sweep(deadline + timedelta(hours=2))
+        episode = self.episode()
+        self.assertEqual((episode.state, episode.close_reason, self.node.actions()), ("closed", "waived", []))
+
+    def test_an_installation_change_under_a_hold_stops_node_calls_and_asks_staff(self):
+        deadline = self.held()
+        self.node.calls.clear()
+        AccountUsageState.objects.filter(account=self.fixture.account).update(installation=uuid4())
+        self.sweep(deadline + timedelta(hours=2))
+        episode = self.episode()
+        self.assertEqual((episode.state, self.node.actions()), ("held", []))
+        self.assertIn("installation changed", episode.last_error)
+        self.assertIn(episode, episodes_needing_attention(at=deadline + timedelta(hours=2)))
 
     def test_a_held_episode_is_verified_hourly_and_drift_is_recorded(self):
         deadline = self.held()

@@ -25,12 +25,14 @@ from .database_overage_admission import close_for_terminated_account, release_wr
 from .database_overage_delivery import notice_due, record_notice_acceptance, send_notice
 from .database_overage_models import DatabaseOverageEpisode, EpisodeState, NoticeKind
 from .database_overage_service import (
+    abandon_hold,
     audit_episode,
     enforcement_refusal,
     evaluate_account,
     next_hold_generation,
     overage_enabled,
     rehold_refusal,
+    stale_identity,
 )
 
 logger = logging.getLogger(__name__)
@@ -418,6 +420,33 @@ def _release_failed(episode_id: UUID, detail: str) -> str:
     return "release_pending"
 
 
+def _identity_changed(episode_id: UUID) -> str | None:
+    """A hold whose domain was recreated on the same node, or whose node reinstalled its collector: never asked
+    about again. A recreated domain's journal is obsolete (releasing it would rewrite the new domain's grants), so
+    the episode leaves it for staff; a changed installation still holds the grants, so staff decide."""
+    from .virtualmin_models import VirtualminAccount  # noqa: PLC0415
+
+    with transaction.atomic():
+        account_id = DatabaseOverageEpisode.objects.filter(pk=episode_id).values_list("account_id", flat=True).first()
+        account = VirtualminAccount.objects.select_for_update().filter(pk=account_id).first() if account_id else None
+        episode = DatabaseOverageEpisode.objects.select_for_update().get(pk=episode_id)
+        if episode.state == EpisodeState.GRACE or (change := stale_identity(episode, account)) is None:
+            return None
+        if change == "domain":
+            abandon_hold(
+                episode,
+                f"identity changed: domain {episode.domain_id} was recreated on the same node; its hold is obsolete",
+                for_staff=True,
+            )
+            return "abandoned"
+        if episode.hold_refused_at is None:
+            episode.hold_refused_at = timezone.now()
+            episode.last_error = "installation changed on the node under this hold: staff must check and resolve it"
+            episode.save(update_fields=["hold_refused_at", "last_error", "updated_at"])
+            logger.error("🔥 [DatabaseOverage] Episode %s: %s", episode.pk, episode.last_error)
+    return "identity_changed"
+
+
 def _advance(episode_id: UUID, gateway: Any, *, at: datetime | None) -> str:
     """One episode's step. A hold decision reads the clock under its locks; the rest at the step's start."""
     episode = DatabaseOverageEpisode.objects.get(pk=episode_id)
@@ -428,6 +457,12 @@ def _advance(episode_id: UUID, gateway: Any, *, at: datetime | None) -> str:
         if now < episode.deadline_at:
             return "grace"
         return _enforce(episode.pk, gateway, at=at)
+    if not episode.suspended_for and (outcome := _identity_changed(episode.pk)) is not None:
+        return outcome
+    return _advance_hold(episode, gateway, at=at, now=now)
+
+
+def _advance_hold(episode: DatabaseOverageEpisode, gateway: Any, *, at: datetime | None, now: datetime) -> str:
     if episode.state == EpisodeState.HOLDING:
         return _verify_holding(episode.pk, gateway, at=at)
     if episode.state == EpisodeState.RELEASING:

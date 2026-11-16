@@ -17,7 +17,7 @@ from uuid import UUID
 from django.db import models, transaction
 from django.utils import timezone
 
-from .database_overage_models import DatabaseOverageEpisode, EpisodeState
+from .database_overage_models import RELEASE_TO_GRACE, DatabaseOverageEpisode, EpisodeState
 
 if TYPE_CHECKING:
     from .service_models import Service
@@ -405,24 +405,80 @@ def enforcement_refusal(  # noqa: PLR0911 -- one return per precondition, in the
     return None
 
 
-def _current_identity(episode: DatabaseOverageEpisode, account: VirtualminAccount) -> bool:
-    """In grace, under the locks: the episode names the node the account is on now, rebound after a migration from
-    the identity the usage collector reported there. False when that isn't known yet."""
+def collected_identity(account: VirtualminAccount) -> tuple[UUID, str, UUID] | None:
+    """The native identity the usage collector verified for the account on the node it is on now, if it has one."""
     from .virtualmin_usage_models import AccountUsageState  # noqa: PLC0415
 
-    if episode.server_id == account.server_id:
-        return True
     state = AccountUsageState.objects.filter(account=account).first()
-    if (
-        episode.state != EpisodeState.GRACE
-        or state is None
-        or state.server_id_snapshot != account.server_id
-        or not state.domain_id
-        or state.installation is None
-    ):
+    if state is None or state.server_id_snapshot != account.server_id or not state.domain_id or not state.installation:
+        return None
+    return account.server_id, state.domain_id, state.installation
+
+
+def _current_identity(episode: DatabaseOverageEpisode, account: VirtualminAccount) -> bool:
+    """Under the locks: the episode names the account's verified native identity now. In grace it is refreshed on
+    any change (a move, or a domain recreated on the same node); False while the collector hasn't verified one."""
+    collected = collected_identity(account)
+    if collected is None:
         return False
-    episode.server_id, episode.domain_id, episode.installation = account.server_id, state.domain_id, state.installation
+    if (episode.server_id, episode.domain_id, episode.installation) == collected:
+        return True
+    if episode.state != EpisodeState.GRACE:
+        return False
+    episode.server_id, episode.domain_id, episode.installation = collected
     return True
+
+
+def abandon_hold(episode: DatabaseOverageEpisode, reason: str, *, for_staff: bool) -> None:
+    """Without the node: the hold's journal is on a domain or node that can no longer be asked. The episode leaves
+    it (to grace, or closed by its release's purpose) and the abandoned journal goes on record. The caller saves.
+
+    for_staff latches the episode like a refused hold, so nothing holds again until staff extend or waive.
+    """
+    old = {
+        "server_id": episode.server_id,
+        "domain_id": episode.domain_id,
+        "installation": episode.installation,
+        "token": episode.hold_token,
+        "generation": episode.hold_generation,
+    }
+    if episode.state in (EpisodeState.HOLDING, EpisodeState.HELD):
+        episode.start_release("hold_withdrawn")
+    purpose = episode.release_purpose
+    if purpose in RELEASE_TO_GRACE:
+        episode.confirm_released_to_grace()
+    else:
+        episode.confirm_released_to_closed()
+    episode.needs_reconcile = False
+    episode.last_error = reason
+    if for_staff:
+        episode.hold_refused_at = timezone.now()
+    episode.save()
+    audit_episode(
+        episode,
+        "database_overage_hold_released",
+        "Database write hold left on a node that can no longer be asked",
+        purpose=purpose,
+        abandoned=True,
+        reason=reason,
+        **old,
+    )
+    if episode.state == EpisodeState.CLOSED:
+        audit_episode(episode, "database_overage_closed", "Closed after release", close_reason=episode.close_reason)
+    logger.warning("⚠️ [DatabaseOverage] Episode %s: hold abandoned: %s", episode.pk, reason)
+
+
+def stale_identity(episode: DatabaseOverageEpisode, account: VirtualminAccount | None) -> str | None:
+    """For a hold on the node: how the account's verified identity on the same node differs from the hold's, if
+    it does. A move to another node is the migration's to settle; an identity not collected yet is no evidence."""
+    collected = None if account is None else collected_identity(account)
+    if collected is None or collected[0] != episode.server_id:
+        return None
+    if collected[1] != episode.domain_id:
+        return "domain"
+    if collected[2] != episode.installation:
+        return "installation"
+    return None
 
 
 def rehold_refusal(episode: DatabaseOverageEpisode, account: VirtualminAccount | None) -> str | None:
