@@ -19,6 +19,7 @@ from uuid import UUID
 from django.db import transaction
 from django.utils import timezone, translation
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 
 from .database_overage_models import DatabaseOverageEpisode, DatabaseOverageNotice, EpisodeState, NoticeKind
 from .database_overage_service import allowance_bytes, audit_episode, grace_period
@@ -193,6 +194,37 @@ def _failed_for_good(log: EmailLog | None) -> bool:
         log.status == "failed"
         and (response.get("permanent_failure") is True or response.get("retry_exhausted") is True)
     )
+
+
+# What staff see for an email state; a provider-accepted email keeps its acceptance time beside it.
+_EMAIL_LABELS = {
+    "queued": gettext_lazy("Queued"),
+    "sending": gettext_lazy("Sending"),
+    "failed": gettext_lazy("Failed, to be retried"),
+    "soft_bounced": gettext_lazy("Soft bounce, to be retried"),
+    "bounced": gettext_lazy("Bounced after the provider accepted it"),
+    "complained": gettext_lazy("Marked as spam by the recipient"),
+    "delivered": gettext_lazy("Delivered"),
+    "opened": gettext_lazy("Delivered"),
+    "clicked": gettext_lazy("Delivered"),
+}
+_PENDING = frozenset({"queued", "sending", "failed", "soft_bounced"})
+
+
+def notice_status(notice: DatabaseOverageNotice) -> dict[str, Any]:
+    """What staff see for a notice: derived from its email's own state, never assumed from its absence."""
+    log = notice.email_log
+    if notice.refusal_reason or log is None:
+        reason = notice.refusal_reason
+        return {"label": _("Not sent: %(reason)s") % {"reason": reason} if reason else _("Not sent"), "at": None}
+    if _failed_for_good(log):
+        response = log.provider_response if isinstance(log.provider_response, dict) else {}
+        detail = response.get("final_error") or (
+            _("rejected by the provider") if log.status == "rejected" else _("retries exhausted")
+        )
+        return {"label": _("Failed for good: %(detail)s") % {"detail": detail}, "at": None}
+    label = _EMAIL_LABELS.get(log.status, gettext_lazy("Accepted by the provider"))
+    return {"label": str(label), "at": None if log.status in _PENDING else notice.accepted_at or log.sent_at}
 
 
 def notice_due(episode: DatabaseOverageEpisode, kind: str) -> bool:

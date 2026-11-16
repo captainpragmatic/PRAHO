@@ -17,6 +17,7 @@ from apps.notifications.tasks import send_email_task
 from apps.provisioning import database_overage_delivery as delivery
 from apps.provisioning.database_overage_delivery import (
     notice_due,
+    notice_status,
     overage_dispatch_allowed,
     record_notice_acceptance,
     send_notice,
@@ -176,6 +177,49 @@ class DatabaseOverageNoticeTests(_Notices, TestCase):
         self.episode.refresh_from_db()
         self.assertEqual(notice.accepted_at, accepted)
         self.assertEqual(self.episode.deadline_at, accepted + timedelta(days=14))
+
+
+class NoticeStatusTests(_Notices, TestCase):
+    """What staff see for a notice comes from its email's own state, failures included."""
+
+    def status(self, **email) -> dict:
+        notice = DatabaseOverageNotice.objects.get(kind="day0")
+        if email:
+            EmailLog.objects.filter(pk=notice.email_log_id).update(**email)
+        notice = DatabaseOverageNotice.objects.select_related("email_log").get(pk=notice.pk)
+        return notice_status(notice)
+
+    def setUp(self):
+        super().setUp()
+        send_notice(self.episode.pk, "day0")
+
+    def test_each_email_state_is_shown_as_it_is(self):
+        cases = [
+            ({}, "Queued"),
+            ({"status": "sending"}, "Sending"),
+            ({"status": "failed", "provider_response": {"final_error": "timeout"}}, "Failed, to be retried"),
+            ({"status": "soft_bounced"}, "Soft bounce, to be retried"),
+            ({"status": "failed", "provider_response": {"permanent_failure": True, "final_error": "550 no such user"}},
+             "Failed for good: 550 no such user"),
+            ({"status": "failed", "provider_response": {"retry_exhausted": True}}, "Failed for good: retries exhausted"),
+            ({"status": "rejected", "provider_response": {}}, "Failed for good: rejected by the provider"),
+        ]
+        for email, label in cases:
+            with self.subTest(label=label):
+                self.assertEqual(self.status(**email)["label"], label)
+
+    def test_accepted_then_bounced_is_not_shown_as_delivered(self):
+        sent = timezone.now()
+        self.status(status="sent", sent_at=sent)
+        record_notice_acceptance()
+        self.assertEqual(self.status()["label"], "Accepted by the provider")
+        self.assertEqual(self.status(status="bounced")["label"], "Bounced after the provider accepted it")
+        self.assertEqual(self.status(status="complained")["label"], "Marked as spam by the recipient")
+        self.assertEqual(self.status(status="delivered")["label"], "Delivered")
+
+    def test_a_refused_notice_says_why(self):
+        DatabaseOverageNotice.objects.filter(kind="day0").update(refusal_reason="overage_recipient_changed")
+        self.assertEqual(self.status()["label"], "Not sent: overage_recipient_changed")
 
 
 class DatabaseOverageDispatchTests(_Notices, TestCase):

@@ -16,8 +16,8 @@
     {% if current.hold_refused_at %}<dt>{% trans "Node refused the hold" %}</dt><dd>{% localised_date current.hold_refused_at "datetime" %}</dd>{% endif %}
     {% if current.last_error %}<dt>{% trans "Last problem" %}</dt><dd>{{ current.last_error }}</dd>{% endif %}
     {% for notice in notices %}
-    <dt>{{ notice.get_kind_display }}</dt>
-    <dd>{% if notice.accepted_at %}{% trans "Delivered" %} {% localised_date notice.accepted_at "datetime" %}{% elif notice.refusal_reason %}{% trans "Not sent" %}: {{ notice.refusal_reason }}{% else %}{% trans "Queued" %}{% endif %}</dd>
+    <dt>{{ notice.kind }}</dt>
+    <dd>{{ notice.label }}{% if notice.at %} {% localised_date notice.at "datetime" %}{% endif %}</dd>
     {% endfor %}
   </dl>
   {% if can_act %}

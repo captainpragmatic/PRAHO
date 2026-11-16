@@ -12144,6 +12144,44 @@ msgstr "Schimbați serviciul unui cont prin save() sau update(), niciodată prin
 msgid "Extend or waive the database write hold before reviewing or starting a component migration."
 msgstr "Prelungiți sau anulați blocarea scrierii în bazele de date înainte de a revizui sau porni o migrare pe componente."
 
+#: apps/provisioning/database_overage_delivery.py:203
+msgid "Failed, to be retried"
+msgstr "Eșuat, se va reîncerca"
+
+#: apps/provisioning/database_overage_delivery.py:204
+msgid "Soft bounce, to be retried"
+msgstr "Respins temporar, se va reîncerca"
+
+#: apps/provisioning/database_overage_delivery.py:212
+#, python-format
+msgid "Not sent: %(reason)s"
+msgstr "Netrimis: %(reason)s"
+
+#: apps/provisioning/database_overage_delivery.py:218
+msgid "rejected by the provider"
+msgstr "respins de furnizor"
+
+#: apps/provisioning/database_overage_delivery.py:218
+msgid "retries exhausted"
+msgstr "reîncercări epuizate"
+
+#: apps/provisioning/database_overage_delivery.py:220
+#, python-format
+msgid "Failed for good: %(detail)s"
+msgstr "Eșuat definitiv: %(detail)s"
+
+#: apps/provisioning/database_overage_delivery.py:225
+msgid "Bounced after the provider accepted it"
+msgstr "Returnat după ce furnizorul l-a acceptat"
+
+#: apps/provisioning/database_overage_delivery.py:227
+msgid "Marked as spam by the recipient"
+msgstr "Marcat ca spam de destinatar"
+
+#: apps/provisioning/database_overage_delivery.py:230
+msgid "Accepted by the provider"
+msgstr "Acceptat de furnizor"
+
 #~ msgid ""
 #~ "The service's owner changed. Review the current details before submitting "
 #~ "again."

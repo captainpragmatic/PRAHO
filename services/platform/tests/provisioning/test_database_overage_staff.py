@@ -263,6 +263,18 @@ class DatabaseOverageStaffPageTests(_Staff, TestCase):
         self.client.force_login(support)
         self.assertNotContains(self.client.get(self.url), 'hx-confirm="')  # support reads, without the forms
 
+    def test_a_notice_that_failed_for_good_is_shown_failed_not_queued(self):
+        from apps.notifications.models import EmailLog  # noqa: PLC0415
+        from apps.provisioning.database_overage_delivery import send_notice, setup_overage_notices  # noqa: PLC0415
+
+        setup_overage_notices()
+        DatabaseOverageEpisode.objects.filter(pk=self.episode.pk).update(deadline_at=timezone.now() + timedelta(days=3))
+        send_notice(self.episode.pk, "day0")
+        EmailLog.objects.update(status="rejected", provider_response={"final_error": "550 mailbox unavailable"})
+        response = self.client.get(self.url)
+        self.assertContains(response, "Failed for good: 550 mailbox unavailable")
+        self.assertNotContains(response, "Queued")
+
     def test_extend_and_waive_from_the_page(self):
         response = self.client.post(
             self.url, {"action": "extend", "days": "3", "reason": "Customer asked for time", **self.form_fields()}

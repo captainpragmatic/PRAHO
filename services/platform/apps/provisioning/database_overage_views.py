@@ -15,6 +15,7 @@ from django.views.decorators.http import require_http_methods
 from apps.common.decorators import staff_required_strict
 
 from .database_overage_attention import episodes_needing_attention
+from .database_overage_delivery import notice_status
 from .database_overage_models import DatabaseOverageEpisode, EpisodeState
 from .database_overage_staff import MAX_EXTENSION_DAYS, MIN_EXTENSION_DAYS, extend_episode, waive_episode
 from .hosting_limit_override_service import can_override_hosting_resources
@@ -74,7 +75,10 @@ def service_database_overage(request: HttpRequest, pk: int) -> HttpResponse:
         {
             "service": service,
             "current": current,
-            "notices": list(current.notices.order_by("created_at")) if current else [],
+            "notices": [
+                {"kind": notice.get_kind_display(), **notice_status(notice)}
+                for notice in (current.notices.select_related("email_log").order_by("created_at") if current else [])
+            ],
             "history": [episode for episode in episodes if episode is not current],
             "error": error,
             "can_act": can_act,
