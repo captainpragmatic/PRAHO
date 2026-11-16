@@ -357,9 +357,6 @@ class TicketStatusService:
             raise ValueError(f"Invalid queue type: {queue_type}")
 
 
-SYSTEM_AUTHOR_NAME = "PragmaticHost"
-
-
 def open_system_ticket(customer: Customer, *, title: str, description: str, related_service: Service | None) -> Ticket:
     """A ticket Platform raises about a customer's service: no author, the customer's own contact details on it.
 
@@ -384,6 +381,8 @@ def add_system_comment(ticket: Ticket, content: str) -> TicketComment:
 
     The ticket is read again under its row lock: staff may have changed it since the caller loaded it.
     """
+    from apps.settings.services import get_brand_name  # noqa: PLC0415 -- Cross-app at call time (ADR-0007).
+
     with transaction.atomic():
         current = Ticket.objects.select_for_update().get(pk=ticket.pk)
         if current.status == "closed":
@@ -393,6 +392,6 @@ def add_system_comment(ticket: Ticket, content: str) -> TicketComment:
             content=content,
             comment_type="system",
             author=None,
-            author_name=SYSTEM_AUTHOR_NAME,
+            author_name=get_brand_name(),  # the deployment's own name (ADR-0062), never a hardcoded operator
             is_public=True,
         )

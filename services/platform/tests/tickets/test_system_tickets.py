@@ -34,3 +34,12 @@ class SystemTicketCommentTests(TestCase):
         add_system_comment(self.ticket, "Writes are now held.")
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.status, "open")
+
+    def test_a_note_is_signed_with_the_deployments_own_brand(self):
+        from apps.settings.models import SystemSetting  # noqa: PLC0415
+
+        SystemSetting.objects.create(
+            key="company.brand_name", value="Example Hosting", default_value="", data_type="string", category="company"
+        )
+        comment = add_system_comment(self.ticket, "Writes are now held.")
+        self.assertEqual(comment.author_name, "Example Hosting")
