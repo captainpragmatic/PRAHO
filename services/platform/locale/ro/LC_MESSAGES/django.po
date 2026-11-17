@@ -11901,6 +11901,291 @@ msgstr "Închideți"
 msgid "Close notification"
 msgstr "Închide notificarea"
 
+#: apps/provisioning/database_overage_models.py:23
+msgid "Grace period"
+msgstr "Perioadă de grație"
+
+#: apps/provisioning/database_overage_models.py:24
+msgid "Applying the hold"
+msgstr "Se aplică blocarea"
+
+#: apps/provisioning/database_overage_models.py:25
+msgid "Writes held"
+msgstr "Scriere blocată"
+
+#: apps/provisioning/database_overage_models.py:26
+msgid "Releasing the hold"
+msgstr "Se ridică blocarea"
+
+#: apps/provisioning/database_overage_models.py:40
+msgid "Not suspended"
+msgstr "Nesuspendat"
+
+#: apps/provisioning/database_overage_models.py:41
+msgid "Account migration"
+msgstr "Migrarea contului"
+
+#: apps/provisioning/database_overage_models.py:49
+msgid "An overage episode's state changes only through its transitions."
+msgstr "Starea unui episod de depășire se schimbă numai prin tranzițiile sale."
+
+#: apps/settings/catalog.py:2818
+msgid "Database over-allowance holds"
+msgstr "Blocări pentru depășirea limitei de către bazele de date"
+
+#: apps/settings/catalog.py:2820
+msgid "Open episodes for accounts whose databases put them over their allowance, notify them, and hold database writes after the grace period. Off: no new episodes or holds; releases continue. The hold must be in the Terms first."
+msgstr "Deschide episoade pentru conturile ale căror baze de date depășesc limita, le notifică și blochează scrierea în bazele de date după perioada de grație. Dezactivat: niciun episod sau blocare nouă; ridicarea blocărilor continuă. Blocarea trebuie inclusă mai întâi în Termeni."
+
+#: apps/settings/catalog.py:2830
+msgid "Database over-allowance grace period"
+msgstr "Perioada de grație pentru depășirea limitei de către bazele de date"
+
+#: apps/settings/catalog.py:2831
+msgid "Days between the first notice and the database write hold."
+msgstr "Zile între prima notificare și blocarea scrierii în bazele de date."
+
+#: apps/provisioning/database_overage_models.py:254
+msgid "Over the allowance: writes held after the deadline"
+msgstr "Peste limită: scrierea se blochează după termen"
+
+#: apps/provisioning/database_overage_delivery.py:129
+#, python-format
+msgid "Databases over the hosting allowance: %(service)s"
+msgstr "Baze de date peste limita găzduirii: %(service)s"
+
+#: apps/provisioning/database_overage_delivery.py:131
+#, python-format
+msgid "The databases of %(service)s take this hosting account over its allowance. Database writes stay enabled for now; we emailed you the date after which they are held. Reply here if you need help."
+msgstr "Bazele de date ale %(service)s depășesc limita acestui cont de găzduire. Scrierea în baze de date rămâne permisă deocamdată; v-am trimis prin email data după care este blocată. Răspundeți aici dacă aveți nevoie de ajutor."
+
+#: apps/provisioning/database_overage_delivery.py:137
+#, python-format
+msgid "Database writes held: %(service)s"
+msgstr "Scriere blocată în baze de date: %(service)s"
+
+#: apps/provisioning/database_overage_delivery.py:139
+#, python-format
+msgid "Database writes for %(service)s are now held because its databases are still over the allowance. Reading, deleting and dropping data still work. Reply here to ask for a short write window."
+msgstr "Scrierea în bazele de date pentru %(service)s este acum blocată, deoarece acestea depășesc în continuare limita. Citirea, ștergerea datelor și eliminarea tabelelor funcționează în continuare. Răspundeți aici pentru a cere o fereastră scurtă de scriere."
+
+#: apps/audit/models.py:515
+msgid "Database Over-Allowance Episode Opened"
+msgstr "Episod de depășire a limitei de către bazele de date deschis"
+
+#: apps/audit/models.py:516
+msgid "Database Over-Allowance Notice Sent"
+msgstr "Notificare de depășire a limitei de către bazele de date trimisă"
+
+#: apps/audit/models.py:517
+msgid "Database Write Hold Applied"
+msgstr "Blocarea scrierii în bazele de date aplicată"
+
+#: apps/audit/models.py:518
+msgid "Database Write Hold Released"
+msgstr "Blocarea scrierii în bazele de date ridicată"
+
+#: apps/audit/models.py:519
+msgid "Database Over-Allowance Deadline Extended"
+msgstr "Termenul pentru depășirea limitei de către bazele de date prelungit"
+
+#: apps/audit/models.py:520
+msgid "Database Over-Allowance Waived"
+msgstr "Depășirea limitei de către bazele de date anulată"
+
+#: apps/audit/models.py:521
+msgid "Database Over-Allowance Episode Closed"
+msgstr "Episod de depășire a limitei de către bazele de date închis"
+
+#: apps/audit/models.py:522
+msgid "Database Write Hold Drift Detected"
+msgstr "Abatere detectată la blocarea scrierii în bazele de date"
+
+#: apps/provisioning/database_overage_views.py:31
+msgid "Enter a whole number of days."
+msgstr "Introduceți un număr întreg de zile."
+
+#: apps/provisioning/database_overage_views.py:33
+msgid "Deadline extended. A hold, if any, is being released for the write window."
+msgstr "Termenul a fost prelungit. O eventuală blocare este ridicată pentru fereastra de scriere."
+
+#: apps/provisioning/database_overage_views.py:36
+msgid "Waived. A hold, if any, is being released."
+msgstr "Anulat. O eventuală blocare este ridicată."
+
+#: apps/provisioning/database_overage_views.py:37
+msgid "Unknown action."
+msgstr "Acțiune necunoscută."
+
+#: apps/provisioning/database_overage_views.py:45
+msgid "Administrator or manager authority is required for database over-allowance actions."
+msgstr "Acțiunile privind depășirea limitei de către bazele de date necesită autoritate de administrator sau manager."
+
+#: apps/provisioning/database_overage_staff.py:41
+msgid "This episode is closed."
+msgstr "Acest episod este închis."
+
+#: apps/provisioning/database_overage_staff.py:43
+msgid "A release is in progress. Try again once it has finished."
+msgstr "O ridicare a blocării este în curs. Încercați din nou după ce se termină."
+
+#: apps/provisioning/database_overage_staff.py:50
+#, python-format
+msgid "Give a reason of at least %(count)d characters."
+msgstr "Indicați un motiv de cel puțin %(count)d caractere."
+
+#: apps/provisioning/database_overage_staff.py:59
+#, python-format
+msgid "Extend by %(low)d to %(high)d days."
+msgstr "Prelungiți cu %(low)d până la %(high)d zile."
+
+#: templates/provisioning/service_database_overage.html:3
+msgid "Database over-allowance"
+msgstr "Depășirea limitei de către bazele de date"
+
+#: templates/provisioning/service_database_overage.html:12
+msgid "Opened"
+msgstr "Deschis"
+
+#: templates/provisioning/service_database_overage.html:13
+msgid "Deadline"
+msgstr "Termen"
+
+#: templates/provisioning/service_database_overage.html:14
+msgid "Paused since"
+msgstr "Întrerupt din"
+
+#: templates/provisioning/service_database_overage.html:15
+msgid "Hold deferred since"
+msgstr "Blocare amânată din"
+
+#: templates/provisioning/service_database_overage.html:16
+msgid "Node refused the hold"
+msgstr "Nodul a refuzat blocarea"
+
+#: templates/provisioning/service_database_overage.html:17
+msgid "Last problem"
+msgstr "Ultima problemă"
+
+#: templates/provisioning/service_database_overage.html:20
+msgid "Not sent"
+msgstr "Netrimis"
+
+#: templates/provisioning/service_database_overage.html:24
+msgid "Extend the deadline? A hold, if any, is released for the customer's write window."
+msgstr "Prelungiți termenul? O eventuală blocare este ridicată pentru fereastra de scriere a clientului."
+
+#: templates/provisioning/service_database_overage.html:27
+msgid "Days"
+msgstr "Zile"
+
+#: templates/provisioning/service_database_overage.html:24
+msgid "Extend"
+msgstr "Prelungiți"
+
+#: templates/provisioning/service_database_overage.html:31
+msgid "Waive this over-allowance? The episode closes, and a hold, if any, is released."
+msgstr "Anulați această depășire a limitei? Episodul se închide, iar o eventuală blocare este ridicată."
+
+#: templates/provisioning/service_database_overage.html:31
+msgid "Waive"
+msgstr "Anulați"
+
+#: templates/provisioning/service_database_overage.html:38
+msgid "No open database over-allowance for this service."
+msgstr "Nicio depășire deschisă a limitei de către bazele de date pentru acest serviciu."
+
+#: templates/provisioning/service_database_overage.html:41
+msgid "Earlier episodes"
+msgstr "Episoade anterioare"
+
+#: apps/provisioning/database_overage_staff.py:41
+msgid "This episode changed since the page was shown. Review it again."
+msgstr "Acest episod s-a schimbat de când a fost afișată pagina. Verificați-l din nou."
+
+#: apps/audit/models.py:517
+msgid "Database Write Hold Requested"
+msgstr "Blocarea scrierii în bazele de date solicitată"
+
+#: apps/audit/models.py:519
+msgid "Database Write Hold Release Requested"
+msgstr "Ridicarea blocării scrierii în bazele de date solicitată"
+
+#: templates/provisioning/database_overage_attention.html:3
+msgid "Database overage needing attention"
+msgstr "Depășiri ale bazelor de date care necesită atenție"
+
+#: templates/provisioning/database_overage_attention.html:7
+msgid "Episodes the sweep can't move on by itself: a hold deferred over a day, a hold the node refused, a release that keeps failing, or grants that drifted from the hold."
+msgstr "Episoade pe care verificarea periodică nu le poate avansa singură: o blocare amânată peste o zi, o blocare refuzată de nod, o ridicare care eșuează în continuare sau permisiuni care s-au abătut de la blocare."
+
+#: templates/provisioning/database_overage_attention.html:16
+msgid "Grants drifted from the hold"
+msgstr "Permisiunile s-au abătut de la blocare"
+
+#: templates/provisioning/database_overage_attention.html:24
+msgid "Nothing needs attention."
+msgstr "Nimic nu necesită atenție."
+
+#: templates/provisioning/database_overage_attention.html:24
+msgid "Pages"
+msgstr "Pagini"
+
+#: apps/provisioning/database_overage_admission.py:140
+#, python-format
+msgid "Release or waive the database write hold of %(domain)s before changing hosting ownership."
+msgstr "Eliberați sau anulați blocarea scrierii în bazele de date pentru %(domain)s înainte de a schimba proprietarul găzduirii."
+
+#: apps/provisioning/hosted_zone_ownership.py:362
+msgid "Change an account's service through save() or update(), never a bulk upsert."
+msgstr "Schimbați serviciul unui cont prin save() sau update(), niciodată printr-un upsert în bloc."
+
+#: apps/provisioning/database_overage_migration.py:49
+msgid "Extend or waive the database write hold before reviewing or starting a component migration."
+msgstr "Prelungiți sau anulați blocarea scrierii în bazele de date înainte de a revizui sau porni o migrare pe componente."
+
+#: apps/provisioning/database_overage_delivery.py:203
+msgid "Failed, to be retried"
+msgstr "Eșuat, se va reîncerca"
+
+#: apps/provisioning/database_overage_delivery.py:204
+msgid "Soft bounce, to be retried"
+msgstr "Respins temporar, se va reîncerca"
+
+#: apps/provisioning/database_overage_delivery.py:212
+#, python-format
+msgid "Not sent: %(reason)s"
+msgstr "Netrimis: %(reason)s"
+
+#: apps/provisioning/database_overage_delivery.py:218
+msgid "rejected by the provider"
+msgstr "respins de furnizor"
+
+#: apps/provisioning/database_overage_delivery.py:218
+msgid "retries exhausted"
+msgstr "reîncercări epuizate"
+
+#: apps/provisioning/database_overage_delivery.py:220
+#, python-format
+msgid "Failed for good: %(detail)s"
+msgstr "Eșuat definitiv: %(detail)s"
+
+#: apps/provisioning/database_overage_delivery.py:225
+msgid "Bounced after the provider accepted it"
+msgstr "Returnat după ce furnizorul l-a acceptat"
+
+#: apps/provisioning/database_overage_delivery.py:227
+msgid "Marked as spam by the recipient"
+msgstr "Marcat ca spam de destinatar"
+
+#: apps/provisioning/database_overage_delivery.py:230
+msgid "Accepted by the provider"
+msgstr "Acceptat de furnizor"
+
+#: apps/provisioning/database_overage_delivery.py:218
+msgid "Accepted by the provider (delivery details no longer kept)"
+msgstr "Acceptat de furnizor (detaliile de livrare nu mai sunt păstrate)"
+
 #~ msgid ""
 #~ "The service's owner changed. Review the current details before submitting "
 #~ "again."

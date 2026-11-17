@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% load i18n ui_components localisation_tags %}
+{% block title %}{% trans "Database over-allowance" %}{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-3xl space-y-5 py-8">
+  <h1 class="text-2xl font-semibold text-white">{% trans "Database over-allowance" %}</h1>
+  <p class="text-slate-300">{{ service.domain }}</p>
+  {% if error %}<p class="rounded-lg border border-slate-600 p-4 text-slate-200" role="alert">{{ error }}</p>{% endif %}
+  {% if current %}
+  <dl class="grid grid-cols-2 gap-2 rounded-lg border border-slate-700 bg-slate-800 p-5 text-slate-300">
+    <dt>{% trans "State" %}</dt><dd>{{ current.get_state_display }}</dd>
+    <dt>{% trans "Opened" %}</dt><dd>{% localised_date current.opened_at "datetime" %}</dd>
+    <dt>{% trans "Deadline" %}</dt><dd>{% localised_date current.deadline_at "datetime" %}</dd>
+    {% if current.paused_at %}<dt>{% trans "Paused since" %}</dt><dd>{% localised_date current.paused_at "datetime" %}</dd>{% endif %}
+    {% if current.deferred_since %}<dt>{% trans "Hold deferred since" %}</dt><dd>{% localised_date current.deferred_since "datetime" %}</dd>{% endif %}
+    {% if current.hold_refused_at %}<dt>{% trans "Node refused the hold" %}</dt><dd>{% localised_date current.hold_refused_at "datetime" %}</dd>{% endif %}
+    {% if current.last_error %}<dt>{% trans "Last problem" %}</dt><dd>{{ current.last_error }}</dd>{% endif %}
+    {% for notice in notices %}
+    <dt>{{ notice.kind }}</dt>
+    <dd>{{ notice.label }}{% if notice.at %} {% localised_date notice.at "datetime" %}{% endif %}</dd>
+    {% endfor %}
+  </dl>
+  {% if can_act %}
+  {% url 'provisioning:service_database_overage' service.pk as action_url %}
+  {% trans "Extend the deadline? A hold, if any, is released for the customer's write window." as confirm_extend %}
+  <form method="post" hx-post="{{ action_url }}" hx-confirm="{{ confirm_extend }}" hx-target="body" class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-5">
+    {% csrf_token %}<input type="hidden" name="action" value="extend"><input type="hidden" name="episode" value="{{ current.pk }}"><input type="hidden" name="revision" value="{{ current.revision }}">
+    {% trans "Days" as days_label %}{% input_field "days" input_type="number" html_id="overage-extend-days" label=days_label min=min_days max=max_days value="7" required=True %}
+    {% trans "Reason" as reason_label %}{% input_field "reason" input_type="textarea" html_id="overage-extend-reason" label=reason_label rows=2 maxlength=2000 required=True %}
+    {% trans "Extend" as extend_label %}{% button extend_label type="submit" variant="primary" %}
+  </form>
+  {% trans "Waive this over-allowance? The episode closes, and a hold, if any, is released." as confirm_waive %}
+  <form method="post" hx-post="{{ action_url }}" hx-confirm="{{ confirm_waive }}" hx-target="body" class="space-y-3 rounded-lg border border-slate-700 bg-slate-800 p-5">
+    {% csrf_token %}<input type="hidden" name="action" value="waive"><input type="hidden" name="episode" value="{{ current.pk }}"><input type="hidden" name="revision" value="{{ current.revision }}">
+    {% trans "Reason" as waive_reason_label %}{% input_field "reason" input_type="textarea" html_id="overage-waive-reason" label=waive_reason_label rows=2 maxlength=2000 required=True %}
+    {% trans "Waive" as waive_label %}{% button waive_label type="submit" variant="danger" %}
+  </form>
+  {% endif %}
+  {% else %}
+  <p class="rounded-lg border border-slate-600 p-4 text-slate-300">{% trans "No open database over-allowance for this service." %}</p>
+  {% endif %}
+  {% if history %}
+  <h2 class="text-lg font-semibold text-white">{% trans "Earlier episodes" %}</h2>
+  <ul class="space-y-1 text-slate-300">
+    {% for episode in history %}<li>{% localised_date episode.opened_at "date" %}: {{ episode.get_state_display }}{% if episode.close_reason %} ({{ episode.close_reason }}){% endif %}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  {% url 'provisioning:service_detail' service.pk as service_url %}{% trans "Back to service" as back_label %}{% button back_label href=service_url variant="secondary" %}
+</div>
+{% endblock %}

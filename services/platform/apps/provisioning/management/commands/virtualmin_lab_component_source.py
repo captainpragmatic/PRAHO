@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 import subprocess
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import paramiko
@@ -23,6 +25,7 @@ from ._virtualmin_lab import (
 from .virtualmin_lab_bootstrap import _certificate_sha256, _scan_host_keys
 
 SOURCE_NAME = "lab-imported-component-source"
+INJECT_MOUNT = "/etc/lab-node/inject"
 
 if TYPE_CHECKING:
     from apps.provisioning.virtualmin_models import VirtualminServer
@@ -33,6 +36,52 @@ def _run(arguments: list[str], *, timeout: int = 60) -> str:
     if result.returncode:
         raise CommandError(f"Disposable component source step failed: {result.stderr.strip()[:2000]}")
     return result.stdout.strip()
+
+
+# Docker Desktop on macOS reports a bind mount's host source under this prefix.
+DOCKER_DESKTOP_HOST_MOUNT = "/host_mnt"
+
+
+def _same_host_path(source: str, inject: Path) -> bool:
+    """The mount source is this checkout's inject directory, as reported directly or under Docker Desktop's prefix."""
+    if Path(source).resolve() == inject.resolve():
+        return True
+    prefix = DOCKER_DESKTOP_HOST_MOUNT + "/"
+    return source.startswith(prefix) and Path(source[len(DOCKER_DESKTOP_HOST_MOUNT) :]).resolve() == inject.resolve()
+
+
+def stale_container_reason(existing: dict[str, Any] | None, inject: Path) -> str | None:
+    """Why an existing source container can't be reused, or None.
+
+    Setup starts it with --no-recreate, and its root password and keys are injected only at first boot. A
+    container created by another checkout, from that checkout's own inject directory, keeps credentials this
+    checkout doesn't hold, so the pinned API login fails with 401. An older image with this checkout's credentials
+    still authenticates: the containerd image store gives every build a new image ID, so comparing images would
+    replace the container on every run, and a replaced container's new keys are refused at registration by design.
+    """
+    if existing is None:
+        return None
+    sources = [mount.get("Source") for mount in existing.get("Mounts", []) if mount.get("Destination") == INJECT_MOUNT]
+    if len(sources) != 1 or not _same_host_path(str(sources[0]), inject):
+        return "it was created by another checkout, whose injected credentials this one does not hold"
+    return None
+
+
+def remove_stale_container(existing: dict[str, Any] | None, inject: Path) -> str | None:
+    """Remove the inspected container by its ID, never by name: another setup may already have replaced it."""
+    reason = stale_container_reason(existing, inject)
+    if reason is not None and existing is not None:
+        _run(["docker", "rm", "-f", str(existing["Id"])])
+    return reason
+
+
+def _existing_container(name: str) -> dict[str, Any] | None:
+    arguments = ["docker", "inspect", "--type", "container", name]
+    result = subprocess.run(arguments, capture_output=True, text=True, timeout=60, check=False)
+    if result.returncode:
+        return None
+    rows = json.loads(result.stdout)
+    return rows[0] if isinstance(rows, list) and rows and isinstance(rows[0], dict) else None
 
 
 class Command(BaseCommand):
@@ -64,6 +113,8 @@ class Command(BaseCommand):
         if not password_file.exists():
             write_private(password_file, secrets.token_urlsafe(24) + "\n")
         password = password_file.read_text().strip()
+        if reason := remove_stale_container(_existing_container(COMPONENT_SOURCE.container), inject):
+            self.stdout.write(f"Replaced {COMPONENT_SOURCE.container}: {reason}")
         _run(
             [
                 "docker",
@@ -127,7 +178,10 @@ class Command(BaseCommand):
                 or getattr(existing, "node_deployment", None) is not None
             ):
                 raise CommandError(
-                    "Existing source identity changed; resolve its fixture records before registering again"
+                    "Existing source identity changed; resolve its fixture records before registering again. After a"
+                    " replaced container, delete only this lab database's VirtualminServer for "
+                    + COMPONENT_SOURCE.server_hostname
+                    + " and its virtualmin vault credential, then rerun."
                 )
             return existing
         server = VirtualminServer.objects.create(

@@ -93,6 +93,35 @@ class ImportedBackupTransportTests(SimpleTestCase):
         self.assertEqual(run.call_count, 1)
         self.service._ssh_manager.get_private_key_file.assert_not_called()
 
+    def imported_logs(self, outcome) -> list[str]:
+        with (
+            patch("apps.infrastructure.ansible_service.subprocess.run", side_effect=outcome),
+            self.assertLogs("apps.infrastructure.ansible_service", level="INFO") as logs,
+        ):
+            self.service.run_server_playbook(self.server, "virtualmin_component.yml", {"component_action": "inspect"})
+        return logs.output
+
+    def test_an_imported_node_run_is_logged_like_a_managed_one(self) -> None:
+        # A component source node has no deployment; its runs used to leave no log line at all (#880).
+        output = self.imported_logs(lambda command, **_options: subprocess.CompletedProcess(command, 0, "ok", ""))
+        self.assertTrue(any("Running: virtualmin_component.yml on imported.example.test" in line for line in output))
+        self.assertTrue(any("Playbook virtualmin_component.yml: success" in line for line in output))
+
+    def test_a_failed_imported_run_logs_its_redacted_reason(self) -> None:
+        stdout = 'fatal: [backup_target]: FAILED! => {"msg": "Native component evidence is unreadable", "password": "hunter2"}\n'
+        output = self.imported_logs(lambda command, **_options: subprocess.CompletedProcess(command, 2, stdout, ""))
+        failures = [line for line in output if line.startswith("ERROR")]
+        self.assertTrue(any("Playbook virtualmin_component.yml: failed" in line for line in failures))
+        self.assertTrue(any("Native component evidence is unreadable" in line for line in failures))
+        self.assertFalse(any("hunter2" in line for line in output))
+
+    def test_a_timed_out_imported_run_is_logged(self) -> None:
+        def slow(command, **_options):
+            raise subprocess.TimeoutExpired(command, 30)
+
+        output = self.imported_logs(slow)
+        self.assertTrue(any("virtualmin_component.yml timed out after 30s" in line for line in output))
+
     def test_missing_key_refuses_before_execution(self) -> None:
         self.key.unlink()
         with patch("apps.infrastructure.ansible_service.subprocess.run") as run:

@@ -151,6 +151,29 @@ def source_retirement_refusal(server: VirtualminServer, values: dict[str, Any] |
     return None
 
 
+MAX_FAILURE_DETAIL = 1000
+
+
+def _failure_reason(result: Any) -> str:
+    """The node's reason for a failed run, bounded for the bridge's last_error (#880).
+
+    The component task runs with no_log, so its output arrives censored; its rescue returns an allowlisted
+    receipt instead. Any other failure (transport, SSH) keeps the redacted run detail.
+    """
+    from apps.infrastructure.ansible_service import (  # noqa: PLC0415 -- native transport
+        component_failure_receipt,
+        redacted_failure_detail,
+    )
+
+    if result.is_err():
+        detail = " ".join(str(result.unwrap_err()).split())
+    else:
+        run = result.unwrap()
+        detail = component_failure_receipt(run.stdout) or redacted_failure_detail(run.stdout, run.stderr)
+    detail = detail[:MAX_FAILURE_DETAIL]
+    return f": {detail}" if detail else ""
+
+
 def _target_artifact_variables(bridge: MigrationBridge, token: str) -> dict[str, Any]:
     values = target_operation_variables(bridge.migration, UUID(token), "target_verify")
     values["component_action"] = "target_retire_artifacts"
@@ -188,7 +211,9 @@ def _retire_target_artifacts(bridge: MigrationBridge, token: str) -> None:
         bridge.target_server, "virtualmin_component.yml", values, timeout_seconds=600
     )
     if result.is_err() or not result.unwrap().success:
-        raise ValueError("Private target staging retirement is uncertain; preserve its owned receipts")
+        raise ValueError(
+            "Private target staging retirement is uncertain; preserve its owned receipts" + _failure_reason(result)
+        )
     if refusal := target_artifact_retirement_refusal(bridge.target_server, values):
         raise BridgeOwnershipError(refusal)
     encoded = re.findall(r"PRAHO_COMPONENT_RESULT=([A-Za-z0-9+/=]+)", result.unwrap().stdout)
@@ -214,7 +239,10 @@ def _retire_source(bridge: MigrationBridge, token: str) -> None:
         bridge.source_server, "virtualmin_component.yml", values, timeout_seconds=600
     )
     if result.is_err() or not result.unwrap().success:
-        raise ValueError("Source component retirement is uncertain; preserve all native receipts and retained services")
+        raise ValueError(
+            "Source component retirement is uncertain; preserve all native receipts and retained services"
+            + _failure_reason(result)
+        )
     if refusal := source_retirement_refusal(bridge.source_server, values):
         raise BridgeOwnershipError(refusal)
     encoded = re.findall(r"PRAHO_COMPONENT_RESULT=([A-Za-z0-9+/=]+)", result.unwrap().stdout)

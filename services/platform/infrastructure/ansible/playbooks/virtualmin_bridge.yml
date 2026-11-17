@@ -15,6 +15,8 @@
           - bridge_action in ['activate', 'retire_activation', 'reconcile_policy'] or bridge_source_ipv4 is match('^[0-9]{1,3}(\\.[0-9]{1,3}){3}$')
           - bridge_action in ['activate', 'retire_activation', 'reconcile_policy'] or bridge_target_ipv4 is match('^[0-9]{1,3}(\\.[0-9]{1,3}){3}$')
           - bridge_enabled is not defined or bridge_enabled is boolean
+          # The activation's optional billing hold (#776): the bridge itself checks its exact shape.
+          - bridge_billing_hold is not defined or (bridge_action == 'activate' and bridge_billing_hold is mapping)
 
     - name: Install the private native current-policy helper on the target
       when: bridge_action in ['activate', 'reconcile_policy']
@@ -33,6 +35,17 @@
             owner: root
             group: root
             mode: '0700'
+        - name: Install the database hold helper an activation's billing hold runs
+          when: bridge_billing_hold is defined
+          ansible.builtin.copy:
+            src: "files/{{ item }}"
+            dest: "/var/lib/praho/recovery/{{ item }}"
+            owner: root
+            group: root
+            mode: '0700'
+          loop:
+            - praho_database_hold.py
+            - praho-component-mysql.py
 
     - name: Fetch the original cron directly into the private controller spool
       when: bridge_action == 'fetch_crontab'
@@ -87,6 +100,7 @@
         PRAHO_BRIDGE_DOMAIN_ID: "{{ bridge_domain_id | default('') }}"
         PRAHO_BRIDGE_ENABLED: "{{ ('1' if bridge_enabled else '0') if bridge_enabled is defined else '' }}"
         PRAHO_BARRIER_RECORD: "{{ bridge_barrier_record | default({}) | to_json }}"
+        PRAHO_BRIDGE_BILLING_HOLD: "{{ (bridge_billing_hold | to_json) if bridge_billing_hold is defined else '' }}"
         PRAHO_BRIDGE_CERT_MIN_SECONDS: "{{ bridge_certificate_min_seconds | default(172800) }}"
         PRAHO_CLEANUP_SOURCE_RECORD: "{{ cleanup_source_record | default('') }}"
       register: bridge_step

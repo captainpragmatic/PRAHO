@@ -2810,6 +2810,30 @@ CATALOG: tuple[SettingDef, ...] = (
         input_kind="toggle",
     ),
     SettingDef(
+        key="provisioning.database_overage_enabled",
+        data_type="boolean",
+        default=False,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Database over-allowance holds"),
+        help_text=_(
+            "Open episodes for accounts whose databases put them over their allowance, notify them, and hold database writes after the grace period. Off: no new episodes or holds; releases continue. The hold must be in the Terms first."
+        ),
+        input_kind="toggle",
+    ),
+    SettingDef(
+        key="provisioning.database_overage_grace_days",
+        data_type="integer",
+        default=14,
+        group="advanced",
+        section=_("Provisioning"),
+        label=_("Database over-allowance grace period"),
+        help_text=_("Days between the first notice and the database write hold."),
+        unit="days",
+        input_kind="number",
+        validation={"min": 1},
+    ),
+    SettingDef(
         key="provisioning.enforce_verified_web_nodes",
         data_type="boolean",
         default=False,

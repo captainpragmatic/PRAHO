@@ -119,4 +119,15 @@ class ComponentSourceActionTests(SimpleTestCase):
             target.activate.return_value = {"operation_id": self.operation, "phase": "active"}
             result = self.module.perform({**payload, "action": "target_activate", "enabled": False})
         self.assertEqual(result["phase"], "active")
-        target.activate.assert_called_once_with("c" * 64, enabled=False)
+        target.activate.assert_called_once_with("c" * 64, enabled=False, billing_hold=None)
+        hold = {"token": str(uuid4()), "generation": 2, "installation": str(uuid4())}
+        target.activate.reset_mock()
+        with patch.object(self.module, "_module", return_value=native):
+            self.module.perform({**payload, "action": "target_activate", "enabled": True, "billing_hold": hold})
+        target.activate.assert_called_once_with("c" * 64, enabled=True, billing_hold=hold)
+        record = {"token": hold["token"], "generation": 2, "held_digest": "d" * 64}
+        with patch.object(self.module, "_module", return_value=native):
+            target.record_billing_hold.return_value = {"operation_id": self.operation, "phase": "active"}
+            result = self.module.perform({**payload, "action": "target_billing_hold", "billing_hold": record})
+        self.assertEqual(result["action"], "target_billing_hold")
+        target.record_billing_hold.assert_called_once_with(record)

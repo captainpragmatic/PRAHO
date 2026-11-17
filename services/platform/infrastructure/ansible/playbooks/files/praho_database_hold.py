@@ -19,6 +19,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
@@ -124,6 +125,8 @@ class Database(Protocol):
     def roles_and_proxies(self, principals: list[Principal]) -> tuple[int, int]: ...
 
     def definers_of(self, databases: list[str]) -> set[str]: ...
+
+    def cascading_references(self, databases: list[str]) -> int: ...
 
     def revoke(self, user: str, host: str, db: str, columns: list[str]) -> None: ...
 
@@ -295,7 +298,8 @@ class DatabaseHold:
         needs_generation = action != "fence"
         expected = {"action", "identity"} | ({"token"} if needs_token else set())
         expected |= {"generation"} if needs_generation else set()
-        if set(request) != expected:
+        # A release may name its token: an activation's cleanup must never end another token's hold.
+        if set(request) != expected and not (action == "release" and set(request) == expected | {"token"}):
             raise ValueError("The database hold request has unsupported terms")
         identity = request["identity"]
         if (
@@ -310,7 +314,7 @@ class DatabaseHold:
         ):
             raise ValueError("An exact native hold identity is required")
         token = request.get("token")
-        if needs_token and (not isinstance(token, str) or re.fullmatch(SAVED, token) is None):
+        if (needs_token or token is not None) and (not isinstance(token, str) or re.fullmatch(SAVED, token) is None):
             raise ValueError("An exact hold token is required")
         generation = request.get("generation")
         if needs_generation and (type(generation) is not int or not 0 < generation < 1 << 62):
@@ -475,6 +479,10 @@ class DatabaseHold:
         allowed = {f"{user}@{host}" for user, host in principals}
         if self.database.definers_of(databases) - allowed:
             raise HoldRefusal("definer_outside_scope", "a routine, trigger, event or view runs as another principal")
+        # ON UPDATE CASCADE from a parent outside the hold lets that parent's owner rewrite held rows, and grow them
+        # for a variable-length key; no grant here can stop it. DELETE CASCADE and SET NULL only shrink.
+        if self.database.cascading_references(databases):
+            raise HoldRefusal("cascade_foreign_key", "a held table cascades updates from a table outside the hold")
         return rows
 
     @staticmethod
@@ -619,6 +627,9 @@ class DatabaseHold:
         if generation < previous:
             raise HoldRefusal("obsolete_generation", "a newer hold exists")
         hold_token = journal.get("token") if journal else None
+        active = journal is not None and journal.get("phase") in {"holding", "held", "releasing"}
+        if token is not None and active and hold_token != token:
+            raise HoldRefusal("generation_conflict", "another token holds this domain")
         if journal is None or journal.get("phase") == "released" or not journal.get("rows"):
             # Nothing to restore, but the release is still recorded with its generation: a delayed older hold then
             # refuses as obsolete, and verify reports not_held (review finding).
@@ -795,6 +806,18 @@ class NativeDatabase:
         )
         return {row[0] for row in rows}
 
+    def cascading_references(self, databases: list[str]) -> int:
+        names = ",".join(f"'{name}'" for name in databases if DATABASE.fullmatch(name))
+        if not names:
+            return 0
+        # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — DATABASE-fullmatched schema names only; native mysql CLI.
+        rows = self.execute(
+            "SELECT COUNT(*) FROM information_schema.REFERENTIAL_CONSTRAINTS "  # noqa: S608 -- Validated names.
+            f"WHERE BINARY CONSTRAINT_SCHEMA IN ({names}) AND BINARY UNIQUE_CONSTRAINT_SCHEMA NOT IN ({names}) "
+            "AND UPDATE_RULE = 'CASCADE'"
+        )
+        return int(rows[0][0])
+
     # One statement each, GRANT OPTION included, so a crash never leaves a row half changed (review finding).
     def revoke(self, user: str, host: str, db: str, columns: list[str]) -> None:
         names = [SQL_NAMES[column] for column in columns]
@@ -840,6 +863,86 @@ class NativeDatabase:
         with suppress(ValueError):
             # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — A range-checked int process id, the only form KILL takes; native mysql CLI.
             self.execute(f"KILL SOFT CONNECTION {number}")
+
+
+# -- a hold during activation (#776, plan revision 3 item 4) -----------------------------------------------------------
+# The native bridge and the component target both run these, each with its own runner for one helper action. A hold
+# that is not exactly in place is undone before the activation completes, and the caller reports why.
+Runner = Callable[[dict[str, Any]], dict[str, Any]]
+UNCERTAIN_ERRORS = (ValueError, OSError, subprocess.SubprocessError)
+
+
+def activation_receipt(run: Runner, request: dict[str, Any]) -> dict[str, Any]:
+    """The helper's receipt for exactly this request; anything else is an uncertain outcome."""
+    receipt = run(request)
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("action") != request["action"]
+        or receipt.get("identity") != request["identity"]
+        or (request["action"] != "fence" and receipt.get("generation") != request["generation"])
+        or (request["action"] in {"hold", "fence"} and receipt.get("token") != request["token"])
+    ):
+        raise ValueError("The database hold receipt is for another request")
+    return receipt
+
+
+def hold_on_activation(run: Runner, hold: dict[str, Any]) -> dict[str, Any]:
+    """Hold, then verify. Anything else is undone (fence, release, verify) so the activation completes unheld."""
+    identity, token, generation = hold["identity"], hold["token"], hold["generation"]
+    result = {"identity": identity, "token": token, "generation": generation}
+    reason, code = "uncertain", None
+    try:
+        receipt = activation_receipt(
+            run, {"action": "hold", "identity": identity, "token": token, "generation": generation}
+        )
+    except UNCERTAIN_ERRORS:
+        receipt = None
+    if receipt is not None and receipt.get("outcome") == "refused":
+        reason, code = "refused", receipt.get("code")
+    elif receipt is not None and receipt.get("outcome") == "ok" and receipt.get("phase") == "holding":
+        reason = "partial"
+    elif receipt is not None and receipt.get("outcome") == "ok" and receipt.get("phase") == "held":
+        try:
+            verify_activation_hold(run, hold, receipt.get("held_digest"))
+        except UNCERTAIN_ERRORS:
+            pass
+        else:
+            return {"outcome": "held", **result, "held_digest": receipt["held_digest"]}
+    undo_activation_hold(run, hold)
+    return {"outcome": "not_held", "reason": reason, "code": code, **result}
+
+
+def verify_activation_hold(run: Runner, hold: dict[str, Any], digest: object) -> None:
+    receipt = activation_receipt(
+        run, {"action": "verify", "identity": hold["identity"], "generation": hold["generation"]}
+    )
+    if (
+        receipt.get("outcome") != "ok"
+        or receipt.get("phase") != "verified"
+        or receipt.get("drift") != []
+        or receipt.get("sessions_remaining") != []
+        or not isinstance(digest, str)
+        or receipt.get("held_digest") != digest
+    ):
+        raise ValueError("The billing hold is not exactly in place on the target")
+
+
+def undo_activation_hold(run: Runner, hold: dict[str, Any]) -> None:
+    """Fence the token, then release with its generation, then prove the target unheld; each only after the last
+    succeeded, since a release behind an unfenced token could be overtaken by that token's delayed hold."""
+    identity, generation = hold["identity"], hold["generation"]
+    steps = (
+        ({"action": "fence", "identity": identity, "token": hold["token"]}, ("phase", "fenced")),
+        (
+            {"action": "release", "identity": identity, "generation": generation, "token": hold["token"]},
+            ("phase", "released"),
+        ),
+        ({"action": "verify", "identity": identity, "generation": generation}, ("drift", ["not_held"])),
+    )
+    for request, (field, expected) in steps:
+        receipt = activation_receipt(run, request)
+        if receipt.get("outcome") != "ok" or receipt.get(field) != expected:
+            raise ValueError("A refused or uncertain billing hold could not be undone on the target")
 
 
 def main() -> None:

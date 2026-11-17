@@ -436,3 +436,73 @@ def test_the_existence_query_proves_a_drop_only_to_an_identity_that_sees_mysql(s
     server.sql(f"CREATE USER 'n{account.user}'@'localhost' IDENTIFIED BY '{TENANT_PASSWORD}'")
     blind = server.tenant(f"n{account.user}", query.replace(f"gone_{account.user}", account.db))
     assert blind.stdout.strip() == "0\t0"
+
+
+def test_the_component_target_reads_a_real_held_form_exactly(server, account, hold):
+    """7B.3: the component target accepts exactly the manifest's grants, or exactly them less the hold's revoked set,
+    as MariaDB 11.8.3 prints them (ALL expanded from its own mysql.db columns, SHOW CREATE ROUTINE included)."""
+    component = load("component_target_database_lab", FILES / "praho-component-target-database.py")
+    native = server.native(hold)
+    key = (account.user, "localhost")
+    view = types.SimpleNamespace(
+        execute=native.execute,
+        selected=(account.db, account.logs),
+        grants={key: [("ALL PRIVILEGES", account.db, False), ("ALL PRIVILEGES", account.logs, False)]},
+    )
+    view._all_privileges = lambda: component.TargetDatabase._all_privileges(view)
+
+    def grants() -> list[str]:
+        return [row[0] for row in native.execute(f"SHOW GRANTS FOR '{account.user}'@'localhost'")]
+
+    def matches(*, held: bool) -> bool:
+        return component.TargetDatabase._grants_are(view, grants(), key, held=held)
+
+    assert matches(held=False) and not matches(held=True)
+    assert account.act("hold")["phase"] == "held"
+    print("Held SHOW GRANTS on mariadb:11.8.3:\n" + "\n".join(grants()))
+    assert matches(held=True) and not matches(held=False)
+    server.sql(f"REVOKE SELECT ON `{account.escaped[account.db]}`.* FROM '{account.user}'@'localhost'")
+    assert not matches(held=True)  # One privilege more than the hold's set is not the held form.
+    server.sql(f"GRANT SELECT ON `{account.escaped[account.db]}`.* TO '{account.user}'@'localhost'")
+    assert account.act("release")["phase"] == "released"
+    assert matches(held=False) and not matches(held=True)
+
+
+def test_a_foreign_key_cascading_updates_from_outside_the_hold_is_refused(server, account):
+    """ON UPDATE CASCADE from a parent outside the hold rewrites held rows without the tenant's grants; ON DELETE
+    CASCADE and ON UPDATE SET NULL across the same boundary only remove or blank them, so they do not refuse."""
+    outside = f"p{account.user}"
+    server.sql(
+        f"CREATE DATABASE {outside}; "
+        f"CREATE TABLE {outside}.parent (k VARCHAR(200) PRIMARY KEY) ENGINE=InnoDB; "
+        f"INSERT INTO {outside}.parent VALUES ('a'), ('b'); "
+        f"CREATE TABLE {account.db}.child (k VARCHAR(200), CONSTRAINT grow FOREIGN KEY (k) "
+        f"REFERENCES {outside}.parent (k) ON UPDATE CASCADE) ENGINE=InnoDB; "
+        f"INSERT INTO {account.db}.child VALUES ('a')"
+    )
+    refused = account.act("hold")
+    assert (refused["outcome"], refused["code"]) == ("refused", "cascade_foreign_key"), refused
+
+    # Why: held anyway (the key added behind the hold's back), the parent's owner still grows the held row.
+    server.sql(f"ALTER TABLE {account.db}.child DROP FOREIGN KEY grow")
+    assert account.act("hold")["phase"] == "held"
+    server.sql(
+        f"ALTER TABLE {account.db}.child ADD CONSTRAINT grow FOREIGN KEY (k) REFERENCES {outside}.parent (k) "
+        "ON UPDATE CASCADE"
+    )
+    server.sql(f"UPDATE {outside}.parent SET k = '{'x' * 200}' WHERE k = 'a'")
+    assert server.sql(f"SELECT LENGTH(k) FROM {account.db}.child") == "200"
+    assert "unqualified:cascade_foreign_key" in account.act("verify")["drift"]
+    assert account.act("release")["phase"] == "released"
+
+    # Delete cascade and update set-null: rows go away or lose their key, never grow; the hold is allowed.
+    server.sql(
+        f"ALTER TABLE {account.db}.child DROP FOREIGN KEY grow; "
+        f"ALTER TABLE {account.db}.child ADD CONSTRAINT shrink FOREIGN KEY (k) REFERENCES {outside}.parent (k) "
+        "ON DELETE CASCADE ON UPDATE SET NULL; "
+        f"DELETE FROM {account.db}.child; INSERT INTO {account.db}.child VALUES ('b'), ('{'x' * 200}')"
+    )
+    assert account.act("hold", generation=2, token=str(uuid4()))["phase"] == "held"
+    server.sql(f"UPDATE {outside}.parent SET k = 'c' WHERE k = 'b'")
+    server.sql(f"DELETE FROM {outside}.parent WHERE k = '{'x' * 200}'")
+    assert server.sql(f"SELECT COUNT(*), COUNT(k) FROM {account.db}.child") == "1\t0"

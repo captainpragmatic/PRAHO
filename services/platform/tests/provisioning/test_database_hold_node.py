@@ -92,6 +92,7 @@ class FakeDatabase:
         self.after_revoke: list = []  # Callbacks run once each, after a REVOKE took effect.
         self.after_sessions: list = []  # Callbacks run once each, after a process list was read.
         self.sessions_fail = False
+        self.cascades = 0  # Foreign keys in held databases cascading updates from a table outside them.
         for user, host in self.global_accounts:
             self.principal(user, host)
 
@@ -139,6 +140,9 @@ class FakeDatabase:
 
     def roles_and_proxies(self, principals: list[tuple[str, str]]) -> tuple[int, int]:
         return self.role_rows, self.proxy_rows
+
+    def cascading_references(self, databases: list[str]) -> int:
+        return self.cascades
 
     def definers_of(self, databases: list[str]) -> set[str]:
         return set().union(*(self.definers.get(name, set()) for name in databases)) if databases else set()
@@ -384,6 +388,18 @@ class GenerationAndFenceTests(HoldFixture):
         self.assertEqual(self.image("shop\\_logs"), privileges("Select_priv", "Insert_priv"))
         self.assertTrue((self.paths.state / INSTALLATION / "42" / f"cancelled-{self.token}.json").exists())
 
+    def test_a_release_naming_its_token_never_ends_another_tokens_hold(self) -> None:
+        other = str(uuid4())
+        self.assertEqual(self.act("hold", token=other, generation=3)["phase"], "held")
+        refused = self.node.perform(
+            {"action": "release", "identity": self.identity, "generation": 3, "token": self.token}
+        )
+        self.assertEqual((refused["outcome"], refused["code"]), ("refused", "generation_conflict"))
+        self.assertEqual(self.image("shop\\_db")["Insert_priv"], "N")
+        released = self.node.perform({"action": "release", "identity": self.identity, "generation": 3, "token": other})
+        self.assertEqual(released["phase"], "released")
+        self.assertEqual(self.image("shop\\_db"), everything())
+
     def test_a_release_before_any_hold_fences_a_delayed_older_hold(self) -> None:
         self.assertEqual(self.act("release", generation=5)["phase"], "released")
         self.assertEqual((self.journal()["phase"], self.journal()["generation"]), ("released", 5))
@@ -599,6 +615,11 @@ class RefusalTests(HoldFixture):
                 self.database.grant_row("shop", stored, privileges("Select_priv"))
                 self.refused("wildcard_database")
 
+    def test_a_foreign_key_cascading_updates_from_outside_the_held_databases(self) -> None:
+        # The parent's owner, outside the hold, could rewrite and grow the held child rows (review finding).
+        self.database.cascades = 1
+        self.refused("cascade_foreign_key")
+
     def test_a_definer_outside_the_scope(self) -> None:
         self.database.definers["shop_db"] = {"shop@localhost", "admin@localhost"}
         self.refused("definer_outside_scope")
@@ -804,6 +825,15 @@ class NativeStatementTests(SimpleTestCase):
             ],
         )
 
+    def test_cascading_references_are_counted_by_exact_schema_and_update_rule(self) -> None:
+        database = self.native()
+        database.execute = lambda query: database.statements.append(query) or [("2",)]
+        self.assertEqual(database.cascading_references(["shop_db", "bad'name"]), 2)
+        (query,) = database.statements
+        self.assertIn("BINARY CONSTRAINT_SCHEMA IN ('shop_db')", query)
+        self.assertIn("BINARY UNIQUE_CONSTRAINT_SCHEMA NOT IN ('shop_db')", query)
+        self.assertTrue(query.endswith("AND UPDATE_RULE = 'CASCADE'"), query)
+
     def test_kill_takes_only_an_int_process_id_in_range(self) -> None:
         database = self.native()
         for bad in (0, True, "12", 1 << 63):
@@ -879,6 +909,11 @@ class RoundTwoFindingTests(HoldFixture):
         with self.assertRaises(ValueError):
             self.act("hold")
         self.assertEqual(self.journal()["phase"], "holding")
+
+    def test_verify_reports_a_cascading_foreign_key_added_after_the_hold(self) -> None:
+        self.act("hold")
+        self.database.cascades = 1
+        self.assertIn("unqualified:cascade_foreign_key", self.act("verify")["drift"])
 
     def test_verify_reports_a_definer_outside_the_scope(self) -> None:
         self.act("hold")

@@ -109,6 +109,10 @@ def intent_refusal(
         return "warning_ownership_changed"
     if service.status != "active" or account.status != "active":
         return "warning_service_inactive"
+    from .database_overage_service import superseded_by_database_overage  # noqa: PLC0415 -- One overage rule.
+
+    if superseded_by_database_overage(intent.resource, int(intent.threshold), account.pk):
+        return "superseded_by_database_overage"
     if reason := _usage_refusal(intent, account, service, audience, at):
         return reason
     if account.server_id not in audience.node_mail:

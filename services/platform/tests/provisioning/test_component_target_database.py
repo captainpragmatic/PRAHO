@@ -17,6 +17,11 @@ class TargetSQLFixture:
         self.statements = []
         self.fail_after_create = False
         self.schemas = []
+        self.columns = ["Select_priv", "Insert_priv", "Update_priv", "Delete_priv", "Create_priv", "Drop_priv",
+                        "Grant_priv", "References_priv", "Index_priv", "Alter_priv", "Create_tmp_table_priv",
+                        "Lock_tables_priv", "Create_view_priv", "Show_view_priv", "Create_routine_priv",
+                        "Alter_routine_priv", "Execute_priv", "Event_priv", "Trigger_priv", "Delete_history_priv",
+                        "Show_create_routine_priv"]
 
     def __call__(self, query):  # noqa: C901, PLR0911, PLR0912 -- explicit native SQL state machine test boundary
         import re  # noqa: PLC0415 -- fixture's tiny native SQL boundary
@@ -30,6 +35,8 @@ class TargetSQLFixture:
             return sorted(self.accounts)
         if query.startswith("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA"):
             return self.schemas
+        if query.startswith("SHOW COLUMNS FROM mysql.db"):
+            return [(column,) for column in self.columns]
         identity = re.search(r"'([^']+)'(?: AND Host = |@)'([^']+)'", query)
         if identity is None:
             raise AssertionError(query)
@@ -66,7 +73,7 @@ class TargetSQLFixture:
         return []
 
 
-class ComponentTargetDatabaseTests(SimpleTestCase):
+class TargetDatabaseFixture(SimpleTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -125,6 +132,9 @@ class ComponentTargetDatabaseTests(SimpleTestCase):
             execute=self.sql,
         )
 
+
+
+class ComponentTargetDatabaseTests(TargetDatabaseFixture):
     def test_restore_narrows_grants_preserves_hash_and_held_retry_cannot_mutate_or_unlock(self):
         target = self.manager()
         target.apply()
@@ -263,3 +273,178 @@ class ComponentTargetDatabaseTests(SimpleTestCase):
         with self.assertRaisesRegex(ValueError, "identity"):
             target.retire()
         self.assertFalse(any(query.startswith("DROP USER") for query in self.sql.statements))
+
+
+HOLD = {"identity": {"domain_id": "123456789", "domain": "shop.test", "installation": str(uuid4())},
+        "token": str(uuid4()), "generation": 4}
+WEB = "ON `customer\\_web`.* TO `webapp`@`localhost`"
+
+
+class ComponentBillingHoldTests(TargetDatabaseFixture):
+    """The component target's billing hold: between the re-grant and the unlock, and its exact held form (#776)."""
+
+    def setUp(self):
+        super().setUp()
+        self.events = []
+        self.hold_outcome = "held"
+        self.held_grants = [f"GRANT SELECT {WEB}"]
+
+    def grants(self, line):
+        self.private[0]["grants"] = [line]
+        self.principal["grants_digest"] = hashlib.sha256(json.dumps([line], separators=(",", ":")).encode()).hexdigest()
+
+    def run_hold(self, request):
+        action = request["action"]
+        self.events.append(action)
+        row = self.sql.accounts[("webapp", "localhost")]
+        echo = {key: request.get(key) for key in ("action", "identity", "token", "generation")}
+        if action == "hold":
+            if self.hold_outcome == "refused":
+                return {**echo, "outcome": "refused", "code": "global_privilege", "detail": "x"}
+            self.events.append("locked" if row["locked"] else "unlocked")
+            row["grants"] = list(self.held_grants)
+            return {**echo, "outcome": "ok", "phase": "held", "held_digest": "d" * 64, "sessions_remaining": [], "drift": []}
+        if action == "verify":
+            held = row["grants"] == self.held_grants
+            return {**echo, "outcome": "ok", "phase": "verified", "held_digest": "d" * 64 if held else None,
+                    "sessions_remaining": [], "drift": [] if held else ["not_held"]}
+        if action == "fence":
+            return {**echo, "outcome": "ok", "generation": 0, "phase": "fenced", "held_digest": None,
+                    "sessions_remaining": [], "drift": []}
+        if action == "release":
+            return {**echo, "outcome": "ok", "phase": "released", "held_digest": None, "sessions_remaining": [],
+                    "drift": []}
+        raise AssertionError(action)
+
+    def held_target(self):
+        target = self.manager()
+        target.apply()
+        outcome = target.activate(billing_hold=HOLD, run_hold=self.run_hold)
+        return target, outcome
+
+    def test_the_hold_lands_after_the_regrant_and_before_any_unlock(self):
+        target, outcome = self.held_target()
+        self.assertEqual((outcome["outcome"], outcome["held_digest"]), ("held", "d" * 64))
+        self.assertEqual(self.events[:2], ["hold", "locked"])
+        self.assertFalse(self.sql.accounts[("webapp", "localhost")]["locked"])
+        self.assertEqual(self.sql.accounts[("webapp", "localhost")]["grants"], self.held_grants)
+        self.assertEqual(target.journal.read()["billing_hold"]["held_digest"], "d" * 64)
+
+    def test_a_release_landing_after_the_hold_is_verified_fails_the_activation(self):
+        real = self.run_hold
+
+        def released_meanwhile(request):
+            receipt = real(request)
+            if request["action"] == "verify" and receipt.get("drift") == []:
+                # A concurrent release restores the manifest's grants right after the hold was verified.
+                self.sql.accounts[("webapp", "localhost")]["grants"] = [f"GRANT SELECT, INSERT {WEB}"]
+            return receipt
+
+        target = self.manager()
+        target.apply()
+        with self.assertRaises(ValueError):
+            target.activate(billing_hold=HOLD, run_hold=released_meanwhile)
+
+    def test_a_held_activation_requires_the_held_grant_form_itself(self):
+        def verify_says_held(request):
+            receipt = self.run_hold(request)
+            if request["action"] == "verify":
+                # Whatever the helper reports, the manifest's grants back on the principal are not a hold.
+                self.sql.accounts[("webapp", "localhost")]["grants"] = [f"GRANT SELECT, INSERT {WEB}"]
+                receipt.update(held_digest="d" * 64, drift=[])
+            return receipt
+
+        target = self.manager()
+        target.apply()
+        with self.assertRaisesRegex(ValueError, "grants changed"):
+            target.activate(billing_hold=HOLD, run_hold=verify_says_held)
+
+    def test_a_held_activation_reverifies_the_hold_with_the_helper(self):
+        calls = {"verify": 0}
+
+        def drifted_at_the_end(request):
+            receipt = self.run_hold(request)
+            if request["action"] == "verify":
+                calls["verify"] += 1
+                if calls["verify"] > 1:  # The grants still look held, but the helper no longer sees its hold.
+                    receipt.update(drift=["regranted:webapp@localhost:customer\\_web"])
+            return receipt
+
+        target = self.manager()
+        target.apply()
+        with self.assertRaisesRegex(ValueError, "not exactly in place"):
+            target.activate(billing_hold=HOLD, run_hold=drifted_at_the_end)
+
+    def test_a_held_target_passes_verify_and_reconcile(self):
+        self.held_target()
+        self.manager().verify(active=True)
+        self.manager().reconcile_policy(enabled=False)
+        self.manager().reconcile_policy(enabled=True)
+        self.manager().verify(active=True)
+
+    def test_only_exactly_the_held_form_passes(self):
+        self.grants(f"GRANT SELECT, INSERT, UPDATE, DELETE {WEB}")
+        self.held_grants = [f"GRANT SELECT, DELETE {WEB}"]
+        self.held_target()
+        self.manager().verify(active=True)
+        row = self.sql.accounts[("webapp", "localhost")]
+        for grants in (
+            [],  # One extra revoked privilege: DELETE went too, so the row is gone.
+            [f"GRANT SELECT {WEB}"],  # Likewise.
+            [f"GRANT SELECT, UPDATE, DELETE {WEB}"],  # A subset in between.
+            [f"GRANT SELECT, DELETE {WEB} WITH GRANT OPTION"],  # Something added back.
+            [f"GRANT SELECT, DELETE, LOCK TABLES {WEB}"],  # Something added.
+            [f"GRANT SELECT, DELETE {WEB}", f"GRANT SELECT, DELETE {WEB}"],  # The same schema twice.
+            [f"GRANT SELECT, DELETE {WEB}", "GRANT USAGE ON *.* TO `webapp`@`localhost` WITH GRANT OPTION"],
+        ):
+            with self.subTest(grants=grants):
+                row["grants"] = grants
+                with self.assertRaisesRegex(ValueError, "grants changed"):
+                    self.manager().verify(active=True)
+
+    def test_the_held_form_is_refused_without_a_recorded_hold(self):
+        target = self.manager()
+        target.apply()
+        target.activate()
+        self.sql.accounts[("webapp", "localhost")]["grants"] = list(self.held_grants)
+        with self.assertRaisesRegex(ValueError, "grants changed"):
+            self.manager().verify(active=True)
+
+    def test_all_privileges_is_held_as_the_servers_own_columns_less_the_revoked_set(self):
+        self.grants(f"GRANT ALL PRIVILEGES {WEB}")
+        self.held_grants = [
+            "GRANT SELECT, DELETE, DROP, REFERENCES, LOCK TABLES, EXECUTE, SHOW VIEW, TRIGGER, DELETE HISTORY, "
+            f"SHOW CREATE ROUTINE {WEB}"
+        ]
+        self.held_target()
+        self.manager().verify(active=True)
+        self.sql.columns.append("Future_priv")
+        with self.assertRaisesRegex(ValueError, "columns"):
+            self.manager().verify(active=True)
+
+    def test_a_refused_hold_is_undone_and_nothing_is_recorded(self):
+        self.hold_outcome = "refused"
+        target, outcome = self.held_target()
+        self.assertEqual((outcome["outcome"], outcome["reason"], outcome["code"]), ("not_held", "refused", "global_privilege"))
+        self.assertEqual(self.events, ["hold", "fence", "release", "verify"])
+        self.assertIsNone(target.journal.read().get("billing_hold"))
+        self.assertEqual(self.manager().activate(), outcome)  # A completed replay returns the stored outcome.
+
+    def test_platform_records_and_clears_a_hold_only_over_the_matching_grants(self):
+        target = self.manager()
+        target.apply()
+        target.activate()
+        record = {"token": HOLD["token"], "generation": 4, "held_digest": "d" * 64}
+        with self.assertRaisesRegex(ValueError, "form"):
+            self.manager().record_billing_hold(record)  # Still the manifest's grants.
+        self.sql.accounts[("webapp", "localhost")]["grants"] = list(self.held_grants)
+        self.manager().record_billing_hold(record)
+        self.manager().reconcile_policy(enabled=True)
+        with self.assertRaisesRegex(ValueError, "form"):
+            self.manager().record_billing_hold(None)  # Not released yet.
+        self.sql.accounts[("webapp", "localhost")]["grants"] = [f"GRANT SELECT, INSERT {WEB}"]
+        self.manager().record_billing_hold(None)
+        self.assertIsNone(target.journal.read()["billing_hold"])
+        self.sql.accounts[("webapp", "localhost")]["grants"] = list(self.held_grants)
+        with self.assertRaisesRegex(ValueError, "grants changed"):
+            self.manager().verify(active=True)

@@ -2177,9 +2177,13 @@ def delete_virtualmin_account_async(account_id: str) -> str:
 
 def setup_virtualmin_scheduled_tasks() -> dict[str, str]:
     """Set up all Virtualmin scheduled tasks."""
+    from .database_overage_delivery import setup_overage_notices  # noqa: PLC0415 -- One explicit scheduler setup.
+    from .database_overage_tasks import setup_overage_sweep  # noqa: PLC0415 -- One explicit scheduler setup.
     from .hosting_warning_delivery import setup_warning_pipeline  # noqa: PLC0415 -- One explicit scheduler setup.
 
     tasks_created = setup_warning_pipeline()
+    tasks_created.update(setup_overage_notices())
+    tasks_created.update(setup_overage_sweep())
     _, created = ScheduleModel.objects.update_or_create(
         name="hosting-safety-observations",
         defaults={

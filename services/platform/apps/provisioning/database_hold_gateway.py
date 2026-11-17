@@ -45,6 +45,7 @@ NODE_REFUSALS = frozenset(
         "outside_scope",
         "wildcard_database",
         "definer_outside_scope",
+        "cascade_foreign_key",
         "unknown_privilege_column",
         "unsupported_grant",
         "operator_inspection_required",
@@ -217,3 +218,85 @@ def _uuid(value: str) -> UUID:
         return UUID(value)
     except (ValueError, TypeError, AttributeError) as error:
         raise _UnreadableError("not a UUID") from error
+
+
+# -- a hold during migration activation (#776, plan revision 3 item 4) -------------------------------------------------
+ACTIVATION_REASONS = frozenset({"refused", "partial", "uncertain"})
+UUID_TEXT = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def activation_hold_request(hold: object) -> dict[str, Any]:
+    """The exact {token, generation, installation} an activation sends to the node; anything else is refused."""
+    if (
+        not isinstance(hold, dict)
+        or set(hold) != {"token", "generation", "installation"}
+        or not all(isinstance(hold[key], str) and UUID_TEXT.fullmatch(hold[key]) for key in ("token", "installation"))
+        or type(hold["generation"]) is not int
+        or not 0 < hold["generation"] < 1 << 62
+    ):
+        raise ValueError("The activation billing hold request is not exact")
+    return dict(hold)
+
+
+def activation_hold_outcome(
+    outcome: object, hold: dict[str, Any], *, domain: str, domain_id: str | None = None
+) -> dict[str, Any]:
+    """The node's hold outcome for exactly this activation: held with its digest, or not_held with a closed reason.
+
+    The node has already undone a hold that is not in place; raising here means the response is not one Platform
+    can act on, so the activation is uncertain.
+    """
+    # A native target's domain id is read on the node; without Platform's own copy it must still be a domain id.
+    identity = {"domain": domain, "installation": hold["installation"]}
+    if not isinstance(outcome, dict) or not isinstance(outcome.get("identity"), dict):
+        raise ValueError("The activation returned no billing hold outcome")
+    expected = {"identity", "token", "generation"} | (
+        {"outcome", "held_digest"} if outcome.get("outcome") == "held" else {"outcome", "reason", "code"}
+    )
+    received = outcome["identity"]
+    if (
+        set(outcome) != expected
+        or not isinstance(outcome["outcome"], str)
+        or outcome["outcome"] not in {"held", "not_held"}
+        or set(received) != {"domain_id", "domain", "installation"}
+        or {key: received[key] for key in identity} != identity
+        or not isinstance(received["domain_id"], str)
+        or re.fullmatch(r"[0-9]{1,30}", received["domain_id"]) is None
+        or (domain_id is not None and received["domain_id"] != domain_id)
+        or (outcome["token"], outcome["generation"]) != (hold["token"], hold["generation"])
+        or (
+            outcome["outcome"] == "held"
+            and (not isinstance(outcome["held_digest"], str) or DIGEST.fullmatch(outcome["held_digest"]) is None)
+        )
+        or (
+            outcome["outcome"] == "not_held"
+            and (
+                not isinstance(outcome["reason"], str)
+                or outcome["reason"] not in ACTIVATION_REASONS
+                or (
+                    outcome["code"] is not None
+                    and (not isinstance(outcome["code"], str) or outcome["code"] not in NODE_REFUSALS)
+                )
+            )
+        )
+    ):
+        raise ValueError("The activation's billing hold outcome is not exactly for this hold")
+    return outcome
+
+
+def activation_hold_record(record: object) -> dict[str, Any] | None:
+    """What a component target records for a verified hold ({token, generation, held_digest}), or None to clear it."""
+    if record is None:
+        return None
+    if (
+        not isinstance(record, dict)
+        or set(record) != {"token", "generation", "held_digest"}
+        or not isinstance(record["token"], str)
+        or UUID_TEXT.fullmatch(record["token"]) is None
+        or type(record["generation"]) is not int
+        or not 0 < record["generation"] < 1 << 62
+        or not isinstance(record["held_digest"], str)
+        or DIGEST.fullmatch(record["held_digest"]) is None
+    ):
+        raise ValueError("The component billing hold record is not exact")
+    return dict(record)

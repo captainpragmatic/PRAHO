@@ -7,6 +7,7 @@ Handles inventory generation, playbook execution, and log capture.
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import ipaddress
 import json
@@ -138,6 +139,72 @@ def failure_detail(stdout: str, stderr: str) -> str:
     first = first[:300]
     parts = [first] + [part for part in (origin[:150], fatal) if part and part not in first]
     return " | ".join(part for part in parts if part)[:1500]
+
+
+# A YAML key line: quoted (spaces allowed) or not, as a list item or not, with any value after the colon.
+_YAML_KEY_LINE = re.compile(
+    r"""^(\s*)((?:-\s+)?)(?:"([^"\n]{1,128})"|'([^'\n]{1,128})'|([A-Za-z_][\w.\-]*))\s*:(?:\s|$)"""
+)
+
+
+def _redact_yaml_blocks(text: str) -> str:
+    """Replace the whole value of a sensitive YAML key, however it continues on the lines below.
+
+    Conservative on purpose: the key's line keeps only the key, and every following line indented past the key's
+    column goes (a block scalar, a list, a mapping or a wrapped plain value), as does an indentless "- " list.
+    """
+    from apps.common.logging import REDACTION_TEXT, _is_sensitive_key  # noqa: PLC0415 -- shared key policy
+
+    kept: list[str] = []
+    column: int | None = None
+    for line in text.splitlines():
+        indent = len(line) - len(line.lstrip())
+        if column is not None:
+            if not line.strip() or indent > column or (indent == column and line.lstrip().startswith("- ")):
+                continue
+            column = None
+        match = _YAML_KEY_LINE.match(line)
+        key = match and (match[3] or match[4] or match[5])
+        if match and key and _is_sensitive_key(key):
+            kept.append(f"{match[1]}{match[2]}{key}: {REDACTION_TEXT}")
+            column = len(match[1]) + len(match[2])
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def redacted_failure_detail(stdout: str, stderr: str) -> str:
+    """failure_detail() of output already redacted whole, on one line.
+
+    Redacting after shortening could cut a key off while its value's end survives. A key right after an escaped
+    "\\n" reads as "n<key>" to the redactor, so a space keeps each such key a word of its own.
+    """
+    from apps.common.logging import redact_sensitive_text  # noqa: PLC0415 -- shared log redaction
+
+    def redacted(text: str) -> str:
+        return redact_sensitive_text(_redact_yaml_blocks(text.replace("\\n", "\\n ").replace("\\t", "\\t ")))
+
+    return " ".join(failure_detail(redacted(stdout), redacted(stderr)).split())
+
+
+def component_failure_receipt(stdout: str) -> str:
+    """The allowlisted receipt a failed component action returns past no_log, as one line, or ""."""
+    encoded = re.findall(r"PRAHO_COMPONENT_FAILURE=([A-Za-z0-9+/=]{1,4096})", stdout)
+    try:
+        failure = json.loads(base64.b64decode(encoded[0], validate=True))["failure"] if len(encoded) == 1 else None
+    except (ValueError, KeyError, TypeError):
+        return ""
+    if not isinstance(failure, dict) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,63}", str(failure.get("type"))):
+        return ""
+    text = str(failure["type"])
+    if isinstance(failure.get("reason"), str) and re.fullmatch(r"[A-Za-z0-9 _.,;()'/-]{1,200}", failure["reason"]):
+        text += ": " + failure["reason"]
+    if isinstance(failure.get("step"), str) and failure["step"].isidentifier():
+        text += f" (step {failure['step']})"
+    changed = failure.get("changed")
+    if isinstance(changed, list) and all(isinstance(name, str) and name.isidentifier() for name in changed[:32]):
+        text += " (changed " + ", ".join(changed[:32]) + ")"
+    return text
 
 
 def node_admin_allowed_cidrs() -> list[str]:
@@ -412,6 +479,16 @@ class AnsibleService:
                 return Err("Quota transport requires its admitted server")
             if quota_refusal := quota_transport_refusal(quota_server, extra_vars):
                 return Err(quota_refusal)
+        if playbook == "virtualmin_database_hold.yml":
+            from apps.provisioning.database_overage_admission import (  # noqa: PLC0415 -- app boundary
+                database_hold_transport_refusal,
+            )
+
+            hold_server = getattr(deployment, "virtualmin_server", None)
+            if hold_server is None:
+                return Err("Database hold transport requires its admitted server")
+            if hold_refusal := database_hold_transport_refusal(hold_server, extra_vars):
+                return Err(hold_refusal)
         if playbook not in {"virtualmin_usage_read.yml", "virtualmin_security_read.yml", "virtualmin_hosting_read.yml"}:
             from apps.infrastructure.models import NodeDeployment as NodeRow  # noqa: PLC0415 -- runtime model boundary
             from apps.provisioning.hosting_node_execution import hosting_transport_allowed  # noqa: PLC0415
@@ -653,11 +730,18 @@ class AnsibleService:
     def _hosting_playbook_refusal(
         server: VirtualminServer, playbook: str, extra_vars: dict[str, Any] | None
     ) -> str | None:
+        from apps.provisioning.database_overage_admission import (  # noqa: PLC0415 -- app boundary
+            database_hold_transport_refusal,
+        )
         from apps.provisioning.hosting_limit_execution import quota_transport_refusal  # noqa: PLC0415
         from apps.provisioning.hosting_node_execution import hosting_transport_allowed  # noqa: PLC0415
         from apps.provisioning.virtualmin_models import VirtualminServer as ServerRow  # noqa: PLC0415
 
         if playbook == "virtualmin_quota.yml" and (refusal := quota_transport_refusal(server, extra_vars)):
+            return refusal
+        if playbook == "virtualmin_database_hold.yml" and (
+            refusal := database_hold_transport_refusal(server, extra_vars)
+        ):
             return refusal
         if (
             playbook not in {"virtualmin_usage_read.yml", "virtualmin_security_read.yml", "virtualmin_hosting_read.yml"}
@@ -895,8 +979,11 @@ class AnsibleService:
                 f"@{variables}",
                 str(PLAYBOOKS_PATH / playbook),
             ]
+            # Log like a managed run: a component source node has no deployment, and its runs were invisible (#880).
+            logger.info(f"📜 [Ansible] Running: {playbook} on {identity.host}")
             try:
                 result = self._execute_process(command, environment, timeout)
+                self._log_imported_outcome(playbook, result)
                 if (
                     security_mutation
                     and playbook == "ssh-hardening.yml"
@@ -906,6 +993,7 @@ class AnsibleService:
                     return Err("Hardening operation ownership changed after SSH verification")
                 return Ok(self._process_result(playbook, result, self._parse_stats(result.stdout)))
             except subprocess.TimeoutExpired:
+                logger.error(f"🚨 [Ansible] Playbook {playbook} timed out after {timeout}s")
                 return Ok(
                     AnsibleResult(
                         success=False,
@@ -917,6 +1005,15 @@ class AnsibleService:
                 )
             except OSError:
                 return Err("Archive transport could not start")
+
+    @staticmethod
+    def _log_imported_outcome(playbook: str, result: subprocess.CompletedProcess[str]) -> None:
+        if result.returncode == 0:
+            logger.info(f"📜 [Ansible] Playbook {playbook}: success")
+            return
+        logger.error(f"📜 [Ansible] Playbook {playbook}: failed (rc={result.returncode})")
+        detail = component_failure_receipt(result.stdout) or redacted_failure_detail(result.stdout, result.stderr)
+        logger.error(f"📜 [Ansible] {detail}")
 
     def _ensure_ssh_policy(
         self, deployment: NodeDeployment, *, operator_public_keys: tuple[str, ...] | None = None

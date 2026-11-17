@@ -13,6 +13,7 @@ from django.utils import timezone
 
 from .component_migration_manifest import ComponentManifest
 from .component_migration_transport import component_network_current, terminal_artifact_refusal
+from .database_hold_gateway import activation_hold_outcome, activation_hold_record, activation_hold_request
 from .virtualmin_migration_models import VirtualminMigration
 from .virtualmin_models import VirtualminServer
 from .virtualmin_node_capability import destination_refusal
@@ -26,16 +27,24 @@ TARGET_PHASES = {
     "target_seal": frozenset({"verifying"}),
     "target_activate": frozenset({"activating"}),
     "target_policy": frozenset({"activating", "bridging", "repointing", "needs_review"}),
+    # Platform records a verified billing hold on the target, or clears it after a verified release (#776).
+    "target_billing_hold": frozenset({"activating", "bridging", "repointing", "needs_review"}),
     "target_remove": frozenset({"compensating"}),
     "target_retire_artifacts": frozenset({"failed", "rolled_back"}),
     "target_retire_unprepared_archive": frozenset({"failed", "rolled_back"}),
 }
 MAX_TARGET_RESULT_BYTES = 4096
+ABSENT: Any = object()  # No billing hold term at all, unlike None: target_billing_hold's "clear".
 FEATURES = ("unix", "dir", "web", "ssl", "mysql", "logrotate")
 
 
 def target_operation_variables(
-    migration: VirtualminMigration, token: UUID, action: str, *, enabled: bool | None = None
+    migration: VirtualminMigration,
+    token: UUID,
+    action: str,
+    *,
+    enabled: bool | None = None,
+    billing_hold: Any = ABSENT,
 ) -> dict[str, Any]:
     approval = migration.component_approval
     if action not in TARGET_PHASES or approval is None:
@@ -77,6 +86,17 @@ def target_operation_variables(
         )
     elif enabled is not None:
         raise ValueError("Only forward component activation accepts service policy")
+    if action == "target_activate" and billing_hold not in (ABSENT, None):
+        operation["billing_hold"] = activation_hold_request(billing_hold)
+    elif action == "target_billing_hold":
+        if billing_hold is ABSENT:
+            raise ValueError("Recording a billing hold needs its exact record, or None to clear it")
+        operation.update(
+            billing_hold=activation_hold_record(billing_hold),
+            target_receipt_sha256=migration.barrier_state.get("component_target_receipt_sha256"),
+        )
+    elif billing_hold not in (ABSENT, None):
+        raise ValueError("Only activation and recording carry a billing hold")
     return {"component_action": action, "component_request": manifest.as_json(), "component_operation": operation}
 
 
@@ -118,7 +138,13 @@ def target_operation_refusal(  # noqa: PLR0911 -- separate current lease, contra
     try:
         manifest = ComponentManifest.parse(review.manifest)
         manifest.assert_ready()
-        expected = target_operation_variables(migration, token, action, enabled=operation.get("enabled"))
+        expected = target_operation_variables(
+            migration,
+            token,
+            action,
+            enabled=operation.get("enabled"),
+            billing_hold=operation.get("billing_hold", ABSENT),
+        )
     except (ValidationError, ValueError, TypeError):
         return "The component target scope or service policy is unqualified"
     if (
@@ -159,7 +185,7 @@ def _phase_refusal(  # noqa: PLR0911 -- independent terminal, seal, policy and o
     if action in {"target_retire_artifacts", "target_retire_unprepared_archive"}:
         return terminal_artifact_refusal(migration, action)
     if (
-        action == "target_policy"
+        action in {"target_policy", "target_billing_hold"}
         and migration.status == "needs_review"
         and (
             migration.parked_phase not in {"bridging", "repointing"}
@@ -178,7 +204,7 @@ def _phase_refusal(  # noqa: PLR0911 -- independent terminal, seal, policy and o
         or migration.barrier_state.get("component_source_sealed") is True
     ):
         return "A sealed or uncertain source commit requires preserving the independently verified target"
-    if action in {"target_activate", "target_policy"}:
+    if action in {"target_activate", "target_policy", "target_billing_hold"}:
         if (
             migration.cutover_committed_at is None
             or migration.account.server_id != migration.target_server_id
@@ -193,12 +219,18 @@ def _phase_refusal(  # noqa: PLR0911 -- independent terminal, seal, policy and o
     return None
 
 
-def run_target_operation(
-    migration: VirtualminMigration, token: UUID, action: str, *, enabled: bool | None = None
+def run_target_operation(  # noqa: C901, PLR0912 -- one exact receipt per action, its hold outcome included
+    migration: VirtualminMigration,
+    token: UUID,
+    action: str,
+    *,
+    enabled: bool | None = None,
+    billing_hold: Any = ABSENT,
 ) -> dict[str, Any]:
+    """With billing_hold on target_activate, the receipt's billing_hold is the node's exact hold outcome."""
     from apps.infrastructure.ansible_service import AnsibleService  # noqa: PLC0415 -- cross-app transport boundary
 
-    values = target_operation_variables(migration, token, action, enabled=enabled)
+    values = target_operation_variables(migration, token, action, enabled=enabled, billing_hold=billing_hold)
     server = migration.target_server
     if refusal := target_operation_refusal(server, values):
         raise ValueError(refusal)
@@ -207,7 +239,11 @@ def run_target_operation(
         server,
         "virtualmin_component.yml",
         values,
-        timeout_seconds=3600 if action == "target_restore" else 180 if action == "target_policy" else 600,
+        timeout_seconds=3600
+        if action == "target_restore"
+        else 180
+        if action in {"target_policy", "target_billing_hold"}
+        else 600,
     )
     if result.is_err() or not result.unwrap().success:
         raise RuntimeError(
@@ -235,6 +271,7 @@ def run_target_operation(
         "target_seal": "sealed",
         "target_activate": "active",
         "target_policy": "active",
+        "target_billing_hold": "active",
         "target_remove": "removed",
         "target_retire_artifacts": "artifacts_retired",
         "target_retire_unprepared_archive": "artifacts_retired",
@@ -244,6 +281,9 @@ def run_target_operation(
         keys.remove("target_domain_id")
     if expected_phase in {"held", "sealed"}:
         keys.add("target_receipt_sha256")
+    sent_hold = values["component_operation"].get("billing_hold", ABSENT)
+    if sent_hold is not ABSENT:
+        keys.add("billing_hold")
     if (
         not isinstance(receipt, dict)
         or set(receipt) != keys
@@ -275,4 +315,13 @@ def run_target_operation(
         )
     ):
         raise ValueError("Target component receipt does not match its exact operation and native identity")
+    if action == "target_activate" and sent_hold is not ABSENT:
+        activation_hold_outcome(
+            receipt["billing_hold"],
+            sent_hold,
+            domain=values["component_request"]["source"]["domain"],
+            domain_id=receipt["target_domain_id"],
+        )
+    elif action == "target_billing_hold" and receipt["billing_hold"] != sent_hold:
+        raise ValueError("The target recorded another billing hold than the one sent")
     return receipt

@@ -378,9 +378,11 @@ class VirtualminMigrationService:
             VirtualminAccount.objects.select_for_update(no_key=True).get(pk=migration.account_id)
             self._move(migration, token, status, error_detail=error)
             if status in _TERMINAL_STATUSES:
+                from .database_overage_migration import settle_after_migration  # noqa: PLC0415
                 from .virtualmin_usage_service import invalidate_gauge  # noqa: PLC0415
 
                 invalidate_gauge(migration.account_id)
+                settle_after_migration(migration.pk, migration.account_id)
             self._audit(migration, status, compensation_failure=compensation_failure, actor=actor)
             if status in _TERMINAL_STATUSES and migration.contract != VirtualminMigration.Contract.RECOVERY:
                 from .migration_artifact_cleanup import schedule_artifact_cleanup  # noqa: PLC0415
@@ -570,6 +572,10 @@ class VirtualminMigrationService:
                 except Exception as error:
                     self._finish(migration, token, "failed", str(error))
                     return Err(str(error))
+                from .database_overage_migration import suspend_for_migration  # noqa: PLC0415 -- episode boundary
+
+                # Once the start is certain, in its admission: a refused start leaves the episode as it was.
+                suspend_for_migration(account, migration.pk)
                 self._move(migration, token, "pending", lease_token=None, worker_lease_expires_at=None)
                 if enqueue:
                     transaction.on_commit(lambda: self._enqueue(migration.pk))
@@ -1202,6 +1208,11 @@ class VirtualminMigrationService:
         if migration.contract == VirtualminMigration.Contract.CUTOVER:
             if migration.cutover_committed_at is None:
                 raise ValueError("The ownership commit must precede target activation")
+            from .database_overage_migration import (  # noqa: PLC0415
+                activation_hold,
+                activation_hold_current,
+                record_activation_hold,
+            )
             from .migration_bridge_service import activate_target  # noqa: PLC0415
             from .migration_enabled_state import (  # noqa: PLC0415  # Same-app activation policy seam.
                 activation_guard,
@@ -1211,17 +1222,21 @@ class VirtualminMigrationService:
             )
             from .migration_target_hold import run_held_target_node  # noqa: PLC0415
 
+            # Committed before the guard's transaction, which a lost reply rolls back: a retry resends this same hold.
+            billing_hold = activation_hold(migration)
             with activation_guard(migration, token) as account:
+                billing_hold = activation_hold_current(migration, billing_hold)  # None if extended or waived since
                 enabled = current_policy(account).enabled
                 run_held_target_node(migration, "activate", enabled=enabled)
                 self._move(migration, token, "activating")
-                activated = activate_target(migration, enabled=enabled)
+                activated = activate_target(migration, enabled=enabled, billing_hold=billing_hold)
                 if activated.is_err():
                     if retriability_of(activated) is not Retriability.NOT_RETRIABLE:
                         raise MigrationDeferredError(
                             timezone.now() + timedelta(seconds=TTL_POLL_SECONDS), activated.unwrap_err()
                         )
                     raise ValueError(f"Target activation failed: {activated.unwrap_err()}")
+                record_activation_hold(migration, billing_hold, activated.unwrap())
                 policy = converge_before_release(self, migration, token, account)
                 self._release_target_hold(migration)
                 record_activation(self, migration, token, policy, "bridging")
@@ -1445,6 +1460,14 @@ class VirtualminMigrationService:
             self._finish(migration, token, "completed")
 
     def _begin(self, migration: VirtualminMigration, token: UUID) -> None:
+        from .database_overage_migration import MigrationHoldReleaseError, release_before_move  # noqa: PLC0415
+
+        try:
+            # Before any barrier record: the move must copy the customer's own grants, not the billing hold's.
+            release_before_move(migration.pk, migration.account_id)
+        except MigrationHoldReleaseError as error:
+            self._finish(migration, token, "failed", str(error))  # nothing moved yet: nothing to compensate
+            return
         self._move(
             migration,
             token,

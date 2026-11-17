@@ -1023,6 +1023,7 @@ class VirtualminProvisioningJob(models.Model):
                 self._rebind_usage_on_create(self.account_id, self.operation, previous, self.status)
                 if previous != self.status:
                     self._invalidate_usage_gauge(self.account_id, self.operation)
+                    self._flag_database_hold_reconcile(self.account_id, self.operation, self.status)
         else:
             super().save(*args, **kwargs)
 
@@ -1226,6 +1227,7 @@ class VirtualminProvisioningJob(models.Model):
                 cls._rebind_usage_on_create(job.account_id, job.operation, previous, status)
                 if previous != status:
                     cls._invalidate_usage_gauge(job.account_id, job.operation)
+                    cls._flag_database_hold_reconcile(job.account_id, job.operation, status)
             return changed
 
     @classmethod
@@ -1265,6 +1267,14 @@ class VirtualminProvisioningJob(models.Model):
             from .virtualmin_usage_service import rebind_created_account  # noqa: PLC0415
 
             rebind_created_account(account_id)
+
+    @staticmethod
+    def _flag_database_hold_reconcile(account_id: Any, operation: str, status: str) -> None:
+        """A completed restore or re-create grants the databases again: a database write hold is verified next."""
+        if account_id is not None and status == "completed" and operation in {"restore_domain", "create_domain"}:
+            from .database_overage_admission import flag_reconcile  # noqa: PLC0415
+
+            flag_reconcile(account_id)
 
     @staticmethod
     def _invalidate_usage_gauge(account_id: Any, operation: str) -> None:

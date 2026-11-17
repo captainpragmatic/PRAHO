@@ -13,6 +13,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
+from django.db import transaction
 from django.db.models.signals import post_save, pre_delete, pre_save
 from django.dispatch import receiver
 
@@ -540,3 +541,18 @@ def audit_virtualmin_provisioning_jobs(
                         },
                     ),
                 )
+
+
+@receiver(post_save, sender=VirtualminAccount, dispatch_uid="database_overage_follows_termination")
+def close_overage_on_termination(
+    sender: type[VirtualminAccount], instance: VirtualminAccount, raw: bool = False, **kwargs: Any
+) -> None:
+    """A terminated account closes its database overage episode, whichever path terminated it (#776)."""
+    if raw or instance.status != "terminated":
+        return
+    from . import database_overage_admission  # noqa: PLC0415  # Deferred: imports the episode service
+
+    account_id = instance.pk
+    # Once the termination commits, so a rollback never closes an episode; never raised into it (the handler logs,
+    # and the sweep closes what it missed). Looked up then, so tests can patch it.
+    transaction.on_commit(lambda: database_overage_admission.on_account_terminated(account_id))

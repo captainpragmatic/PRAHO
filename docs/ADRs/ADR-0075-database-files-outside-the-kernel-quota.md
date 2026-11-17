@@ -3,7 +3,8 @@
 ## Status
 
 **Accepted** — 2026-11-10. Amends the storage assumption in ADR-0068 and the
-database enforcement in #776. The over-allowance write hold is a separate change.
+database enforcement in #776. Amended 2026-11-14 with the over-allowance write hold
+(see the amendment below).
 
 ## Date
 
@@ -90,3 +91,26 @@ Platform.
   application: a native write that sets unchanged caps when nothing was lifted.
 - PRAHO's restores are limited to web features and import no Virtualmin settings. A
   template changed by hand between deploys is refused at the next probe.
+
+## Amendment (2026-11-14): database over-allowance episodes
+
+The billing-level control the Consequences above leave open (#776 Task 7). It is
+off until `provisioning.database_overage_enabled` is on, and the write hold must
+be in the Terms before that.
+
+- A fresh reading (under 2 hours, same owner, server and chain epoch, no failed
+  scan after it) that puts an account with database bytes over its verified
+  allowance plus active temporary relief opens an episode. Unverified limits decide
+  nothing; an allowance of 0 is unlimited, relief or not.
+- Day 0: an email and a system support ticket. Writes stay enabled for
+  `provisioning.database_overage_grace_days` (14) from when the notice is sent; the
+  deadline moves later if the provider accepted it late. The day-0 notice replaces
+  the account's 100% disk warning while the episode is open.
+- At the deadline the account's database write privileges are revoked on the node
+  and journalled, so they are restored exactly. `SELECT`, `DELETE` and `DROP` stay
+  available. The day-14 notice follows a confirmed hold.
+- The episode closes after 24 observed hours under the allowance: a reading counts
+  once, and a gap of more than 3 hours between readings restarts the 24 hours.
+- Once a hold may exist, an episode closes only through a release, or when its
+  account was terminated with the node domain.
+- Every step is audited as contract evidence.

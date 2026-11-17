@@ -9,6 +9,7 @@ import hashlib
 import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,21 @@ def _module(filename: str, name: str) -> Any:
 mysql = _module("praho-component-mysql.py", "component_target_database_sql")
 archives = _module("praho-component-archive.py", "component_target_database_credentials")
 journals = _module("praho-component-journal.py", "component_target_database_receipts")
+
+
+def _registered(filename: str, name: str) -> Any:
+    """A helper with dataclasses, whose annotations resolve through the module registry."""
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(filename))
+    if spec is None or spec.loader is None:
+        raise ValueError("Native target SQL restoration support is unavailable")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+holds = _registered("praho_database_hold.py", "component_target_database_hold")
+HELD_LINE = re.compile(r"GRANT ([A-Z][A-Z ,]*[A-Z]) ON `((?:[A-Za-z0-9]|\\_)+)`\.\* TO `([^`]+)`@`([^`]+)`")
 
 
 def _digest(value: Any) -> str:
@@ -115,7 +131,13 @@ class TargetDatabase:
         return state
 
     def _verify(
-        self, state: dict[str, Any], *, active: bool, native_activation: bool = False, check_locks: bool = True
+        self,
+        state: dict[str, Any],
+        *,
+        active: bool,
+        native_activation: bool = False,
+        check_locks: bool = True,
+        held_only: bool = False,
     ) -> None:
         if self._namespace() != self.accounts:
             raise ValueError("Owned target SQL namespace changed")
@@ -132,7 +154,10 @@ class TargetDatabase:
                 raise ValueError("Target SQL lock state changed")
             actual = mysql._grants(self.execute, *key)
             if key in self.principals:
-                if mysql.selected_schema_grants(actual, *key, self.selected) != self.grants[key]:
+                # A held activation must still be held: the manifest's grants back would mean a release raced it.
+                if (held_only or not self._grants_are(actual, key, held=False)) and not (
+                    state.get("billing_hold") and self._grants_are(actual, key, held=True)
+                ):
                     raise ValueError("Target SQL selected schema grants changed")
                 expected = self.private[key]
                 if not (native_activation and key[0] == self.owner) and (auth[0], auth[1], auth[3]) != (
@@ -153,6 +178,51 @@ class TargetDatabase:
                     raise ValueError("Unused native owner acquired unselected SQL grants")
                 if not native_activation and _credential_digest(auth) != state["unused_auth"]["@".join(key)]:
                     raise ValueError("Unused native owner SQL authentication changed")
+
+    def _grants_are(self, actual: list[str], key: tuple[str, str], *, held: bool) -> bool:
+        """Whether the live grants are exactly the manifest's, or exactly the manifest's less a billing hold's revoked
+        set: ALL expanded from the server's own mysql.db columns, GRANT OPTION dropped, emptied rows absent (#776)."""
+        if not held:
+            try:
+                return mysql.selected_schema_grants(actual, *key, self.selected) == self.grants[key]
+            except ValueError:
+                return False
+        revoked = set(holds.REVOKED.values())
+        expected: set[tuple[frozenset[str], str]] = set()
+        for privileges, database, _grant_option in self.grants[key]:
+            names = self._all_privileges() if privileges == "ALL PRIVILEGES" else set(privileges.split(", "))
+            if names - revoked:
+                expected.add((frozenset(names - revoked), database))
+        usage = re.compile(
+            r"GRANT USAGE ON \*\.\* TO `"
+            + re.escape(key[0])
+            + r"`@`"
+            + re.escape(key[1])
+            + r"`(?: IDENTIFIED BY PASSWORD '[^'\r\n]*')?(?: WITH MAX_USER_CONNECTIONS [0-9]+)?"
+        )
+        found: set[tuple[frozenset[str], str]] = set()
+        for line in actual:
+            if usage.fullmatch(line):
+                continue
+            match = HELD_LINE.fullmatch(line)
+            names = set(match[1].split(", ")) if match else set()
+            database = match[2].replace("\\_", "_") if match else ""
+            if (
+                match is None
+                or (match[3], match[4]) != key
+                or database not in self.selected
+                or any(entry[1] == database for entry in found)
+            ):
+                return False
+            found.add((frozenset(names), database))
+        return found == expected
+
+    def _all_privileges(self) -> set[str]:
+        """What ALL PRIVILEGES means on this server: its own mysql.db privilege columns, every one known."""
+        columns = [row[0] for row in self.execute("SHOW COLUMNS FROM mysql.db LIKE '%\\_priv'")]
+        if not columns or any(column not in holds.SQL_NAMES for column in columns):
+            raise ValueError("Target SQL privilege columns are unknown; a held form cannot be qualified")
+        return {holds.SQL_NAMES[column] for column in columns if column != "Grant_priv"}
 
     def _configure(self, key: tuple[str, str], *, create: bool) -> None:
         identity = "'" + key[0] + "'@'" + key[1] + "'"
@@ -220,8 +290,18 @@ class TargetDatabase:
                 raise ValueError("Target SQL restoration is not in the required phase")
             self._verify(state, active=active)
 
-    def activate(self, *, enabled: bool = True) -> None:
-        """Called only after native enable, while independent HTTP/cron/Unix holds remain in force."""
+    def activate(
+        self,
+        *,
+        enabled: bool = True,
+        billing_hold: dict[str, Any] | None = None,
+        run_hold: Any = None,
+    ) -> dict[str, Any] | None:
+        """Called only after native enable, while independent HTTP/cron/Unix holds remain in force.
+
+        A billing hold goes after the grants are restored and before any account is unlocked (#776). Its outcome is
+        returned; a hold not exactly in place has already been undone.
+        """
         with self.journal.locked():
             if type(enabled) is not bool:
                 raise ValueError("Target SQL activation policy must be explicit")
@@ -230,7 +310,7 @@ class TargetDatabase:
                 if state.get("enabled") is not enabled:
                     raise ValueError("Completed target SQL activation policy changed")
                 self._verify(state, active=True)
-                return
+                return state.get("billing_hold_outcome")
             if state["phase"] != "held":
                 raise ValueError("Target SQL activation was interrupted; preserve all ingress holds")
             self._verify(state, active=False, native_activation=True)
@@ -243,13 +323,49 @@ class TargetDatabase:
                 "@".join(key): _credential_digest(self._authentication(key))
                 for key in sorted(self.accounts - self.principals.keys())
             }
+            outcome = None
+            if billing_hold is not None:
+                outcome = holds.hold_on_activation(run_hold, billing_hold)
+                if outcome["outcome"] == "held":
+                    state["billing_hold"] = {key: outcome[key] for key in ("token", "generation", "held_digest")}
+                state["billing_hold_outcome"] = outcome
+                self.journal.write(state)
             for key, principal in sorted(self.principals.items()):
                 if enabled and not principal["locked"]:
                     # nosemgrep: formatted-sql-query, sqlalchemy-execute-raw-query — Identity belongs to validated manifest USER/HOST; native mysql DDL.
                     self.execute(f"ALTER USER '{key[0]}'@'{key[1]}' ACCOUNT UNLOCK")
-            self._verify(state, active=True)
+            held = outcome is not None and outcome["outcome"] == "held"
+            self._verify(state, active=True, held_only=held)
+            if held and billing_hold is not None and outcome is not None:
+                holds.verify_activation_hold(run_hold, billing_hold, outcome["held_digest"])
             state["owned_accounts"] = self._fingerprints(self.accounts)
             state["phase"] = "active"
+            self.journal.write(state)
+            return outcome
+
+    def record_billing_hold(self, hold: dict[str, Any] | None) -> None:
+        """Platform records a verified hold ({token, generation, held_digest}) or clears a verified release (None).
+
+        Each is written only when the live grants are exactly that form: the held form while recording, the
+        manifest's while clearing (#776, 7B).
+        """
+        with self.journal.locked():
+            state = self._state()
+            if state["phase"] != "active":
+                raise ValueError("A billing hold is recorded only on a completed, owned target activation")
+            if hold is not None and (
+                set(hold) != {"token", "generation", "held_digest"}
+                or not isinstance(hold["token"], str)
+                or type(hold["generation"]) is not int
+                or not isinstance(hold["held_digest"], str)
+                or re.fullmatch(r"[0-9a-f]{64}", hold["held_digest"]) is None
+            ):
+                raise ValueError("A billing hold record is not exact")
+            for key in sorted(self.principals):
+                if not self._grants_are(mysql._grants(self.execute, *key), key, held=hold is not None):
+                    raise ValueError("Target SQL grants are not the form being recorded")
+            state["billing_hold"] = hold
+            state["owned_accounts"] = self._fingerprints(self.accounts)
             self.journal.write(state)
 
     def reconcile_policy(self, *, enabled: bool) -> None:

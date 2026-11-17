@@ -19,6 +19,7 @@ from apps.notifications.models import EmailLog, EmailPreference, EmailSuppressio
 from apps.notifications.services import EmailService
 from apps.notifications.tasks import process_email_queue, send_email_task
 from apps.provisioning import virtualmin_usage_service as usage
+from apps.provisioning.database_overage_models import DatabaseOverageEpisode
 from apps.provisioning.hosting_limit_models import ServiceHostingLimits
 from apps.provisioning.hosting_node_policy import NOTIFICATION_EMITTERS, verify_notification_evidence
 from apps.provisioning.hosting_node_policy_models import NodeHostingPolicy
@@ -706,3 +707,41 @@ class HostingWarningDeliveryTests(WarningFixture, TestCase):
             HostingWarningIntent.objects.filter(pk=intent.pk).update(state=intent.state)
         with self.assertRaises(ValidationError):
             HostingWarningDelivery.objects.update(email_log=EmailLog.objects.get())
+
+
+@override_settings(EMAIL_BACKEND="django.core.mail.backends.smtp.EmailBackend", LANGUAGE_CODE="en")
+class DatabaseOverageSupersedesWarningTests(WarningFixture, TestCase):
+    """While a database overage episode is open, its own day-0 notice replaces the 100% disk warning."""
+
+    def open_overage(self):
+        now = timezone.now()
+        DatabaseOverageEpisode.objects.create(
+            account=self.account,
+            service=self.service,
+            service_id_snapshot=self.service.pk,
+            customer_id_snapshot=self.customer.pk,
+            owner_scope=usage.current_state(self.account).owner_scope,
+            server_id=self.server.pk,
+            domain_id="12345",
+            domain=self.account.domain,
+            installation=self.installation,
+            opened_at=now,
+            deadline_at=now + timedelta(days=14),
+        )
+
+    def test_no_critical_disk_warning_is_created_while_an_overage_is_open(self):
+        self.open_overage()
+        observed = self.publish(1024**3)
+        sweep_hosting_warnings(at=observed + timedelta(minutes=10))
+        self.assertFalse(HostingWarningIntent.objects.filter(resource="disk", threshold=100).exists())
+        self.assertFalse(EmailLog.objects.exists())
+
+    def test_a_queued_critical_disk_warning_is_refused_once_an_overage_opens(self):
+        log = self.queue_critical()
+        self.open_overage()
+        with patch("django.core.mail.EmailMultiAlternatives.send", autospec=True, return_value=1) as provider:
+            result = send_email_task(str(log.pk))
+        self.assertFalse(result["success"], result)
+        provider.assert_not_called()
+        delivery = HostingWarningDelivery.objects.get(email_log=log)
+        self.assertEqual(delivery.refusal_reason, "superseded_by_database_overage")

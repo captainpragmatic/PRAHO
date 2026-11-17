@@ -448,7 +448,7 @@ class BridgeNodeTests(SimpleTestCase):
         }
         with (
             patch.dict(os.environ, {**environment, "PRAHO_BRIDGE_ACTION": "activate"}),
-            patch.object(self.module, "NodeBridge", return_value=Mock()) as factory,
+            patch.object(self.module, "NodeBridge", return_value=Mock(**{"activate_target.return_value": None})) as factory,
             patch("builtins.print"),
         ):
             self.module.main()
@@ -458,6 +458,7 @@ class BridgeNodeTests(SimpleTestCase):
                 "shop",
                 original,
                 enabled=False,
+                billing_hold=None,
             )
         node = Mock()
         node.reconcile_policy.return_value = {"domain_id": "42", "owner": "shop", "enabled": False}

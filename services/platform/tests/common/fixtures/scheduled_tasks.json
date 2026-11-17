@@ -270,6 +270,15 @@
     "cluster": null
   },
   {
+    "name": "database-overages",
+    "func": "apps.provisioning.database_overage_tasks.sweep_database_overages",
+    "schedule_type": "I",
+    "minutes": 15,
+    "cron": null,
+    "repeats": -1,
+    "cluster": null
+  },
+  {
     "name": "domains-dns-zones",
     "func": "apps.domains.dns_zone_tasks.dispatch_zone_operations",
     "schedule_type": "I",

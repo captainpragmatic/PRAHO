@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Database over-allowance episodes (#776), behind `provisioning.database_overage_enabled` (off by default): an account whose databases put it over its verified allowance gets a day-0 email and support ticket, and writes stay enabled for `provisioning.database_overage_grace_days` (14). At the deadline, database writes are held on the node (`SELECT`, `DELETE` and `DROP` keep working) and a day-14 notice follows; the episode closes after 24 observed hours under the allowance. Staff can extend or waive, a cross-service list shows the episodes that need them, and `release_database_holds --all` is the rollback. Every step is audited as contract evidence; see [ADR-0075](docs/ADRs/ADR-0075-database-files-outside-the-kernel-quota.md) and [the runbook](docs/deployment/DATABASE_OVERAGE_RUNBOOK.md).
+
 - Hosting usage warnings and temporary disk relief (#783): owner-scoped 80/95/100-percent warnings, optional-mail preferences, current and pending allowance details, and staff delivery history. Audited raises expire against the current operational limit without changing billing. Platform owns warning delivery after explicit native mail handover; activation remains gated by native acceptance.
 
 - Customer-accepted paid hosting plan changes (#840), behind `billing.hosting_plan_changes_enabled` (off by default): curated catalog paths, itemized on-session upgrade supplements, explicit no-charge acceptance, scheduled renewal-boundary downgrades, durable payment recovery and verified native completion. Accepted per-service renewal terms preserve frozen documents and purchased allowances. Staff shares a customer checkout proposal; resource-only overrides stay separate. Native/provider-DNS and end-to-end rollout gates remain required; see [ADR-0074](docs/ADRs/ADR-0074-paid-hosting-plan-changes.md).
@@ -59,6 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Verified off-server Platform database/media backup pairs, native systemd backup scheduling, Docker streaming publication and bounded Platform-managed customer backups. Imported Virtualmin servers support explicit root-key archive transport with enrolled host trust.
 
 ### Fixed
+
+- A component migration's source cleanup no longer parks for manual review when only the services check after a finished step failed, such as one DNS query timing out (#880). A retry re-runs that check against the recorded baseline when the step's own work still verifies; a real change in a retained service, or a step that can't be proven complete, still refuses. DNS reads in that check retry up to three times, and a failure now records the step, the error and which retained parts changed, and logs the node's redacted reason.
 
 - `make i18n-check` and `make i18n-extract` no longer read coverage HTML (`htmlcov/`) under a service tree as translation source (#881).
 

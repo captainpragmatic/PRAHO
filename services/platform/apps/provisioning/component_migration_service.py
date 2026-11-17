@@ -51,6 +51,10 @@ def record_component_review(
     _operator(actor)
     manifest = ComponentManifest.parse(evidence)
     account = VirtualminAccount.objects.select_for_update(no_key=True).get(pk=account.pk)
+    from .database_overage_migration import component_review_refusal  # noqa: PLC0415 -- episode boundary
+
+    if refusal := component_review_refusal(account.pk):
+        raise ValidationError(refusal)
     servers = {
         server.pk: server
         for server in VirtualminServer.objects.select_for_update(no_key=True)
@@ -88,6 +92,11 @@ def _review_scope(
     }
     source, target = servers[stored.source_server_id], servers[stored.target_server_id]
     from apps.infrastructure.node_maintenance_gate import maintenance_refusal  # noqa: PLC0415  # Shared node admission
+
+    from .database_overage_migration import component_review_refusal  # noqa: PLC0415 -- episode boundary
+
+    if refusal := component_review_refusal(account.pk):
+        raise ValidationError(refusal)
 
     for node in (source, target):
         if refusal := maintenance_refusal(node.pk):
@@ -281,6 +290,9 @@ def start_component_migration(
         )
     migration.component_source_obligation = obligation
     migration.save(update_fields=["component_source_obligation", "updated_at"])
+    from .database_overage_migration import suspend_for_migration  # noqa: PLC0415 -- episode boundary
+
+    suspend_for_migration(account, migration.pk, held_allowed=False)  # _review_scope refused anything but grace
     token = uuid4()
     if not migration.acquire_lease(token, engine.lease_ttl):
         raise ValidationError(_("Could not acquire the new component migration lease."))

@@ -76,6 +76,10 @@ def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+# A loaded node can drop one loopback query; three tries keep that from failing a retirement re-check (#880).
+DNS_QUERY_ATTEMPTS = 3
+
+
 def _command(arguments: list[str]) -> str:
     result = subprocess.run(  # noqa: S603 -- literal read-only native commands and qualified identities
         arguments,
@@ -220,7 +224,14 @@ def _dns(domain: str, *, local: bool) -> dict[str, list[str]]:
         arguments = ["/usr/bin/dig", "+time=3", "+tries=1", "+short"]
         if local:
             arguments.append("@127.0.0.1")
-        return _command([*arguments, name, kind]).splitlines()
+        # dig exits non-zero when a query gets no reply; an empty answer exits 0 and is an answer, not retried.
+        for attempt in range(DNS_QUERY_ATTEMPTS):
+            try:
+                return _command([*arguments, name, kind]).splitlines()
+            except ValueError:
+                if attempt == DNS_QUERY_ATTEMPTS - 1:
+                    raise
+        raise AssertionError("unreachable")
 
     mx = query(domain, "MX")
     records = {

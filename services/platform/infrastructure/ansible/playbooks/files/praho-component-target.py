@@ -479,7 +479,43 @@ class TargetCoordinator:
         ):
             raise ValueError("Native target Unix credential or suspension state changed during activation")
 
-    def _activate_native(self, state: dict[str, Any], private: dict[str, Any], *, enabled: bool) -> None:
+    def _billing_hold(self, state: dict[str, Any], hold: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The activation's hold on this target domain, from Platform's {token, generation, installation} (#776)."""
+        if hold is None:
+            return None
+        uuid = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+        if (
+            not isinstance(hold, dict)
+            or set(hold) != {"token", "generation", "installation"}
+            or not all(isinstance(hold[key], str) and uuid.fullmatch(hold[key]) for key in ("token", "installation"))
+            or type(hold["generation"]) is not int
+            or not 0 < hold["generation"] < 1 << 62
+        ):
+            raise ValueError("The activation billing hold request is not exact")
+        identity = {"domain_id": state["target_domain_id"], "domain": self.domain, "installation": hold["installation"]}
+        return {"identity": identity, "token": hold["token"], "generation": hold["generation"]}
+
+    @staticmethod
+    def _hold_module() -> Any:
+        """The database hold helper installed beside this one, registered so its dataclasses resolve."""
+        spec = importlib.util.spec_from_file_location(
+            "component_target_billing_hold", Path(__file__).with_name("praho_database_hold.py")
+        )
+        if spec is None or spec.loader is None:
+            raise ValueError("The database hold helper is not installed")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    def _run_hold(self, request: dict[str, Any]) -> dict[str, Any]:
+        """One action of the database hold helper, in this process."""
+        holds = self._hold_module()
+        return holds.DatabaseHold(holds.Paths(), holds.NativeDatabase()).perform(request)
+
+    def _activate_native(
+        self, state: dict[str, Any], private: dict[str, Any], *, enabled: bool, billing_hold: dict[str, Any] | None
+    ) -> None:
         recovery = self._recovery()
         payload = self._activation_payload(private)
         # This callback stages the original Unix hash/aging while Unix remains
@@ -492,7 +528,16 @@ class TargetCoordinator:
             native("enable-domain", ["--domain", self.domain])
         self._domain(state, held=not enabled)
         if self.manifest["databases"]:
-            self._sql(state, private).activate(enabled=enabled)
+            outcome = self._sql(state, private).activate(
+                enabled=enabled, billing_hold=billing_hold, run_hold=self._run_hold
+            )
+        elif billing_hold is not None:
+            outcome = self._hold_module().hold_on_activation(self._run_hold, billing_hold)
+        else:
+            outcome = None
+        if billing_hold is not None:
+            state["billing_hold_outcome"] = outcome
+            self.journal.write(state)
         self._verify_owner(payload, enabled=enabled)
         cron_path = self.journal.directory / (self.operation + ".cron")
         recovery.checked(cron_path)
@@ -540,7 +585,9 @@ class TargetCoordinator:
                 "target_receipt_sha256": expected_receipt,
             }
 
-    def activate(self, expected_receipt: str, *, enabled: bool) -> dict[str, Any]:
+    def activate(
+        self, expected_receipt: str, *, enabled: bool, billing_hold: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Only the leased forward worker may invoke this after the source seal and database cutover commit."""
         with self.journal.locked():
             state = self._state()
@@ -550,18 +597,41 @@ class TargetCoordinator:
             if state["phase"] == "active":
                 if state.get("enabled") is not enabled:
                     raise ValueError("Completed component activation policy changed")
-                return self._active(state, private)
+                return self._with_hold(state, self._active(state, private))
             if state["phase"] != "sealed":
                 raise ValueError("Component activation requires a sealed target and no interrupted native work")
             if self._held(state, private)["target_receipt_sha256"] != expected_receipt:
                 raise ValueError("The held component activation receipt changed")
+            hold = self._billing_hold(state, billing_hold)
             state.update(phase="activating", enabled=enabled)
             self.journal.write(state)
-            self._activate_native(state, private, enabled=enabled)
+            self._activate_native(state, private, enabled=enabled, billing_hold=hold)
             receipt = self._active(state, private)
             state["phase"] = "active"
             self.journal.write(state)
-            return receipt
+            return self._with_hold(state, receipt)
+
+    @staticmethod
+    def _with_hold(state: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]:
+        return (
+            {**receipt, "billing_hold": state["billing_hold_outcome"]} if "billing_hold_outcome" in state else receipt
+        )
+
+    def record_billing_hold(self, record: dict[str, Any] | None) -> dict[str, Any]:
+        """Platform records a verified 7B hold, or clears it after a verified release (#776)."""
+        with self.journal.locked():
+            state = self._state()
+            if state["phase"] != "active":
+                raise ValueError("A billing hold is recorded only on a completed component activation")
+            if self.manifest["databases"]:
+                private = archives.read_component_archive(self.archive, self.checksum, self.operation, self.manifest)
+                self._sql(state, private).record_billing_hold(record)
+            return {
+                "operation_id": self.operation,
+                "target_domain_id": state["target_domain_id"],
+                "phase": "active",
+                "billing_hold": record,
+            }
 
     def _policy_native(self, state: dict[str, Any], *, enabled: bool) -> None:
         result = subprocess.run(  # noqa: S603 -- fixed protected policy callback, exact identity on bounded stdin

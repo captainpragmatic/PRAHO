@@ -7,16 +7,21 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from django.core.files import File
+from django.db import transaction
 from django.db.models import QuerySet
 from django.utils import timezone
 from django_fsm import TransitionNotAllowed
 
 from apps.users.models import User
 
-from .models import Ticket, TicketAttachment
+if TYPE_CHECKING:
+    from apps.customers.models import Customer
+    from apps.provisioning.models import Service
+
+from .models import Ticket, TicketAttachment, TicketComment
 
 logger = logging.getLogger(__name__)
 
@@ -350,3 +355,43 @@ class TicketStatusService:
 
         else:
             raise ValueError(f"Invalid queue type: {queue_type}")
+
+
+def open_system_ticket(customer: Customer, *, title: str, description: str, related_service: Service | None) -> Ticket:
+    """A ticket Platform raises about a customer's service: no author, the customer's own contact details on it.
+
+    `created_by` stays empty, so a privacy export or erasure finds the ticket by its contact email.
+    """
+    return TicketStatusService.create_ticket(
+        customer=customer,
+        title=title[:200],
+        description=description,
+        created_by=None,
+        source="internal",
+        related_service=related_service,
+        contact_person=customer.get_billing_name()[:100],
+        contact_email=customer.primary_email or "",
+        contact_phone=(customer.primary_phone or "")[:20],
+        is_public=True,
+    )
+
+
+def add_system_comment(ticket: Ticket, content: str) -> TicketComment:
+    """A customer-visible note from Platform; a closed ticket reopens, since it is news the customer needs.
+
+    The ticket is read again under its row lock: staff may have changed it since the caller loaded it.
+    """
+    from apps.settings.services import get_brand_name  # noqa: PLC0415 -- Cross-app at call time (ADR-0007).
+
+    with transaction.atomic():
+        current = Ticket.objects.select_for_update().get(pk=ticket.pk)
+        if current.status == "closed":
+            TicketStatusService.reopen_ticket(current)
+        return TicketComment.objects.create(
+            ticket=current,
+            content=content,
+            comment_type="system",
+            author=None,
+            author_name=get_brand_name(),  # the deployment's own name (ADR-0062), never a hardcoded operator
+            is_public=True,
+        )
