@@ -13,6 +13,7 @@ import shlex
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -20,6 +21,10 @@ from uuid import UUID
 LIMIT = 256 * 1024
 MAX_CALLBACK_BYTES = 4 * 1024 * 1024
 MAX_DOMAINS = 10000
+DOMAIN_ROOT = Path("/etc/webmin/virtual-server/domains")
+DOMAIN_WRITE_ATTEMPTS = 10
+DOMAIN_WRITE_WAIT_SECONDS = 0.5
+WEBMIN_WRITE = re.compile(r"[0-9]+\.(?:lock|webmintmp\.[0-9]+\.[0-9]+)")
 MX_FIELDS = 2
 PATH_ALIAS_FIELDS = 3
 QUALIFIED_CALLBACKS = {
@@ -389,8 +394,17 @@ def _owner_cron(owner: str, preparation: list[str]) -> str:
 
 
 def _related_domains(owner: str) -> list[dict[str, str]]:
+    # Webmin's save_domain locks a domain file with <id>.lock and writes it through <id>.webmintmp.<pid>.<n>, renamed
+    # over it: a write in progress, waited out so the inventory reads settled files; any other name is unclassified (#886).
+    for attempt in range(DOMAIN_WRITE_ATTEMPTS):
+        paths = sorted(DOMAIN_ROOT.iterdir())
+        if not any(WEBMIN_WRITE.fullmatch(path.name) for path in paths):
+            break
+        if attempt == DOMAIN_WRITE_ATTEMPTS - 1:
+            raise ValueError("A native domain file is being written; retry the inventory")
+        time.sleep(DOMAIN_WRITE_WAIT_SECONDS)
     result = []
-    for count, path in enumerate(sorted(Path("/etc/webmin/virtual-server/domains").iterdir())):
+    for count, path in enumerate(paths):
         if count >= MAX_DOMAINS or not path.name.isdecimal():
             raise ValueError("Native retained-domain inventory is unclassified or exceeds its bound")
         fields = _fields(path)
