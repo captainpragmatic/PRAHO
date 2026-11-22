@@ -17,6 +17,8 @@ HELPERS = (
     "praho-component-database-export.py",
     "praho-component-capacity.py",
     "praho-component-target-database.py",
+    # The target database module loads the hold helper beside it, as virtualmin_component.yml ships it (#890).
+    "praho_database_hold.py",
 )
 
 NATIVE_PROOF = r"""
