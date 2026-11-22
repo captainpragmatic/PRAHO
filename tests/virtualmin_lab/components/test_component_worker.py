@@ -252,6 +252,8 @@ def _install_helpers(lab: Lab, helpers: Path) -> str:
         *helpers.glob("praho-component-*.py"),
         *helpers.glob("praho-component-*.pl"),
         helpers / "praho-apache-bindings.py",
+        # praho-component-target-database.py loads it beside itself, as virtualmin_component.yml ships it (#890).
+        helpers / "praho_database_hold.py",
         helpers / "praho-bridge.py",
         helpers / "praho-account-name-neutral.py",
         helpers / "praho-default-site.conf",
