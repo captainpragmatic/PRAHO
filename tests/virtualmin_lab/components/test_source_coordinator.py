@@ -311,6 +311,8 @@ def prepare_native_target(exported: dict, helpers: Path, password: str, *, activ
             for path in (
                 *helpers.glob("praho-component-*.py"),
                 helpers / "praho-apache-bindings.py",
+                # praho-component-target-database.py loads it beside itself, as virtualmin_component.yml ships it (#890).
+                helpers / "praho_database_hold.py",
                 helpers / "praho-component-native-command.pl",
                 helpers / "praho-component-policy.pl",
                 helpers / "praho-recovery.py",

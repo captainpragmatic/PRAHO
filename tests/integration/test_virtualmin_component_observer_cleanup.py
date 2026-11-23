@@ -18,7 +18,8 @@ pytestmark = pytest.mark.integration
 
 
 def test_inventory_refusal_reports_only_the_exact_entry_and_keeps_the_native_failure(tmp_path: Path) -> None:
-    entry = tmp_path / "123.lock"
+    # A name no Webmin write produces: <id>.lock and <id>.webmintmp.* are waited out, not refused (#886).
+    entry = tmp_path / "123.bak"
     entry.write_text("private content must not appear in diagnostics")
     helper = (
         Path(__file__).resolve().parents[2]
@@ -31,7 +32,7 @@ import importlib.util,sys
 from pathlib import Path
 spec=importlib.util.spec_from_file_location('actual_inspection',sys.argv[1])
 module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
-directory=Path(sys.argv[2]);module.Path=lambda unused:directory
+module.DOMAIN_ROOT=Path(sys.argv[2])
 module._related_domains('fixture-owner')
 """
     )
@@ -47,7 +48,7 @@ module._related_domains('fixture-owner')
     diagnostics = [line for line in result.stderr.splitlines() if line.startswith("PRAHO_INSPECTION_REFUSAL=")]
     assert len(diagnostics) == 1, result.stderr
     evidence = json.loads(diagnostics[0].partition("=")[2])
-    assert evidence["entry"] == "123.lock"
+    assert evidence["entry"] == "123.bak"
     assert evidence["index"] == 0
     assert type(evidence["time_ns"]) is int
     assert "private content" not in result.stderr
