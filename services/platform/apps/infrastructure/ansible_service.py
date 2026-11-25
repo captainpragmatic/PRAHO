@@ -63,7 +63,8 @@ def _error_index(lines: list[str]) -> int | None:
     failed_when or until kept its result ok, so with a fatal task in the output only an [ERROR]
     inside that task's own section counts. Without one, the first [ERROR] (a controller error)."""
     stripped = [line.strip() for line in lines]
-    fatal = next((index for index, line in enumerate(stripped) if re.match(r"fatal: \[.*\]: FAILED! =>", line)), None)
+    terminal = re.compile(r"fatal: \[.*\]: (FAILED|UNREACHABLE)! =>|failed: \[.*\] \(item=.*\) =>")
+    fatal = next((index for index, line in enumerate(stripped) if terminal.match(line)), None)
     if fatal is None:
         return next((index for index, line in enumerate(stripped) if line.startswith("[ERROR]:")), None)
     task = next((index for index in range(fatal, -1, -1) if stripped[index].startswith("TASK [")), -1)

@@ -271,3 +271,33 @@ class PanelCertificateFailureReasonTests(SimpleTestCase):
         self.assertIn("installer exited 1", detail)
         self.assertNotIn("non-zero return code", detail)
         self.assertNotIn("virtualmin.yml:6:5", detail)
+
+    def test_an_unreachable_host_or_a_failed_loop_item_is_not_explained_by_a_recovered_retry(self) -> None:
+        recovered = (
+            "TASK [Check the certificate the panel serves] ***\n"
+            "[ERROR]: Task failed: Action failed: non-zero return code\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:6:5\n"
+            "ok: [node]\n\n"
+        )
+        endings = {
+            "unreachable": (
+                "TASK [Look up the hostname virtual server] ***\n"
+                "[ERROR]: Task failed: Failed to connect to the host via ssh: Connection timed out\n"
+                "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:30:7\n"
+                'fatal: [node]: UNREACHABLE! => {"changed": false, "unreachable": true}\n',
+                "Connection timed out",
+            ),
+            "loop item": (
+                "TASK [Enable the Virtualmin features] ***\n"
+                "[ERROR]: Task failed: Action failed: set-global-feature refused web\n"
+                "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:520:7\n"
+                'failed: [node] (item=web) => {"ansible_loop_var": "item", "item": "web", "rc": 1}\n',
+                "set-global-feature refused web",
+            ),
+        }
+        for case, (ending, expected) in endings.items():
+            with self.subTest(case=case):
+                detail = failure_detail(recovered + ending, "")
+                self.assertIn(expected, detail)
+                self.assertNotIn("non-zero return code", detail)
+                self.assertNotIn("virtualmin.yml:6:5", detail)
