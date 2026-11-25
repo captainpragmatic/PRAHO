@@ -477,11 +477,11 @@ class NodeValidationService:
         ``CERT_REQUIRED``, SNI/hostname validation against the deployment fqdn) and records
         the verdict in ``details`` and the message.
 
-        It deliberately does **not** fail the check on an untrusted certificate. Per #436
-        that flip is a rollout decision requiring a staging drill against a real node and
-        Let's Encrypt staging — every node currently serving a self-signed cert would start
-        failing validation the moment it lands. Reporting first makes the true per-node
-        state visible (and gives the drill something to read) at zero rollout risk.
+        The check passes only on an affirmative verdict. An untrusted certificate, or one whose
+        trust could not be evaluated, fails it, so the report's summary no longer reads "all
+        checks passed" for a self-signed panel. Validation stays a warning in the deploy flow;
+        the panel playbook's own certificate check and the activation gate
+        (``infrastructure.require_trusted_panel_certificate``) are what stop such a node.
         """
         try:
             trust = self._probe_tls_trust(deployment)
@@ -525,10 +525,8 @@ class NodeValidationService:
             )
 
         # The verdict has to reach a human. The report's per-check message and details are
-        # dropped by every live consumer -- deployment_service logs only report.summary, and
-        # since an untrusted certificate still passes, that summary reads "All 4 checks
-        # passed". Without this line the check is invisible in exactly the flow it was built
-        # to inform, which is what "gives the drill something to read" depends on.
+        # dropped by every live consumer -- deployment_service logs only report.summary, which
+        # says how many checks passed but not why one failed.
         if not trust["trusted"]:
             logger.warning(
                 "⚠️ [Validation] %s panel certificate is not CA-trusted for %s (%s): %s",
@@ -540,7 +538,7 @@ class NodeValidationService:
 
         return ValidationResult(
             check_name="ssl",
-            passed=True,  # #436: reporting only; do not gate deployments until the staging drill
+            passed=bool(trust["trusted"]),
             message=message,
             details={
                 "protocol": trust["protocol"],

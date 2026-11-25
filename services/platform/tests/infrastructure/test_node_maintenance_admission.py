@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings
@@ -11,6 +12,7 @@ from apps.billing.currency_models import Currency
 from apps.customers.models import Customer
 from apps.infrastructure.node_maintenance_models import NodeMaintenancePolicy, NodeMaintenanceWindow
 from apps.infrastructure.node_maintenance_service import change_window, create_window
+from apps.infrastructure.registration_service import NodeRegistrationService
 from apps.provisioning.service_models import Service, ServicePlan
 from apps.provisioning.virtualmin_models import VirtualminAccount, VirtualminProvisioningJob, VirtualminServer
 from apps.provisioning.virtualmin_service import VirtualminBackupManagementService
@@ -20,6 +22,10 @@ from tests.infrastructure.maintenance_policy_fixtures import maintenance_policy_
 
 class MaintenanceAdmissionFixture:
     def setUp(self) -> None:
+        # Maintenance fixtures activate healthy nodes; a healthy node's panel certificate is trusted (#436 gate).
+        trusted = patch.object(NodeRegistrationService, "_panel_trust_refusal", return_value=None)
+        trusted.start()
+        self.addCleanup(trusted.stop)
         self.actor = User.objects.create_superuser(email="admission-operator@example.test", password=None)
         self.node = VirtualminServer.objects.create(name="Admission node", hostname="admission.example.test")
         starts_time, ends_time = maintenance_policy_times()

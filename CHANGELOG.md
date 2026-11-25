@@ -122,6 +122,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **A new node no longer goes live with an untrusted panel certificate (#436).** The Let's Encrypt step in the panel playbook always failed (`generate-letsencrypt-cert` without `--domain`, then a shell call to `letsencrypt.cgi`), and both failures were ignored. A node's panel was trusted only when the Virtualmin installer's own hostname step happened to succeed, and nothing checked. The playbook now checks the certificate Webmin serves (trusted chain, the node name, more than 30 days left). It reissues only when that check fails, and fails the deployment with a `LETSENCRYPT_FAILED` reason when the certificate is still not trusted. The SSL health check now fails for an untrusted certificate, and `infrastructure.require_trusted_panel_certificate` is on by default, so activation refuses such a node and leaves it disabled.
+
 - Log redaction in both services now hides two value shapes it missed: a sensitive key right after an escaped line break in JSON-escaped text (`"Traceback\npassword=..."`), and a YAML value that continues on the lines indented under its key (block scalars, lists, mappings and wrapped values).
 
 - **Portal logs no longer write passwords, card numbers, CUI or VAT numbers either.** Customer sign-in and password-reset requests pass through the Portal, whose handlers had no value redaction at all. Every Portal handler in development, staging and production now writes those values as `[REDACTED]`, with the same rules as the Platform; a parity test keeps the two copies identical.
