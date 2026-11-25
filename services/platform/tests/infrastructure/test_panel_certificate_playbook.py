@@ -318,3 +318,48 @@ class PanelCertificateFailureReasonTests(SimpleTestCase):
         self.assertIn("ufw refused the rule set", detail)
         self.assertIn("virtualmin_harden.yml:300:7", detail)
         self.assertNotIn("avahi-daemon", detail)
+
+    def test_an_ignored_task_before_the_failure_does_not_supply_its_result(self) -> None:
+        stdout = (
+            "TASK [Probe an optional service] ***\n"
+            "[ERROR]: Task failed: Action failed: non-zero return code\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:100:7\n"
+            "fatal: [node]: FAILED! =>\n"
+            "    changed: false\n"
+            "    rc: 3\n"
+            "    stderr: optional probe missing\n"
+            "...ignoring\n\n"
+            "TASK [Reissue the panel certificate] ***\n"
+            "[ERROR]: Task failed: Action failed: non-zero return code\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:440:7\n"
+            "fatal: [node]: FAILED! =>\n"
+            "    changed: false\n"
+            "    rc: 1\n"
+            "    stdout: 'Web-based validation failed : Some challenges have failed.'\n"
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("virtualmin.yml:440:7", detail)
+        self.assertIn("Some challenges have failed", detail)
+        self.assertNotIn("optional probe missing", detail)
+
+    def test_an_ignored_cleanup_after_the_failure_does_not_supply_the_origin(self) -> None:
+        stdout = (
+            "TASK [Reissue the panel certificate] ***\n"
+            "[ERROR]: Task failed: Action failed: non-zero return code\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:440:7\n"
+            "fatal: [node]: FAILED! =>\n"
+            "    changed: false\n"
+            "    rc: 1\n"
+            "    stdout: 'Some challenges have failed.'\n\n"
+            "TASK [Remove the temporary files] ***\n"
+            "[ERROR]: Task failed: Action failed: file busy\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:900:11\n"
+            "fatal: [node]: FAILED! =>\n"
+            "    changed: false\n"
+            "    msg: file busy\n"
+            "...ignoring\n"
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("virtualmin.yml:440:7", detail)
+        self.assertNotIn("virtualmin.yml:900:11", detail)
+        self.assertNotIn("file busy", detail)

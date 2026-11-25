@@ -56,24 +56,33 @@ PLAYBOOKS_PATH = ANSIBLE_BASE_PATH / "playbooks"
 _SYSTEM_ANSIBLE_PATHS = ("/usr/local/bin/ansible-playbook", "/usr/bin/ansible-playbook")
 
 
-def _error_index(lines: list[str]) -> int | None:
-    """Index of the [ERROR] that explains the failure.
+_TERMINAL_FAILURE = re.compile(r"fatal: \[.*\]: (FAILED|UNREACHABLE)! =>|failed: \[.*\] \(item=.*\) =>")
 
-    ansible-core 2.20 also prints [ERROR] for a task whose last attempt exited non-zero while
-    failed_when or until kept its result ok, so with a fatal task in the output only an [ERROR]
-    inside that task's own section counts. Without one, the first [ERROR] (a controller error)."""
-    stripped = [line.strip() for line in lines]
-    terminal = re.compile(r"fatal: \[.*\]: (FAILED|UNREACHABLE)! =>|failed: \[.*\] \(item=.*\) =>")
+
+def _terminal_index(lines: list[str]) -> int | None:
+    """Index of the first real failure in unstripped output lines.
+
+    A failure Ansible followed with ...ignoring (an ignore_errors task or loop item) did not stop the
+    play, so it is skipped, whether it came before the real failure or in a cleanup after it."""
 
     def ignored(index: int) -> bool:
         following = next((line for line in lines[index + 1 :] if line and not line.startswith((" ", "\t"))), "")
         return following.strip() == "...ignoring"
 
-    # The play stops at the host's real failure, so it is the last failure that was not ignored.
-    fatal = next(
-        (index for index in range(len(stripped) - 1, -1, -1) if terminal.match(stripped[index]) and not ignored(index)),
+    return next(
+        (index for index in range(len(lines)) if _TERMINAL_FAILURE.match(lines[index].strip()) and not ignored(index)),
         None,
     )
+
+
+def _error_index(lines: list[str]) -> int | None:
+    """Index of the [ERROR] that explains the failure, in unstripped output lines.
+
+    ansible-core 2.20 also prints [ERROR] for a task whose last attempt exited non-zero while
+    failed_when or until kept its result ok, so with a failed task in the output only an [ERROR]
+    inside that task's own section counts. Without one, the first [ERROR] (a controller error)."""
+    stripped = [line.strip() for line in lines]
+    fatal = _terminal_index(lines)
     if fatal is None:
         return next((index for index, line in enumerate(stripped) if line.startswith("[ERROR]:")), None)
     task = next((index for index in range(fatal, -1, -1) if stripped[index].startswith("TASK [")), -1)
@@ -88,12 +97,11 @@ def _first_failure_line(stdout: str, stderr: str) -> str:
         if error is not None:
             return lines[error].strip()[:300]
 
-    for index, line in enumerate(stdout_lines):
-        fatal_line = line.strip()
-        fatal = re.match(r"fatal: \[.*\]: FAILED! =>", fatal_line)
-        if fatal is None:
-            continue
-        if fatal_line[fatal.end() :].strip():
+    index = _terminal_index(stdout_lines)
+    if index is not None:
+        fatal_line = stdout_lines[index].strip()
+        fatal = _TERMINAL_FAILURE.match(fatal_line)
+        if fatal is not None and fatal_line[fatal.end() :].strip():
             return fatal_line[:300]
         for following in stdout_lines[index + 1 :]:
             if following and not following.startswith((" ", "\t")):
@@ -108,11 +116,11 @@ def _first_failure_line(stdout: str, stderr: str) -> str:
 
 def _error_origin(text: str) -> str:
     """The Origin line of the explaining [ERROR] in one stream; a warning's Origin above it is not the error's."""
-    lines = [line.strip() for line in text.splitlines()]
+    lines = text.splitlines()
     error = _error_index(lines)
     if error is None:
         return ""
-    return next((line for line in lines[error + 1 :] if line.startswith("Origin:")), "")
+    return next((line.strip() for line in lines[error + 1 :] if line.strip().startswith("Origin:")), "")
 
 
 def _bounded_field(text: str, budget: int = 240) -> str:
@@ -133,7 +141,7 @@ def failure_detail(stdout: str, stderr: str) -> str:
     first = _first_failure_line(stdout, stderr) or stderr.strip()[:500]
     origin = _error_origin(stdout) or _error_origin(stderr)
     raw = stdout.splitlines()
-    at = next((index for index, line in enumerate(raw) if re.match(r"fatal: \[.*\]: FAILED! =>", line.strip())), None)
+    at = _terminal_index(raw)
     fatal = ""
     if at is not None:
         # The YAML callback writes the result on the following indented lines. Keep the fields that say why
