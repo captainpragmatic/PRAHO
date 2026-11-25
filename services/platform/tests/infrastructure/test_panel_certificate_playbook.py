@@ -301,3 +301,20 @@ class PanelCertificateFailureReasonTests(SimpleTestCase):
                 self.assertIn(expected, detail)
                 self.assertNotIn("non-zero return code", detail)
                 self.assertNotIn("virtualmin.yml:6:5", detail)
+
+    def test_an_ignored_loop_failure_does_not_explain_the_later_fatal_task(self) -> None:
+        stdout = (
+            "TASK [Disable unnecessary services] ***\n"
+            "[ERROR]: Task failed: Action failed: Could not find the requested service avahi-daemon\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin_harden.yml:210:7\n"
+            'failed: [node] (item=avahi-daemon) => {"ansible_loop_var": "item", "item": "avahi-daemon"}\n'
+            "...ignoring\n\n"
+            "TASK [Apply the firewall policy] ***\n"
+            "[ERROR]: Task failed: Action failed: ufw refused the rule set\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin_harden.yml:300:7\n"
+            'fatal: [node]: FAILED! => {"changed": false, "msg": "ufw refused the rule set"}\n'
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("ufw refused the rule set", detail)
+        self.assertIn("virtualmin_harden.yml:300:7", detail)
+        self.assertNotIn("avahi-daemon", detail)

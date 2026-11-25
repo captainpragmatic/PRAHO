@@ -64,7 +64,16 @@ def _error_index(lines: list[str]) -> int | None:
     inside that task's own section counts. Without one, the first [ERROR] (a controller error)."""
     stripped = [line.strip() for line in lines]
     terminal = re.compile(r"fatal: \[.*\]: (FAILED|UNREACHABLE)! =>|failed: \[.*\] \(item=.*\) =>")
-    fatal = next((index for index, line in enumerate(stripped) if terminal.match(line)), None)
+
+    def ignored(index: int) -> bool:
+        following = next((line for line in lines[index + 1 :] if line and not line.startswith((" ", "\t"))), "")
+        return following.strip() == "...ignoring"
+
+    # The play stops at the host's real failure, so it is the last failure that was not ignored.
+    fatal = next(
+        (index for index in range(len(stripped) - 1, -1, -1) if terminal.match(stripped[index]) and not ignored(index)),
+        None,
+    )
     if fatal is None:
         return next((index for index, line in enumerate(stripped) if line.startswith("[ERROR]:")), None)
     task = next((index for index in range(fatal, -1, -1) if stripped[index].startswith("TASK [")), -1)
