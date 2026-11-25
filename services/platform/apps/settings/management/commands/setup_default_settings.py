@@ -46,6 +46,8 @@ DEFAULT_VALUE_MIGRATIONS: dict[str, tuple[object, object]] = {
     "common.query_warning_threshold": (10, 10),
     "common.sql_display_limit": (200, 200),
     "common.value_summary_limit": (50, 50),
+    # #436: panel certificate trust gate, off until the drill proved issuance.
+    "infrastructure.require_trusted_panel_certificate": (False, True),
     "notifications.max_name_length": (100, 200),
     "notifications.max_subject_length": (200, 200),
     "notifications.max_template_size": (102400, 100000),
