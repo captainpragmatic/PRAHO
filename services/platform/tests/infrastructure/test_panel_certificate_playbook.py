@@ -381,3 +381,33 @@ class PanelCertificateFailureReasonTests(SimpleTestCase):
         detail = failure_detail(stdout, "")
         self.assertIn("ufw refused the rule set", detail)
         self.assertNotIn("avahi-daemon", detail)
+
+    def test_marker_text_inside_an_indented_result_is_not_a_callback_marker(self) -> None:
+        payload_marker = (
+            "TASK [Reissue the panel certificate] ***\n"
+            "[ERROR]: Task failed: Action failed: non-zero return code\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:440:7\n"
+            "fatal: [node]: FAILED! =>\n"
+            "    rc: 1\n"
+            "    stdout: |-\n"
+            "        challenge failed\n"
+            "        ...ignoring\n"
+        )
+        self.assertIn("virtualmin.yml:440:7", failure_detail(payload_marker, ""))
+        self.assertIn("challenge failed", failure_detail(payload_marker, ""))
+        payload_header = (
+            "TASK [Probe an optional service] ***\n"
+            "[ERROR]: Task failed: Action failed: probe missing\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:100:7\n"
+            "fatal: [node]: FAILED! =>\n"
+            "    stdout: |-\n"
+            "        TASK [inner probe] ***\n"
+            "...ignoring\n\n"
+            "TASK [Reissue the panel certificate] ***\n"
+            "[ERROR]: Task failed: Action failed: challenge failed\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:440:7\n"
+            'fatal: [node]: FAILED! => {"changed": false, "msg": "challenge failed"}\n'
+        )
+        detail = failure_detail(payload_header, "")
+        self.assertIn("virtualmin.yml:440:7", detail)
+        self.assertNotIn("probe missing", detail)

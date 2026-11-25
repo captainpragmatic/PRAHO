@@ -68,6 +68,8 @@ def _terminal_index(lines: list[str]) -> int | None:
     def ignored(index: int) -> bool:
         # ignore_errors covers the whole task: ...ignoring follows its last result, loop items included.
         for line in lines[index + 1 :]:
+            if line.startswith((" ", "\t")):
+                continue  # inside a result: its text is payload, never a callback marker
             text = line.strip()
             if text.startswith(("TASK [", "PLAY [", "PLAY RECAP", "RUNNING HANDLER [")):
                 return False
