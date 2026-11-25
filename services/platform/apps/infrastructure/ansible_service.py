@@ -66,8 +66,14 @@ def _terminal_index(lines: list[str]) -> int | None:
     play, so it is skipped, whether it came before the real failure or in a cleanup after it."""
 
     def ignored(index: int) -> bool:
-        following = next((line for line in lines[index + 1 :] if line and not line.startswith((" ", "\t"))), "")
-        return following.strip() == "...ignoring"
+        # ignore_errors covers the whole task: ...ignoring follows its last result, loop items included.
+        for line in lines[index + 1 :]:
+            text = line.strip()
+            if text.startswith(("TASK [", "PLAY [", "PLAY RECAP", "RUNNING HANDLER [")):
+                return False
+            if text == "...ignoring":
+                return True
+        return False
 
     return next(
         (index for index in range(len(lines)) if _TERMINAL_FAILURE.match(lines[index].strip()) and not ignored(index)),
