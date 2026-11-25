@@ -407,14 +407,14 @@ class NodeRegistrationService:
                 except (ValidationError, ValueError) as error:
                     return Err(f"Node web-only policy is not verified, leaving disabled: {error}")
 
-            # #436 (flag-gated, default off): under the strict policy, activation
+            # #436 (on by default): under the strict policy, activation
             # additionally requires an AFFIRMATIVE CA-trust verdict on the panel
             # certificate. Indeterminate probes refuse too (fail-closed under an
             # explicitly strict flag; the operator retries). Refusal keeps the
             # server disabled — it never discards the deployment.
             from apps.settings.services import SettingsService  # noqa: PLC0415  # Circular
 
-            if SettingsService.get_boolean_setting("infrastructure.require_trusted_panel_certificate", False):
+            if SettingsService.get_boolean_setting("infrastructure.require_trusted_panel_certificate", True):
                 trust_error = self._panel_trust_refusal(server)
                 if trust_error is not None:
                     from apps.common.validators import log_security_event  # noqa: PLC0415  # Circular

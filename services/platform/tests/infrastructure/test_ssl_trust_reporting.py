@@ -186,7 +186,7 @@ class SSLTrustReportingTests(SimpleTestCase):
         with _tls_server(cert_pem, key_pem) as port:
             result = self._check(port, self._deployment())
 
-        self.assertTrue(result.passed)  # #436: reporting only, still not gating
+        self.assertFalse(result.passed)
         self.assertFalse(result.details["trusted"])
         self.assertIn("NOT CA-trusted", result.message)
         self.assertTrue(result.details["trust_evaluated"], "a self-signed chain IS a verdict")
@@ -220,6 +220,7 @@ class SSLTrustReportingTests(SimpleTestCase):
         with _tls_server(leaf_pem, leaf_key_pem) as port:
             result = self._check(port, self._deployment("node.example.test"), ca_pem=ca_pem)
 
+        self.assertFalse(result.passed)
         self.assertFalse(result.details["trusted"])
         self.assertIn("NOT CA-trusted", result.message)
         self.assertTrue(result.details["trust_evaluated"], "a name mismatch IS a verdict")
@@ -237,18 +238,20 @@ class SSLTrustReportingTests(SimpleTestCase):
         with _tls_server(leaf_pem, leaf_key_pem) as port:
             result = self._check(port, self._deployment("node.example.test"), ca_pem=ca_pem)
 
+        self.assertFalse(result.passed)
         self.assertFalse(result.details["trusted"])
         self.assertTrue(result.details["trust_evaluated"])
         self.assertIn("expired", result.details["trust_error"])
 
-    def test_untrusted_certificate_does_not_fail_the_check(self) -> None:
-        """#436 explicitly defers gating to a staging drill — nothing may flip red yet."""
+    def test_untrusted_certificate_fails_the_check(self) -> None:
+        """#436: a listener alone is not a passing panel certificate; the summary must say so."""
         cert_pem, key_pem, _, _ = _make_cert("node.example.test")
 
         with _tls_server(cert_pem, key_pem) as port:
             result = self._check(port, self._deployment())
 
-        self.assertTrue(result.passed, "gating on trust is a rollout decision, not this change")
+        self.assertFalse(result.passed)
+        self.assertTrue(result.details["trust_evaluated"])
 
     def test_protocol_and_cipher_are_still_reported(self) -> None:
         """The liveness pass must keep the diagnostics the old check provided."""
@@ -300,7 +303,7 @@ class SSLTrustIndeterminateTests(SSLTrustReportingTests):
             with patch.object(socket, "create_connection", side_effect=flaky_connect):
                 result = self._check(port, deployment)
 
-        self.assertTrue(result.passed)
+        self.assertFalse(result.passed, "trust that was never established is not a pass")
         self.assertFalse(result.details["trusted"])
         # The load-bearing assertion: we did not reach a verdict, and must not imply one.
         self.assertFalse(result.details["trust_evaluated"])

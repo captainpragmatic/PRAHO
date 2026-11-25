@@ -200,6 +200,10 @@ class Command(BaseCommand):
         result = SettingsService.update_setting("infrastructure.node_admin_allowed_cidrs", allowed)
         if result.is_err():
             raise CommandError(f"Could not set the node admin allowlist: {result.unwrap_err()}")
+        # The node is named under the reserved praho.test, so its panel certificate stays self-signed (#436).
+        result = SettingsService.update_setting("infrastructure.require_trusted_panel_certificate", False)
+        if result.is_err():
+            raise CommandError(f"Could not relax the panel certificate policy: {result.unwrap_err()}")
         self.stdout.write(f"Prepared {DEPLOY_NODE.server_hostname}; node admin allowlist {allowed}")
 
     def _forget_server(self) -> None:
@@ -225,7 +229,9 @@ class Command(BaseCommand):
         with self._denied_panel_probe(), lab_transport(with_deploy_node(state)):
             self._run_playbook(deployment, "virtualmin_firewall.yml", None)
             self._run_playbook(
-                deployment, "virtualmin.yml", {"praho_api_user": API_USER, "praho_api_password": password}
+                deployment,
+                "virtualmin.yml",
+                {"praho_api_user": API_USER, "praho_api_password": password, "panel_certificate_required": False},
             )
             server = self._register(deployment, password)
             self._prove_durable_api(server)

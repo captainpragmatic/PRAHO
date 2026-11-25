@@ -1,9 +1,9 @@
 # Node deployment drill — execution entry point (#347 / #436)
 
 Use a reviewed branch based on current `master`. The canonical
-[panel-certificate preflight and live drill guide](../../../../../docs/deployment/DEPLOYMENT.md#panel-certificate-preflight-and-activation-gate-436-drill-gated)
-defines the certificate prerequisites, staging isolation, failure/recovery and
-renewal tests, production trust gate, rate budget, evidence and cleanup for #436.
+[panel-certificate preflight and live drill guide](../../../../../docs/deployment/DEPLOYMENT.md#panel-certificate-preflight-and-activation-gate-436)
+defines the certificate prerequisites, how issuance and the trust gate work,
+the rate budget, and cleanup for #436.
 The [credential-seam acceptance checklist](NODE_DEPLOY_DRILL.md) covers API ACLs
 and customer provisioning after the node is ready.
 
@@ -16,10 +16,10 @@ python manage.py panel_cert_preflight --deployment-id <deployment-id> --json
 ```
 
 A green report establishes only scoped prerequisites. It does not prove ACME
-issuance, renewal or activation, and does not start a deployment. The current
-playbook can issue a production hostname certificate during installation, so a
-future staging drill must first establish the installer opt-out described in the
-canonical guide. `letsencrypt_fatal=true` is not a staging selector.
+issuance, renewal or activation, and does not start a deployment. The installer
+issues the panel certificate from the production CA, and no staging path exists
+(see the canonical guide), so a live drill spends real certificates. Use a node
+name with budget left: the name includes the region.
 
 For a separately scheduled live run:
 
@@ -28,8 +28,8 @@ For a separately scheduled live run:
    settings. Do not reuse secrets copied into chat or print them for debugging.
 2. Start the platform and its django-q workers (`make dev-platform`, or
    `make dev-all` for the portal too). Confirm the worker is processing tasks.
-3. Prepare the verified staging path before triggering the CLI or staff UI
-   deployment. Record the deployment ID and watch `NodeDeploymentLog` through
+3. Check the node name's certificate budget before triggering the CLI or staff
+   UI deployment. Record the deployment ID and watch `NodeDeploymentLog` through
    provisioning, DNS, panel installation, backups, validation and registration.
    Public node DNS is implemented; a controller `/etc/hosts` entry is not ACME
    evidence and should not replace public DNS checks.

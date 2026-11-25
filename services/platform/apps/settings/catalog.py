@@ -1635,14 +1635,14 @@ CATALOG: tuple[SettingDef, ...] = (
     SettingDef(
         key="infrastructure.require_trusted_panel_certificate",
         data_type="boolean",
-        default=False,
+        default=True,
         group="advanced",
         section=_("Infrastructure"),
         label=_("Require a CA-trusted panel certificate for activation"),
         help_text=_(
             "When enabled, verify_and_activate refuses to activate a server whose panel "
             "certificate is not affirmatively CA-trusted (indeterminate probes also refuse). "
-            "Flip only after the Let's Encrypt staging drill."
+            "Turn off only to activate a node whose panel certificate is knowingly untrusted."
         ),
         input_kind="toggle",
         advanced=True,

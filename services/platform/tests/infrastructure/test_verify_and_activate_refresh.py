@@ -27,6 +27,10 @@ from apps.provisioning.virtualmin_models import VirtualminServer
 
 class VerifyAndActivateRefreshTests(TestCase):
     def setUp(self) -> None:
+        # These tests are about the final refresh; the panel certificate is trusted (#436 gate).
+        trusted = patch.object(NodeRegistrationService, "_panel_trust_refusal", return_value=None)
+        trusted.start()
+        self.addCleanup(trusted.stop)
         self.server = VirtualminServer.objects.create(
             name="vm-activate-1",
             hostname="vm-activate-1.example.test",

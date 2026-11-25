@@ -311,3 +311,28 @@ class SettingsActivationTests(TestCase):
         self.assertEqual(second.value, "invalid-integer")
         self.assertEqual(second.default_value, 300)
         self.assertFalse(AuditAlert.objects.filter(metadata__activation_version="wp18-v1").exists())
+
+
+class PanelCertificatePolicyActivationTests(TestCase):
+    """#436: nodes seeded while the policy defaulted to off are switched on once, then left to the operator."""
+
+    TRUST_KEY = "infrastructure.require_trusted_panel_certificate"
+
+    def sync(self) -> None:
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command("setup_default_settings", category="advanced", stdout=StringIO())
+
+    def test_a_seeded_off_policy_is_turned_on_once(self) -> None:
+        row = SystemSetting.objects.create(
+            key=self.TRUST_KEY, value=False, **sync._row_defaults(CATALOG_BY_KEY[self.TRUST_KEY])
+        )
+        self.sync()
+        row.refresh_from_db()
+        self.assertIs(row.value, True)
+        self.assertTrue(SettingsService.get_boolean_setting(self.TRUST_KEY, False))
+
+        row.value = False
+        row.save(update_fields=["value", "updated_at"])
+        self.sync()
+        row.refresh_from_db()
+        self.assertIs(row.value, False, "a later deliberate choice is the operator's")

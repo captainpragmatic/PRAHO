@@ -183,6 +183,8 @@ class Command(BaseCommand):
             # Platform reaches every lab node from the compose network gateway
             # (ADR-0060 allowlist); the nodes' own addresses stay outside it.
             "infrastructure.node_admin_allowed_cidrs": [f"{container_address(NODES[0].container, 'Gateway')}/32"],
+            # Lab panels serve self-signed certificates under the reserved praho.test (#436).
+            "infrastructure.require_trusted_panel_certificate": False,
         }
         for key, value in values.items():
             result = SettingsService.update_setting(key, value)

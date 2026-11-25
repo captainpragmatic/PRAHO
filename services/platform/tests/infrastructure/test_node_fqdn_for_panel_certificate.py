@@ -46,20 +46,19 @@ class PanelPlaybookUsesNodeFqdnTests(SimpleTestCase):
                 self.assertNotIn("inventory_hostname", command_text(task))
                 self.assertNotIn("inventory_hostname", str(task.get("args", "")))
 
-    def test_installer_and_both_letsencrypt_steps_get_the_fqdn(self) -> None:
+    def test_installer_and_the_certificate_steps_get_the_fqdn(self) -> None:
         install = command_text(task_named("virtualmin.yml", "Run Virtualmin installation"))
-        generate = command_text(task_named("virtualmin.yml", "Generate Let's Encrypt certificate for Virtualmin"))
         self.assertRegex(install, r"--hostname \{\{ node_fqdn \}\}")
-        self.assertRegex(generate, r"--host \{\{ node_fqdn \}\}")
-        installs = [task for task in tasks("virtualmin.yml") if "letsencrypt.cgi" in command_text(task)]
-        self.assertTrue(installs)
-        for task in installs:
-            self.assertRegex(command_text(task), r"--host \{\{ node_fqdn \}\}")
+        for title in ("Reissue the panel certificate", "Install the hostname certificate for Webmin"):
+            with self.subTest(title=title):
+                self.assertRegex(command_text(task_named("virtualmin.yml", title)), r"--domain \{\{ node_fqdn \}\}")
+        for title in ("Check the certificate the panel serves", "Re-check the certificate the panel serves"):
+            with self.subTest(title=title):
+                self.assertIn("-verify_hostname {{ node_fqdn }}", command_text(task_named("virtualmin.yml", title)))
 
-    def test_the_certificate_marker_path_uses_the_fqdn(self) -> None:
+    def test_no_certificate_step_names_the_node_by_its_short_hostname(self) -> None:
         text = " ".join(str(task) for task in tasks("virtualmin.yml"))
-        self.assertIsNone(re.search(r"letsencrypt-cert-\{\{ inventory_hostname", text))
-        self.assertIn("letsencrypt-cert-{{ node_fqdn }}", text)
+        self.assertIsNone(re.search(r"(--domain|--hostname|-verify_hostname|-servername) \{\{ inventory_hostname", text))
 
     def test_the_play_refuses_to_run_without_a_fqdn(self) -> None:
         guard = task_named("virtualmin.yml", "Refuse a missing node FQDN")

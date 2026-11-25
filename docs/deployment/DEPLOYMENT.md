@@ -210,7 +210,7 @@ unpinnable rows, and SSH-pinnable candidates):
 python manage.py pin_virtualmin_certificates --report
 ```
 
-### Panel-certificate preflight and activation gate (#436, drill-gated)
+### Panel-certificate preflight and activation gate (#436)
 
 The read-only preflight prepares the **Hetzner / Virtualmin** drill. It does not
 issue certificates, provision servers, edit DNS, pin certificates, or change
@@ -266,80 +266,57 @@ available. An observed fingerprint is not a trust anchor. A self-signed or
 staging certificate before issuance is expected and does not fail the scoped
 prerequisites. Probe failure does not mean the certificate was rejected.
 
-`letsencrypt_fatal` remains **false** by default. The
-`infrastructure.require_trusted_panel_certificate` setting remains **off** by
-default; when enabled it already refuses both untrusted and indeterminate
-certificates and leaves the server disabled. The preflight does not enable either
-control. **#436 stays open until the live evidence and rollout below are complete.**
+#### How the panel certificate is issued and enforced (#436)
 
-#### Future live drill: evidence required before fatal issuance rollout
+A disposable node (Virtualmin 8.3.0) established how issuance works:
 
-1. **Prepare one disposable node and a cost limit.** Validate provider and DNS
-   credentials, confirm a public domain under operator control, select available
-   capacity, name the cleanup owner and deadline, and record a maximum spend.
-   Capture the Git SHA, provider/deployment IDs and preflight JSON. Public DNS
-   provisioning is implemented; `/etc/hosts` cannot prove public ACME readiness.
-   Keep real credentials in the vault and the existing mode-0600 Ansible vars
-   file; never put them on argv, in a transcript, or in unredacted logs.
-2. **Establish the installed CLI contract before any ACME attempt.** Record the
-   installer artifact checksum, OS, Webmin/Virtualmin versions, installed help,
-   and relevant source/paths. The [Virtualmin command documentation](https://www.virtualmin.com/docs/development/api-programs/generate-letsencrypt-cert/)
-   requires `--domain` to identify a virtual server; `--host` alone is not that
-   argument. `--renew` configures renewal, and `--staging` selects the test CA.
-   Prove whether the panel hostname should use a Virtualmin virtual server or
-   Webmin's hostname-certificate workflow on the installed version. Do not ship
-   guessed replacement flags into the active playbook.
-3. **Prevent the installer's own production request.** The [automated installer](https://www.virtualmin.com/docs/installation/automated/)
-   requests a hostname certificate unless `--no-hostname-ssl` is used. Verify that
-   option in the selected installer and build an isolated staging drill path
-   before starting installation. The current deployment playbook is not a
-   staging-safe harness: setting `letsencrypt_fatal=true` alone does not select
-   staging or suppress installer issuance. Stop if production ACME calls cannot
-   be excluded. Record the staging directory actually used:
-   `https://acme-staging-v02.api.letsencrypt.org/directory`.
-4. **Prove challenge routing.** Run deployment preflight after DNS provisioning.
-   Compare all authorities, then serve an actual random HTTP-01 test nonce at the
-   chosen challenge webroot. Fetch and compare its exact content from an external
-   vantage point at every published A and AAAA address with the hostname `Host`
-   header. Inspect any redirects explicitly; neither an open port nor a generic
-   response is proof. Remove the test nonce afterward. Resolve DNS/firewall/webroot
-   failures before contacting ACME.
-5. **Exercise staging success and failure.** Prove staging issuance, installation
-   into the running panel, and the certificate served on :10000. Induce a failed
-   issuance and a separate installation failure; with the drill's fatal flag they
-   must abort before activation and produce useful redacted errors. Interrupt
-   between issuance and installation, recover without another unnecessary order,
-   and rerun successfully without replacing a usable certificate. Verify the
-   marker is written only after both steps succeed and reconciles with the
-   installed certificate; a marker alone must not conceal an interrupted install.
-   Demonstrate the configured renewal mechanism and a staging renewal, including
-   panel reload and a changed served certificate. Preserve order/attempt counts.
-6. **Prove ordinary trust once.** After staging passes and the rate budget permits,
-   make one deliberate production issuance. Verify FQDN/SAN, chain, expiry and
-   fingerprint from the platform, then exercise strict activation: a trusted
-   certificate permits the ordinary credential handshake; untrusted and
-   indeterminate probes refuse. [Staging roots](https://letsencrypt.org/docs/staging-environment/)
-   belong only in an isolated test client's trust store, never the controller's
-   ordinary trust store. Staging success cannot satisfy production CA trust.
-7. **Review rollout and clean up.** Ship the proven hostname workflow, recovery
-   behavior and fatal failure handling in a follow-up PR; then enable fatal
-   issuance and strict activation in the reviewed rollout. Destroy the disposable
-   server and owned firewall, DNS records and temporary challenge files. Verify
-   absence through provider/DNS read APIs and reconcile PRAHO state. Retain
-   redacted logs, timings, costs, DNS/HTTP evidence, certificate identities,
-   interruption/renewal results, attempt counts and cleanup receipts on #436.
+- The Virtualmin installer's hostname step is the issuer. It creates the hostname
+  virtual server for the node FQDN, requests a production Let's Encrypt certificate
+  for it, and Webmin serves that certificate. If the request fails, the installer
+  deletes the virtual server again. It always uses the production CA, so there is
+  no staging path through the installer.
+- Every `virtualmin generate-letsencrypt-cert --domain FQDN --web` call issues a
+  new certificate. Let's Encrypt reuses a cached authorization for up to 30 days,
+  so a repeat call succeeds even with port 80 closed and counts against the
+  5-per-week limit for that exact name.
 
-Before the paid drill, record a capacity model per registered domain: planned new
-nodes plus replacements and recovery headroom in each seven-day window. Current
+`virtualmin.yml` therefore judges the certificate Webmin actually serves on
+127.0.0.1:10000: a chain trusted by the system store, the FQDN as the verified
+hostname, and more than 30 days to expiry. It acts only when that check fails:
+
+1. If the hostname virtual server exists, it reissues
+   (`generate-letsencrypt-cert --domain FQDN --web --email-never`), points Webmin at
+   it (`install-service-cert --domain FQDN --add-global --service webmin`) and
+   checks again, allowing Webmin time to restart.
+2. If the virtual server is missing, the installer's hostname step failed. The
+   play does not re-run `virtualmin-config-system --include SSL`, because that
+   also re-runs the `Virtualmin` plugin it depends on.
+3. A failed reissue or install fails at its own task, and its output becomes the
+   deployment's failure reason. A missing hostname domain, or a certificate still
+   not trusted afterwards, fails with `LETSENCRYPT_FAILED step=hostname-domain|verify ...`.
+   The first check retries for about 30 seconds before acting, so a Webmin restart
+   is not mistaken for an untrusted certificate. Check that the FQDN resolves to the
+   node and port 80 is reachable before retrying: a retry rebuilds the node.
+
+Enforcement has one switch: `panel_certificate_required=false` skips the whole
+check. The lab passes it, because its nodes are named under the reserved
+`praho.test`. The earlier `letsencrypt_fatal` variable is gone.
+
+The deployment's SSL health check fails for an untrusted or unevaluated
+certificate, but validation stays a warning. The activation gate
+`infrastructure.require_trusted_panel_certificate` is **on** by default: it refuses
+untrusted and indeterminate certificates and leaves the server disabled. Turn it
+off only to activate a node whose panel certificate is knowingly untrusted (the
+lab does this in its own settings).
+
+Plan certificate demand per registered domain. Current
 [Let's Encrypt rate limits](https://letsencrypt.org/docs/rate-limits/) include 50
 new certificates per registered domain per seven days, five per exact identifier
 set per seven days, and five failed authorizations per identifier/account/hour.
-Check current limits again at execution time and distinguish renewals from new
-orders. Keep all iteration on staging. Honor `Retry-After` and the reported
-cooldown; a failure must not trigger an automatic deploy retry or a replacement
-hostname to bypass the limit. If forecast demand exceeds the budget, obtain an
-approved limit override before rollout; creating subdomains does not provide a
-new registered-domain allowance.
+Node names repeat after a rebuild (`-001` again), so repeated rebuilds of one
+node draw on the same five. A failure must not be retried in a loop to get past
+a limit. If forecast demand exceeds the budget, obtain an approved limit override;
+creating subdomains does not provide a new registered-domain allowance.
 
 ---
 

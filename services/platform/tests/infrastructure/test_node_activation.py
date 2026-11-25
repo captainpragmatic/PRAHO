@@ -144,7 +144,7 @@ class GeneratedNodeActivationTests(TestCase):
 
 
 class TrustedPanelCertificateGateTests(TestCase):
-    """#436 flag-gated activation trust gate (default off = byte-identical)."""
+    """#436 activation trust gate, on by default; an operator may turn it off."""
 
     def _disabled_server(self) -> VirtualminServer:
         return VirtualminServer.objects.create(
@@ -184,6 +184,27 @@ class TrustedPanelCertificateGateTests(TestCase):
             vault.return_value.get_credential.return_value = Ok(("praho-api", "vault-pw", {}))
             gateway_cls.return_value.test_connection.return_value = Ok({"healthy": True})
             return NodeRegistrationService().verify_and_activate(server)
+
+    def test_untrusted_verdict_refuses_under_the_shipped_default(self) -> None:
+        """No stored setting: the catalog default must be the strict policy."""
+        server = self._disabled_server()
+        with (
+            patch.object(
+                NodeRegistrationService,
+                "_panel_trust_refusal",
+                return_value="Panel certificate for x is NOT CA-trusted: self-signed",
+            ) as probe,
+            patch("apps.common.credential_vault.get_credential_vault") as vault,
+            patch("apps.provisioning.virtualmin_gateway.VirtualminGateway") as gateway_cls,
+        ):
+            vault.return_value.get_credential.return_value = Ok(("praho-api", "vault-pw", {}))
+            gateway_cls.return_value.test_connection.return_value = Ok({"healthy": True})
+            result = NodeRegistrationService().verify_and_activate(server)
+        probe.assert_called_once()
+        self.assertTrue(result.is_err())
+        self.assertIn("NOT CA-trusted", result.unwrap_err())
+        server.refresh_from_db()
+        self.assertEqual(server.status, "disabled")
 
     def test_flag_on_trusted_verdict_activates(self) -> None:
         server = self._disabled_server()
@@ -241,6 +262,12 @@ class TrustedPanelCertificateGateTests(TestCase):
 
 
 class VerifyAndActivateTests(TestCase):
+    def setUp(self) -> None:
+        # These tests are about the API credential; the panel certificate is trusted (#436 gate).
+        trusted = patch.object(NodeRegistrationService, "_panel_trust_refusal", return_value=None)
+        trusted.start()
+        self.addCleanup(trusted.stop)
+
     def _disabled_server(self) -> VirtualminServer:
         return VirtualminServer.objects.create(
             name="Node: prd-sha-tst-de-tst1-001",
@@ -335,6 +362,12 @@ class VerifyAndActivateRealHandshakeTests(TestCase):
     they FAIL against the pre-fix code and PASS after verify_and_activate uses
     VirtualminConfig.from_credentials (active-status probe) with the vault credential.
     """
+
+    def setUp(self) -> None:
+        # These tests are about the API credential; the panel certificate is trusted (#436 gate).
+        trusted = patch.object(NodeRegistrationService, "_panel_trust_refusal", return_value=None)
+        trusted.start()
+        self.addCleanup(trusted.stop)
 
     def _disabled_server(self) -> VirtualminServer:
         return VirtualminServer.objects.create(
