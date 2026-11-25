@@ -32,7 +32,17 @@ plus the approved DNS authority references as `PRAHO_NATIVE_CLOUDFLARE_TOKEN` an
 `PRAHO_NATIVE_CLOUDFLARE_ZONE_ID`. Do not print or commit their values. The DNS zone
 argument must be the approved disposable zone/subzone inside that provider zone.
 Use an otherwise empty isolated native database, not the registration-resume fixture's
-database. Run these phases sequentially:
+database.
+
+Every run spends a production Let's Encrypt certificate on the node's name: the
+Virtualmin installer issues it, and no staging path exists. Because the database is
+empty, the node is always number `001`, so the name depends only on the location
+(`dev-sha-het-de-fsn1-001`, `dev-sha-het-de-nbg1-001`, `dev-sha-het-fi-hel1-001`, and
+so on). Let's Encrypt allows five certificates per exact name per seven days. Check a
+name's recent issuances (for example on crt.sh or Cert Spotter) before a run, and
+choose another `PRAHO_NATIVE_LOCATION` when a name is near the limit.
+
+Run these phases sequentially:
 
 1. `make native-vm-fresh-intent` records only private local intent and an original
    SSH/vault identity. It creates no provider resources. Preserve this key after
