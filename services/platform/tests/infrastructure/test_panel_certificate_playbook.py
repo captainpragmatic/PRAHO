@@ -40,10 +40,10 @@ SKIPPED: dict[str, Any] = {"skipped": True, "changed": False}
 # ansible-core 2.20.6 with the callback settings AnsibleService uses (default callback, result_format=yaml).
 FAILED_RUN_STDOUT = """
 TASK [Fail when the panel certificate is not trusted] **************************
-[ERROR]: Task failed: Action failed: LETSENCRYPT_FAILED step=generate rc=1 stderr=Web-based validation failed : Some challenges have failed.
+[ERROR]: Task failed: Action failed: LETSENCRYPT_FAILED step=verify untrusted: verify error:num=18:self-signed certificate
 Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:470:7
 
-fatal: [node]: FAILED! => {"changed": false, "msg": "LETSENCRYPT_FAILED step=generate rc=1 stderr=Web-based validation failed : Some challenges have failed."}
+fatal: [node]: FAILED! => {"changed": false, "msg": "LETSENCRYPT_FAILED step=verify untrusted: verify error:num=18:self-signed certificate"}
 
 PLAY RECAP *********************************************************************
 node                  : ok=40   changed=3    unreachable=0    failed=1    skipped=2    rescued=0    ignored=0
@@ -123,38 +123,14 @@ class PanelCertificateDecisionTests(SimpleTestCase):
         self.assertIn(FAIL, walk.ran)
         self.assertIn("LETSENCRYPT_FAILED step=hostname-domain", walk.failure)
         self.assertIn(FQDN, walk.failure)
+        self.assertIn("untrusted: self-signed", walk.failure)
 
-    def test_a_lookup_error_is_not_read_as_a_missing_domain_with_the_name_in_it(self) -> None:
+    def test_another_virtual_server_is_not_mistaken_for_the_hostname_domain(self) -> None:
         walk = PanelCertificateScenario(
-            registered(check=ran(1, "untrusted"), lookup=ran(1, FQDN), recheck=ran(1, "untrusted"))
+            registered(check=ran(1, "untrusted"), lookup=ran(0, "customer.example.org"), recheck=ran(1, "untrusted"))
         ).walk()
         self.assertNotIn(REISSUE, walk.ran)
         self.assertIn("step=hostname-domain", walk.failure)
-
-    def test_a_failed_issuance_skips_the_install_and_names_the_step(self) -> None:
-        walk = PanelCertificateScenario(
-            registered(
-                check=ran(1, "untrusted"),
-                lookup=ran(0, FQDN),
-                issue=ran(1, "Web-based validation failed : Some challenges have failed."),
-                recheck=ran(1, "untrusted"),
-            )
-        ).walk()
-        self.assertNotIn(INSTALL, walk.ran)
-        self.assertIn(FAIL, walk.ran)
-        self.assertIn("LETSENCRYPT_FAILED step=generate rc=1", walk.failure)
-        self.assertIn("Some challenges have failed", walk.failure)
-
-    def test_a_failed_install_names_the_step(self) -> None:
-        walk = PanelCertificateScenario(
-            registered(
-                check=ran(1, "untrusted"), lookup=ran(0, FQDN), issue=ran(0), install=ran(2, "", "no such service"),
-                recheck=ran(1, "untrusted"),
-            )
-        ).walk()
-        self.assertIn(FAIL, walk.ran)
-        self.assertIn("LETSENCRYPT_FAILED step=install rc=2", walk.failure)
-        self.assertIn("no such service", walk.failure)
 
     def test_a_certificate_still_untrusted_after_both_steps_names_the_verification(self) -> None:
         walk = PanelCertificateScenario(
@@ -174,6 +150,29 @@ class PanelCertificateDecisionTests(SimpleTestCase):
         walk = PanelCertificateScenario(variables).walk()
         self.assertNotIn(FAIL, walk.ran)
         self.assertIn(REPORT, walk.ran)
+
+
+class PanelCertificateFailureHandlingTests(SimpleTestCase):
+    def test_no_step_hides_its_own_failure(self) -> None:
+        for title in STEPS:
+            with self.subTest(title=title):
+                task = task_named(PLAYBOOK, title)
+                self.assertNotIn(task.get("failed_when"), (False, "false"))
+                self.assertFalse(task.get("ignore_errors", False))
+
+    def test_a_failed_reissue_install_or_lookup_fails_at_its_own_task(self) -> None:
+        for title in (LOOKUP, REISSUE, INSTALL):
+            with self.subTest(title=title):
+                self.assertNotIn("failed_when", task_named(PLAYBOOK, title))
+
+    def test_the_checks_fail_only_when_the_check_itself_breaks(self) -> None:
+        templar = Templar(loader=DataLoader(), variables={})
+        for title, register in ((CHECK, "panel_cert_check"), (RECHECK, "panel_cert_recheck")):
+            expression = trust_as_template(str(task_named(PLAYBOOK, title)["failed_when"]))
+            for rc, broken in ((0, False), (1, False), (2, True), (127, True)):
+                with self.subTest(title=title, rc=rc):
+                    templar.available_variables = {register: {"rc": rc}}
+                    self.assertIs(templar.evaluate_conditional(expression), broken)
 
 
 class PanelCertificateCommandTests(SimpleTestCase):
@@ -201,10 +200,15 @@ class PanelCertificateCommandTests(SimpleTestCase):
         self.assertIn("--add-global", command)
         self.assertIn("--service webmin", command)
 
-    def test_the_recheck_waits_for_webmin_to_restart(self) -> None:
-        recheck = task_named(PLAYBOOK, RECHECK)
-        self.assertGreaterEqual(int(recheck["retries"]), 3)
-        self.assertIn("panel_cert_recheck.rc == 0", str(recheck["until"]))
+    def test_both_checks_wait_for_webmin_to_restart(self) -> None:
+        """A refused connection reads as untrusted; on the first check that would order a certificate."""
+        for title, register in ((CHECK, "panel_cert_check"), (RECHECK, "panel_cert_recheck")):
+            with self.subTest(title=title):
+                task = task_named(PLAYBOOK, title)
+                self.assertEqual(task["register"], register)
+                self.assertGreaterEqual(int(task["retries"]), 3)
+                self.assertGreaterEqual(int(task["delay"]), 5)
+                self.assertIn(f"{register}.rc == 0", str(task["until"]))
 
     def test_the_steps_run_in_order_after_the_install(self) -> None:
         titles = [task.get("name") for task in tasks(PLAYBOOK)]
@@ -225,5 +229,5 @@ class PanelCertificateCommandTests(SimpleTestCase):
 class PanelCertificateFailureReasonTests(SimpleTestCase):
     def test_the_deploy_failure_reason_carries_the_letsencrypt_line(self) -> None:
         detail = failure_detail(FAILED_RUN_STDOUT, "")
-        self.assertIn("LETSENCRYPT_FAILED step=generate rc=1", detail)
-        self.assertIn("Some challenges have failed", detail)
+        self.assertIn("LETSENCRYPT_FAILED step=verify", detail)
+        self.assertIn("self-signed certificate", detail)

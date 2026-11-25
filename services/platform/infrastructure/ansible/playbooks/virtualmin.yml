@@ -404,7 +404,9 @@
     # checked the result, so the verdict is the certificate Webmin actually serves (trusted chain,
     # the FQDN in its names, more than 30 days left). A reissue runs only when that check fails:
     # every generate-letsencrypt-cert call issues a new certificate (Let's Encrypt reuses a cached
-    # authorization), and a name gets 5 duplicates a week. An untrusted panel fails the deploy
+    # authorization), and a name gets 5 duplicates a week. A failed reissue or install fails at its
+    # own task; a missing hostname domain or a still-untrusted certificate fails with a stated reason.
+    # An untrusted panel fails the deploy
     # unless letsencrypt_fatal is passed false. The lab passes panel_certificate_required=false:
     # its nodes are named under the reserved praho.test, which no public CA certifies.
     - name: Check the certificate the panel serves
@@ -420,15 +422,19 @@
       args:
         executable: /bin/bash
       register: panel_cert_check
+      # A refused connection reads as untrusted, and a reissue is a real order: ride out a Webmin restart first.
+      until: panel_cert_check.rc == 0
+      retries: 5
+      delay: 6
       changed_when: false
-      failed_when: false
+      # The script answers 0 (trusted) or 1 (not trusted, including no answer); anything else is a broken check.
+      failed_when: panel_cert_check.rc not in [0, 1]
       when: panel_certificate_required | default(true) | bool
 
     - name: Look up the hostname virtual server
-      ansible.builtin.command: virtualmin list-domains --name-only --domain {{ node_fqdn }}
+      ansible.builtin.command: virtualmin list-domains --name-only
       register: panel_cert_hostname_domain
       changed_when: false
-      failed_when: false
       when: (panel_cert_check.rc | default(0)) != 0
 
     - name: Reissue the panel certificate
@@ -438,10 +444,8 @@
         --web
         --email-never
       register: panel_cert_issue
-      failed_when: false
       when:
         - (panel_cert_check.rc | default(0)) != 0
-        - (panel_cert_hostname_domain.rc | default(1)) == 0
         - node_fqdn in (panel_cert_hostname_domain.stdout_lines | default([]))
 
     - name: Install the hostname certificate for Webmin
@@ -451,7 +455,6 @@
         --add-global
         --service webmin
       register: panel_cert_install
-      failed_when: false
       when: (panel_cert_issue.rc | default(1)) == 0
 
     # Webmin restarts after the install; give it time before judging again.
@@ -464,24 +467,17 @@
       retries: 5
       delay: 6
       changed_when: false
-      failed_when: false
+      failed_when: panel_cert_recheck.rc not in [0, 1]
       when: (panel_cert_check.rc | default(0)) != 0
 
     - name: Describe the panel certificate failure
       ansible.builtin.set_fact:
         panel_cert_failure: >-
-          {% if (panel_cert_hostname_domain.rc | default(1)) != 0
-                or node_fqdn not in (panel_cert_hostname_domain.stdout_lines | default([])) -%}
+          {% if node_fqdn not in (panel_cert_hostname_domain.stdout_lines | default([])) -%}
           LETSENCRYPT_FAILED step=hostname-domain the hostname virtual server {{ node_fqdn }} does not exist:
           the installer's hostname certificate step failed and removed it. Check that {{ node_fqdn }}
           resolves to this node and that port 80 is reachable before retrying.
-          {{ ((panel_cert_hostname_domain.stdout | default('')) ~ ' ' ~ (panel_cert_hostname_domain.stderr | default(''))) | trim | truncate(200) }}
-          {%- elif (panel_cert_issue.rc | default(0)) != 0 -%}
-          LETSENCRYPT_FAILED step=generate rc={{ panel_cert_issue.rc }}
-          stderr={{ (((panel_cert_issue.stdout | default('')) ~ ' ' ~ (panel_cert_issue.stderr | default(''))) | trim)[-400:] }}
-          {%- elif (panel_cert_install.rc | default(0)) != 0 -%}
-          LETSENCRYPT_FAILED step=install rc={{ panel_cert_install.rc }}
-          stderr={{ (((panel_cert_install.stdout | default('')) ~ ' ' ~ (panel_cert_install.stderr | default(''))) | trim)[-400:] }}
+          Panel check: {{ panel_cert_recheck.stdout | default('') }}
           {%- else -%}
           LETSENCRYPT_FAILED step=verify {{ panel_cert_recheck.stdout | default('') }}
           {%- endif %}

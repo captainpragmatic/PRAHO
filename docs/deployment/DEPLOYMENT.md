@@ -291,10 +291,12 @@ hostname, and more than 30 days to expiry. It acts only when that check fails:
 2. If the virtual server is missing, the installer's hostname step failed. The
    play does not re-run `virtualmin-config-system --include SSL`, because that
    also re-runs the `Virtualmin` plugin it depends on.
-3. If the certificate is still not trusted, the play fails with a
-   `LETSENCRYPT_FAILED step=hostname-domain|generate|install|verify ...` message,
-   which becomes the deployment's failure reason. Check that the FQDN resolves to
-   the node and port 80 is reachable before retrying: a retry rebuilds the node.
+3. A failed reissue or install fails at its own task, and its output becomes the
+   deployment's failure reason. A missing hostname domain, or a certificate still
+   not trusted afterwards, fails with `LETSENCRYPT_FAILED step=hostname-domain|verify ...`.
+   The first check retries for about 30 seconds before acting, so a Webmin restart
+   is not mistaken for an untrusted certificate. Check that the FQDN resolves to the
+   node and port 80 is reachable before retrying: a retry rebuilds the node.
 
 `letsencrypt_fatal=false` reports the failure without failing the play. The lab
 passes `panel_certificate_required=false`, because its nodes are named under the
