@@ -56,13 +56,27 @@ PLAYBOOKS_PATH = ANSIBLE_BASE_PATH / "playbooks"
 _SYSTEM_ANSIBLE_PATHS = ("/usr/local/bin/ansible-playbook", "/usr/bin/ansible-playbook")
 
 
+def _error_index(lines: list[str]) -> int | None:
+    """Index of the [ERROR] that explains the failure.
+
+    ansible-core 2.20 also prints [ERROR] for a task whose last attempt exited non-zero while
+    failed_when or until kept its result ok, so with a fatal task in the output only an [ERROR]
+    inside that task's own section counts. Without one, the first [ERROR] (a controller error)."""
+    stripped = [line.strip() for line in lines]
+    fatal = next((index for index, line in enumerate(stripped) if re.match(r"fatal: \[.*\]: FAILED! =>", line)), None)
+    if fatal is None:
+        return next((index for index, line in enumerate(stripped) if line.startswith("[ERROR]:")), None)
+    task = next((index for index in range(fatal, -1, -1) if stripped[index].startswith("TASK [")), -1)
+    return next((index for index in range(task + 1, fatal) if stripped[index].startswith("[ERROR]:")), None)
+
+
 def _first_failure_line(stdout: str, stderr: str) -> str:
     """Keep the first actionable controller error or task failure, bounded for display."""
     stdout_lines = stdout.splitlines()
     for lines in (stdout_lines, stderr.splitlines()):
-        for line in lines:
-            if line.strip().startswith("[ERROR]:"):
-                return line.strip()[:300]
+        error = _error_index(lines)
+        if error is not None:
+            return lines[error].strip()[:300]
 
     for index, line in enumerate(stdout_lines):
         fatal_line = line.strip()
@@ -83,9 +97,9 @@ def _first_failure_line(stdout: str, stderr: str) -> str:
 
 
 def _error_origin(text: str) -> str:
-    """The Origin line of the first [ERROR] in one stream; a warning's Origin above it is not the error's."""
+    """The Origin line of the explaining [ERROR] in one stream; a warning's Origin above it is not the error's."""
     lines = [line.strip() for line in text.splitlines()]
-    error = next((index for index, line in enumerate(lines) if line.startswith("[ERROR]:")), None)
+    error = _error_index(lines)
     if error is None:
         return ""
     return next((line for line in lines[error + 1 :] if line.startswith("Origin:")), "")

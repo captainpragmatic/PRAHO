@@ -36,16 +36,42 @@ STEPS = (CHECK, LOOKUP, REISSUE, INSTALL, RECHECK, DESCRIBE, FAIL)
 
 SKIPPED: dict[str, Any] = {"skipped": True, "changed": False}
 
-# ansible-core 2.20.6 with the callback settings AnsibleService uses (default callback, result_format=yaml).
-FAILED_RUN_STDOUT = """
-TASK [Fail when the panel certificate is not trusted] **************************
-[ERROR]: Task failed: Action failed: LETSENCRYPT_FAILED step=verify untrusted: verify error:num=18:self-signed certificate
-Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:470:7
+# ansible-core 2.20.6 against a real Virtualmin 8.3.0 node whose hostname domain was deleted, with the
+# callback settings AnsibleService uses. The check and re-check print [ERROR] for their failing attempts
+# although their results are ok (failed_when); only the last task is fatal.
+FAILED_RUN_STDOUT = """FAILED - RETRYING: [node]: Check the certificate the panel serves (1 retries left).
 
-fatal: [node]: FAILED! => {"changed": false, "msg": "LETSENCRYPT_FAILED step=verify untrusted: verify error:num=18:self-signed certificate"}
+TASK [Check the certificate the panel serves] **********************************
+[ERROR]: Task failed: Action failed: non-zero return code
+Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:6:5
+
+6   - name: Check the certificate the panel serves
+      ^ column 5
+
+ok: [node]
+
+TASK [Re-check the certificate the panel serves] *******************************
+[ERROR]: Task failed: Action failed: non-zero return code
+Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:45:5
+
+45   - name: Re-check the certificate the panel serves
+       ^ column 5
+
+ok: [node]
+
+TASK [Fail when the panel certificate is not trusted] **************************
+[ERROR]: Task failed: Action failed: LETSENCRYPT_FAILED step=hostname-domain the hostname virtual server node.example.net does not exist: the installer's hostname certificate step failed and removed it. Check that node.example.net resolves to this node and that port 80 is reachable before retrying. Panel check: untrusted: verify error:num=18:self-signed certificate
+Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:75:5
+
+75   - name: Fail when the panel certificate is not trusted
+       ^ column 5
+
+fatal: [node]: FAILED! =>
+    changed: false
+    msg: 'LETSENCRYPT_FAILED step=hostname-domain the hostname virtual server node.example.net does not exist'
 
 PLAY RECAP *********************************************************************
-node                  : ok=40   changed=3    unreachable=0    failed=1    skipped=2    rescued=0    ignored=0
+node                  : ok=4    changed=0    unreachable=0    failed=1    skipped=2    rescued=0    ignored=0
 """
 
 
@@ -225,7 +251,23 @@ class PanelCertificateCommandTests(SimpleTestCase):
 
 
 class PanelCertificateFailureReasonTests(SimpleTestCase):
-    def test_the_deploy_failure_reason_carries_the_letsencrypt_line(self) -> None:
+    def test_the_deploy_failure_reason_is_the_fatal_task_not_a_recovered_retry(self) -> None:
         detail = failure_detail(FAILED_RUN_STDOUT, "")
-        self.assertIn("LETSENCRYPT_FAILED step=verify", detail)
-        self.assertIn("self-signed certificate", detail)
+        self.assertTrue(detail.startswith("[ERROR]: Task failed: Action failed: LETSENCRYPT_FAILED step=hostname-domain"), detail)
+        self.assertIn("virtualmin.yml:75:5", detail)
+        self.assertNotIn("non-zero return code", detail)
+        self.assertNotIn("virtualmin.yml:6:5", detail)
+
+    def test_a_fatal_task_without_its_own_error_line_is_not_explained_by_a_recovered_retry(self) -> None:
+        stdout = (
+            "TASK [Check the certificate the panel serves] ***\n"
+            "[ERROR]: Task failed: Action failed: non-zero return code\n"
+            "Origin: /opt/praho/infrastructure/ansible/playbooks/virtualmin.yml:6:5\n"
+            "ok: [node]\n\n"
+            "TASK [Run Virtualmin installation] ***\n"
+            'fatal: [node]: FAILED! => {"changed": false, "msg": "installer exited 1", "rc": 1}\n'
+        )
+        detail = failure_detail(stdout, "")
+        self.assertIn("installer exited 1", detail)
+        self.assertNotIn("non-zero return code", detail)
+        self.assertNotIn("virtualmin.yml:6:5", detail)
