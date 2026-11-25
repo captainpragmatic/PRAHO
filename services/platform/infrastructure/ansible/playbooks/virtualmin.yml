@@ -406,9 +406,8 @@
     # every generate-letsencrypt-cert call issues a new certificate (Let's Encrypt reuses a cached
     # authorization), and a name gets 5 duplicates a week. A failed reissue or install fails at its
     # own task; a missing hostname domain or a still-untrusted certificate fails with a stated reason.
-    # An untrusted panel fails the deploy
-    # unless letsencrypt_fatal is passed false. The lab passes panel_certificate_required=false:
-    # its nodes are named under the reserved praho.test, which no public CA certifies.
+    # The lab passes panel_certificate_required=false to skip the block: its nodes are named under
+    # the reserved praho.test, which no public CA certifies.
     - name: Check the certificate the panel serves
       ansible.builtin.shell: &panel_cert_check |
         served=$(timeout 20 openssl s_client -connect 127.0.0.1:10000 -servername {{ node_fqdn }} \
@@ -485,21 +484,12 @@
         - (panel_cert_check.rc | default(0)) != 0
         - (panel_cert_recheck.rc | default(0)) != 0
 
-    - name: Report the panel certificate failure
-      ansible.builtin.debug:
-        msg: "{{ panel_cert_failure }}"
-      when:
-        - (panel_cert_check.rc | default(0)) != 0
-        - (panel_cert_recheck.rc | default(0)) != 0
-        - not (letsencrypt_fatal | default(true) | bool)
-
     - name: Fail when the panel certificate is not trusted
       ansible.builtin.fail:
         msg: "{{ panel_cert_failure }}"
       when:
         - (panel_cert_check.rc | default(0)) != 0
         - (panel_cert_recheck.rc | default(0)) != 0
-        - letsencrypt_fatal | default(true) | bool
 
     # `virtualmin modify-config` does not exist (the old task hid that behind
     # failed_when: false); set-global-feature is the 8.x command. Only features a

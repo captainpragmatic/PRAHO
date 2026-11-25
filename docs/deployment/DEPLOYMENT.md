@@ -210,7 +210,7 @@ unpinnable rows, and SSH-pinnable candidates):
 python manage.py pin_virtualmin_certificates --report
 ```
 
-### Panel-certificate preflight and activation gate (#436, drill-gated)
+### Panel-certificate preflight and activation gate (#436)
 
 The read-only preflight prepares the **Hetzner / Virtualmin** drill. It does not
 issue certificates, provision servers, edit DNS, pin certificates, or change
@@ -298,9 +298,9 @@ hostname, and more than 30 days to expiry. It acts only when that check fails:
    is not mistaken for an untrusted certificate. Check that the FQDN resolves to the
    node and port 80 is reachable before retrying: a retry rebuilds the node.
 
-`letsencrypt_fatal=false` reports the failure without failing the play. The lab
-passes `panel_certificate_required=false`, because its nodes are named under the
-reserved `praho.test`.
+Enforcement has one switch: `panel_certificate_required=false` skips the whole
+check. The lab passes it, because its nodes are named under the reserved
+`praho.test`. The earlier `letsencrypt_fatal` variable is gone.
 
 The deployment's SSL health check fails for an untrusted or unevaluated
 certificate, but validation stays a warning. The activation gate

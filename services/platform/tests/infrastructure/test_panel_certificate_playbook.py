@@ -31,9 +31,8 @@ REISSUE = "Reissue the panel certificate"
 INSTALL = "Install the hostname certificate for Webmin"
 RECHECK = "Re-check the certificate the panel serves"
 DESCRIBE = "Describe the panel certificate failure"
-REPORT = "Report the panel certificate failure"
 FAIL = "Fail when the panel certificate is not trusted"
-STEPS = (CHECK, LOOKUP, REISSUE, INSTALL, RECHECK, DESCRIBE, REPORT, FAIL)
+STEPS = (CHECK, LOOKUP, REISSUE, INSTALL, RECHECK, DESCRIBE, FAIL)
 
 SKIPPED: dict[str, Any] = {"skipped": True, "changed": False}
 
@@ -143,13 +142,12 @@ class PanelCertificateDecisionTests(SimpleTestCase):
         self.assertIn("LETSENCRYPT_FAILED step=verify", walk.failure)
         self.assertIn("self-signed certificate", walk.failure)
 
-    def test_failure_is_fatal_unless_explicitly_turned_off(self) -> None:
+    def test_an_untrusted_verdict_has_no_non_fatal_switch(self) -> None:
+        """Only panel_certificate_required=false (skip the block) avoids enforcement; nothing half-enforces."""
         variables = registered(check=ran(1, "untrusted"), lookup=ran(0, ""), recheck=ran(1, "untrusted"))
-        self.assertIn(FAIL, PanelCertificateScenario(variables).walk().ran)
         variables["letsencrypt_fatal"] = False
-        walk = PanelCertificateScenario(variables).walk()
-        self.assertNotIn(FAIL, walk.ran)
-        self.assertIn(REPORT, walk.ran)
+        self.assertIn(FAIL, PanelCertificateScenario(variables).walk().ran)
+        self.assertNotIn("letsencrypt_fatal", " ".join(str(task) for task in tasks(PLAYBOOK)))
 
 
 class PanelCertificateFailureHandlingTests(SimpleTestCase):

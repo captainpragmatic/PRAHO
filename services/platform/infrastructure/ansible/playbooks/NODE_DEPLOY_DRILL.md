@@ -33,7 +33,7 @@ it before claiming production auto-deploy is customer-ready.
   `virtualmin_firewall.yml` play must precede the installer; its minimal profile excludes Nftables,
   Firewalld and Fail2ban integrations that could replace the reviewed policy.
 - Configure the Cloudflare API token, zone ID and deployment DNS zone. The deployment pipeline now creates and owns its public A/AAAA records. Run `panel_cert_preflight --provider-id <id>` before the paid drill.
-- Follow the canonical [panel-certificate drill guide](../../../../../docs/deployment/DEPLOYMENT.md#panel-certificate-preflight-and-activation-gate-436-drill-gated) for #436. This credential-seam checklist does not prove certificate issuance or authorize enabling fatal issuance. The current installer can make a production ACME request; prepare and verify the isolated staging path first.
+- Follow the canonical [panel-certificate guide](../../../../../docs/deployment/DEPLOYMENT.md#panel-certificate-preflight-and-activation-gate-436) for #436. This credential-seam checklist does not prove certificate issuance. The installer makes a production ACME request, so check the node name's certificate budget first.
 
 ## Existing nodes and imported websites
 
