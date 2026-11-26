@@ -10,7 +10,10 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
-Record = TypeVar("Record", bound="ImmutableCloudRecord")
+# Bound to models.Model, not a string naming the model below: a forward-referenced bound on a
+# queryset that the model turns into its manager (as_manager) crashes mypy's semantic analysis
+# whenever this module is reached through another file's imports.
+Record = TypeVar("Record", bound=models.Model)
 
 
 class ImmutableCloudQuerySet(models.QuerySet[Record]):

@@ -11,24 +11,6 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django_fsm import ConcurrentTransitionMixin, FSMField, transition
 
-WarningModelT = TypeVar("WarningModelT", bound="WarningLifecycle")
-
-
-class WarningEvidenceQuerySet(models.QuerySet[WarningModelT]):
-    def _protected_fields(self) -> set[str]:
-        fields = {"phase", *self.model.immutable_fields, *self.model.linked_fields}
-        return fields | {field.removesuffix("_id") for field in fields if field.endswith("_id")}
-
-    def update(self, **kwargs: Any) -> int:
-        if set(kwargs) & self._protected_fields():
-            raise ValidationError(_("Warning evidence cannot be overwritten."))
-        return super().update(**kwargs)
-
-    def bulk_update(self, objs: Any, fields: Any, batch_size: int | None = None) -> int:
-        if set(fields) & self._protected_fields():
-            raise ValidationError(_("Warning evidence cannot be overwritten."))
-        return super().bulk_update(objs, fields, batch_size=batch_size)
-
 
 class WarningLifecycle(ConcurrentTransitionMixin, models.Model):
     immutable_fields: ClassVar[tuple[str, ...]] = ()
@@ -61,6 +43,28 @@ class WarningLifecycle(ConcurrentTransitionMixin, models.Model):
             if saved is not None:
                 self.__dict__["phase"] = saved
             raise
+
+
+# Defined after WarningLifecycle so the bound is the class itself: a string forward reference here,
+# on a queryset the models turn into managers (as_manager), crashes mypy's semantic analysis
+# whenever this module is reached through another file's imports.
+WarningModelT = TypeVar("WarningModelT", bound=WarningLifecycle)
+
+
+class WarningEvidenceQuerySet(models.QuerySet[WarningModelT]):
+    def _protected_fields(self) -> set[str]:
+        fields = {"phase", *self.model.immutable_fields, *self.model.linked_fields}
+        return fields | {field.removesuffix("_id") for field in fields if field.endswith("_id")}
+
+    def update(self, **kwargs: Any) -> int:
+        if set(kwargs) & self._protected_fields():
+            raise ValidationError(_("Warning evidence cannot be overwritten."))
+        return super().update(**kwargs)
+
+    def bulk_update(self, objs: Any, fields: Any, batch_size: int | None = None) -> int:
+        if set(fields) & self._protected_fields():
+            raise ValidationError(_("Warning evidence cannot be overwritten."))
+        return super().bulk_update(objs, fields, batch_size=batch_size)
 
 
 class HostingWarningState(models.Model):
