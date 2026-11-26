@@ -84,6 +84,21 @@ class AuditTestLayoutPlacementTests(TestCase):
                 misplaced = audit_test_layout.iter_misplaced_test_files()
         self.assertEqual([path.name for path in misplaced], ["tests.py"])
 
+    def test_every_runner_discovery_pattern_is_covered(self) -> None:
+        """Django collects test*.py; pytest also collects *_test.py and *_tests.py (pytest.ini)."""
+        import tempfile  # noqa: PLC0415
+
+        test_body = "def test_total():\n    pass\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            app_root = Path(tmp) / "apps" / "billing"
+            app_root.mkdir(parents=True)
+            for name in ("test_totals.py", "invoice_test.py", "invoice_tests.py", "helpers.py"):
+                (app_root / name).write_text(test_body)
+            with patch.object(audit_test_layout, "APP_ROOTS", [app_root.parent]):
+                misplaced = sorted(path.name for path in audit_test_layout.iter_misplaced_test_files())
+        # helpers.py is collected by no runner anywhere, so it is not a placement problem.
+        self.assertEqual(misplaced, ["invoice_test.py", "invoice_tests.py", "test_totals.py"])
+
     def test_no_app_package_holds_a_test_module(self) -> None:
         misplaced = [str(path) for path in audit_test_layout.iter_misplaced_test_files()]
         self.assertEqual(misplaced, [], "move these into the service's tests/ tree (ADR-0011)")

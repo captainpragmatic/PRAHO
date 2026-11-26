@@ -26,6 +26,8 @@ TEST_ROOTS = [
     PROJECT_ROOT / "services" / "portal" / "tests",
 ]
 # Every suite runs only its tests/ root (ADR-0011), so a test module inside an app package runs in no gate.
+# A module counts when a runner would collect it by name: Django test*.py, pytest *_test.py / *_tests.py.
+RUNNER_DISCOVERY_PATTERNS = ("test*.py", "*_test.py", "*_tests.py")
 APP_ROOTS = [
     PROJECT_ROOT / "services" / "platform" / "apps",
     PROJECT_ROOT / "services" / "portal" / "apps",
@@ -108,15 +110,14 @@ def _defines_tests(path: Path) -> bool:
 
 def iter_misplaced_test_files() -> list[Path]:
     """Test modules inside app packages, which no test runner collects."""
-    files: list[Path] = []
+    files: set[Path] = set()
     for root in APP_ROOTS:
         if root.exists():
-            files.extend(
-                path
-                for path in sorted(root.rglob("test*.py"))
-                if "__pycache__" not in path.parts and _defines_tests(path)
-            )
-    return files
+            for pattern in RUNNER_DISCOVERY_PATTERNS:
+                files.update(
+                    path for path in root.rglob(pattern) if "__pycache__" not in path.parts and _defines_tests(path)
+                )
+    return sorted(files)
 
 
 def read_ast(path: Path) -> tuple[ast.Module | None, str]:

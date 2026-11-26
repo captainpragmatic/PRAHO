@@ -155,29 +155,35 @@ class TestDeploymentPipelineIntegration(TestCase):
 
     def test_deployment_logs_created_during_pipeline(self):
         """
-        Test that deployment logs are created at each pipeline stage.
+        Deployment logs are written along the pipeline, up to a provisioning failure.
         """
-        from apps.infrastructure.deployment_service import NodeDeploymentService  # noqa: PLC0415
+        from apps.infrastructure.cloud_gateway import SSHKeyResult  # noqa: PLC0415
+        from tests.infrastructure.test_deployment_operation_ownership import (  # noqa: PLC0415
+            _gateway,
+            _pipeline_service,
+        )
+        from tests.infrastructure.test_deployment_service_pipeline import (  # noqa: PLC0415
+            _create_deployment,
+            _ok_dns_gateway,
+        )
 
-        deployment = create_test_deployment(self.infra)
+        deployment = _create_deployment("pending")
+        service = _pipeline_service()
+        gateway = _gateway()
+        gateway.upload_owned_ssh_key.return_value = Ok(SSHKeyResult(key_id="key-1", name="praho-key"))
+        gateway.create_server.return_value = Err("Test provisioning error")
 
-        # Mock all external dependencies — deployment uses cloud gateway
-        with mock.patch(
-            "apps.infrastructure.deployment_service.get_cloud_gateway"
-        ) as mock_gateway_factory, mock.patch(
-            "apps.infrastructure.deployment_service.get_ansible_service"
+        with (
+            mock.patch("apps.infrastructure.deployment_service.SettingsService.get_setting", return_value=True),
+            mock.patch("apps.infrastructure.deployment_service.get_dns_gateway", return_value=_ok_dns_gateway()),
+            mock.patch("apps.infrastructure.deployment_service.get_cloud_gateway", return_value=gateway),
         ):
-            mock_gw = mock.MagicMock()
-            mock_gw.create_server.return_value = Err("Test provisioning error")
-            mock_gateway_factory.return_value = mock_gw
+            result = service.deploy_node(deployment=deployment, credentials={"api_token": "test"}, check_orderable=False)
 
-            service = NodeDeploymentService()
-            result = service.deploy_node(
-                deployment=deployment,
-                credentials={"api_token": "test"},
-                user=self.infra["user"],
-            )
-        self.assertTrue(result.is_err(), "a provisioning error must fail the deployment")
+        # The failure must be the injected one, reached through create_server, not an earlier step.
+        gateway.create_server.assert_called_once()
+        self.assertTrue(result.is_err())
+        self.assertIn("Test provisioning error", result.unwrap_err())
 
         # Check that logs were created
         logs = NodeDeploymentLog.objects.filter(deployment=deployment)
