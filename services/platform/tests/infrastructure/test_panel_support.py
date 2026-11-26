@@ -57,7 +57,7 @@ class AnsibleServicePanelPlaybooksTestCase(TestCase):
     @patch("apps.infrastructure.ansible_service.shutil.which", return_value="/usr/bin/ansible-playbook")
     def test_panel_playbooks_exist_on_disk(self, mock_which):
         """All configured playbooks should exist as files."""
-        from apps.infrastructure.ansible_service import PLAYBOOKS_PATH
+        from apps.infrastructure.ansible_service import PLAYBOOKS_PATH  # noqa: PLC0415
 
         service = AnsibleService()
         for panel_type, playbooks in service.PANEL_PLAYBOOKS.items():
@@ -92,8 +92,12 @@ class AnsibleServiceBuildVarsTestCase(TestCase):
         deployment.id = "test-123"
         deployment.hostname = "test-host"
         deployment.dns_zone = None
+        # A node being deployed has no registered server yet; a bare Mock would invent one.
+        deployment.virtualmin_server = None
+        deployment.virtualmin_server_id = None
 
         vars_dict = service._build_vars(deployment)
+        self.assertNotIn("security_policy_version", vars_dict)
         self.assertEqual(vars_dict["backup_storage"], "local")
         self.assertNotIn("backup_s3_bucket", vars_dict)
 
@@ -121,6 +125,9 @@ class AnsibleServiceBuildVarsTestCase(TestCase):
         deployment.id = "test-123"
         deployment.hostname = "test-host"
         deployment.dns_zone = None
+        # A node being deployed has no registered server yet; a bare Mock would invent one.
+        deployment.virtualmin_server = None
+        deployment.virtualmin_server_id = None
 
         vars_dict = service._build_vars(deployment)
         self.assertEqual(vars_dict["backup_storage"], "s3")
@@ -134,7 +141,7 @@ class DeploymentServiceStagesTestCase(TestCase):
 
     def test_stages_include_generic_panel_name(self):
         """Stages should use 'ansible_panel' not 'ansible_virtualmin'."""
-        from apps.infrastructure.deployment_service import NodeDeploymentService
+        from apps.infrastructure.deployment_service import NodeDeploymentService  # noqa: PLC0415
 
         service = NodeDeploymentService.__new__(NodeDeploymentService)
         self.assertIn("ansible_panel", service.STAGES)

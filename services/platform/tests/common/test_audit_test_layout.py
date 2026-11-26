@@ -40,3 +40,50 @@ class AuditTestLayoutNamesTests(TestCase):
                 expected = [f"tests/{name}"] if flagged else []
                 self.assertEqual(result["suspicious_filenames"], expected)
                 self.assertEqual(result["summary"]["suspiciously_named_files"], int(flagged))
+
+
+class AuditTestLayoutPlacementTests(TestCase):
+    """A test module under an app package is run by no gate: every suite runs only its tests/ root."""
+
+    def test_test_modules_under_app_packages_are_reported_and_fail_strict(self) -> None:
+        import tempfile  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app_root = Path(tmp) / "apps"
+            (app_root / "billing" / "tests").mkdir(parents=True)
+            (app_root / "billing" / "tests" / "test_invoices.py").write_text("def test_x():\n    pass\n")
+            (app_root / "billing" / "helpers.py").write_text("")
+            # A management command named test_* and a startapp placeholder define no test: not reported.
+            (app_root / "billing" / "management" / "commands").mkdir(parents=True)
+            (app_root / "billing" / "management" / "commands" / "test_gateway.py").write_text(
+                "class Command:\n    def handle(self):\n        pass\n"
+            )
+            (app_root / "billing" / "tests.py").write_text("# Create your tests here.\n")
+            with (
+                patch.object(audit_test_layout, "APP_ROOTS", [app_root]),
+                patch.object(audit_test_layout, "iter_test_files", return_value=[]),
+            ):
+                result = audit_test_layout.scan(audit_test_layout.DEFAULT_ALLOWLIST_PATH)
+                with patch.object(sys, "argv", ["audit_test_layout.py", "--strict", "--json"]), patch("builtins.print"):
+                    exit_code = audit_test_layout.main()
+        self.assertEqual(result["summary"]["test_files_outside_test_roots"], 1)
+        self.assertEqual(len(result["test_files_outside_test_roots"]), 1)
+        self.assertTrue(result["test_files_outside_test_roots"][0].endswith("billing/tests/test_invoices.py"))
+        self.assertEqual(exit_code, 1)
+
+    def test_a_tests_module_with_a_test_case_is_reported(self) -> None:
+        import tempfile  # noqa: PLC0415
+
+        with tempfile.TemporaryDirectory() as tmp:
+            app_root = Path(tmp) / "apps"
+            (app_root / "orders").mkdir(parents=True)
+            (app_root / "orders" / "tests.py").write_text(
+                "from django.test import TestCase\n\nclass OrderTests(TestCase):\n    def test_total(self):\n        pass\n"
+            )
+            with patch.object(audit_test_layout, "APP_ROOTS", [app_root]):
+                misplaced = audit_test_layout.iter_misplaced_test_files()
+        self.assertEqual([path.name for path in misplaced], ["tests.py"])
+
+    def test_no_app_package_holds_a_test_module(self) -> None:
+        misplaced = [str(path) for path in audit_test_layout.iter_misplaced_test_files()]
+        self.assertEqual(misplaced, [], "move these into the service's tests/ tree (ADR-0011)")

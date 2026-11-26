@@ -25,6 +25,11 @@ TEST_ROOTS = [
     PROJECT_ROOT / "services" / "platform" / "tests",
     PROJECT_ROOT / "services" / "portal" / "tests",
 ]
+# Every suite runs only its tests/ root (ADR-0011), so a test module inside an app package runs in no gate.
+APP_ROOTS = [
+    PROJECT_ROOT / "services" / "platform" / "apps",
+    PROJECT_ROOT / "services" / "portal" / "apps",
+]
 
 SUSPICIOUS_NAME_RE = re.compile(
     r"(?<![a-z0-9])(todos?|fix(?:es|up|ups)?|hotfix(?:es)?|miscs?|coverage|remaining|round\d*s?|"
@@ -86,6 +91,31 @@ def iter_test_files() -> list[Path]:
     for root in TEST_ROOTS:
         if root.exists():
             files.extend(sorted(root.rglob("test_*.py")))
+    return files
+
+
+def _defines_tests(path: Path) -> bool:
+    """Whether a module defines a test: a test* function or method. A management command named test_* does not."""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return True  # cannot tell, so report it
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith("test")
+        for node in ast.walk(tree)
+    )
+
+
+def iter_misplaced_test_files() -> list[Path]:
+    """Test modules inside app packages, which no test runner collects."""
+    files: list[Path] = []
+    for root in APP_ROOTS:
+        if root.exists():
+            files.extend(
+                path
+                for path in sorted(root.rglob("test*.py"))
+                if "__pycache__" not in path.parts and _defines_tests(path)
+            )
     return files
 
 
@@ -184,6 +214,11 @@ def scan(allowlist_path: Path) -> dict[str, Any]:
     duplicate_name_index: dict[str, list[TestLocation]] = {}
     duplicate_body_index: dict[str, list[TestLocation]] = {}
 
+    misplaced_files = [
+        _to_relative(path) if path.is_relative_to(PROJECT_ROOT) else path.as_posix()
+        for path in iter_misplaced_test_files()
+    ]
+
     test_files = iter_test_files()
     for file in test_files:
         if SUSPICIOUS_NAME_RE.search(file.name):
@@ -230,6 +265,7 @@ def scan(allowlist_path: Path) -> dict[str, Any]:
         "duplicate_test_names_unapproved": sum(not group.allowed for group in duplicate_name_groups),
         "duplicate_test_bodies": len(duplicate_body_groups),
         "duplicate_test_bodies_unapproved": sum(not group.allowed for group in duplicate_body_groups),
+        "test_files_outside_test_roots": len(misplaced_files),
     }
 
     return {
@@ -239,6 +275,7 @@ def scan(allowlist_path: Path) -> dict[str, Any]:
         "suspicious_filenames": sorted(suspicious_files),
         "duplicate_test_names": [asdict(group) for group in duplicate_name_groups],
         "duplicate_test_bodies": [asdict(group) for group in duplicate_body_groups],
+        "test_files_outside_test_roots": misplaced_files,
     }
 
 
@@ -263,7 +300,12 @@ def print_report(result: dict[str, Any]) -> None:
         f"{summary['duplicate_test_bodies']} "
         f"({summary['duplicate_test_bodies_unapproved']} unapproved)"
     )
+    print(f"Test files outside the test roots: {summary['test_files_outside_test_roots']}")
     print(f"Allowlist: {result['allowlist_path']}")
+
+    print("\n# Test files outside the test roots (run by no gate)")
+    for filename in result["test_files_outside_test_roots"] or ["none"]:
+        print(f"- {filename}")
 
     print("\n# Suspicious filename candidates")
     suspicious = result["suspicious_filenames"]
@@ -304,7 +346,7 @@ def main() -> int:
     parser.add_argument(
         "--strict",
         action="store_true",
-        help="Exit non-zero when suspicious names or unapproved duplicates are present",
+        help="Exit non-zero when suspicious names, unapproved duplicates or misplaced test files are present",
     )
     args = parser.parse_args()
 
@@ -321,6 +363,7 @@ def main() -> int:
             summary["suspiciously_named_files"] > 0
             or summary["duplicate_test_names_unapproved"] > 0
             or summary["duplicate_test_bodies_unapproved"] > 0
+            or summary["test_files_outside_test_roots"] > 0
         ):
             return 1
     return 0

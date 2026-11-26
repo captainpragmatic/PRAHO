@@ -18,13 +18,11 @@ Note: Unit tests for individual functions are in test_provider_config.py
 
 from collections.abc import Callable
 from decimal import Decimal
-from pathlib import Path
 from typing import Any
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, override_settings
-from django.utils import timezone
+from django.test import TestCase
 
 from apps.common.types import Err, Ok
 from apps.infrastructure.models import (
@@ -50,7 +48,7 @@ User = get_user_model()
 
 def create_test_infrastructure(provider_type: str = "hetzner") -> dict[str, Any]:
     """Create test infrastructure objects for a specific provider."""
-    import uuid
+    import uuid  # noqa: PLC0415
 
     # Use unique identifiers to avoid conflicts between test runs
     unique_suffix = uuid.uuid4().hex[:8]
@@ -159,7 +157,7 @@ class TestDeploymentPipelineIntegration(TestCase):
         """
         Test that deployment logs are created at each pipeline stage.
         """
-        from apps.infrastructure.deployment_service import NodeDeploymentService
+        from apps.infrastructure.deployment_service import NodeDeploymentService  # noqa: PLC0415
 
         deployment = create_test_deployment(self.infra)
 
@@ -179,6 +177,7 @@ class TestDeploymentPipelineIntegration(TestCase):
                 credentials={"api_token": "test"},
                 user=self.infra["user"],
             )
+        self.assertTrue(result.is_err(), "a provisioning error must fail the deployment")
 
         # Check that logs were created
         logs = NodeDeploymentLog.objects.filter(deployment=deployment)
@@ -278,7 +277,7 @@ class TestCredentialFlowIntegration(TestCase):
 
         Views pass credentials as dict → tasks receive dict → services use dict
         """
-        deployment = create_test_deployment(self.infra)
+        create_test_deployment(self.infra)
 
         # The credentials dict format used by views
         credentials = {
@@ -302,7 +301,7 @@ class TestCredentialFlowIntegration(TestCase):
         """
         Test that async tasks receive and use credentials correctly.
         """
-        from apps.infrastructure.tasks import deploy_node_task
+        from apps.infrastructure.tasks import deploy_node_task  # noqa: PLC0415
 
         deployment = create_test_deployment(self.infra)
 
@@ -321,7 +320,7 @@ class TestCredentialFlowIntegration(TestCase):
             mock_token.return_value = Ok("task-token")
 
             provider = self.infra["provider"]
-            result = deploy_node_task(
+            deploy_node_task(
                 deployment_id=deployment.id,
                 provider_id=provider.id,
                 user_id=self.infra["user"].id,
@@ -435,7 +434,7 @@ class TestLifecycleOperationsIntegration(TestCase):
         """
         Test that run_provider_command for power_off uses correct CLI command.
         """
-        from apps.infrastructure.provider_config import run_provider_command
+        from apps.infrastructure.provider_config import run_provider_command  # noqa: PLC0415
 
         mock_which.return_value = "/usr/bin/hcloud"
         mock_run.return_value = mock.MagicMock(
@@ -470,7 +469,7 @@ class TestLifecycleOperationsIntegration(TestCase):
         """
         Test that run_provider_command for power_on uses correct CLI command.
         """
-        from apps.infrastructure.provider_config import run_provider_command
+        from apps.infrastructure.provider_config import run_provider_command  # noqa: PLC0415
 
         mock_which.return_value = "/usr/bin/hcloud"
         mock_run.return_value = mock.MagicMock(
@@ -510,7 +509,7 @@ class TestTaskQueueIntegration(TestCase):
         """
         Test that queue_deploy_node creates a properly configured task.
         """
-        from apps.infrastructure.tasks import queue_deploy_node
+        from apps.infrastructure.tasks import queue_deploy_node  # noqa: PLC0415
 
         deployment = create_test_deployment(self.infra)
 
@@ -523,6 +522,7 @@ class TestTaskQueueIntegration(TestCase):
                 provider_id=provider.id,
                 user_id=self.infra["user"].id,
             )
+            self.assertEqual(task_id, "task-id-123")
 
             # Verify async_task was called correctly
             self.assertTrue(mock_async.called)
@@ -544,7 +544,7 @@ class TestTaskQueueIntegration(TestCase):
         """
         Test that queue_destroy_node creates a properly configured task.
         """
-        from apps.infrastructure.tasks import queue_destroy_node
+        from apps.infrastructure.tasks import queue_destroy_node  # noqa: PLC0415
 
         deployment = create_test_deployment(self.infra, status="completed")
 
@@ -556,6 +556,7 @@ class TestTaskQueueIntegration(TestCase):
                 provider_id=deployment.provider_id,
                 user_id=self.infra["user"].id,
             )
+            self.assertEqual(task_id, "task-id-456")
 
             # Verify async_task was called
             self.assertTrue(mock_async.called)
@@ -568,13 +569,11 @@ class TestTaskQueueIntegration(TestCase):
         """
         Test that lifecycle operation queue functions work correctly.
         """
-        from apps.infrastructure.tasks import (
+        from apps.infrastructure.tasks import (  # noqa: PLC0415
+            queue_reboot_node,
             queue_start_node,
             queue_stop_node,
-            queue_reboot_node,
         )
-
-        deployment = create_test_deployment(self.infra, status="completed")
 
         queue_functions: list[tuple[Callable[..., str], str]] = [
             (queue_stop_node, "stop_node_task"),
@@ -582,7 +581,11 @@ class TestTaskQueueIntegration(TestCase):
             (queue_reboot_node, "reboot_node_task"),
         ]
 
-        for queue_fn, expected_task in queue_functions:
+        # A queued operation owns its deployment until verified, so each gets its own (#802).
+        for number, (queue_fn, expected_task) in enumerate(queue_functions, start=1):
+            deployment = create_test_deployment(
+                self.infra, status="completed", node_number=number, hostname=f"prd-sha-het-us-tst1-{number:03d}"
+            )
             with self.subTest(task=expected_task), mock.patch("django_q.tasks.async_task") as mock_async:
                     mock_async.return_value = f"task-{expected_task}"
 
@@ -591,12 +594,28 @@ class TestTaskQueueIntegration(TestCase):
                         provider_id=deployment.provider_id,
                         user_id=self.infra["user"].id,
                     )
+                    self.assertEqual(task_id, f"task-{expected_task}")
 
                     self.assertTrue(mock_async.called)
                     self.assertIn(
                         expected_task,
                         mock_async.call_args[0][0]
                     )
+
+    def test_a_second_operation_is_refused_while_the_first_owns_the_deployment(self):
+        from django.core.exceptions import ValidationError  # noqa: PLC0415
+
+        from apps.infrastructure.tasks import queue_start_node, queue_stop_node  # noqa: PLC0415
+
+        deployment = create_test_deployment(self.infra, status="completed")
+        with mock.patch("django_q.tasks.async_task", return_value="task-stop"):
+            queue_stop_node(
+                deployment_id=deployment.id, provider_id=deployment.provider_id, user_id=self.infra["user"].id
+            )
+            with self.assertRaisesMessage(ValidationError, "currently owns this deployment"):
+                queue_start_node(
+                    deployment_id=deployment.id, provider_id=deployment.provider_id, user_id=self.infra["user"].id
+                )
 
 
 # =============================================================================
@@ -705,7 +724,7 @@ class TestErrorHandlingIntegration(TestCase):
             is_active=True,
         )
 
-        deployment = NodeDeployment.objects.create(
+        NodeDeployment.objects.create(
             hostname="prd-sha-fak-xx-fak1-001",
             environment="prd",
             node_type="sha",
