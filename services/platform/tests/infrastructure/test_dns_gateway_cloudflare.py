@@ -2,7 +2,7 @@
 
 Only the HTTP layer (``dns_gateway.safe_request``) is faked, by an in-memory Cloudflare v4
 double that pages its listings and can script failures, so every assertion runs through the
-real gateway logic. Complements ``apps/infrastructure/tests/test_dns_gateway.py``.
+real gateway logic. Complements ``tests/infrastructure/test_dns_gateway.py``.
 """
 
 from __future__ import annotations

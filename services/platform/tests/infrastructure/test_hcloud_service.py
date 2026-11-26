@@ -10,6 +10,10 @@ from __future__ import annotations
 from unittest import mock
 
 from django.test import TestCase
+from hcloud import APIException
+from hcloud.images import Image
+from hcloud.locations import Location
+from hcloud.server_types import ServerType, ServerTypeLocation
 
 from apps.infrastructure.cloud_gateway import ServerCreateRequest, ServerCreateResult, ServerInfo, SSHKeyResult
 from apps.infrastructure.hcloud_service import HcloudService
@@ -151,10 +155,10 @@ class TestDeleteServer(TestCase):
     """Tests for HcloudService.delete_server()."""
 
     def test_delete_server_success(self):
-        """Successful deletion returns Ok(True)."""
+        """A deletion counts only once a re-read returns the provider's not_found."""
         svc, client = _make_service()
         server = _make_mock_server()
-        client.servers.get_by_id.return_value = server
+        client.servers.get_by_id.side_effect = [server, APIException("not_found", "server not found", None)]
         action = mock.Mock()
         client.servers.delete.return_value = action
 
@@ -164,10 +168,21 @@ class TestDeleteServer(TestCase):
         self.assertTrue(result.unwrap())
         action.wait_until_finished.assert_called_once()
 
+    def test_delete_server_still_present_after_delete_is_unconfirmed(self):
+        svc, client = _make_service()
+        server = _make_mock_server()
+        client.servers.get_by_id.return_value = server
+        client.servers.delete.return_value = mock.Mock()
+
+        result = svc.delete_server("42")
+
+        self.assertTrue(result.is_err())
+        self.assertIn("still exists", result.unwrap_err())
+
     def test_delete_server_not_found(self):
         """Deleting an already absent server is idempotent success."""
         svc, client = _make_service()
-        client.servers.get_by_id.side_effect = Exception("Server not found")
+        client.servers.get_by_id.side_effect = APIException("not_found", "server not found", None)
 
         result = svc.delete_server("999")
 
@@ -200,7 +215,7 @@ class TestGetServer(TestCase):
     def test_get_server_not_found(self):
         """Getting a nonexistent server returns Ok(None)."""
         svc, client = _make_service()
-        client.servers.get_by_id.side_effect = Exception("not found")
+        client.servers.get_by_id.side_effect = APIException("not_found", "server not found", None)
 
         result = svc.get_server("999")
 
@@ -296,14 +311,20 @@ class TestGetServerTypes(TestCase):
 
     def test_get_server_types_returns_list(self):
         svc, client = _make_service()
-        st1 = mock.Mock(name="cx11", description="CX11", cores=1, memory=2, disk=20, deprecated=False, prices=[])
-        st2 = mock.Mock(name="cx21", description="CX21", cores=2, memory=4, disk=40, deprecated=False, prices=[])
+        sold = ServerTypeLocation(location=Location(name="fsn1"), deprecation=None)
+        retired = ServerTypeLocation(location=Location(name="nbg1"), deprecation={"announced": "2025-09-24"})
+        st1 = ServerType(name="cx23", description="CX23", cores=2, memory=4, disk=40, prices=[], locations=[sold, retired])
+        st2 = ServerType(name="cx11", description="CX11", cores=1, memory=2, disk=20, prices=[], locations=[retired])
         client.server_types.get_all.return_value = [st1, st2]
 
         result = svc.get_server_types()
 
         self.assertTrue(result.is_ok())
-        self.assertEqual(len(result.unwrap()), 2)
+        types = {info.name: info for info in result.unwrap()}
+        self.assertEqual(types["cx23"].locations, ("fsn1",))
+        self.assertTrue(types["cx23"].available)
+        self.assertEqual(types["cx11"].locations, ())
+        self.assertFalse(types["cx11"].available)
 
     def test_get_server_types_error(self):
         svc, client = _make_service()
@@ -538,7 +559,7 @@ class TestFirewallOperations(TestCase):
     """Tests for firewall create/delete."""
 
     def test_create_firewall_success(self):
-        from apps.infrastructure.cloud_gateway import FirewallRule
+        from apps.infrastructure.cloud_gateway import FirewallRule  # noqa: PLC0415
         svc, client = _make_service()
         fw = mock.Mock()
         fw.id = 100
@@ -598,13 +619,22 @@ class TestSnapshotOperations(TestCase):
 
     def test_delete_snapshot_success(self):
         svc, client = _make_service()
-        image = mock.Mock()
-        client.images.get_by_id.return_value = image
+        image = Image(id=200)
+        client.images.get_by_id.side_effect = [image, APIException("not_found", "image not found", None)]
         result = svc.delete_snapshot("200")
         self.assertTrue(result.is_ok())
+        client.images.delete.assert_called_once_with(image)
 
     def test_delete_snapshot_already_gone(self):
         svc, client = _make_service()
-        client.images.get_by_id.return_value = None
+        client.images.get_by_id.side_effect = APIException("not_found", "image not found", None)
         result = svc.delete_snapshot("200")
         self.assertTrue(result.is_ok())
+        client.images.delete.assert_not_called()
+
+    def test_delete_snapshot_refuses_a_response_that_is_not_the_requested_image(self):
+        svc, client = _make_service()
+        client.images.get_by_id.return_value = None
+        result = svc.delete_snapshot("200")
+        self.assertTrue(result.is_err())
+        client.images.delete.assert_not_called()

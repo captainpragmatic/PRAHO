@@ -317,15 +317,17 @@ class TestStateMachine(InfrastructureTestMixin, TestCase):
         self.assertTrue(self.deployment.is_valid_transition("destroying"))
         self.assertFalse(self.deployment.is_valid_transition("completed"))
 
-    def test_destroyed_is_terminal(self):
+    def test_destroyed_reopens_only_for_a_redeploy(self):
+        """Terminal except a re-deploy, which keeps the hostname (#802)."""
         self.deployment.transition_to("provisioning_node")
         self.deployment.transition_to("failed")
         self.deployment.transition_to("destroying")
         self.deployment.transition_to("destroyed")
 
-        self.assertEqual(NodeDeployment.VALID_TRANSITIONS["destroyed"], [])
-        self.assertFalse(self.deployment.is_valid_transition("pending"))
+        self.assertEqual(NodeDeployment.VALID_TRANSITIONS["destroyed"], ["pending"])
+        self.assertTrue(self.deployment.is_valid_transition("pending"))
         self.assertFalse(self.deployment.is_valid_transition("failed"))
+        self.assertFalse(self.deployment.is_valid_transition("completed"))
 
 
 class TestNodeDeploymentProperties(InfrastructureTestMixin, TestCase):
@@ -372,11 +374,14 @@ class TestNodeDeploymentProperties(InfrastructureTestMixin, TestCase):
         self.assertTrue(self.deployment.can_be_destroyed)
 
     def test_can_retry(self):
-        self.deployment.transition_to("failed")
-        self.assertFalse(self.deployment.can_retry)  # no last_successful_phase
+        """A failed row can be retried unless its provider resources must be reconciled first (#802)."""
+        self.assertFalse(self.deployment.can_retry)  # pending, not failed
 
-        self.deployment.last_successful_phase = "provisioning_node"
+        self.deployment.transition_to("failed")
         self.assertTrue(self.deployment.can_retry)
+
+        self.deployment.needs_reconciliation = True
+        self.assertFalse(self.deployment.can_retry)
 
     def test_fqdn_with_dns_zone(self):
         self.deployment.dns_zone = "nodes.pragmatichost.com"
@@ -386,7 +391,7 @@ class TestNodeDeploymentProperties(InfrastructureTestMixin, TestCase):
         self.assertEqual(self.deployment.fqdn, "prd-sha-het-de-fsn1-001")
 
 
-class TestGetNextNodeNumber(InfrastructureTestMixin, TestCase):
+class TestGetNextNodeNumberPerScope(InfrastructureTestMixin, TestCase):
     """Tests for NodeDeployment.get_next_node_number()."""
 
     def setUp(self):

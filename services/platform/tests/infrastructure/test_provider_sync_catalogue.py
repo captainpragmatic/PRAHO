@@ -42,6 +42,7 @@ def _make_mock_server_type(  # noqa: PLR0913
     disk_gb: int = 80,
     available: bool = True,
     price_monthly: float = 5.39,
+    locations: tuple[str, ...] | None = None,
 ) -> mock.Mock:
     st = mock.Mock()
     st.name = name
@@ -50,6 +51,8 @@ def _make_mock_server_type(  # noqa: PLR0913
     st.disk_gb = disk_gb
     st.available = available
     st.price_monthly = price_monthly
+    # Sizes follow Hetzner's per-location availability (#801): a type is sold only where it lists a location.
+    st.locations = (("fsn1", "nbg1") if available else ()) if locations is None else locations
     return st
 
 
@@ -165,14 +168,15 @@ class TestSyncHetznerProvider(TestCase):
         """Regions no longer in API get deactivated."""
         svc = mock.Mock()
         mock_get_svc.return_value = svc
-        svc.get_server_types.return_value = mock.Mock(is_err=lambda: False, unwrap=list)
+        # A sync with nothing orderable leaves the catalogue unchanged (#801), so a type must be sold.
+        svc.get_server_types.return_value = mock.Mock(is_err=lambda: False, unwrap=lambda: [_make_mock_server_type("cpx21")])
 
         # First sync with two locations
         svc.get_locations.return_value = mock.Mock(
             is_err=lambda: False,
             unwrap=lambda: [_make_mock_location("fsn1"), _make_mock_location("nbg1", "Nuremberg")],
         )
-        sync_hetzner_provider(token="fake")
+        self.assertTrue(sync_hetzner_provider(token="fake").is_ok())
         self.assertEqual(NodeRegion.objects.filter(is_active=True).count(), 2)
 
         # Second sync with only one location
@@ -191,14 +195,14 @@ class TestSyncHetznerProvider(TestCase):
         """Sizes no longer in API get deactivated."""
         svc = mock.Mock()
         mock_get_svc.return_value = svc
-        svc.get_locations.return_value = mock.Mock(is_err=lambda: False, unwrap=list)
+        svc.get_locations.return_value = mock.Mock(is_err=lambda: False, unwrap=lambda: [_make_mock_location("fsn1")])
 
         # First sync with two sizes
         svc.get_server_types.return_value = mock.Mock(
             is_err=lambda: False,
             unwrap=lambda: [_make_mock_server_type("cpx21"), _make_mock_server_type("cpx31", 4, 8, 160)],
         )
-        sync_hetzner_provider(token="fake")
+        self.assertTrue(sync_hetzner_provider(token="fake").is_ok())
         self.assertEqual(NodeSize.objects.filter(is_active=True).count(), 2)
 
         # Second sync with only one size
@@ -212,10 +216,10 @@ class TestSyncHetznerProvider(TestCase):
         self.assertEqual(result.unwrap().sizes_deactivated, 1)
 
     def test_skips_deprecated_server_types(self, mock_get_svc):
-        """Deprecated server types are skipped."""
+        """A type sold in no fetched location is skipped (#801)."""
         svc = mock.Mock()
         mock_get_svc.return_value = svc
-        svc.get_locations.return_value = mock.Mock(is_err=lambda: False, unwrap=list)
+        svc.get_locations.return_value = mock.Mock(is_err=lambda: False, unwrap=lambda: [_make_mock_location("fsn1")])
         svc.get_server_types.return_value = mock.Mock(
             is_err=lambda: False,
             unwrap=lambda: [
@@ -284,7 +288,7 @@ class TestSyncHetznerProvider(TestCase):
         """Server type pricing is correctly extracted from fsn1 entry."""
         svc = mock.Mock()
         mock_get_svc.return_value = svc
-        svc.get_locations.return_value = mock.Mock(is_err=lambda: False, unwrap=list)
+        svc.get_locations.return_value = mock.Mock(is_err=lambda: False, unwrap=lambda: [_make_mock_location("fsn1")])
         svc.get_server_types.return_value = mock.Mock(
             is_err=lambda: False,
             unwrap=lambda: [
@@ -295,7 +299,8 @@ class TestSyncHetznerProvider(TestCase):
             ],
         )
 
-        sync_hetzner_provider(token="fake")
+        result = sync_hetzner_provider(token="fake")
+        self.assertTrue(result.is_ok(), result)
 
         size = NodeSize.objects.get(provider_type_id="cpx41")
         self.assertEqual(size.monthly_cost_eur, Decimal("18.59"))
@@ -307,13 +312,14 @@ class TestSyncHetznerProvider(TestCase):
         """max_domains on NodeSize is derived from memory_gb."""
         svc = mock.Mock()
         mock_get_svc.return_value = svc
-        svc.get_locations.return_value = mock.Mock(is_err=lambda: False, unwrap=list)
+        svc.get_locations.return_value = mock.Mock(is_err=lambda: False, unwrap=lambda: [_make_mock_location("fsn1")])
         svc.get_server_types.return_value = mock.Mock(
             is_err=lambda: False,
             unwrap=lambda: [_make_mock_server_type("cpx11", 2, 2, 40)],
         )
 
-        sync_hetzner_provider(token="fake")
+        result = sync_hetzner_provider(token="fake")
+        self.assertTrue(result.is_ok(), result)
 
         size = NodeSize.objects.get(provider_type_id="cpx11")
         self.assertEqual(size.max_domains, 25)  # 2GB -> 25

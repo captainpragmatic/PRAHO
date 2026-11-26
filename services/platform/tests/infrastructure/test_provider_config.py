@@ -14,12 +14,9 @@ from django.test import TestCase
 from apps.infrastructure.provider_config import (
     PROVIDER_CONFIG,
     ProviderCommandResult,
-    get_cli_tool_path,
     get_provider_config,
-    get_provider_sync_fn,
     get_provider_token,
     get_supported_providers,
-    is_cli_available,
     is_provider_supported,
     run_provider_command,
     store_provider_token,
@@ -100,7 +97,7 @@ class TestProviderConfigData(TestCase):
 
     def test_no_hardcoded_credentials_in_config(self):
         """Ensure no actual credentials are hardcoded in config."""
-        import re
+        import re  # noqa: PLC0415
 
         # Check for patterns that look like real API tokens (long alphanumeric strings)
         # Real tokens are typically 32+ chars of random alphanumerics
@@ -395,52 +392,49 @@ class TestEdgeCases(TestCase):
 
     def test_empty_credentials_dict(self):
         """Test behavior with empty credentials."""
-        with mock.patch("shutil.which", return_value="/usr/bin/hcloud"):
-            with mock.patch("subprocess.run") as mock_run:
-                mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+        with mock.patch("shutil.which", return_value="/usr/bin/hcloud"), mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
 
-                result = run_provider_command(
-                    provider_type="hetzner",
-                    operation="power_off",
-                    credentials={},  # Empty credentials
-                    server_id="123",
-                )
+            result = run_provider_command(
+                provider_type="hetzner",
+                operation="power_off",
+                credentials={},  # Empty credentials
+                server_id="123",
+            )
 
-                # Should still run but with empty token
-                self.assertTrue(result.is_ok())
+            # Should still run but with empty token
+            self.assertTrue(result.is_ok())
 
     def test_special_characters_in_server_id(self):
         """Test that special characters in server_id are handled."""
-        with mock.patch("shutil.which", return_value="/usr/bin/hcloud"):
-            with mock.patch("subprocess.run") as mock_run:
-                mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+        with mock.patch("shutil.which", return_value="/usr/bin/hcloud"), mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
 
-                # Try various potentially problematic characters
-                for server_id in ["123", "abc-def", "server_1", "12345678901234567890"]:
-                    result = run_provider_command(
-                        provider_type="hetzner",
-                        operation="power_off",
-                        credentials={"api_token": "test"},
-                        server_id=server_id,
-                    )
-                    self.assertTrue(result.is_ok(), f"Failed for server_id: {server_id}")
-
-    def test_very_long_timeout(self):
-        """Test that timeout is passed correctly."""
-        with mock.patch("shutil.which", return_value="/usr/bin/hcloud"):
-            with mock.patch("subprocess.run") as mock_run:
-                mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
-
-                run_provider_command(
+            # Try various potentially problematic characters
+            for server_id in ["123", "abc-def", "server_1", "12345678901234567890"]:
+                result = run_provider_command(
                     provider_type="hetzner",
                     operation="power_off",
                     credentials={"api_token": "test"},
-                    server_id="123",
-                    timeout=600,  # 10 minutes
+                    server_id=server_id,
                 )
+                self.assertTrue(result.is_ok(), f"Failed for server_id: {server_id}")
 
-                call_kwargs = mock_run.call_args.kwargs
-                self.assertEqual(call_kwargs["timeout"], 600)
+    def test_very_long_timeout(self):
+        """Test that timeout is passed correctly."""
+        with mock.patch("shutil.which", return_value="/usr/bin/hcloud"), mock.patch("subprocess.run") as mock_run:
+            mock_run.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+
+            run_provider_command(
+                provider_type="hetzner",
+                operation="power_off",
+                credentials={"api_token": "test"},
+                server_id="123",
+                timeout=600,  # 10 minutes
+            )
+
+            call_kwargs = mock_run.call_args.kwargs
+            self.assertEqual(call_kwargs["timeout"], 600)
 
 
 class TestValidateProviderPrerequisites(TestCase):
