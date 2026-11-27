@@ -28,6 +28,7 @@ from django.core.cache.backends.locmem import LocMemCache
 from django.db import connection, connections
 from django.test.runner import DiscoverRunner, ParallelTestSuite, RemoteTestResult, RemoteTestRunner
 
+from tests.field_lengths import install_sqlite_length_check
 from tests.media import isolated_media, setup_worker_media
 from tests.thread_connections import ThreadConnectionCheck, active_check
 
@@ -82,11 +83,17 @@ class ThreadConnectionTestResult(TextTestResult):
         super().stopTestRun()
 
 
+def setup_worker(directory: str) -> None:
+    """Per-worker setup: a spawned worker runs none of the runner's setup_test_environment()."""
+    setup_worker_media(directory)
+    install_sqlite_length_check()
+
+
 class MediaIsolatedParallelSuite(ParallelTestSuite):
-    """Give spawned workers the same disposable directory inherited by forked workers."""
+    """Give spawned workers the same disposable directory and checks the parent process has."""
 
     # Django passes this bound method's __func__ to the worker initializer.
-    process_setup = setup_worker_media
+    process_setup = setup_worker
 
     @property
     def process_setup_args(self) -> tuple[str]:
@@ -130,6 +137,10 @@ class MediaIsolatedRunner(DiscoverRunner):
     def run_tests(self, test_labels: list[str], **kwargs: object) -> int:
         with isolated_media():
             return super().run_tests(test_labels, **kwargs)
+
+    def setup_test_environment(self, **kwargs: Any) -> None:
+        super().setup_test_environment(**kwargs)
+        install_sqlite_length_check()
 
 
 class PostgreSQLSafeRunner(MediaIsolatedRunner):

@@ -66,9 +66,15 @@ def create_test_infrastructure(provider_type: str = "hetzner") -> dict[str, Any]
         "linode": "lin",
     }
 
+    # CloudProvider.code is varchar(3) and unique: PostgreSQL rejects anything longer (#895).
+    code = provider_codes.get(provider_type, provider_type[:3])
+    taken = set(CloudProvider.objects.values_list("code", flat=True))
+    if code in taken:
+        code = next(f"t{n:02d}" for n in range(100) if f"t{n:02d}" not in taken)
+
     provider = CloudProvider.objects.create(
         name=f"{provider_type.title()} Cloud {unique_suffix}",
-        code=f"{provider_codes.get(provider_type, provider_type[:3])}{unique_suffix[:3]}",
+        code=code,
         provider_type=provider_type,
         credential_identifier=f"{provider_type}_api_token",
         is_active=True,
