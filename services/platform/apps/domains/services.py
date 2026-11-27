@@ -1725,8 +1725,7 @@ class DomainOrderService:
             outcome = "unhandled"
             if item.action in ORDERABLE_DOMAIN_ACTIONS:
                 line = item.order_item
-                started = line is not None and line.provisioning_status != "pending"
-                if started:
+                if line is not None and line.provisioning_status != "pending":
                     # A line's own status wins: a cancelled transfer has its code cleared too.
                     outcome = DomainOrderService._LINE_OUTCOMES.get(line.provisioning_status, "unknown")
                 elif item.action == "transfer" and not item.epp_code and item.domain_id is None:
