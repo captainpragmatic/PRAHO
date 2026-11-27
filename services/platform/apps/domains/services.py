@@ -1695,14 +1695,16 @@ class DomainOrderService:
     def _unlinked_item_outcome(action: str, domain: Domain) -> str:
         """An item with no order line (older or staff-made): the domain's durable record decides.
 
-        A registration completed when it was confirmed (registered_at is set on every confirmed
-        activation), whatever the domain's status became since. A transfer completed once its
-        domain left the transfer.
+        A registration completed once its domain left pending, whatever its status became since: only
+        a confirmed registration activates a domain. A cancelled domain completed only if it was
+        registered first. A transfer completed once its domain left the transfer.
         """
         if action == "register":
-            if domain.registered_at is not None:
-                return "completed"
-            return "in_progress" if domain.status == "pending" else "failed"
+            if domain.status == "pending":
+                return "in_progress"
+            if domain.status == "cancelled" and domain.registered_at is None:
+                return "failed"
+            return "completed"
         if domain.status in ("pending", "transfer_in"):
             return "in_progress"
         return "failed" if domain.status == "cancelled" else "completed"

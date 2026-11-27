@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+from django.db import transaction
 from django.test import TransactionTestCase
 from django.utils import timezone
 
@@ -153,3 +154,45 @@ class DomainOrderTaskOutcomeTests(DomainOrderLineFixture, TransactionTestCase):
         outcomes = DomainOrderService.order_item_outcomes(self.order)
 
         self.assertIn(_outcome("legacy-done.ro", "register", "completed"), outcomes)
+
+    def test_a_registration_confirmed_by_webhook_is_completed(self) -> None:
+        """Every confirmation path records registered_at; the webhook did not (#442 review)."""
+        from apps.domains.webhooks import RegistrarWebhookView  # noqa: PLC0415
+
+        created, item = DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="webhook-done.ro", action="register", years=1
+        )
+        self.assertTrue(created, item)
+        domain = Domain.objects.create(
+            name="webhook-done.ro", tld=self.ro, registrar=self.ro_registrar, customer=self.customer,
+            status="pending", expires_at=timezone.now() + timedelta(days=365),
+        )
+        DomainOrderItem.objects.filter(pk=item.pk).update(domain=domain)
+        self.assertIsNone(domain.registered_at)  # precondition
+
+        with patch("apps.domains.signals.sync_domain_to_virtualmin"), transaction.atomic():
+            ok, reason = RegistrarWebhookView()._handle_domain_registered(domain, {}, "198.51.100.7")
+
+        self.assertTrue(ok, reason)
+        domain.refresh_from_db()
+        self.assertEqual(domain.status, "active")
+        self.assertIsNotNone(domain.registered_at)
+        self.assertIn(
+            _outcome("webhook-done.ro", "register", "completed"), DomainOrderService.order_item_outcomes(self.order)
+        )
+
+    def test_a_registration_without_a_line_that_is_active_but_unstamped_is_completed(self) -> None:
+        """A row confirmed before every path stamped registered_at still reads as completed."""
+        created, item = DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="unstamped.ro", action="register", years=1
+        )
+        self.assertTrue(created, item)
+        domain = Domain.objects.create(
+            name="unstamped.ro", tld=self.ro, registrar=self.ro_registrar, customer=self.customer, status="active"
+        )
+        DomainOrderItem.objects.filter(pk=item.pk).update(domain=domain)
+        self.assertIsNone(domain.registered_at)  # precondition
+
+        self.assertIn(
+            _outcome("unstamped.ro", "register", "completed"), DomainOrderService.order_item_outcomes(self.order)
+        )
