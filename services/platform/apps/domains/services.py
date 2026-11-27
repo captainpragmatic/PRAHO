@@ -1692,6 +1692,22 @@ class DomainOrderService:
     }
 
     @staticmethod
+    def _unlinked_item_outcome(action: str, domain: Domain) -> str:
+        """An item with no order line (older or staff-made): the domain's durable record decides.
+
+        A registration completed when it was confirmed (registered_at is set on every confirmed
+        activation), whatever the domain's status became since. A transfer completed once its
+        domain left the transfer.
+        """
+        if action == "register":
+            if domain.registered_at is not None:
+                return "completed"
+            return "in_progress" if domain.status == "pending" else "failed"
+        if domain.status in ("pending", "transfer_in"):
+            return "in_progress"
+        return "failed" if domain.status == "cancelled" else "completed"
+
+    @staticmethod
     def order_item_outcomes(order: Order) -> list[dict[str, str]]:
         """Each domain item's outcome from its recorded state, whichever run did the work (#442).
 
@@ -1707,14 +1723,16 @@ class DomainOrderService:
             outcome = "unhandled"
             if item.action in ORDERABLE_DOMAIN_ACTIONS:
                 line = item.order_item
-                if item.action == "transfer" and not item.epp_code and item.domain_id is None:
-                    outcome = "waiting_for_code"
-                elif line is not None:
+                started = line is not None and line.provisioning_status != "pending"
+                if started:
+                    # A line's own status wins: a cancelled transfer has its code cleared too.
                     outcome = DomainOrderService._LINE_OUTCOMES.get(line.provisioning_status, "unknown")
-                elif item.domain is None:
+                elif item.action == "transfer" and not item.epp_code and item.domain_id is None:
+                    outcome = "waiting_for_code"
+                elif line is not None or item.domain is None:
                     outcome = "unprocessed"
                 else:
-                    outcome = "completed" if item.domain.status == "active" else "in_progress"
+                    outcome = DomainOrderService._unlinked_item_outcome(item.action, item.domain)
             elif item.action == "renew":
                 outcome = "unprocessed"
                 if item.domain is not None:

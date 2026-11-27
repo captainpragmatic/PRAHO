@@ -18,7 +18,7 @@ from django.utils import timezone
 from apps.common.types import Ok
 from apps.domains import tasks as domain_tasks
 from apps.domains.gateways.base import DomainInfoResult
-from apps.domains.models import Domain, DomainOperation
+from apps.domains.models import Domain, DomainOperation, DomainOrderItem
 from apps.domains.operation_services import DomainOperationService
 from apps.domains.services import DomainOrderService
 from apps.orders.models import OrderItem
@@ -127,3 +127,29 @@ class DomainOrderTaskOutcomeTests(DomainOrderLineFixture, TransactionTestCase):
 
         self.assertEqual(renew.call_count, 1)
         self.assertIn(_outcome(domain.name, "renew", "completed"), confirmed["outcomes"])
+
+    def test_a_cancelled_transfer_with_its_code_cleared_is_cancelled_not_waiting(self) -> None:
+        order, line = self._domain_order()
+        # What cancelling a pending transfer leaves: the line cancelled and the transfer code cleared.
+        DomainOrderItem.objects.filter(order_item=line).update(action="transfer", epp_code="")
+        OrderItem.objects.filter(pk=line.pk).update(provisioning_status="cancelled")
+
+        outcomes = DomainOrderService.order_item_outcomes(order)
+
+        self.assertEqual(outcomes, [_outcome("flow.ro", "transfer", "cancelled")])
+
+    def test_a_registration_without_an_order_line_stays_completed_after_its_domain_changes(self) -> None:
+        created, item = DomainOrderService.create_domain_order_item(
+            order=self.order, domain_name="legacy-done.ro", action="register", years=1
+        )
+        self.assertTrue(created, item)
+        self.assertIsNone(item.order_item_id)  # precondition: an item with no order line
+        domain = Domain.objects.create(
+            name="legacy-done.ro", tld=self.ro, registrar=self.ro_registrar, customer=self.customer,
+            status="suspended", registered_at=timezone.now() - timedelta(days=30),
+        )
+        DomainOrderItem.objects.filter(pk=item.pk).update(domain=domain)
+
+        outcomes = DomainOrderService.order_item_outcomes(self.order)
+
+        self.assertIn(_outcome("legacy-done.ro", "register", "completed"), outcomes)
