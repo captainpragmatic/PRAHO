@@ -1,11 +1,15 @@
 FROM ubuntu:26.04 AS runtime
 ENV container=docker
+# The nightly image builds against live Ubuntu mirrors: retry a failed index or package download,
+# and give up on a stalled connection instead of waiting out the whole build timeout (#895).
+RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' \
+    > /etc/apt/apt.conf.d/80-praho-network
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     systemd systemd-sysv openssh-server openssh-client python3 python3-apt sudo ufw iproute2 \
     curl ca-certificates gnupg git build-essential locales gettext dnsmasq-base unzip util-linux-extra \
     && apt-get clean && rm -rf /var/lib/apt/lists/* \
     && ssh-keygen -A && systemctl enable ssh.socket
-RUN curl --fail --silent --show-error --location https://astral.sh/uv/install.sh -o /tmp/uv-install \
+RUN curl --fail --silent --show-error --location --retry 5 --retry-connrefused https://astral.sh/uv/install.sh -o /tmp/uv-install \
     && UV_INSTALL_DIR=/usr/local/bin sh /tmp/uv-install && rm /tmp/uv-install
 ENV UV_PYTHON_INSTALL_DIR=/opt/praho-python UV_PYTHON_BIN_DIR=/opt/praho-python/bin
 RUN uv python install 3.13

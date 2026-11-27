@@ -67,9 +67,11 @@ class NodeMaintenanceSecurityPostgresTests(MaintenanceSecurityFixture, Transacti
                     "SELECT wait_event_type, pg_blocking_pids(pid), query FROM pg_stat_activity WHERE pid=%s", [pid]
                 )
                 sample = cursor.fetchone()
-            if sample and sample[0] == "Lock" and holder in sample[1]:
+            # pg_stat_activity copies the query text when the view is read but reads the wait state live, so
+            # one row can pair the contender's previous plain SELECT with its next statement's lock wait
+            # (nightly, #895). Count only a coherent sample; anything else keeps polling until the deadline.
+            if sample and sample[0] == "Lock" and holder in sample[1] and VirtualminServer._meta.db_table in sample[2]:
                 self.assertTrue(sample[2].startswith("SELECT "))
-                self.assertIn(VirtualminServer._meta.db_table, sample[2])
                 return
             if pending.done():
                 self.fail(f"The contender finished without waiting on its owner: {pending.result()}")

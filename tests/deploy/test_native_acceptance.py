@@ -32,7 +32,13 @@ pytestmark = pytest.mark.docker
 
 
 def docker(*arguments: str, data: str | None = None, check: bool = True, timeout: int = 600) -> subprocess.CompletedProcess[str]:
-    result = subprocess.run([DOCKER, *arguments], input=data, capture_output=True, text=True, check=False, timeout=timeout)  # noqa: S603
+    try:
+        result = subprocess.run([DOCKER, *arguments], input=data, capture_output=True, text=True, check=False, timeout=timeout)  # noqa: S603
+    except subprocess.TimeoutExpired as expired:
+        # Without this the output gathered so far is lost, and a slow mirror reads like a hang (#895).
+        captured = "".join(part if isinstance(part, str) else (part or b"").decode(errors="replace")
+                           for part in (expired.stdout, expired.stderr))
+        raise AssertionError(f"docker {arguments[0]} timed out after {timeout}s; last output:\n{captured[-5000:]}") from expired
     if check:
         assert result.returncode == 0, result.stdout[-5000:] + result.stderr[-5000:]
     return result
