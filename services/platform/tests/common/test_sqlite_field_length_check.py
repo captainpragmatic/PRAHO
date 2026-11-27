@@ -6,6 +6,8 @@ PostgreSQL nightly (#895). The test runners install a pre_save check on SQLite t
 DataError PostgreSQL would. It does not see queryset.update() or bulk_create().
 """
 
+from unittest import skipUnless
+
 from django.db import DataError, connection
 from django.db.models.signals import pre_save
 from django.test import TestCase
@@ -14,9 +16,10 @@ from apps.infrastructure.models import CloudProvider
 
 
 class SQLiteFieldLengthCheckTests(TestCase):
-    def _provider(self, code: str) -> CloudProvider:
+    def _provider(self, code: object) -> CloudProvider:
         return CloudProvider(name="Length Check Cloud", code=code, provider_type="hetzner", is_active=True)
 
+    @skipUnless(connection.vendor == "sqlite", "the check's own message; PostgreSQL raises its own DataError")
     def test_a_value_longer_than_its_column_is_refused(self) -> None:
         with self.assertRaisesMessage(DataError, "CloudProvider.code"):
             self._provider("abcd").save()
@@ -25,6 +28,24 @@ class SQLiteFieldLengthCheckTests(TestCase):
     def test_a_value_that_fits_is_saved(self) -> None:
         self._provider("abc").save()
         self.assertTrue(CloudProvider.objects.filter(code="abc").exists())
+
+    @skipUnless(connection.vendor == "sqlite", "the check is installed only for SQLite")
+    def test_a_value_that_becomes_too_long_once_converted_is_refused(self) -> None:
+        """Django writes str(value) for a CharField, so 1234 is four characters, as PostgreSQL sees it."""
+        with self.assertRaisesMessage(DataError, "CloudProvider.code"):
+            self._provider(1234).save()
+
+    @skipUnless(connection.vendor == "sqlite", "the check is installed only for SQLite")
+    def test_a_partial_save_checks_only_the_fields_it_writes(self) -> None:
+        """PostgreSQL accepts save(update_fields=...) when the unwritten field holds a too-long value."""
+        provider = self._provider("abc")
+        provider.save()
+        provider.code = "abcd"
+        provider.is_active = False
+        provider.save(update_fields=["is_active"])
+        self.assertFalse(CloudProvider.objects.get(pk=provider.pk).is_active)
+        with self.assertRaisesMessage(DataError, "CloudProvider.code"):
+            provider.save(update_fields=["code"])
 
     def test_a_deferred_field_is_not_read_to_check_it(self) -> None:
         """A save must not load a field the query deferred: the check would change what the save reads."""

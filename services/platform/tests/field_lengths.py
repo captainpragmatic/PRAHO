@@ -16,14 +16,21 @@ from django.db.models.signals import pre_save
 RECEIVER_UID = "tests.field_lengths.refuse_overlong_char_values"
 
 
-def _refuse_overlong_char_values(sender: type[models.Model], instance: models.Model, **kwargs: Any) -> None:
+def _refuse_overlong_char_values(
+    sender: type[models.Model], instance: models.Model, update_fields: frozenset[str] | None = None, **kwargs: Any
+) -> None:
     # A deferred field was never loaded and this save does not write it; reading it here would make the
-    # check fetch it, changing what the save under test does.
+    # check fetch it, changing what the save under test does. A partial save writes only update_fields.
     deferred = instance.get_deferred_fields()
     for field in sender._meta.concrete_fields:
         if not isinstance(field, models.CharField) or field.max_length is None or field.attname in deferred:
             continue
+        if update_fields is not None and field.name not in update_fields and field.attname not in update_fields:
+            continue
         value = getattr(instance, field.attname)
+        if value is None or hasattr(value, "resolve_expression"):
+            continue  # NULL, or an expression the database computes
+        value = field.get_prep_value(value)  # what Django writes: str(value) for a CharField
         if isinstance(value, str) and len(value) > field.max_length:
             raise DataError(
                 f"value too long for {sender.__name__}.{field.name}: {len(value)} characters, "
