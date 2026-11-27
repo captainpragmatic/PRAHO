@@ -12,6 +12,7 @@ from typing import Any
 from django.db import transaction
 from django.http import HttpRequest, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
@@ -240,6 +241,9 @@ class RegistrarWebhookView(View):
                     return False, f"Domain {domain.name} cannot transition from '{domain.status}' to active"
 
             self._apply_webhook_domain_fields(domain, webhook_data)
+            # Every other confirmation path stamps the registration; the order outcome reads it (#442).
+            if domain.registered_at is None:
+                domain.registered_at = timezone.now()
 
             try:
                 domain.save()

@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING, Any, TypedDict, cast
+from typing import TYPE_CHECKING, Any, ClassVar, TypedDict, cast
 from uuid import UUID
 
 from django.db import transaction
@@ -1674,6 +1674,87 @@ class DomainOrderService:
             fail_order_line(item, result.unwrap_err())
         return None
 
+    # Recorded state → outcome. Every value is mapped on purpose; one this code does not know fails closed.
+    _LINE_OUTCOMES: ClassVar[dict[str, str]] = {
+        "pending": "unprocessed",
+        "in_progress": "in_progress",
+        "completed": "completed",
+        "failed": "failed",
+        "cancelled": "cancelled",
+    }
+    _RENEWAL_OUTCOMES: ClassVar[dict[str, str]] = {
+        "pending": "in_progress",
+        "submitted": "in_progress",
+        "retrying": "in_progress",
+        "completed": "completed",
+        "failed": "failed",
+        "cancelled": "cancelled",
+    }
+
+    @staticmethod
+    def _unlinked_item_outcome(action: str, domain: Domain) -> str:
+        """An item with no order line (older or staff-made): the domain's durable record decides.
+
+        A registration completed once its domain left pending, whatever its status became since: only
+        a confirmed registration activates a domain. A cancelled domain completed only if it was
+        registered first. A transfer completed once its domain left the transfer.
+        """
+        if action == "register":
+            if domain.status == "pending":
+                return "in_progress"
+            if domain.status == "cancelled" and domain.registered_at is None:
+                return "failed"
+            return "completed"
+        if domain.status in ("pending", "transfer_in"):
+            return "in_progress"
+        return "failed" if domain.status == "cancelled" else "completed"
+
+    @staticmethod
+    def order_item_outcomes(order: Order) -> list[dict[str, str]]:
+        """Each domain item's outcome from its recorded state, whichever run did the work (#442).
+
+        A line is sent at most once (claimed lines and renewal intents replay), so a repeated run
+        dispatches nothing for the lines already done; its own return value cannot tell them apart from
+        lines never processed. One entry per order item: two items may name the same domain.
+        """
+        from .operation_services import renewal_intent_key  # noqa: PLC0415
+
+        outcomes: list[dict[str, str]] = []
+        items = DomainOrderItem.objects.filter(order=order).select_related("domain", "order_item").order_by("pk")
+        for item in items:
+            outcome = "unhandled"
+            if item.action in ORDERABLE_DOMAIN_ACTIONS:
+                line = item.order_item
+                if line is not None and line.provisioning_status != "pending":
+                    # A line's own status wins: a cancelled transfer has its code cleared too.
+                    outcome = DomainOrderService._LINE_OUTCOMES.get(line.provisioning_status, "unknown")
+                elif item.action == "transfer" and not item.epp_code and item.domain_id is None:
+                    outcome = "waiting_for_code"
+                elif line is not None or item.domain is None:
+                    outcome = "unprocessed"
+                else:
+                    outcome = DomainOrderService._unlinked_item_outcome(item.action, item.domain)
+            elif item.action == "renew":
+                outcome = "unprocessed"
+                if item.domain is not None:
+                    # The same filter DomainOperationService.renewal_completed uses, so the two agree.
+                    operation = (
+                        DomainOperation.objects.filter(
+                            domain=item.domain,
+                            registrar=item.domain.registrar,
+                            operation_type="renew",
+                            intent_key=renewal_intent_key(item.years, f"order_item:{item.pk}"),
+                        )
+                        .order_by("-created_at")
+                        .first()
+                    )
+                    if operation is not None:
+                        outcome = DomainOrderService._RENEWAL_OUTCOMES.get(operation.state, "unknown")
+                        if outcome == "in_progress" and operation.review_required_at is not None:
+                            outcome = "needs_review"
+            outcomes.append({"domain": item.domain_name, "action": item.action, "outcome": outcome})
+        return outcomes
+
     @staticmethod
     def process_domain_order_items(order: Order) -> list[Domain]:
         """⚡ Process all domain order items for paid order"""
@@ -1749,8 +1830,7 @@ class DomainOrderService:
                 else:
                     # #430: any unhandled action must be VISIBLE, not silently dropped. This logs and
                     # continues rather than raising: one malformed item must not abort processing of
-                    # the order's remaining (valid) items. Per-item outcomes are not yet returned to
-                    # the caller — tracked as a before-wiring follow-up.
+                    # the order's remaining (valid) items. order_item_outcomes reports it as unhandled.
                     logger.error(
                         "🔥 [Domain] Unhandled domain order item action %r for %s — item not processed",
                         item.action,
