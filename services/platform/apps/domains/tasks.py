@@ -38,23 +38,29 @@ def process_order_domain_items(order_id: str) -> dict[str, Any]:
     processed = DomainOrderService.process_domain_order_items(order)
     # success must reflect the PAID intent, not merely "nothing crashed": the
     # per-item boundary swallows failures, so the Django-Q2 task result is the
-    # durable signal that register/renew items remain unfulfilled.
-    items_total = order.domain_items.filter(action__in=("register", "renew")).count()
-    success = len(processed) >= items_total
+    # durable signal that register/renew items remain unfulfilled. It is read from
+    # each item's recorded state (#442): a repeated run sends nothing for the lines
+    # already done, and must not report them as unprocessed.
+    outcomes = DomainOrderService.order_item_outcomes(order)
+    counted = [entry for entry in outcomes if entry["action"] in ("register", "renew")]
+    unfulfilled = [entry for entry in counted if entry["outcome"] not in ("completed", "cancelled")]
+    success = not unfulfilled
     if success:
-        logger.info("✅ [Domains] Processed %d domain item(s) for order %s", len(processed), order_id)
+        logger.info("✅ [Domains] Order %s: %d domain item(s) fulfilled", order_id, len(counted))
     else:
         logger.error(
-            "🔥 [Domains] Order %s: %d of %d domain item(s) remain unprocessed",
+            "🔥 [Domains] Order %s: %d of %d domain item(s) not fulfilled: %s",
             order_id,
-            items_total - len(processed),
-            items_total,
+            len(unfulfilled),
+            len(counted),
+            ", ".join(f"{entry['domain']} ({entry['action']}: {entry['outcome']})" for entry in unfulfilled),
         )
     return {
         "success": success,
         "processed": len(processed),
-        "items_total": items_total,
+        "items_total": len(counted),
         "domains": [domain.name for domain in processed],
+        "outcomes": outcomes,
     }
 
 
